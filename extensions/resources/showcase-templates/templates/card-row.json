@@ -1,0 +1,186 @@
+{
+  "id": "tpl-cards",
+  "type": "div",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-c1",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-c1-h",
+          "type": "h3",
+          "text": "只点不改代码",
+          "children": [],
+          "style": {
+            "marginTop": "0px",
+            "marginBottom": "8px",
+            "fontSize": "18px",
+            "fontWeight": "bold",
+            "color": "#111827"
+          },
+          "attrs": {
+            "className": "card-title"
+          }
+        },
+        {
+          "id": "tpl-c1-p",
+          "type": "p",
+          "text": "每个按钮、每个框都对应一个能看懂的选项，改完立刻在画布上看到结果。",
+          "children": [],
+          "style": {
+            "marginTop": "0px",
+            "marginBottom": "0px",
+            "lineHeight": "1.7",
+            "color": "#6b7280",
+            "fontSize": "14px"
+          },
+          "attrs": {
+            "className": "card-text"
+          }
+        }
+      ],
+      "style": {
+        "paddingTop": "20px",
+        "paddingRight": "20px",
+        "paddingBottom": "20px",
+        "paddingLeft": "20px",
+        "borderWidth": "1px",
+        "borderStyle": "solid",
+        "borderColor": "#e5e7eb",
+        "borderTopLeftRadius": "8px",
+        "borderTopRightRadius": "8px",
+        "borderBottomRightRadius": "8px",
+        "borderBottomLeftRadius": "8px",
+        "backgroundColor": "#ffffff"
+      },
+      "attrs": {
+        "className": "card"
+      }
+    },
+    {
+      "id": "tpl-c2",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-c2-h",
+          "type": "h3",
+          "text": "样式自动复用",
+          "children": [],
+          "style": {
+            "marginTop": "0px",
+            "marginBottom": "8px",
+            "fontSize": "18px",
+            "fontWeight": "bold",
+            "color": "#111827"
+          },
+          "attrs": {
+            "className": "card-title"
+          }
+        },
+        {
+          "id": "tpl-c2-p",
+          "type": "p",
+          "text": "相同的样式会自动合并成一条规则，导出文件又小又整洁，还能用全局 CSS 覆盖。",
+          "children": [],
+          "style": {
+            "marginTop": "0px",
+            "marginBottom": "0px",
+            "lineHeight": "1.7",
+            "color": "#6b7280",
+            "fontSize": "14px"
+          },
+          "attrs": {
+            "className": "card-text"
+          }
+        }
+      ],
+      "style": {
+        "paddingTop": "20px",
+        "paddingRight": "20px",
+        "paddingBottom": "20px",
+        "paddingLeft": "20px",
+        "borderWidth": "1px",
+        "borderStyle": "solid",
+        "borderColor": "#e5e7eb",
+        "borderTopLeftRadius": "8px",
+        "borderTopRightRadius": "8px",
+        "borderBottomRightRadius": "8px",
+        "borderBottomLeftRadius": "8px",
+        "backgroundColor": "#ffffff"
+      },
+      "attrs": {
+        "className": "card"
+      }
+    },
+    {
+      "id": "tpl-c3",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-c3-h",
+          "type": "h3",
+          "text": "立即可预览",
+          "children": [],
+          "style": {
+            "marginTop": "0px",
+            "marginBottom": "8px",
+            "fontSize": "18px",
+            "fontWeight": "bold",
+            "color": "#111827"
+          },
+          "attrs": {
+            "className": "card-title"
+          }
+        },
+        {
+          "id": "tpl-c3-p",
+          "type": "p",
+          "text": "按 Ctrl+P 就能把当前页面在浏览器里打开，所见即所得，随时检查效果。",
+          "children": [],
+          "style": {
+            "marginTop": "0px",
+            "marginBottom": "0px",
+            "lineHeight": "1.7",
+            "color": "#6b7280",
+            "fontSize": "14px"
+          },
+          "attrs": {
+            "className": "card-text"
+          }
+        }
+      ],
+      "style": {
+        "paddingTop": "20px",
+        "paddingRight": "20px",
+        "paddingBottom": "20px",
+        "paddingLeft": "20px",
+        "borderWidth": "1px",
+        "borderStyle": "solid",
+        "borderColor": "#e5e7eb",
+        "borderTopLeftRadius": "8px",
+        "borderTopRightRadius": "8px",
+        "borderBottomRightRadius": "8px",
+        "borderBottomLeftRadius": "8px",
+        "backgroundColor": "#ffffff"
+      },
+      "attrs": {
+        "className": "card"
+      }
+    }
+  ],
+  "style": {
+    "backgroundColor": "rgba(0,0,0,0)",
+    "minHeight": "60px",
+    "boxSizing": "border-box",
+    "display": "flex",
+    "justifyContent": "space-between",
+    "gap": "16px"
+  },
+  "attrs": {
+    "className": "cards-row"
+  }
+}

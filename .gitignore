@@ -1,0 +1,36 @@
+# ===== BlockCanvas 积木画布 · Git 忽略清单 =====
+# 原则：仓库只放「人写的源码/配置/文档」，生成的、缓存的、机器相关的都不进仓库。
+
+# ---- 依赖（换机用 pnpm install --frozen-lockfile 还原，无需入库）----
+node_modules/
+
+# ---- 构建输出（electron-vite 产物，可随时重新生成）----
+out/
+
+# ---- 打包输出（electron-builder 生成的 exe / 安装包 / 便携版）----
+dist/
+
+# ---- 日志 / 临时文件 ----
+*.log
+dev-run.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ---- e2e 生成物（保留 *.mjs 测试脚本，剔除自动生成的截图/检查文件/报告）----
+tests/e2e/shots/
+tests/e2e/shots-mc/
+tests/e2e/*.html
+tests/e2e/report*.txt
+tests/e2e/last-run.log
+
+# ---- electron-builder 调试 / 临时清单 ----
+builder-debug.yml
+release/
+
+# ---- 编辑器 / 系统 ----
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

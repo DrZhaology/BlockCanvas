@@ -1,0 +1,13 @@
+allowBuilds:
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+onlyBuiltDependencies:
+  - electron
+  - esbuild
+  - electron-winstaller
+
+# 强制 @electron/get 到 3.1.0（electron-builder 26 需要其导出 ElectronDownloadCacheMode，
+# 默认锁定的 3.0.0 缺少该导出，会在下载构建工具链时报错）
+overrides:
+  "@electron/get": "^3.1.0"

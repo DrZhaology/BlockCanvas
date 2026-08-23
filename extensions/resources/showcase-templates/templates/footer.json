@@ -1,0 +1,51 @@
+{
+  "id": "tpl-footer",
+  "type": "footer",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-f-p1",
+      "type": "p",
+      "text": "© 2026 我的站点 · 保留所有权利",
+      "children": [],
+      "style": {
+        "marginTop": "0px",
+        "marginBottom": "4px",
+        "lineHeight": "1.6",
+        "color": "#9ca3af",
+        "fontSize": "13px",
+        "textAlign": "center"
+      },
+      "attrs": {
+        "className": "footer-copyright"
+      }
+    },
+    {
+      "id": "tpl-f-p2",
+      "type": "p",
+      "text": "由 BlockCanvas 积木画布制作",
+      "children": [],
+      "style": {
+        "marginTop": "0px",
+        "marginBottom": "0px",
+        "lineHeight": "1.6",
+        "color": "#6b7280",
+        "fontSize": "12px",
+        "textAlign": "center"
+      },
+      "attrs": {
+        "className": "footer-made"
+      }
+    }
+  ],
+  "style": {
+    "paddingTop": "16px",
+    "paddingRight": "20px",
+    "paddingBottom": "16px",
+    "paddingLeft": "20px",
+    "backgroundColor": "#1f2937"
+  },
+  "attrs": {
+    "className": "site-footer"
+  }
+}

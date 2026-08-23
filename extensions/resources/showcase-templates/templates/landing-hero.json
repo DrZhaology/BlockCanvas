@@ -1,0 +1,75 @@
+{
+  "id": "tpl-hero",
+  "type": "section",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-hero-h1",
+      "type": "h1",
+      "text": "欢迎来到你的新网站",
+      "children": [],
+      "style": {
+        "marginTop": "0px",
+        "marginRight": "auto",
+        "marginBottom": "12px",
+        "marginLeft": "auto",
+        "fontSize": "40px",
+        "fontWeight": "bold",
+        "color": "#ffffff",
+        "textAlign": "center",
+        "textShadow": "0 3px 0 rgba(0,0,0,0.2)"
+      }
+    },
+    {
+      "id": "tpl-hero-p",
+      "type": "p",
+      "text": "用积木画布搭一个网页：不需要会写代码，点一点就能看到效果。",
+      "children": [],
+      "style": {
+        "marginTop": "0px",
+        "marginBottom": "28px",
+        "lineHeight": "1.6",
+        "color": "#e8f1fb",
+        "fontSize": "16px",
+        "textAlign": "center"
+      }
+    },
+    {
+      "id": "tpl-hero-cta",
+      "type": "button",
+      "text": "开始搭建",
+      "children": [],
+      "style": {
+        "paddingTop": "12px",
+        "paddingRight": "28px",
+        "paddingBottom": "12px",
+        "paddingLeft": "28px",
+        "backgroundColor": "#1e88e5",
+        "color": "#ffffff",
+        "borderStyle": "none",
+        "borderTopLeftRadius": "6px",
+        "borderTopRightRadius": "6px",
+        "borderBottomRightRadius": "6px",
+        "borderBottomLeftRadius": "6px",
+        "fontSize": "16px",
+        "fontWeight": "bold",
+        "cursor": "pointer",
+        "boxSizing": "border-box",
+        "marginLeft": "auto",
+        "marginRight": "auto",
+        "display": "block"
+      }
+    }
+  ],
+  "style": {
+    "paddingTop": "64px",
+    "paddingRight": "32px",
+    "paddingBottom": "64px",
+    "paddingLeft": "32px",
+    "backgroundColor": "#101828",
+    "textAlign": "center"
+  },
+  "attrs": {
+    "className": "hero"
+  }
+}

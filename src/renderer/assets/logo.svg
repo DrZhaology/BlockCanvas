@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none">
+  <!-- BlockCanvas 积木画布 · Logo
+       三块圆角小方块组成一个「L」形，寓意「积木（Block）+ 画布（Canvas）」：
+       - 蓝 = CSS   #2965F1
+       - 橙 = HTML  #E34F26
+       - 黄 = JS    #F7DF1E
+       极简，无渐变、无描边；透明背景，可放任意浅色/深色场景。
+  -->
+  <!-- 左上：CSS 蓝 -->
+  <rect x="29" y="29" width="92" height="92" rx="20" fill="#2965F1"/>
+  <!-- 左下：HTML 橙 -->
+  <rect x="29" y="135" width="92" height="92" rx="20" fill="#E34F26"/>
+  <!-- 右下：JS 黄 -->
+  <rect x="135" y="135" width="92" height="92" rx="20" fill="#F7DF1E"/>
+</svg>

@@ -1,0 +1,42 @@
+# BlockCanvas · electron-builder 打包配置
+# 目标：产出一个「绿色便携文件夹版」——解压即用、不装进 AppData；
+#       extensions/ 是 exe 旁边可写的真实文件夹，方便随时增删插件/资源包。
+# 运行：pnpm build && pnpm exec electron-builder --win dir
+# 产物：dist\win-unpacked\（可运行的应用文件夹），随后用 build-exe.ps1 复制
+#       extensions 并压缩成 zip。
+
+appId: com.blockcanvas.app
+productName: BlockCanvas
+copyright: Copyright © 2026 Dr.Zhaology
+
+directories:
+  output: dist
+  buildResources: build
+
+# 直接使用本地已解压的 Electron 运行时（node_modules/electron/dist），
+# 跳过 electron-builder 的远程下载/缓存解析（本环境该步会报 cache 类型错误）。
+electronDist: node_modules/electron/dist
+
+# 只打包构建产物 + 入口 package.json 进 asar（程序本体）；
+# extension 不放进只读 asar，而是由 build-exe.ps1 复制成 exe 旁边可写的 extensions/。
+# 源码 / 文档 / 测试 / 依赖目录 / 构建资源 均不进包。
+files:
+  - out/**
+  - package.json
+  - '!node_modules/**'
+  - '!src/**'
+  - '!docs/**'
+  - '!tests/**'
+  - '!tools/**'
+  - '!build/**'
+  - '!dist/**'
+
+asar: true
+
+win:
+  # 用 build/icon.png（256×256）自动生成 exe 图标
+  icon: build/icon.png
+  target:
+    - target: dir
+      arch:
+        - x64

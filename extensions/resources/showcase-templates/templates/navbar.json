@@ -1,0 +1,107 @@
+{
+  "id": "tpl-nav",
+  "type": "header",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-nav-brand",
+      "type": "span",
+      "text": "我的站点",
+      "children": [],
+      "style": {
+        "display": "inline-block",
+        "paddingTop": "0px",
+        "paddingRight": "0px",
+        "paddingBottom": "0px",
+        "paddingLeft": "0px",
+        "backgroundColor": "rgba(0,0,0,0)",
+        "boxSizing": "border-box",
+        "color": "#ffffff",
+        "fontSize": "18px",
+        "fontWeight": "bold"
+      },
+      "attrs": {
+        "className": "site-brand"
+      }
+    },
+    {
+      "id": "tpl-nav-links",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-nav-a1",
+          "type": "a",
+          "text": "首页",
+          "children": [],
+          "style": {
+            "color": "#cfe3f7",
+            "textDecoration": "none",
+            "fontSize": "14px"
+          },
+          "attrs": {
+            "href": "#",
+            "className": "nav-link"
+          }
+        },
+        {
+          "id": "tpl-nav-a2",
+          "type": "a",
+          "text": "关于",
+          "children": [],
+          "style": {
+            "color": "#cfe3f7",
+            "textDecoration": "none",
+            "fontSize": "14px"
+          },
+          "attrs": {
+            "href": "#",
+            "className": "nav-link"
+          }
+        },
+        {
+          "id": "tpl-nav-a3",
+          "type": "a",
+          "text": "联系",
+          "children": [],
+          "style": {
+            "color": "#cfe3f7",
+            "textDecoration": "none",
+            "fontSize": "14px"
+          },
+          "attrs": {
+            "href": "#",
+            "className": "nav-link"
+          }
+        }
+      ],
+      "style": {
+        "backgroundColor": "rgba(0,0,0,0)",
+        "minHeight": "60px",
+        "boxSizing": "border-box",
+        "display": "flex",
+        "gap": "16px",
+        "alignItems": "center"
+      },
+      "attrs": {
+        "className": "nav-links"
+      }
+    }
+  ],
+  "style": {
+    "paddingTop": "10px",
+    "paddingRight": "20px",
+    "paddingBottom": "10px",
+    "paddingLeft": "20px",
+    "backgroundColor": "#101828",
+    "minHeight": "60px",
+    "boxSizing": "border-box",
+    "display": "flex",
+    "justifyContent": "space-between",
+    "alignItems": "center",
+    "gap": "16px"
+  },
+  "attrs": {
+    "className": "site-nav"
+  }
+}
