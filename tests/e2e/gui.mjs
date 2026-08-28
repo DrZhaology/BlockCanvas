@@ -608,8 +608,9 @@ async function main() {
     // 当前画布：divA(absolute) + divB。给 divB 设类名 + 页面写全局 CSS
     await doc(win, '.canvas > [data-bc-id]').nth(1).click();
     await new Promise((r) => setTimeout(r, 200));
-    // 类名输入（HTML 属性区）
-    await doc(win, '.prop-row:has-text("类名 class") input').fill('banner test');
+    // 类名 chips（面板顶部）：一次贴两个 token（空格分隔）
+    await doc(win, '.cls-chip-input').fill('banner test');
+    await doc(win, '.cls-chip-input').evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 200));
     // 页面页签：先展开「高级 CSS」再写全局 CSS（4-D 折叠区，blur 提交）
     await doc(win, '.inspector-tab:has-text("页面")').click();
@@ -849,8 +850,8 @@ async function main() {
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.tab-btn:has-text("属性")').click();
     await new Promise((r) => setTimeout(r, 200));
-    await doc(win, '.prop-row:has-text("类名 Class") input').fill('dup');
-    await doc(win, '.prop-row:has-text("类名 Class") input').evaluate((el) => el.blur());
+    await doc(win, '.cls-chip-input').fill('dup');
+    await doc(win, '.cls-chip-input').evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.element-btn:has-text("通用容器")').click(); // 插入 divD（到选中 divA 内）
     await new Promise((r) => setTimeout(r, 300));
@@ -860,19 +861,17 @@ async function main() {
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.tab-btn:has-text("属性")').click();
     await new Promise((r) => setTimeout(r, 200));
-    await doc(win, '.prop-row:has-text("类名 Class") input').fill('dup');
-    await doc(win, '.prop-row:has-text("类名 Class") input').evaluate((el) => el.blur());
+    await doc(win, '.cls-chip-input').fill('dup');
+    await doc(win, '.cls-chip-input').evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 200));
-    // 此时 .dup 下 divA(absolute) 与 divD(默认) 样式不同 → 规则只保留第一个 + ⚠ 冲突
-    const dup27 = await win.evaluate(() => {
-      const rules = document.querySelector('style.bc-auto-css')?.textContent ?? '';
-      const badge = document.querySelector('.issue-badge')?.textContent ?? '';
-      return {
-        dupRuleCount: (rules.match(/\.dup \{/g) || []).length,
-        badge
-      };
+    // S27.2 加入已有类名 = 立刻穿上该类的样式（数据+显示即时同步，无幽灵冲突）
+    const joined27 = await win.evaluate(() => {
+      const els = document.querySelectorAll('.canvas > [data-bc-id]');
+      const a = getComputedStyle(els[0]);
+      const d = getComputedStyle(els[0].querySelector(':scope > div'));
+      return { abg: a.backgroundColor, dbg: d.backgroundColor, apad: a.paddingTop, dpad: d.paddingTop };
     });
-    check('S27.2 同名类不同样式：规则保留第一个 + ⚠ 冲突标记', dup27.dupRuleCount === 1 && Number(dup27.badge) >= 1, JSON.stringify(dup27));
+    check('S27.2 给元素填已有类名 → 立刻变成该类的样子（背景/内边距一致）', joined27.abg === joined27.dbg && joined27.apad === joined27.dpad, JSON.stringify(joined27));
     // S27.2b 编辑即统一：改 divD 背景 → divA 自动同化（改一个全改），冲突消失
     await doc(win, '.tab-btn:has-text("图层")').click();
     await new Promise((r) => setTimeout(r, 200));
@@ -963,22 +962,23 @@ async function main() {
     const selAfterIssue30 = (await doc(win, '.sel-indicator').count()) >= 1;
     const issueBlock30 = await doc(win, '.issue-pop').count();
     check('S30.2 ⚠ 面板：计数 + 未命名条目 + 点击可选中', Number(badge30) >= 3 && issueText30.includes('未设置类名') && selAfterIssue30 && issueBlock30 === 0, `badge=${badge30} / ${issueText30.slice(0, 50)} / sel=${selAfterIssue30}`);
-    // S30.3 类名管理页签：列出全部名称 + 样式摘要 + 未命名块
+    // S30.3 类名总览页签：按单个 token 分组（.banner 与 .test 各一张卡）+ 未命名块
     await doc(win, '.inspector-tab:has-text("类名")').click();
     await new Promise((r) => setTimeout(r, 250));
     const clsNames30 = await doc(win, '.cls-card-name').allTextContents();
     const unnamedHead30 = await doc(win, '.cls-block-head').first().textContent();
-    const diag30 = { ok: clsNames30.includes('.dup'), ban: clsNames30.includes('.banner test'), id: clsNames30.includes('#c-sec'), un: unnamedHead30.includes('没有类名'), head: unnamedHead30 };
-    check('S30.3 类名管理：列表含 .dup / .banner.test / #c-sec + 未命名提示', diag30.ok && diag30.ban && diag30.id && diag30.un, JSON.stringify(diag30));
-    await shot(win, '类名ID管理-列表');
-    // S30.4 表单模式：调整 .dup 样式 → 保存 → 全部同类元素应用（写回）
+    const diag30 = { ok: clsNames30.includes('.dup'), ban: clsNames30.includes('.banner') && clsNames30.includes('.test'), id: clsNames30.includes('#c-sec'), un: unnamedHead30.includes('没有类名'), head: unnamedHead30 };
+    check('S30.3 类名总览（单 token 分组）：列表含 .dup / .banner / .test / #c-sec + 未命名提示', diag30.ok && diag30.ban && diag30.id && diag30.un, JSON.stringify(diag30));
+    await shot(win, '类名ID总览-列表');
+    // S30.4 编辑即统一：定位 .dup → 属性面板改背景色 → 全部 .dup 一起变
     const dupCard30 = doc(win, '.cls-card:has-text(".dup")');
-    await dupCard30.locator('button:has-text("调整样式")').click();
-    await new Promise((r) => setTimeout(r, 250));
-    // 表单行 = key+value 输入对；找到 backgroundColor 那一行改值
-    const bgVal30 = doc(win, '.cls-form-row').filter({ has: doc(win, '.cls-form-key[value="backgroundColor"]') }).locator('.cls-form-val');
-    await bgVal30.fill('#00aa00');
-    await doc(win, '.cls-editor-actions button:has-text("保存并应用")').click();
+    await dupCard30.locator('button:has-text("定位")').click();
+    await new Promise((r) => setTimeout(r, 300));
+    await doc(win, '.tab-btn:has-text("属性")').click();
+    await new Promise((r) => setTimeout(r, 200));
+    const bgRow30 = doc(win, '.prop-row:has-text("背景色 Background") input').first();
+    await bgRow30.fill('rgb(0, 170, 0)');
+    await bgRow30.evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 400));
     const afterForm30 = await win.evaluate(() => {
       const els = document.querySelectorAll('.canvas > [data-bc-id]');
@@ -986,23 +986,30 @@ async function main() {
       const d = getComputedStyle(els[0].querySelector(':scope > div')).backgroundColor;
       return { a, d };
     });
-    check('S30.4 表单编辑类样式 → 写回全部同类元素', afterForm30.a === 'rgb(0, 170, 0)' && afterForm30.d === 'rgb(0, 170, 0)', JSON.stringify(afterForm30));
-    // S30.5 源码模式：切源码 → 改 CSS 文本 → 保存 → 全部应用
-    await dupCard30.locator('button:has-text("调整样式")').click();
-    await new Promise((r) => setTimeout(r, 250));
-    await doc(win, '.cls-mode-switch button:has-text("源码")').click();
-    await new Promise((r) => setTimeout(r, 150));
-    const srcArea30 = doc(win, '.cls-src');
-    await srcArea30.fill('background-color: #0000ff;\nwidth: 300px;');
-    await doc(win, '.cls-editor-actions button:has-text("保存并应用")').click();
-    await new Promise((r) => setTimeout(r, 400));
-    const afterSrc30 = await win.evaluate(() => {
-      const els = document.querySelectorAll('.canvas > [data-bc-id]');
-      const a = getComputedStyle(els[0]).backgroundColor;
-      const w = getComputedStyle(els[0]).width;
-      return { a, w };
+    check('S30.4 编辑即统一：改一个 .dup 元素 → 全部同类一起变', afterForm30.a === 'rgb(0, 170, 0)' && afterForm30.d === 'rgb(0, 170, 0)', JSON.stringify(afterForm30));
+    // S30.5 同类同色轮廓：开「⬚ 轮廓」→ 有类名元素实线同色描边，无类名暗蓝虚线；关闭后消失
+    await doc(win, '.tb-outline-btn').click();
+    await new Promise((r) => setTimeout(r, 200));
+    const outline30 = await win.evaluate(() => {
+      const dupA = document.querySelector('.canvas > [data-bc-cg="dup"]');
+      const dupD = dupA.querySelector(':scope > [data-bc-cg="dup"]') ?? dupA.querySelector(':scope > div');
+      const plain = document.querySelector('.canvas > [data-bc-id]:not([data-bc-cg])');
+      return {
+        aColor: getComputedStyle(dupA).outlineColor,
+        dColor: getComputedStyle(dupD).outlineColor,
+        aStyle: getComputedStyle(dupA).outlineStyle,
+        plainStyle: getComputedStyle(plain).outlineStyle,
+        plainColor: getComputedStyle(plain).outlineColor,
+        chipsDot: (() => { const dot = document.querySelector('.cls-chip-dot'); return dot ? getComputedStyle(dot).backgroundColor : ''; })()
+      };
     });
-    check('S30.5 源码模式编辑 → 保存应用（背景+宽度）', afterSrc30.a === 'rgb(0, 0, 255)' && parseFloat(afterSrc30.w) >= 290, JSON.stringify(afterSrc30));
+    const sameGroup = outline30.aColor === outline30.dColor && outline30.aStyle === 'solid' && outline30.aColor !== 'rgb(43, 87, 151)';
+    const plainOk = outline30.plainStyle === 'dotted' && outline30.plainColor === 'rgb(43, 87, 151)';
+    const chipOk = outline30.chipsDot === '' || outline30.chipsDot === outline30.aColor;
+    check('S30.5 同类同色：.dup 实线同色描边、无类名暗蓝虚线、chips 色点一致', sameGroup && plainOk && chipOk, JSON.stringify(outline30));
+    await shot(win, '同类同色-轮廓');
+    await doc(win, '.tb-outline-btn').click();
+    await new Promise((r) => setTimeout(r, 150));
     // S30.6 ID 重复输入 → 即时红色警告；类名重复 → 同步提示（4-F：输入即时反馈）
     await doc(win, '.tab-btn:has-text("图层")').click();
     await new Promise((r) => setTimeout(r, 200));
@@ -1019,13 +1026,19 @@ async function main() {
     await idRow30.fill('');
     await idRow30.evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 250));
-    const clsRow30 = doc(win, '.prop-row:has-text("类名 Class") input');
-    await clsRow30.fill('dup');
-    await clsRow30.evaluate((el) => el.blur());
+    // S30.7 类名 chips：当前元素 divD 的类名以 chip 呈现（色点 + 名称），输入框可追加
+    const chipNames30 = await doc(win, '.cls-chip-name').allTextContents();
+    check('S30.7 类名 chips 显示当前元素类名', chipNames30.includes('dup'), JSON.stringify(chipNames30));
+    // S30.8 总览页快速起名：未命名行输入名字回车 → 生成新卡片
+    await doc(win, '.inspector-tab:has-text("类名")').click();
+    await new Promise((r) => setTimeout(r, 250));
+    const quickInput30 = doc(win, '.cls-quick-input').first();
+    await quickInput30.fill('fresh-name');
+    await quickInput30.evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 300));
-    const dupClsHint30 = await doc(win, '.attr-hint').textContent();
-    check('S30.7 类名重复输入提示（编辑即统一）', dupClsHint30.includes('一起变') && !dupClsHint30.includes('必须唯一'), dupClsHint30);
-    await shot(win, '类名ID管理-输入提示');
+    const freshCard30 = await doc(win, '.cls-card:has-text(".fresh-name")').count();
+    check('S30.8 快速起名：未命名元素回车命名 → 出现 .fresh-name 卡片', freshCard30 >= 1, `cards=${freshCard30}`);
+    await shot(win, '类名总览-快速起名');
 
     // ===== S31 布局切换（4-F 版2）：默认底部布局，可切左侧 =====
     // S31.1 默认底部布局：元素面板在画布下方

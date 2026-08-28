@@ -1,6 +1,6 @@
 {
   "name": "blockcanvas",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "BlockCanvas 积木画布 - 可视化静态网页构建工具",
   "main": "out/main/main.js",
   "author": "Dr.Zhaology",

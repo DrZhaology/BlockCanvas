@@ -1,14 +1,130 @@
 {
   "id": "showcase-templates",
   "type": "resource",
-  "name": "内置新手模板包",
-  "version": "1.0.0",
+  "name": "新手模板资源包",
+  "version": "2.0.0",
   "author": "BlockCanvas",
-  "description": "打开软件自带的基础页面零件：大标题区、导航栏、卡片组、页脚。直接点一下就能插到画布上，之后再随便改。",
+  "description": "按风格分类的完整网页模板库：品牌首页、营销转化、信息内容、组件零件。每个模板均配有完整的选择器体系，零类名冲突，开箱即用。",
+  "categories": [
+    {
+      "id": "brand",
+      "name": "品牌首页",
+      "description": "用于展示品牌形象的主页板块"
+    },
+    {
+      "id": "marketing",
+      "name": "营销转化",
+      "description": "用于推广产品、引导用户行动的转化型板块"
+    },
+    {
+      "id": "content",
+      "name": "信息内容",
+      "description": "用于展示信息、知识、内容的板块"
+    },
+    {
+      "id": "components",
+      "name": "组件零件",
+      "description": "可复用的通用网页组件"
+    }
+  ],
   "templates": [
-    { "id": "landing-hero", "name": "首页大标题区", "description": "深色背景 + 大标题 + 副标题 + 按钮，放页面最上面的招牌区", "file": "templates/landing-hero.json" },
-    { "id": "navbar", "name": "顶部导航栏", "description": "站点名 + 三个链接 + 按钮，一进来就能改字", "file": "templates/navbar.json" },
-    { "id": "card-row", "name": "三张信息卡片", "description": "横排三张卡片（标题 + 说明），适合功能/服务介绍", "file": "templates/card-row.json" },
-    { "id": "footer", "name": "页脚", "description": "版权信息 + 小字免责声明，放在页面最底部", "file": "templates/footer.json" }
+    {
+      "category": "brand",
+      "id": "hero-split",
+      "name": "左右分屏 Hero",
+      "description": "左文右图的英雄区，适合品牌首页首屏，含标签 + 标题 + 描述 + 双按钮 + 头像证明",
+      "file": "templates/hero-split.json"
+    },
+    {
+      "category": "brand",
+      "id": "logo-cloud",
+      "name": "信赖伙伴 Logo 墙",
+      "description": "灰色品牌 Logo 横排展示区，营造合作背书感",
+      "file": "templates/logo-cloud.json"
+    },
+    {
+      "category": "brand",
+      "id": "statistics",
+      "name": "数据统计指标栏",
+      "description": "深色背景上的四个关键数据指标，用不同颜色高亮",
+      "file": "templates/statistics.json"
+    },
+    {
+      "category": "brand",
+      "id": "features",
+      "name": "六宫格特性卡片",
+      "description": "3×2 网格展示产品六大核心特性，每个卡片带 emoji 图标",
+      "file": "templates/features.json"
+    },
+    {
+      "category": "marketing",
+      "id": "landing-hero",
+      "name": "深色大标题 Hero",
+      "description": "深色背景 + 大标题 + 副标题 + CTA 按钮，经典首页招牌区",
+      "file": "templates/landing-hero.json"
+    },
+    {
+      "category": "marketing",
+      "id": "cta",
+      "name": "行动召唤 CTA 区",
+      "description": "深蓝渐变背景上的大标题 + 说明 + 主次两个按钮",
+      "file": "templates/cta.json"
+    },
+    {
+      "category": "marketing",
+      "id": "pricing",
+      "name": "三档定价方案",
+      "description": "免费版 / 专业版 / 企业版对比卡片，推荐款高亮边框",
+      "file": "templates/pricing.json"
+    },
+    {
+      "category": "marketing",
+      "id": "testimonials",
+      "name": "用户评价卡片组",
+      "description": "三列用户好评卡片，含星级评分 + 头像 + 引言 + 身份信息",
+      "file": "templates/testimonials.json"
+    },
+    {
+      "category": "marketing",
+      "id": "team",
+      "name": "团队介绍卡片",
+      "description": "三人团队卡片，含圆形头像 + 姓名 + 职位 + 简介 + 社交链接",
+      "file": "templates/team.json"
+    },
+    {
+      "category": "content",
+      "id": "faq",
+      "name": "常见问题折叠列表",
+      "description": "四组问答卡片，用于 FAQ 页面或详情页底部",
+      "file": "templates/faq.json"
+    },
+    {
+      "category": "content",
+      "id": "blog-grid",
+      "name": "博客文章网格",
+      "description": "三列博客卡片，含彩色渐变缩略图 + 标签 + 标题 + 摘要 + 阅读全文",
+      "file": "templates/blog-grid.json"
+    },
+    {
+      "category": "components",
+      "id": "navbar",
+      "name": "顶部导航栏",
+      "description": "站点名 + 三个链接 + 按钮，一进来就能改字",
+      "file": "templates/navbar.json"
+    },
+    {
+      "category": "components",
+      "id": "footer",
+      "name": "页脚",
+      "description": "版权信息 + 小字免责声明，放在页面最底部",
+      "file": "templates/footer.json"
+    },
+    {
+      "category": "components",
+      "id": "card-row",
+      "name": "三张信息卡片",
+      "description": "横排三张卡片（标题 + 说明），适合功能/服务介绍",
+      "file": "templates/card-row.json"
+    }
   ]
 }

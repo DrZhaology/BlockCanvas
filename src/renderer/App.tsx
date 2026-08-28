@@ -5,29 +5,26 @@ import { Canvas } from '@comp/Canvas';
 import { Inspector } from '@comp/Inspector';
 import { LayerTree } from '@comp/LayerTree';
 import { ErrorBoundary } from '@comp/ErrorBoundary';
-import { ExtensionManager } from '@comp/ExtensionManager';
+import { ProjectsCenter } from '@comp/ProjectsCenter';
+import { Settings, type SettingsSection } from '@comp/Settings';
+import { ProjectTabBar } from '@comp/ProjectTabBar';
 import { AboutModal } from '@comp/About';
 import { useScene } from '@store/sceneStore';
+import { useTabStore } from '@store/tabStore';
 import { refreshPlugins } from '@lib/pluginHost';
-import type { SceneElement } from '@lib/types';
 
 // BlockCanvas · 主界面
-// 阶段1：顶部窄工具栏 + 左中右三栏
-// 阶段4・F版2：布局可切换（设置菜单 / 事件）——
-//   - 'left'：左=元素/模板，中=画布，右=属性（原版）
-//   - 'bottom'：上=画布+右属性，下=元素/模板（默认，画布最大）
-//   zoom 提升到 App：归位按钮在工具栏；菜单设置里也可切布局
+// - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
+// - 视图中枢：'editor' (画布编辑) | 'web-manager' (项目与网页管理库) | 'settings' (Fluent 偏好设置)
+// - 会话自愈：启动自动从 data/session.json 恢复上次打开的所有标签页与草稿
+// - 自动备份：根据用户设定时间间隔自动快照至 data/backups/
 
 type RightTab = 'layers' | 'inspector';
 const RIGHT_TAB_KEY = 'bc-right-tab';
-// 画布宽度：'auto' = 跟随编辑区（自适应），或具体像素 '<n>px'，或预设断点 '375px'/'768px'/'1440px'
 const CANVAS_WIDTH_KEY = 'bc-canvas-width';
-// 布局模式：'left' 左栏布局 / 'bottom' 底部栏布局（默认，画布最大）
 const LAYOUT_KEY = 'bc-layout';
-// bottom 面板高度 / right 面板宽度（可拖手调，最小约为默认 70%）
 const BOTTOM_HEIGHT_KEY = 'bc-bottom-height';
 const RIGHT_WIDTH_KEY = 'bc-right-width';
-// 左侧布局下元素面板宽度（可拖动调宽，仅 left 布局生效）
 const LEFT_WIDTH_KEY = 'bc-left-width';
 const LEFT_WIDTH_DEFAULT = 230;
 const LEFT_WIDTH_MIN = 160;
@@ -35,6 +32,8 @@ const BOTTOM_HEIGHT_DEFAULT = 250;
 const BOTTOM_HEIGHT_MIN = 175;
 const RIGHT_WIDTH_DEFAULT = 320;
 const RIGHT_WIDTH_MIN = 224;
+
+export type AppView = 'editor' | 'projects' | 'settings';
 
 export default function App() {
   const [rightTab, setRightTab] = usePersistentState<RightTab>(RIGHT_TAB_KEY, 'inspector');
@@ -44,20 +43,54 @@ export default function App() {
   const [rightWidth, setRightWidth] = usePersistentState<number>(RIGHT_WIDTH_KEY, RIGHT_WIDTH_DEFAULT);
   const [leftWidth, setLeftWidth] = usePersistentState<number>(LEFT_WIDTH_KEY, LEFT_WIDTH_DEFAULT);
   const [zoom, setZoom] = useState(1);
-  // 全页视图切换：'editor' 编辑器（默认） / 'extensions' 扩展管理
-  const [view, setView] = useState<'editor' | 'extensions'>('editor');
-  // 关于弹窗
+  const [view, setView] = useState<AppView>('editor');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('personalization');
   const [showAbout, setShowAbout] = useState(false);
-  // Toolbar/Canvas 共用：setZoom 直接可用（Canvas 传函数式更新）
+  const [_updating, setUpdating] = useState(false);
   const applyZoom = (fn: (z: number) => number) => setZoom(fn);
 
-  // 阶段1补：不再强制选中后切到属性页
-  // 用户可在图层页中查看选中行（LayerTree 内部自动滚动定位）
-  // 用户主动点 Tab 切换控制权交给用户
+  useKeyboardShortcuts(setView);
 
-  useKeyboardShortcuts();
+  // 1. 启动时像 Windows 11 记事本一样秒级恢复上次会话
+  useEffect(() => {
+    (async () => {
+      try {
+        const session = await window.bc.getSession();
+        if (session && session.tabs && session.tabs.length > 0) {
+          useTabStore.getState().initFromSession(session);
+        }
+      } catch (e) {
+        console.warn('恢复会话失败:', e);
+      }
+    })();
+  }, []);
 
-  // 启动 / 刷新插件宿主（插件启用、禁用、导入、删除后由扩展管理页派发 bc:plugins-changed）
+  // 2. 定时自动备份：按用户配置的毫秒数执行，按项目名称分别隔离保存
+  useEffect(() => {
+    let timer: number = 0;
+    const startBackupTimer = async () => {
+      const cfg = await window.bc.getAppConfig();
+      const interval = typeof cfg.autoBackupInterval === 'number' ? cfg.autoBackupInterval : 60000;
+      if (interval <= 0) return;
+
+      timer = window.setInterval(() => {
+        const sc = useScene.getState().scene;
+        const tabs = useTabStore.getState().tabs;
+        const activeId = useTabStore.getState().activeTabId;
+        const curTab = tabs.find((t) => t.id === activeId);
+        if (sc.root.children.length > 0) {
+          window.bc.saveBackupSnapshot(sc, curTab?.name, true);
+        }
+      }, interval);
+    };
+
+    startBackupTimer();
+    return () => {
+      if (timer) window.clearInterval(timer);
+    };
+  }, []);
+
+  // 3. 启动 / 刷新插件宿主
   useEffect(() => {
     refreshPlugins();
     const onPluginsChanged = () => refreshPlugins();
@@ -65,8 +98,64 @@ export default function App() {
     return () => window.removeEventListener('bc:plugins-changed', onPluginsChanged);
   }, []);
 
-  // 菜单"设置"事件：切换布局 / 打开扩展 / 打开类名管理 / 关于
-  // 生产走 IPC（bc.onMenu），测试里 window.dispatchEvent(new CustomEvent('menu:…')) 兜底转发
+  // 4. 启动延迟检测更新（5秒后静默检查，有更新则弹窗）
+  useEffect(() => {
+    const checkAndNotify = async () => {
+      try {
+        const cfg = await window.bc.getAppConfig();
+        const lastCheck = cfg.lastCheckUpdate as string | undefined;
+        if (lastCheck && Date.now() - new Date(lastCheck).getTime() < 24 * 3600 * 1000) return;
+        await window.bc.setAppConfig({ lastCheckUpdate: new Date().toISOString() });
+      } catch {}
+
+      try {
+        const result = await window.bc.checkUpdate();
+        if (!result.ok || !result.hasUpdate) return;
+        // 弹窗通知
+        setTimeout(() => {
+          const confirmed = confirm(
+            `发现新版本 ${result.latestVersion}！\n\n当前版本：${result.localVersion}\n${result.releaseName ? '版本说明：' + result.releaseName + '\n' : ''}是否立即下载并更新？`
+          );
+          if (confirmed && result.downloadUrl) {
+            handleApplyUpdate(result.downloadUrl);
+          }
+        }, 500);
+      } catch {}
+    };
+    const timer = window.setTimeout(checkAndNotify, 5000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const handleApplyUpdate = async (assetUrl: string) => {
+    setUpdating(true);
+    try {
+      const res = await window.bc.applyUpdate(assetUrl);
+      if (!res.ok) alert('更新失败：' + (res.error || '未知错误'));
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const checkAndUpdateManually = async () => {
+    try {
+      const result = await window.bc.checkUpdate();
+      if (!result.ok) { alert('检测更新失败：' + (result.error || '未知错误')); return; }
+      if (!result.hasUpdate) {
+        alert(`当前已是最新版本 ${result.localVersion}，无需更新。`);
+        return;
+      }
+      const confirmed = confirm(
+        `发现新版本 ${result.latestVersion}！\n\n当前版本：${result.localVersion}\n${result.releaseName ? '版本说明：' + result.releaseName + '\n' : ''}是否立即下载并更新？`
+      );
+      if (confirmed && result.downloadUrl) {
+        handleApplyUpdate(result.downloadUrl);
+      }
+    } catch (e: any) {
+      alert('检测更新失败：' + (e.message || '未知错误'));
+    }
+  };
+
+  // 4. 菜单 & 事件路由监听
   useEffect(() => {
     const onSetLayout = (e: Event) => {
       const v = (e as CustomEvent).detail;
@@ -74,88 +163,211 @@ export default function App() {
     };
     const toLeft = () => setLayout('left');
     const toBottom = () => setLayout('bottom');
-    const openExt = () => setView('extensions');
-    const openClass = () => window.dispatchEvent(new CustomEvent('bc:open-class'));
+    const openProjects = () => setView('projects');
+    const openSettings = (sec?: SettingsSection) => {
+      setSettingsSection(sec || 'personalization');
+      setView('settings');
+    };
+    const openClass = () => {
+      setView('editor');
+      setRightTab('inspector');
+      window.dispatchEvent(new CustomEvent('bc:open-class'));
+    };
     const openAbout = () => setShowAbout(true);
+
+    const onNewTab = () => {
+      useTabStore.getState().newTab();
+      setView('editor');
+    };
+
+    const onSaveProject = async () => {
+      const tabs = useTabStore.getState().tabs;
+      const activeId = useTabStore.getState().activeTabId;
+      const curTab = tabs.find((t) => t.id === activeId);
+      if (!curTab) return;
+      const curScene = useScene.getState().scene;
+
+      if (curTab.filePath) {
+        const res = await window.bc.saveProject({ name: curTab.name, scene: curScene }, false, curTab.filePath);
+        if (res.ok) useTabStore.getState().setTabSaved(curTab.id, curTab.filePath, curTab.name);
+      } else {
+        const res = await window.bc.saveProject({ name: curTab.name, scene: curScene }, true);
+        if (res.ok && res.path) useTabStore.getState().setTabSaved(curTab.id, res.path, res.name);
+      }
+    };
+
+    const onSaveProjectAs = async () => {
+      const tabs = useTabStore.getState().tabs;
+      const activeId = useTabStore.getState().activeTabId;
+      const curTab = tabs.find((t) => t.id === activeId);
+      if (!curTab) return;
+      const curScene = useScene.getState().scene;
+      const res = await window.bc.saveProject({ name: curTab.name, scene: curScene }, true);
+      if (res.ok && res.path) useTabStore.getState().setTabSaved(curTab.id, res.path, res.name);
+    };
+
+    const onOpenProject = async () => {
+      const res = await window.bc.openProjectFile();
+      if (res.ok && res.project?.scene) {
+        useTabStore.getState().newTab(res.project.name || '已打开工程', res.project.scene, res.path);
+        setView('editor');
+      }
+    };
+
+    const onExportHtml = () => {
+      window.dispatchEvent(new CustomEvent('bc:export-html'));
+    };
+
+    const onPreview = () => {
+      window.dispatchEvent(new CustomEvent('bc:preview'));
+    };
+
     window.addEventListener('bc:set-layout', onSetLayout);
+    window.addEventListener('bc:open-projects', openProjects);
+    window.addEventListener('bc:open-settings', () => openSettings());
     window.addEventListener('menu:layout-left', toLeft);
     window.addEventListener('menu:layout-bottom', toBottom);
-    window.addEventListener('menu:ext', openExt);
+    window.addEventListener('menu:ext', () => openSettings('extensions'));
+    window.addEventListener('menu:web-manager', openProjects);
+    window.addEventListener('menu:settings', () => openSettings());
     window.addEventListener('menu:class-manager', openClass);
     window.addEventListener('menu:about', openAbout);
+    window.addEventListener('menu:check-update', () => checkAndUpdateManually());
+    window.addEventListener('menu:new-tab', onNewTab);
+    window.addEventListener('menu:save-project', onSaveProject);
+    window.addEventListener('menu:save-project-as', onSaveProjectAs);
+    window.addEventListener('menu:open-project', onOpenProject);
+    window.addEventListener('menu:export-html', onExportHtml);
+    window.addEventListener('menu:preview', onPreview);
+
     const offs = [
       window.bc.onMenu('menu:layout-left', toLeft),
       window.bc.onMenu('menu:layout-bottom', toBottom),
-      window.bc.onMenu('menu:ext', openExt),
+      window.bc.onMenu('menu:ext', () => openSettings('extensions')),
+      window.bc.onMenu('menu:web-manager', openProjects),
+      window.bc.onMenu('menu:settings', () => openSettings()),
       window.bc.onMenu('menu:class-manager', openClass),
-      window.bc.onMenu('menu:about', openAbout)
+      window.bc.onMenu('menu:about', openAbout),
+      window.bc.onMenu('menu:check-update', () => checkAndUpdateManually()),
+      window.bc.onMenu('menu:new-tab', onNewTab),
+      window.bc.onMenu('menu:save-project', onSaveProject),
+      window.bc.onMenu('menu:save-project-as', onSaveProjectAs),
+      window.bc.onMenu('menu:open-project', onOpenProject),
+      window.bc.onMenu('menu:export-html', onExportHtml),
+      window.bc.onMenu('menu:preview', onPreview)
     ];
+
     return () => {
       window.removeEventListener('bc:set-layout', onSetLayout);
+      window.removeEventListener('bc:open-projects', openProjects);
+      window.removeEventListener('bc:open-settings', () => openSettings());
       window.removeEventListener('menu:layout-left', toLeft);
       window.removeEventListener('menu:layout-bottom', toBottom);
-      window.removeEventListener('menu:ext', openExt);
+      window.removeEventListener('menu:ext', () => openSettings('extensions'));
+      window.removeEventListener('menu:web-manager', openProjects);
+      window.removeEventListener('menu:settings', () => openSettings());
       window.removeEventListener('menu:class-manager', openClass);
       window.removeEventListener('menu:about', openAbout);
+      window.removeEventListener('menu:check-update', () => checkAndUpdateManually());
+      window.removeEventListener('menu:new-tab', onNewTab);
+      window.removeEventListener('menu:save-project', onSaveProject);
+      window.removeEventListener('menu:save-project-as', onSaveProjectAs);
+      window.removeEventListener('menu:open-project', onOpenProject);
+      window.removeEventListener('menu:export-html', onExportHtml);
+      window.removeEventListener('menu:preview', onPreview);
       offs.forEach((off) => off && off());
     };
   }, [setLayout, setView]);
 
   return (
     <div className="app">
-      {view === 'extensions' ? (
-        <ExtensionManager onBack={() => setView('editor')} />
+      {view === 'projects' ? (
+        <ProjectsCenter
+          onBack={() => setView('editor')}
+        />
+      ) : view === 'settings' ? (
+        <Settings
+          onBack={() => setView('editor')}
+          onOpenWebManager={() => setView('projects')}
+          initialSection={settingsSection}
+          layout={layout}
+          onLayoutChange={setLayout}
+          canvasWidth={canvasWidth}
+          onCanvasWidthChange={setCanvasWidth}
+        />
       ) : (
         <>
-      <Toolbar
-        canvasWidth={canvasWidth}
-        onCanvasWidthChange={setCanvasWidth}
-        zoom={zoom}
-        onZoomChange={setZoom}
-      />
-      <div className="workspace" data-layout={layout} style={{ '--bc-bottom-height': bottomHeight + 'px', '--bc-right-width': rightWidth + 'px', '--bc-left-width': leftWidth + 'px' } as React.CSSProperties}>
-        <div className="elem-pane-wrap">
-          <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>
-          {layout === 'left' && (
-            <div className="panel-resizer panel-resizer-left"
-              onMouseDown={(e) => startResize(e, 'left', setLeftWidth, LEFT_WIDTH_MIN, leftWidth)}>
-              <div className="panel-resizer-handle" />
+          <ProjectTabBar />
+          <Toolbar
+            canvasWidth={canvasWidth}
+            onCanvasWidthChange={setCanvasWidth}
+            zoom={zoom}
+            onZoomChange={setZoom}
+          />
+          <div
+            className="workspace"
+            data-layout={layout}
+            style={{
+              '--bc-bottom-height': bottomHeight + 'px',
+              '--bc-right-width': rightWidth + 'px',
+              '--bc-left-width': leftWidth + 'px'
+            } as React.CSSProperties}
+          >
+            <div className="elem-pane-wrap">
+              <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>
+              {layout === 'left' && (
+                <div
+                  className="panel-resizer panel-resizer-left"
+                  onMouseDown={(e) => startResize(e, 'left', setLeftWidth, LEFT_WIDTH_MIN, leftWidth)}
+                >
+                  <div className="panel-resizer-handle" />
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        <div className="canvas-area">
-          <ErrorBoundary label="画布"><Canvas canvasWidth={canvasWidth} zoom={zoom} onZoomChange={applyZoom} onUserResize={(px) => setCanvasWidth(px + 'px')} /></ErrorBoundary>
-          {layout === 'bottom' && (
-            <div className="panel-resizer panel-resizer-horizontal"
-              onMouseDown={(e) => startResize(e, 'bottom', setBottomHeight, BOTTOM_HEIGHT_MIN, bottomHeight)}>
-              <div className="panel-resizer-handle" />
-            </div>
-          )}
-        </div>
-        <div className="right-pane-wrap">
-          <div className="panel-resizer panel-resizer-vertical"
-            onMouseDown={(e) => startResize(e, 'right', setRightWidth, RIGHT_WIDTH_MIN, rightWidth)}>
-            <div className="panel-resizer-handle" />
-          </div>
-          <div className="right-pane">
-            <div className="tab-bar">
-              <button
-                className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
-                onClick={() => setRightTab('layers')}
-              >图层</button>
-              <button
-                className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
-                onClick={() => setRightTab('inspector')}
-              >属性</button>
-            </div>
-            <div className="tab-body">
-              <ErrorBoundary label="右侧面板">
-                {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
+            <div className="canvas-area">
+              <ErrorBoundary label="画布">
+                <Canvas
+                  canvasWidth={canvasWidth}
+                  zoom={zoom}
+                  onZoomChange={applyZoom}
+                  onUserResize={(px) => setCanvasWidth(px + 'px')}
+                />
               </ErrorBoundary>
+              {layout === 'bottom' && (
+                <div
+                  className="panel-resizer panel-resizer-horizontal"
+                  onMouseDown={(e) => startResize(e, 'bottom', setBottomHeight, BOTTOM_HEIGHT_MIN, bottomHeight)}
+                >
+                  <div className="panel-resizer-handle" />
+                </div>
+              )}
+            </div>
+            <div className="right-pane-wrap">
+              <div
+                className="panel-resizer panel-resizer-vertical"
+                onMouseDown={(e) => startResize(e, 'right', setRightWidth, RIGHT_WIDTH_MIN, rightWidth)}
+              >
+                <div className="panel-resizer-handle" />
+              </div>
+              <div className="right-pane">
+                <div className="tab-bar">
+                  <button
+                    className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
+                    onClick={() => setRightTab('layers')}
+                  >图层</button>
+                  <button
+                    className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
+                    onClick={() => setRightTab('inspector')}
+                  >属性</button>
+                </div>
+                <div className="tab-body">
+                  <ErrorBoundary label="右侧面板">
+                    {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
+                  </ErrorBoundary>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
         </>
       )}
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
@@ -163,9 +375,6 @@ export default function App() {
   );
 }
 
-// 拖手：鼠标按下后全局监听 mousemove，按方向改 state；最小值约束；拖手位置贴面板边缘
-// 光标按拖拽方向固定：bottom 用 ns-resize（竖向），left/right 用 col-resize（横向），
-// 防止拖拽过程中在子元素上光标闪变。
 function startResize(
   e: React.MouseEvent,
   dir: 'bottom' | 'right' | 'left',
@@ -176,8 +385,7 @@ function startResize(
   e.preventDefault();
   const startY = e.clientY;
   const startX = e.clientX;
-  const vertical = dir === 'bottom'; // 竖向拖拽
-  // 底部面板上限：不能超过工作区高度除留一条最小编辑区，否则按钮会冲出屏幕最下方
+  const vertical = dir === 'bottom';
   const wsEl = (e.currentTarget as HTMLElement).closest('.workspace') as HTMLElement | null;
   const bottomMax = wsEl ? Math.max(min, wsEl.clientHeight - 60) : Infinity;
   document.body.classList.add(vertical ? 'bc-resizing-ns' : 'bc-resizing-col');
@@ -201,7 +409,7 @@ function startResize(
 }
 
 // ============ 全局快捷键 + 菜单事件 ============
-function useKeyboardShortcuts() {
+function useKeyboardShortcuts(setView: (v: AppView) => void) {
   useEffect(() => {
     const triggerUndo = () => useScene.getState().undo();
     const triggerRedo = () => useScene.getState().redo();
@@ -209,7 +417,6 @@ function useKeyboardShortcuts() {
       const st = useScene.getState();
       if (st.scene.selectedIds.length > 0) st.copyMany(st.scene.selectedIds);
     };
-    // 剪切 = 复制 + 删除（一条 undo）
     const triggerCut = () => {
       const st = useScene.getState();
       if (st.scene.selectedIds.length > 0) st.cutMany(st.scene.selectedIds);
@@ -218,7 +425,7 @@ function useKeyboardShortcuts() {
       const st = useScene.getState();
       const id = st.scene.selectedId;
       if (!st.clipboard) return;
-      st.pasteSibling(id);
+      st.paste(id);
     };
     const triggerDuplicate = () => {
       const st = useScene.getState();
@@ -228,11 +435,10 @@ function useKeyboardShortcuts() {
       const st = useScene.getState();
       if (st.scene.selectedIds.length > 0) st.removeMany(st.scene.selectedIds);
     };
-    // Ctrl+A 全选：所有可见、未锁定的元素
     const triggerSelectAll = () => {
       const st = useScene.getState();
       const ids: string[] = [];
-      const walk = (n: SceneElement) => {
+      const walk = (n: any) => {
         for (const c of n.children) {
           if (!c.hidden && !c.locked) ids.push(c.id);
           walk(c);
@@ -243,7 +449,6 @@ function useKeyboardShortcuts() {
     };
 
     const onKey = (e: KeyboardEvent) => {
-      // 编辑文字时不触发
       const t = e.target as HTMLElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
 
@@ -255,38 +460,39 @@ function useKeyboardShortcuts() {
       if (mod && e.key.toLowerCase() === 'v') { e.preventDefault(); triggerPaste(); return; }
       if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); triggerDuplicate(); return; }
       if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); triggerSelectAll(); return; }
+      if (mod && e.key === ',') { e.preventDefault(); setView('settings'); return; }
+      if (mod && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        useTabStore.getState().newTab();
+        setView('editor');
+        return;
+      }
+      if (mod && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent(e.shiftKey ? 'menu:save-project-as' : 'menu:save-project'));
+        return;
+      }
+      if (mod && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('menu:open-project'));
+        return;
+      }
+      if (mod && e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('bc:export-html'));
+        return;
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); triggerDelete(); return; }
       if (e.key === 'Escape') { e.preventDefault(); useScene.getState().selectElement(null); return; }
     };
     window.addEventListener('keydown', onKey);
 
-    // 订阅菜单事件
-    const offs = [
-      window.bc.onMenu('menu:undo', triggerUndo),
-      window.bc.onMenu('menu:redo', triggerRedo),
-      window.bc.onMenu('menu:copy', triggerCopy),
-      window.bc.onMenu('menu:cut', triggerCut),
-      window.bc.onMenu('menu:paste', triggerPaste),
-      window.bc.onMenu('menu:duplicate', triggerDuplicate),
-      window.bc.onMenu('menu:delete', triggerDelete),
-      window.bc.onMenu('menu:export-html', () => {
-        // 触发导出（Toolbar 已有逻辑，这里复用同一做法）
-        // 通过自定义事件让 Toolbar 自己处理，避免重复 logic
-        window.dispatchEvent(new CustomEvent('bc:export-html'));
-      }),
-      window.bc.onMenu('menu:preview', () => {
-        window.dispatchEvent(new CustomEvent('bc:preview'));
-      })
-    ];
-
     return () => {
       window.removeEventListener('keydown', onKey);
-      offs.forEach((off) => off && off());
     };
-  }, []);
+  }, [setView]);
 }
 
-// ============ 简易持久化 hook ============
 function usePersistentState<T>(key: string, initial: T): [T, (v: T) => void] {
   const [state, setStateRaw] = useState<T>(() => {
     try {

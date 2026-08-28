@@ -1,11 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
-// BlockCanvas · "?" 帮助按钮 + 紧凑 popover
-// 用 Portal 渲染到 document.body + fixed 定位，彻底避免被属性面板的
-// overflow 容器裁剪；打开后测量气泡尺寸，空间不够自动翻到按钮上方，
-// 并夹紧在窗口范围内（不再出现部分内容跑到窗口外、文字看不到）。
-// 点外部 / Esc / wheel 滚动 / "知道了" / × 关闭。
+// BlockCanvas · "?" 帮助按钮 + 悬停 1s 缓入与点击通用组件
+// - 鼠标悬停 1 秒后自动平滑淡入气泡，无需强制点击；也可直接点击瞬间开关
+// - Portal 挂载到 document.body + fixed 定位，自动检测视口边界向上/向下翻转
+// - 滚动 / Esc / 移开鼠标 自动平滑关闭
 
 interface Props {
   title: string;
@@ -23,6 +22,40 @@ export function HelpButton(props: Props) {
   const [pos, setPos] = useState<Pos | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
+  const hoverTimer = useRef<number>(0);
+  const closeTimer = useRef<number>(0);
+
+  const clearTimers = () => {
+    if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = 0; }
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = 0; }
+  };
+
+  const handleMouseEnter = () => {
+    clearTimers();
+    if (!open) {
+      hoverTimer.current = window.setTimeout(() => {
+        setPos(null);
+        setOpen(true);
+      }, 1000); // 悬停 1 秒后缓入
+    }
+  };
+
+  const handleMouseLeave = () => {
+    clearTimers();
+    if (open) {
+      closeTimer.current = window.setTimeout(() => {
+        setOpen(false);
+      }, 300); // 给用户 300ms 鼠标移进弹层的时间
+    }
+  };
+
+  // 点击事件即刻切换
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    clearTimers();
+    setPos(null);
+    setOpen((prev) => !prev);
+  };
 
   // 点外部关闭
   useEffect(() => {
@@ -35,7 +68,6 @@ export function HelpButton(props: Props) {
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
-    // 滚动面板/窗口时气泡跟着按钮跑会错位，直接关闭
     const onWheel = (e: WheelEvent) => {
       const t = e.target as Node;
       if (popRef.current?.contains(t) || btnRef.current?.contains(t)) return;
@@ -51,7 +83,7 @@ export function HelpButton(props: Props) {
     };
   }, [open]);
 
-  // 打开后测量气泡尺寸，再定最终位置（下方空间不够→翻到上方；左右夹紧不越窗）
+  // 打开后计算绝对定位与方向
   useEffect(() => {
     if (!open || !popRef.current || !btnRef.current) return;
     const btn = btnRef.current.getBoundingClientRect();
@@ -59,7 +91,7 @@ export function HelpButton(props: Props) {
     const w = pop.offsetWidth;
     const h = pop.offsetHeight;
     const gap = 8;
-    const margin = 4;
+    const margin = 6;
     const placeBelow = btn.bottom + gap + h <= window.innerHeight - margin;
     const dir: 'down' | 'up' = placeBelow ? 'down' : 'up';
     const top = dir === 'down'
@@ -69,29 +101,32 @@ export function HelpButton(props: Props) {
     setPos({ top, left, dir });
   }, [open]);
 
-  const toggle = () => {
-    setPos(null);
-    setOpen(!open);
-  };
+  useEffect(() => () => clearTimers(), []);
 
   return (
     <>
-      <span className="help-wrap">
+      <span
+        className="help-wrap"
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
         <button
           ref={btnRef}
           className="help-btn"
-          onClick={(e) => { e.stopPropagation(); toggle(); }}
-          title={props.title}
+          onClick={handleClick}
+          title={props.title + '（悬停1秒查看或点击开启）'}
         >?</button>
       </span>
       {open && createPortal(
         <div
           ref={popRef}
-          className={'help-pop help-pop-fixed' + (pos ? ' ' + pos.dir : '')}
+          className={'help-pop help-pop-fixed' + (pos ? ' ' + pos.dir + ' fade-in' : '')}
           style={pos
             ? { top: pos.top, left: pos.left }
             : { top: 0, left: -9999, visibility: 'hidden' }}
           onClick={(e) => e.stopPropagation()}
+          onMouseEnter={() => { clearTimers(); }}
+          onMouseLeave={handleMouseLeave}
         >
           <div className="help-pop-header">
             <span className="help-pop-title">{props.title}</span>

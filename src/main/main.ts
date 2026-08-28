@@ -1,37 +1,67 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net, shell, nativeTheme, type MenuItemConstructorOptions } from 'electron';
-import { join, basename, dirname } from 'node:path';
-import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync } from 'node:fs';
+import { join, basename, dirname, relative } from 'node:path';
+import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { zipCreate, zipList } from './zip';
+import {
+  dataRoot, initDataDirectories, readAppConfig, writeAppConfig, listProjects,
+  listProjectBackups, saveProjectSnapshotFile, deleteProjectBackupFolder,
+  readSession, writeSession, getStorageStats, clearAppCache, clearOrphanBackups,
+  getLocalVersion, fetchLatestRelease, compareVersion, findMatchingAsset, applyUpdate
+} from './userData';
+
+// 启动最优先：初始化纯便携数据区 data/，隔离系统盘
+initDataDirectories();
 
 // electron-vite 在 dev 模式下注入 ELECTRON_RENDERER_URL；
-// 其余情况（构建产物 / 自动化测试直接 electron .）一律加载打包 HTML。
 const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
 
 // ============ 本地图片协议 ============
-// 画布预览本地图片时用 bc-img://file/<encodeURIComponent(绝对路径)> 加载，
-// 否则 http 页面加载 file:// 路径会被浏览器拦截（"Not allowed to load local resource"）。
-// 必须在 app ready 之前注册特权声明。
 protocol.registerSchemesAsPrivileged([
   { scheme: 'bc-img', privileges: { standard: true, secure: true } }
 ]);
 
 // ============ 自定义中文菜单 ============
-// 阶段1：基础菜单 + 快捷键。后续阶段接入"保存工程/打开工程"。
 function buildMenu(win: BrowserWindow): Menu {
   const template: MenuItemConstructorOptions[] = [
     {
       label: '文件',
       submenu: [
         {
-          label: '导出 HTML…',
+          label: '新建项目标签 (New Tab)',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => win.webContents.send('menu:new-tab')
+        },
+        {
+          label: '打开项目 (.bcproj)…',
+          accelerator: 'CmdOrCtrl+O',
+          click: () => win.webContents.send('menu:open-project')
+        },
+        {
+          label: '保存项目 (.bcproj)',
+          accelerator: 'CmdOrCtrl+S',
+          click: () => win.webContents.send('menu:save-project')
+        },
+        {
+          label: '项目另存为…',
+          accelerator: 'CmdOrCtrl+Shift+S',
+          click: () => win.webContents.send('menu:save-project-as')
+        },
+        { type: 'separator' },
+        {
+          label: '导出 HTML 网页…',
           accelerator: 'CmdOrCtrl+E',
           click: () => win.webContents.send('menu:export-html')
         },
         {
-          label: '在浏览器中预览…',
+          label: '在浏览器中预览',
           accelerator: 'CmdOrCtrl+P',
           click: () => win.webContents.send('menu:preview')
+        },
+        { type: 'separator' },
+        {
+          label: '浏览本地项目库 (data/projects/)',
+          click: () => shell.openPath(join(dataRoot(), 'projects'))
         },
         { type: 'separator' },
         { label: '退出', accelerator: 'CmdOrCtrl+Q', role: 'quit' }
@@ -68,16 +98,20 @@ function buildMenu(win: BrowserWindow): Menu {
       ]
     },
     {
-      // 4-F 版2：设置放在帮助右边（用户要求）：布局切换 + 插件入口 + 打开扩展文件夹
       label: '设置',
       submenu: [
+        { label: '⚙️ 偏好设置…', accelerator: 'CmdOrCtrl+,', click: () => win.webContents.send('menu:settings') },
+        { type: 'separator' },
         { label: '左侧布局（元素面板在左）', click: () => win.webContents.send('menu:layout-left') },
         { label: '底部布局（元素面板在下方）', click: () => win.webContents.send('menu:layout-bottom') },
         { type: 'separator' },
         { label: '插件与资源包…', click: () => win.webContents.send('menu:ext') },
-        { label: '打开扩展文件夹…', click: () => shell.openPath(extRoot()) },
+        { label: '打开便携数据文件夹 (data/)…', click: () => shell.openPath(dataRoot()) },
+        { label: '打开扩展文件夹 (extensions/)…', click: () => shell.openPath(extRoot()) },
         { type: 'separator' },
-        { label: '类名 / ID 管理…', click: () => win.webContents.send('menu:class-manager') }
+        { label: '🔄 检测更新…', click: () => win.webContents.send('menu:check-update') },
+        { type: 'separator' },
+        { label: '类名 / ID 总览…', click: () => win.webContents.send('menu:class-manager') }
       ]
     }
   ];
@@ -85,9 +119,6 @@ function buildMenu(win: BrowserWindow): Menu {
 }
 
 async function createWindow() {
-  // 应用图标：取自 build/icon.png（由 src/renderer/assets/logo.svg 渲染导出）。
-  // 开发/未打包阶段路径存在即生效；打包后 exe 图标已内嵌到 BlockCanvas.exe，
-  // 此处不存在时不再传 icon（避免出现悬空路径）。
   const iconPath = join(app.getAppPath(), 'build', 'icon.png');
   const win = new BrowserWindow({
     width: 1280,
@@ -107,13 +138,10 @@ async function createWindow() {
 
   Menu.setApplicationMenu(buildMenu(win));
 
-  // 插件/深色模式：跟随应用切换原生窗口 chrome（含顶部菜单栏）的明暗。
-  // 渲染进程的 CSS 改不到原生菜单栏，原生 chrome 只能通过 nativeTheme.themeSource 控制。
   ipcMain.on('theme:set-source', (_evt, source: unknown) => {
     nativeTheme.themeSource = source === 'dark' || source === 'light' ? source : 'system';
   });
 
-  // dev 与生产都不自动开 DevTools（Fn/F12 或「视图→开发者工具」可手动打开）
   if (devServerUrl) {
     await win.loadURL(devServerUrl);
   } else {
@@ -121,9 +149,196 @@ async function createWindow() {
   }
 }
 
+// ============ 数据区路径与配置 IPC ============
+ipcMain.handle('data:get-paths', () => ({
+  dataRoot: dataRoot(),
+  userDataDir: app.getPath('userData'),
+  extDir: extRoot(),
+  projectsDir: join(dataRoot(), 'projects'),
+  backupsDir: join(dataRoot(), 'backups')
+}));
+
+ipcMain.handle('data:get-storage-stats', () => getStorageStats());
+ipcMain.handle('data:clear-cache', () => clearAppCache());
+ipcMain.handle('data:clear-orphan-backups', () => clearOrphanBackups());
+
+// ============ 自动更新 IPC ============
+ipcMain.handle('update:get-version', () => getLocalVersion());
+
+ipcMain.handle('update:check', async () => {
+  const localVer = getLocalVersion();
+  const release = await fetchLatestRelease();
+  if (!release) return { ok: false, error: '无法连接到更新服务器' };
+  const cmp = compareVersion(localVer, release.version);
+  return {
+    ok: true,
+    localVersion: localVer,
+    latestVersion: release.version,
+    releaseName: release.name,
+    publishedAt: release.publishedAt,
+    hasUpdate: cmp < 0,
+    downloadUrl: findMatchingAsset(release.assets),
+    assets: release.assets
+  };
+});
+
+ipcMain.handle('update:apply', async (_evt, assetUrl: string, onProgress?: (msg: string) => void) => {
+  if (!assetUrl) return { ok: false, error: '未找到下载地址' };
+  return await applyUpdate(assetUrl, onProgress);
+});
+
+ipcMain.handle('data:open-path', async (_evt, target: string) => {
+  const p = target === 'data' ? dataRoot() : target === 'extensions' ? extRoot() : join(dataRoot(), target);
+  return shell.openPath(p);
+});
+
+ipcMain.handle('cfg:get', () => readAppConfig());
+ipcMain.handle('cfg:set', (_evt, patch: Record<string, any>) => writeAppConfig(patch));
+
+// ============ 项目工程管理 (.bcproj) ============
+ipcMain.handle('project:list', () => listProjects());
+
+ipcMain.handle('project:save', async (_evt, projectData: { name?: string; scene: any; meta?: any }, saveAs = false, customPath?: string) => {
+  try {
+    const pName = (projectData.name || '未命名网页').trim();
+    const cleanName = sanitizeId(pName) || 'project';
+    const defaultFullDir = join(dataRoot(), 'projects');
+    let targetPath = customPath;
+
+    if (!targetPath) {
+      if (saveAs) {
+        // 关键修复：默认路径传入完整绝对路径，文件选择器自动跳转定位至 BlockCanvas\data\projects\
+        const res = await dialog.showSaveDialog({
+          title: '保存项目工程文件 (.bcproj)',
+          defaultPath: join(defaultFullDir, `${cleanName}.bcproj`),
+          filters: [{ name: 'BlockCanvas 工程文件', extensions: ['bcproj', 'json'] }]
+        });
+        if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+        targetPath = res.filePath;
+      } else {
+        // 默认存进 data/projects/
+        targetPath = join(defaultFullDir, `${cleanName}.bcproj`);
+      }
+    }
+
+    const payload = {
+      format: 'BlockCanvas-Project',
+      version: '1.0.0',
+      name: pName,
+      updatedAt: new Date().toISOString(),
+      meta: {
+        ...(projectData.meta || {}),
+        elementCount: countNodes(projectData.scene?.root)
+      },
+      scene: projectData.scene
+    };
+
+    mkdirSync(dirname(targetPath), { recursive: true });
+    writeFileSync(targetPath, JSON.stringify(payload, null, 2), 'utf-8');
+    return { ok: true, path: targetPath, name: pName };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+ipcMain.handle('project:open-file', async (_evt, customPath?: string) => {
+  try {
+    let targetPath = customPath;
+    if (!targetPath) {
+      const res = await dialog.showOpenDialog({
+        title: '打开项目工程文件',
+        defaultPath: join(dataRoot(), 'projects'),
+        properties: ['openFile'],
+        filters: [{ name: 'BlockCanvas 工程文件', extensions: ['bcproj', 'json'] }]
+      });
+      if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
+      targetPath = res.filePaths[0];
+    }
+    if (!existsSync(targetPath)) return { ok: false, error: '文件不存在' };
+    const raw = JSON.parse(readFileSync(targetPath, 'utf-8'));
+    if (!raw || !raw.scene || typeof raw.scene !== 'object') {
+      return { ok: false, error: '文件不是有效的 BlockCanvas 工程文件' };
+    }
+    return { ok: true, project: raw, path: targetPath };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+ipcMain.handle('project:delete', async (_evt, fileName: string, projectName?: string) => {
+  try {
+    const full = join(dataRoot(), 'projects', fileName);
+    let innerName = '';
+    if (existsSync(full)) {
+      try {
+        const raw = JSON.parse(readFileSync(full, 'utf-8'));
+        innerName = raw.name || '';
+      } catch {}
+      unlinkSync(full);
+    }
+    // 1. 按文件名清理对应快照目录
+    const fBase = fileName.replace(/\.bcproj$/i, '');
+    deleteProjectBackupFolder(fBase);
+    // 2. 按项目内部 name 清理对应快照目录
+    if (innerName && innerName !== fBase) {
+      deleteProjectBackupFolder(innerName);
+    }
+    // 3. 按前端传入的 projectName 清理
+    if (projectName && projectName !== fBase && projectName !== innerName) {
+      deleteProjectBackupFolder(projectName);
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+// ============ 会话记忆 Session (类似 Notepad 原地自愈恢复) ============
+ipcMain.handle('session:get', () => readSession());
+ipcMain.handle('session:set', (_evt, sessionData: any) => writeSession(sessionData));
+
+// ============ 自动备份与崩溃恢复 (按项目隔离专属快照) ============
+ipcMain.handle('backup:save-snapshot', async (_evt, scene: any, projectName?: string, isAuto = true) => {
+  try {
+    const time = saveProjectSnapshotFile(scene, projectName, isAuto);
+    return { ok: true, timestamp: time };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+ipcMain.handle('backup:get-autosave', (_evt, projectName?: string) => {
+  try {
+    const folder = (projectName || '_general').trim().replace(/[\\/:*?"<>|]+/g, '_');
+    const f = join(dataRoot(), 'backups', folder, 'autosave.bcproj');
+    if (!existsSync(f)) return { ok: false };
+    const raw = JSON.parse(readFileSync(f, 'utf-8'));
+    const stat = statSync(f);
+    return { ok: true, autosave: raw, updatedAt: stat.mtime.toISOString(), elementCount: countNodes(raw.scene?.root) };
+  } catch {
+    return { ok: false };
+  }
+});
+
+ipcMain.handle('backup:list', (_evt, projectName?: string) => listProjectBackups(projectName));
+
+ipcMain.handle('backup:clear-all', async () => {
+  try {
+    const bDir = join(dataRoot(), 'backups');
+    if (existsSync(bDir)) {
+      for (const f of readdirSync(bDir)) {
+        try { unlinkSync(join(bDir, f)); } catch {}
+      }
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+// ============ 导出 HTML 与同步保存项目工程 ============
 ipcMain.handle('export:html', async (_evt, html: string, defaultName = 'index.html') => {
-  // 自动化测试钩子：设置 BC_EXPORT_PATH 后跳过保存对话框，直接写到指定文件
-  const autoPath = process.env['BC_EXPORT_PATH'];
+  const autoPath = process.env['BC_AUTO_EXPORT_PATH'];
   if (autoPath) {
     try {
       const dir = join(autoPath, '..');
@@ -134,10 +349,11 @@ ipcMain.handle('export:html', async (_evt, html: string, defaultName = 'index.ht
       return { ok: false, error: (e as Error).message };
     }
   }
+  const defaultDir = app.getPath('downloads') || join(dataRoot(), 'projects');
   const res = await dialog.showSaveDialog({
-    title: '导出 HTML',
-    defaultPath: defaultName,
-    filters: [{ name: 'HTML', extensions: ['html'] }]
+    title: '导出 HTML 网页文件',
+    defaultPath: join(defaultDir, defaultName),
+    filters: [{ name: 'HTML 网页文件', extensions: ['html', 'htm'] }]
   });
   if (res.canceled || !res.filePath) return { ok: false, canceled: true };
   try {
@@ -150,20 +366,41 @@ ipcMain.handle('export:html', async (_evt, html: string, defaultName = 'index.ht
   }
 });
 
-// ============ 扩展系统（阶段3・第二批） ============
-// 所有扩展统一放程序目录 extensions/ 下（用户决策：不用 AppData，绿色便携）：
-//   extensions/plugins/<id>/manifest.json   —— 插件（3-3 起执行）
-//   extensions/resources/<id>/manifest.json —— 资源包（模板库）
-// 打包后（便携文件夹版）：extensions/ 放在 exe 旁边、可写，方便用户随时增删插件/资源包；
-// 开发/未打包：程序根目录。
+// 导出 HTML 的同时自动保存同名 .bcproj 项目文件（HTML 逆向成本高，双写防丢）
+ipcMain.handle('export:html-with-project', async (_evt, html: string, scene: any, defaultName = 'index.html', projectName = '我的网页') => {
+  try {
+    const res = await dialog.showSaveDialog({
+      title: '导出 HTML 与项目文件',
+      defaultPath: defaultName,
+      filters: [{ name: 'HTML 网页文件', extensions: ['html'] }]
+    });
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+    const htmlPath = res.filePath;
+    const projectPath = htmlPath.replace(/\.html?$/i, '') + '.bcproj';
+
+    writeFileSync(htmlPath, html, 'utf-8');
+
+    const projectPayload = {
+      format: 'BlockCanvas-Project',
+      version: '1.0.0',
+      name: projectName,
+      updatedAt: new Date().toISOString(),
+      meta: { elementCount: countNodes(scene?.root) },
+      scene
+    };
+    writeFileSync(projectPath, JSON.stringify(projectPayload, null, 2), 'utf-8');
+
+    return { ok: true, htmlPath, projectPath };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+// ============ 扩展系统（extensions/ 迁移至 data/extensions/） ============
 function extRoot(): string {
-  const base = app.isPackaged
-    ? (process.env['PORTABLE_EXECUTABLE_DIR'] || dirname(process.execPath))
-    : app.getAppPath();
-  return join(base, 'extensions');
+  return join(dataRoot(), 'extensions');
 }
 
-// 扩展是否启用：文件夹内有 .disabled 标记文件即视为被禁用（扫描/加载跳过，文件保留）
 function isEnabled(kind: 'plugins' | 'resources', id: string): boolean {
   return !existsSync(join(extOf(kind, id), '.disabled'));
 }
@@ -171,14 +408,13 @@ function extOf(kind: 'plugins' | 'resources', id: string): string {
   return join(extRoot(), kind, id);
 }
 
-// 目录 id 清洗：小写字母数字 + _-.，其余替换成 -，去首尾 -；空返回 ''
 function sanitizeId(s: string): string {
   return (s || '').toLowerCase().replace(/[^a-z0-9_\-.]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
-// 递归收集目录下所有文件的相对路径
 function collectFiles(base: string, rel: string): { rel: string; abspath: string }[] {
   const out: { rel: string; abspath: string }[] = [];
+  if (!existsSync(join(base, rel))) return out;
   for (const e of readdirSync(join(base, rel), { withFileTypes: true })) {
     const sub = rel ? `${rel}/${e.name}` : e.name;
     if (e.isDirectory()) out.push(...collectFiles(base, sub));
@@ -187,13 +423,13 @@ function collectFiles(base: string, rel: string): { rel: string; abspath: string
   return out;
 }
 
-// 扫描全部扩展（只读 manifest，插件不执行）
 function scanExtensions() {
   const result: {
     plugins: { id: string; name: string; version: string; author: string; description: string; enabled: boolean; error: string | null }[];
     resources: {
       id: string; name: string; version: string; author: string; description: string;
-      templates: { id: string; name: string; description: string }[];
+      categories: any[];
+      templates: { id: string; name: string; description: string; category?: string }[];
       enabled: boolean; error: string | null;
     }[];
     errors: string[];
@@ -229,12 +465,14 @@ function scanExtensions() {
           result.plugins.push({ ...base, error: null });
         } else {
           if (!Array.isArray(mf.templates) || mf.templates.length === 0) throw new Error('缺少 templates 列表（资源包至少一个模板）');
+          const categories: any[] = Array.isArray(mf.categories) ? mf.categories : [];
           const templates = mf.templates.map((t: any) => ({
             id: String(t.id),
             name: String(t.name ?? t.id),
-            description: String(t.description ?? '')
+            description: String(t.description ?? ''),
+            category: t.category ? String(t.category) : undefined
           }));
-          result.resources.push({ ...base, templates, error: null });
+          result.resources.push({ ...base, categories, templates, error: null });
         }
       } catch (e) {
         result.errors.push(`${kind}/${entry.name}: ${(e as Error).message}`);
@@ -249,8 +487,6 @@ function scanExtensions() {
 
 ipcMain.handle('ext:scan', () => scanExtensions());
 
-// 读取插件入口源码：把 main 指向的 JS 以文本下发渲染进程执行。
-// 只读源码、不在主进程执行任何插件代码（插件在渲染进程 new Function 求值）。
 ipcMain.handle('plg:get-source', async (_evt, id: string) => {
   try {
     const dir = extOf('plugins', id);
@@ -268,7 +504,6 @@ ipcMain.handle('plg:get-source', async (_evt, id: string) => {
   }
 });
 
-// 读取资源包里的模板文件（返回元素快照树；导入时由渲染进程重新分配 id）
 ipcMain.handle('ext:read-template', async (_evt, resourceId: string, templateId: string) => {
   const mfPath = join(extRoot(), 'resources', resourceId, 'manifest.json');
   if (!existsSync(mfPath)) return { ok: false, error: '资源包不存在' };
@@ -286,7 +521,6 @@ ipcMain.handle('ext:read-template', async (_evt, resourceId: string, templateId:
   }
 });
 
-// 打开扩展文件夹（方便用户自己放插件/资源包）
 ipcMain.handle('ext:open-dir', async () => {
   try {
     const err = await shell.openPath(extRoot());
@@ -296,8 +530,6 @@ ipcMain.handle('ext:open-dir', async () => {
   }
 });
 
-// ============ 扩展：启用/禁用 ============
-// 禁用 = 在扩展目录写一个 .disabled 标记（文件保留可随时恢复）；启用 = 删掉标记
 ipcMain.handle('ext:set-enabled', async (_evt, kind: 'plugins' | 'resources', id: string, enabled: boolean) => {
   try {
     const dir = extOf(kind, id);
@@ -314,7 +546,6 @@ ipcMain.handle('ext:set-enabled', async (_evt, kind: 'plugins' | 'resources', id
   }
 });
 
-// ============ 扩展：删除（移到回收站，可恢复） ============
 ipcMain.handle('ext:delete', async (_evt, kind: 'plugins' | 'resources', id: string) => {
   try {
     const dir = extOf(kind, id);
@@ -326,8 +557,6 @@ ipcMain.handle('ext:delete', async (_evt, kind: 'plugins' | 'resources', id: str
   }
 });
 
-// ============ 扩展：导入 ============
-// 导入整个资源包文件夹（含 manifest.json），复制进 extensions/<kind>/<id>
 ipcMain.handle('ext:import-folder', async (_evt, kind: 'plugins' | 'resources') => {
   try {
     const res = await dialog.showOpenDialog({ title: '选择要导入的资源包文件夹', properties: ['openDirectory'] });
@@ -344,13 +573,12 @@ ipcMain.handle('ext:import-folder', async (_evt, kind: 'plugins' | 'resources') 
   }
 });
 
-// 导入单个模板 JSON：放进统一的"我的导入"资源包（templates/ 下，并同步 manifest）
 const IMPORTED_PKG_ID = 'imported';
 function ensureImportedPackage() {
   const dir = extOf('resources', IMPORTED_PKG_ID);
   const mfPath = join(dir, 'manifest.json');
   if (existsSync(mfPath)) {
-    try { return JSON.parse(readFileSync(mfPath, 'utf-8')); } catch { /* 继续重建 */ }
+    try { return JSON.parse(readFileSync(mfPath, 'utf-8')); } catch {}
   }
   mkdirSync(join(dir, 'templates'), { recursive: true });
   const mf = {
@@ -360,6 +588,7 @@ function ensureImportedPackage() {
   writeFileSync(mfPath, JSON.stringify(mf, null, 2), 'utf-8');
   return mf;
 }
+
 ipcMain.handle('ext:import-json', async () => {
   try {
     const res = await dialog.showOpenDialog({
@@ -385,7 +614,6 @@ ipcMain.handle('ext:import-json', async () => {
   }
 });
 
-// 导入 zip 压缩资源包：解包后还原成扩展目录结构
 ipcMain.handle('ext:import-zip', async (_evt, kind: 'plugins' | 'resources') => {
   try {
     const res = await dialog.showOpenDialog({
@@ -403,10 +631,10 @@ ipcMain.handle('ext:import-zip', async (_evt, kind: 'plugins' | 'resources') => 
     if (existsSync(target)) return { ok: false, error: `已存在「${id}」` };
     mkdirSync(target, { recursive: true });
     for (const e of entries) {
-      if (e.name.endsWith('/')) continue; // 目录条目跳过
+      if (e.name.endsWith('/')) continue;
       const rel = e.name.replace(/^\/+/, '').split('/').map(sanitizeId).join('/');
       const out = join(target, rel);
-      if (!out.startsWith(target + '\\') && out !== target) continue; // 防路径穿越
+      if (!out.startsWith(target + '\\') && out !== target) continue;
       mkdirSync(join(out, '..'), { recursive: true });
       writeFileSync(out, e.data);
     }
@@ -416,7 +644,6 @@ ipcMain.handle('ext:import-zip', async (_evt, kind: 'plugins' | 'resources') => 
   }
 });
 
-// ============ 扩展：导出（资源包 → 文件夹 / zip） ============
 ipcMain.handle('ext:export-resource', async (_evt, id: string, format: 'folder' | 'zip') => {
   try {
     const srcDir = extOf('resources', id);
@@ -441,8 +668,6 @@ ipcMain.handle('ext:export-resource', async (_evt, id: string, format: 'folder' 
   }
 });
 
-// ============ 模板导出（画布选中元素） ============
-// 导出单个选中元素为模板 JSON
 ipcMain.handle('tpl:export-single', async (_evt, tree: unknown, defaultName?: string) => {
   try {
     const res = await dialog.showSaveDialog({ defaultPath: defaultName || 'template.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
@@ -454,7 +679,6 @@ ipcMain.handle('tpl:export-single', async (_evt, tree: unknown, defaultName?: st
   }
 });
 
-// 导出选中元素为完整资源包（manifest + templates/）：format = 'folder' | 'zip'
 ipcMain.handle('tpl:export-package', async (_evt, tree: unknown, meta: { id?: string; name?: string; version?: string; author?: string; description?: string }, format: 'folder' | 'zip') => {
   try {
     const id = sanitizeId(String(meta?.id)) || 'template';
@@ -490,7 +714,6 @@ ipcMain.handle('tpl:export-package', async (_evt, tree: unknown, meta: { id?: st
   }
 });
 
-// ============ 生成资源包结构（界面输入元信息 → 生成目录骨架） ============
 ipcMain.handle('ext:create-package', async (_evt, meta: { id?: string; name?: string; version?: string; author?: string; description?: string }) => {
   try {
     const id = sanitizeId(String(meta?.id)) || 'my-package';
@@ -506,15 +729,7 @@ ipcMain.handle('ext:create-package', async (_evt, meta: { id?: string; name?: st
       templates: []
     };
     writeFileSync(join(target, 'manifest.json'), JSON.stringify(mf, null, 2), 'utf-8');
-    const readme = '给模板文件夹里加模板的步骤：\n' +
-      '\n' +
-      '1. 用 BlockCanvas 导出单个模板 JSON（选中元素 → 更多 → 导出为模板 JSON）。\n' +
-      '2. 把那个 .json 文件放入本目录 templates\\ 下。\n' +
-      '3. 打开 manifest.json，在 templates 数组里追加一项，例如：\n' +
-      '   { "id": "my-tpl", "name": "模板显示名", "description": "一句话说明", "file": "templates/文件名.json" }\n' +
-      '4. 保存后回到 BlockCanvas 点「重新扫描」即可在模板页看到。\n' +
-      '\n' +
-      'templates 目录里可放多个模板文件，manifest.json 每项对应一个。\n';
+    const readme = '给模板文件夹里加模板的步骤：\n\n1. 用 BlockCanvas 导出单个模板 JSON\n2. 放入 templates\\ 并在 manifest.json 声明\n';
     writeFileSync(join(target, 'templates', '说明.txt'), readme, 'utf-8');
     return { ok: true, id, path: target };
   } catch (e) {
@@ -522,8 +737,6 @@ ipcMain.handle('ext:create-package', async (_evt, meta: { id?: string; name?: st
   }
 });
 
-// 浏览器预览：把导出的 HTML 写进系统临时目录，用默认浏览器打开。
-// 用户在同一设备上直接对比画布与真实浏览器渲染（同一 Chromium 引擎，1px = 1px）。
 ipcMain.handle('preview:open', async (_evt, html: string) => {
   try {
     const file = join(app.getPath('temp'), `bc-preview-${Date.now()}.html`);
@@ -536,21 +749,35 @@ ipcMain.handle('preview:open', async (_evt, html: string) => {
   }
 });
 
-// 图片路径选择：让用户选一个本地文件，返回绝对路径；模式 = 'abs' 返回绝对路径，'rel' 返回相对当前工程的相对路径
-ipcMain.handle('img:pick-src', async () => {
+ipcMain.handle('img:pick-src', async (_evt, mode: 'abs' | 'rel' = 'rel') => {
   const res = await dialog.showOpenDialog({
     title: '选择本地图片',
     properties: ['openFile'],
     filters: [
-      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'] }
+      { name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] }
     ]
   });
   if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
-  return { ok: true, path: res.filePaths[0] };
+  const absPath = res.filePaths[0];
+  if (mode === 'rel') {
+    const base = app.isPackaged ? dirname(process.execPath) : app.getAppPath();
+    let rel = relative(base, absPath).replace(/\\/g, '/');
+    if (!rel.startsWith('.') && !rel.startsWith('/')) rel = './' + rel;
+    return { ok: true, path: rel, absPath };
+  }
+  return { ok: true, path: absPath, absPath };
 });
 
+function countNodes(node: any): number {
+  if (!node) return 0;
+  let count = 1;
+  if (Array.isArray(node.children)) {
+    for (const c of node.children) count += countNodes(c);
+  }
+  return count;
+}
+
 app.whenReady().then(() => {
-  // bc-img://file/<encodeURIComponent(C:\path\to\img.png)> → 读本地文件返回
   protocol.handle('bc-img', async (request) => {
     try {
       const url = new URL(request.url);

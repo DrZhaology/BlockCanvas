@@ -8,16 +8,9 @@
       "type": "h1",
       "text": "欢迎来到你的新网站",
       "children": [],
-      "style": {
-        "marginTop": "0px",
-        "marginRight": "auto",
-        "marginBottom": "12px",
-        "marginLeft": "auto",
-        "fontSize": "40px",
-        "fontWeight": "bold",
-        "color": "#ffffff",
-        "textAlign": "center",
-        "textShadow": "0 3px 0 rgba(0,0,0,0.2)"
+      "style": {},
+      "attrs": {
+        "className": "hero-title"
       }
     },
     {
@@ -25,13 +18,9 @@
       "type": "p",
       "text": "用积木画布搭一个网页：不需要会写代码，点一点就能看到效果。",
       "children": [],
-      "style": {
-        "marginTop": "0px",
-        "marginBottom": "28px",
-        "lineHeight": "1.6",
-        "color": "#e8f1fb",
-        "fontSize": "16px",
-        "textAlign": "center"
+      "style": {},
+      "attrs": {
+        "className": "hero-sub"
       }
     },
     {
@@ -39,25 +28,9 @@
       "type": "button",
       "text": "开始搭建",
       "children": [],
-      "style": {
-        "paddingTop": "12px",
-        "paddingRight": "28px",
-        "paddingBottom": "12px",
-        "paddingLeft": "28px",
-        "backgroundColor": "#1e88e5",
-        "color": "#ffffff",
-        "borderStyle": "none",
-        "borderTopLeftRadius": "6px",
-        "borderTopRightRadius": "6px",
-        "borderBottomRightRadius": "6px",
-        "borderBottomLeftRadius": "6px",
-        "fontSize": "16px",
-        "fontWeight": "bold",
-        "cursor": "pointer",
-        "boxSizing": "border-box",
-        "marginLeft": "auto",
-        "marginRight": "auto",
-        "display": "block"
+      "style": {},
+      "attrs": {
+        "className": "hero-cta"
       }
     }
   ],
@@ -71,5 +44,23 @@
   },
   "attrs": {
     "className": "hero"
-  }
+  },
+  "childStyles": [
+    {
+      "sel": ".hero-title",
+      "css": "margin: 0 auto 12px; font-size: 40px; font-weight: bold; color: #ffffff; text-align: center; text-shadow: 0 3px 0 rgba(0,0,0,0.2);"
+    },
+    {
+      "sel": ".hero-sub",
+      "css": "margin: 0 0 28px; line-height: 1.6; color: #e8f1fb; font-size: 16px; text-align: center;"
+    },
+    {
+      "sel": ".hero-cta",
+      "css": "padding: 12px 28px; background-color: #1e88e5; color: #ffffff; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; box-sizing: border-box; display: block; margin: 0 auto;"
+    },
+    {
+      "sel": ".hero-cta:hover",
+      "css": "background-color: #1976d2;"
+    }
+  ]
 }

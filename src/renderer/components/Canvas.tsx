@@ -1,8 +1,9 @@
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { useScene, findParent } from '@store/sceneStore';
-import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS } from '@lib/types';
+import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS, TEXT_TAGS } from '@lib/types';
 import type { SceneElement } from '@lib/types';
 import { selectorForNode, collectStyleClasses, buildStyleBlock, createStyleClassSet, quickCssToCss, cssTextToObject } from '@lib/styleClass';
+import { classColor } from '@lib/classColor';
 
 // BlockCanvas · 画布
 // 阶段1：递归渲染 scene graph。
@@ -36,19 +37,48 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   }, [root]);
   const autoCssBlock = useMemo(() => buildStyleBlock(styleSet), [styleSet]);
   const quickCssBlock = useMemo(() => {
-    // 快速设置的 body/a 规则在导出 HTML 里作用于页面；画布注入时把它指向画布自身，
-    // 避免污染编辑器窗口的 body（所见即所得语义不变）
-    return quickCssToCss(quickCss).replace('body {', '.canvas {').replace('a {', '.canvas a {');
+    // 快速设置的 body/a/标题规则在导出 HTML 里作用于页面；画布注入时把它指向画布自身，
+    // 避免污染编辑器窗口（所见即所得语义不变）。
+    // 「默认边距」所见即所得：未开启"去掉白边"时，画布模拟浏览器给 body 的 8px 默认 margin
+    //（.canvas 无 margin 概念，用 padding 等效呈现）；开启后贴边，与导出行为一致。
+    const base = quickCssToCss(quickCss)
+      .replace('body {', '.canvas {')
+      .replace('a {', '.canvas a {')
+      .replace('h1, h2, h3, h4, h5, h6 {', '.canvas h1, .canvas h2, .canvas h3, .canvas h4, .canvas h5, .canvas h6 {');
+    const bodyMargin = quickCss?.resetMargin === '1' ? '' : '\n.canvas { padding: 8px; }';
+    // 「重置标题/段落默认间距」：画布侧同步清零（带 .canvas 前缀防泄漏到编辑器 UI），
+    // 与导出端的 UA margin 重置保持一致
+    const headingReset = quickCss?.resetHeadingMargin === '1'
+      ? '\n.canvas h1, .canvas h2, .canvas h3, .canvas h4, .canvas h5, .canvas h6, .canvas p, .canvas ul, .canvas ol, .canvas figure, .canvas blockquote, .canvas table { margin: 0; }'
+      : '';
+    return base + bodyMargin + headingReset;
   }, [quickCss]);
+  // 同类同色：轮廓模式下，同类名/关系选择器元素用同一专属颜色描边（颜色 = classColor 哈希色板）。
+  // 只注入编辑器可视化样式（挂在 body 开关类下），导出链路不经过。
+  const classColorCss = useMemo(() => {
+    const names = new Set<string>();
+    const walk = (n: SceneElement): void => {
+      const cls = (n.attrs?.className ?? '').trim();
+      const rel = (n.attrs?.relSelector ?? '').trim();
+      if (cls) names.add(cls.split(/\s+/)[0]);
+      else if (rel) names.add(rel);
+      for (const c of n.children) walk(c);
+    };
+    walk(root);
+    return [...names]
+      .map((n) => `body.bc-outlines-on .canvas [data-bc-cg="${CSS.escape(n)}"]{outline-color:${classColor(n)};}`)
+      .join('\n');
+  }, [root]);
   const selectedId = useScene((s) => s.scene.selectedId);
   const selectedIds = useScene((s) => s.scene.selectedIds);
   const select = useScene((s) => s.selectElement);
   const toggleSelect = useScene((s) => s.toggleSelect);
   const selectMany = useScene((s) => s.selectMany);
 
-  // 拖框选中状态
+  // 拖框选中状态（client 坐标系：起点可在画布空白或条纹背景，拖到哪都能继续选）
   const dragRef = useRef<{ startX: number; startY: number; active: boolean; ctrl: boolean } | null>(null);
-  const [marquee, setMarquee] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   // 拖框结束后会跟着一个 click（冒泡到 .canvas）——用它吞掉，避免框选完又清空选区
   const suppressClickRef = useRef(false);
 
@@ -66,47 +96,47 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     if (p && p.id !== root.id) select(p.id);
   };
 
-  const onCanvasPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-    // 只从画布空白处（背景）起框；元素上的按下由元素自身处理（选中/多选）
-    if (e.target !== e.currentTarget) return;
-    dragRef.current = { startX: e.clientX, startY: e.clientY, active: false, ctrl: e.ctrlKey || e.metaKey };
-    e.currentTarget.setPointerCapture(e.pointerId);
+  const endMarquee = () => {
+    window.removeEventListener('pointermove', onWindowMove);
+    window.removeEventListener('pointerup', onWindowUp);
+    document.body.classList.remove('bc-marqueeing');
   };
 
-  const onCanvasPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+  // window 级监听：指针跑到画布外（条纹区/面板上）也持续更新选框
+  const onWindowMove = (e: PointerEvent) => {
     const d = dragRef.current;
-    if (!d || Number.isNaN(d.startX)) return;
+    if (!d) return;
     const dx = e.clientX - d.startX;
     const dy = e.clientY - d.startY;
-    // 移动超过 4px 才算"拖框"（区分普通点击清空选区）
     if (!d.active && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
     d.active = true;
-    const rect = e.currentTarget.getBoundingClientRect();
     setMarquee({
-      left: Math.min(dx, 0) + (d.startX - rect.left),
-      top: Math.min(dy, 0) + (d.startY - rect.top),
-      width: Math.abs(dx),
-      height: Math.abs(dy)
+      x: Math.min(d.startX, e.clientX),
+      y: Math.min(d.startY, e.clientY),
+      w: Math.abs(dx),
+      h: Math.abs(dy)
     });
   };
 
-  const onCanvasPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+  const onWindowUp = (e: PointerEvent) => {
     const d = dragRef.current;
-    if (!d || Number.isNaN(d.startX)) return;
+    endMarquee();
     dragRef.current = null;
     setMarquee(null);
+    if (!d) return;
     if (!d.active) return; // 没拖成框 = 普通点击，交给 onClick 清空选区
     suppressClickRef.current = true;
-    // 100% 在框内才算选中（与 Windows 桌面框选一致，只框到一半不选）
+    // 100% 在框内才算选中（与 Windows 桌面框选一致）。client 坐标对比，
+    // getBoundingClientRect 已含缩放 → zoom 下天然正确
     const minX = Math.min(d.startX, e.clientX);
     const minY = Math.min(d.startY, e.clientY);
     const maxX = Math.max(d.startX, e.clientX);
     const maxY = Math.max(d.startY, e.clientY);
     const ids: string[] = [];
-    for (const el of e.currentTarget.querySelectorAll('[data-bc-id]')) {
+    for (const el of document.querySelectorAll('.canvas [data-bc-id]')) {
       if (el.getAttribute('data-bc-locked') === '1') continue;
       const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) continue; // hidden 元素不参与
       if (r.left >= minX - 0.5 && r.top >= minY - 0.5 && r.right <= maxX + 0.5 && r.bottom <= maxY + 0.5) {
         ids.push(el.getAttribute('data-bc-id')!);
       }
@@ -120,7 +150,22 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     }
   };
 
-  const onCanvasClick = () => {
+  const onCanvasPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    // 起点允许：条纹背景（wrap 自身）或画布空白处（canvas 自身）；
+    // 元素上的按下由元素自身处理（选中/多选），不在此起框
+    const t = e.target as HTMLElement;
+    if (t !== e.currentTarget && t !== canvasRef.current) return;
+    dragRef.current = { startX: e.clientX, startY: e.clientY, active: false, ctrl: e.ctrlKey || e.metaKey };
+    document.body.classList.add('bc-marqueeing');
+    window.addEventListener('pointermove', onWindowMove);
+    window.addEventListener('pointerup', onWindowUp);
+  };
+
+  const onCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // 与起框同样的空白语义：点条纹/画布空白 = 清空选区
+    const t = e.target as HTMLElement;
+    if (t !== e.currentTarget && t !== canvasRef.current) return;
     if (suppressClickRef.current) { suppressClickRef.current = false; return; }
     select(null);
   };
@@ -159,9 +204,11 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     <div
       className="canvas-wrap"
       style={wDrag ? { justifyContent: 'flex-start', paddingLeft: wDrag.padLeft, paddingRight: 0, paddingBottom: 24, paddingTop: 24 } : undefined}
-      title="提示：Ctrl+点击 多选；空白处拖框批量选中；Alt+点击 选中父级；Ctrl+滚轮 缩放画布"
+      title="提示：Ctrl+点击 多选；空白/条纹处拖框批量选中（可拖出画布）；Alt+点击 选中父级；Ctrl+滚轮 缩放画布"
+      onPointerDown={onCanvasPointerDown}
+      onClick={onCanvasClick}
     >
-      {/* 画布样式注入（与导出同源同序）：① 自动样式类 ② 快速设置 ③ 用户全局 CSS */}
+      {/* 画布样式注入（与导出同源同序）：① 自动样式类 ② 快速设置 ③ 用户全局 CSS ④ 同类同色（编辑器可视化） */}
       <style className="bc-auto-css">{autoCssBlock}</style>
       {quickCssBlock && (
         <style className="bc-quick-css">{quickCssBlock}</style>
@@ -169,31 +216,24 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       {globalCss && globalCss.trim() !== '' && (
         <style className="bc-global-css">{globalCss}</style>
       )}
+      {classColorCss && (
+        <style className="bc-class-colors">{classColorCss}</style>
+      )}
       <div
+        ref={canvasRef}
         className="canvas"
         style={{
           ...(canvasWidth === 'auto' ? undefined : { width: canvasWidth }),
           transform: zoom === 1 ? undefined : `scale(${zoom})`,
           transformOrigin: 'left top'
         }}
-        onClick={onCanvasClick}
         onWheel={onCanvasWheel}
-        onPointerDown={onCanvasPointerDown}
-        onPointerMove={onCanvasPointerMove}
-        onPointerUp={onCanvasPointerUp}
-        onPointerCancel={() => { dragRef.current = null; setMarquee(null); }}
       >
         {root.children.map((c) => (
           <CanvasNode key={c.id} node={c} depth={0} selectedIds={selectedIds} onSelect={select} onSelectParent={selectParent} onToggleSelect={toggleSelect} />
         ))}
         {root.children.length === 0 && (
           <div className="canvas-empty">从左侧点击元素按钮插入到画布</div>
-        )}
-        {marquee && (
-          <div
-            className="marquee-box"
-            style={{ left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height }}
-          />
         )}
         {/* 画布左右拖拽手柄（#6）：贴住画布左右边缘，鼠标上去变左右拉伸光标 */}
         <span className="canvas-resize-handle canvas-resize-handle-l" onPointerDown={(e) => onResizeStart(e, 'l')} title="拖动调整画布宽度" />
@@ -202,8 +242,15 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       {selectedId && (
         <div className="canvas-hint">
           已选中 {selectedIds.length > 1 ? `${selectedIds.length} 个元素` : '元素'}
-          {selectedIds.length > 1 ? '。Ctrl+点击可取消个别' : ''}。空白处拖框可批量选中
+          {selectedIds.length > 1 ? '。Ctrl+点击可取消个别' : ''}。空白处拖框可批量选中（可拖出画布）
         </div>
+      )}
+      {/* 框选矩形：fixed 覆盖层（client 坐标），可自由延伸到画布外的条纹区 */}
+      {marquee && (
+        <div
+          className="marquee-box"
+          style={{ position: 'fixed', left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h, zIndex: 90 }}
+        />
       )}
     </div>
   );
@@ -226,6 +273,36 @@ const CanvasNode = React.memo(function CanvasNode(props: {
   const Tag = node.type as keyof React.JSX.IntrinsicElements;
   // 4-C/4-F：选择器 = 类名优先 → ID → 行内样式（与导出同一计算 → DOM 与规则文本一致）
   const selInfo = useMemo(() => selectorForNode(node), [node.style, node.attrs]);
+
+  // 画布双击就地编辑文案
+  const [editingText, setEditingText] = useState(false);
+  const [inlineDraft, setInlineDraft] = useState(node.text ?? '');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!editingText) setInlineDraft(node.text ?? '');
+  }, [node.text, editingText]);
+
+  useEffect(() => {
+    if (editingText && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingText]);
+
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    if (node.locked) return;
+    if (TEXT_TAGS.has(node.type) || node.text !== undefined) {
+      e.stopPropagation();
+      setInlineDraft(node.text ?? '');
+      setEditingText(true);
+    }
+  };
+
+  const commitInlineText = () => {
+    setEditingText(false);
+    useScene.getState().setText(node.id, inlineDraft);
+  };
   // 有类名/ID 的元素：样式由自动类承担。无类名无 ID 的元素：行内样式与导出一致。
   // 内联里还混着编辑器交互装饰：光标、选中框、空容器可见性兜底 —— 全部不导出。
   const baseStyle: React.CSSProperties = {
@@ -242,8 +319,10 @@ const CanvasNode = React.memo(function CanvasNode(props: {
     baseStyle.minWidth = '60px';
   }
   if (isSelected) {
+    // 方案1：双层高亮边框（内白 + 外亮蓝），向内 -2px 偏移，绝不向外扩张改变视觉大小
     baseStyle.outline = '2px solid #1e88e5';
     baseStyle.outlineOffset = '-2px';
+    baseStyle.boxShadow = 'inset 0 0 0 1.5px #ffffff';
   }
 
   const commonProps = {
@@ -251,7 +330,9 @@ const CanvasNode = React.memo(function CanvasNode(props: {
     'data-bc-locked': node.locked ? '1' : '0',
     // 类名优先原则：用户类名（或兜底 hash 类）真实挂到 DOM；用 ID 做选择器时挂 id 属性 —— 与导出一致
     className: selInfo.classAttr || undefined,
-    id: selInfo.idAttr || undefined
+    id: selInfo.idAttr || undefined,
+    // 同类同色（编辑器可视化）：优先类名，其次关系选择器作为分组标记，配合 bc-class-colors 注入描边色
+    'data-bc-cg': (node.attrs?.className ?? '').trim().split(/\s+/)[0] || (node.attrs?.relSelector ?? '').trim() || undefined
   } as const;
 
   // 统一点击逻辑：Ctrl=多选切换；Alt=选中父级；否则选中自己；locked 不可选
@@ -306,10 +387,31 @@ const CanvasNode = React.memo(function CanvasNode(props: {
     <Tag
       style={baseStyle}
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       {...commonProps}
     >
-      {/* 文本直接作为文本节点（与导出一致）；hover 时高亮提示可点选 */}
-      {node.text || null}
+      {/* 文本直接作为文本节点；双击进入就地输入框 */}
+      {editingText ? (
+        <input
+          ref={inputRef}
+          type="text"
+          className="canvas-inline-text-input"
+          value={inlineDraft}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onChange={(e) => setInlineDraft(e.target.value)}
+          onBlur={commitInlineText}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitInlineText();
+            else if (e.key === 'Escape') {
+              setInlineDraft(node.text ?? '');
+              setEditingText(false);
+            }
+          }}
+        />
+      ) : (
+        node.text || null
+      )}
       {node.children.length > 0 &&
         node.children.map((c) => (
           <CanvasNode key={c.id} node={c} depth={props.depth + 1} selectedIds={selectedIds} onSelect={onSelect} onSelectParent={onSelectParent} onToggleSelect={onToggleSelect} />

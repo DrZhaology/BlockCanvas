@@ -53,8 +53,13 @@ export function NumberUnitInput(props: Props) {
   const units = [...CSS_UNITS, ...(allowAuto ? ['auto'] : []), 'custom'];
 
   const onNumChange = (v: string) => {
+    let currentUnit = u;
+    if (u === 'auto') {
+      currentUnit = defaultUnit || 'px';
+      setU(currentUnit);
+    }
     setNum(v);
-    updateStyleTransient(elementId, { [schemaKey]: compose(v, u) } as any);
+    updateStyleTransient(elementId, { [schemaKey]: compose(v, currentUnit) } as any);
   };
 
   const onUnitChange = (nu: string) => {
@@ -68,7 +73,9 @@ export function NumberUnitInput(props: Props) {
       commit(num);
       return;
     }
-    commit(compose(num, nu));
+    const cleanNum = num === 'auto' ? '' : num;
+    setNum(cleanNum);
+    commit(compose(cleanNum, nu));
   };
 
   const isAuto = u === 'auto';
@@ -109,13 +116,15 @@ export function NumberUnitInput(props: Props) {
       <input
         type="text"
         className="num-unit-num"
-        inputMode="decimal"
         value={num}
         placeholder={isAuto ? 'auto' : '只填数字'}
-        disabled={isAuto}
         onFocus={() => {
           editingRef.current = true;
           beginStyleEdit();
+          if (u === 'auto') {
+            setNum('');
+            setU(defaultUnit || 'px');
+          }
         }}
         onChange={(e) => onNumChange(e.target.value)}
         onKeyDown={(e) => {

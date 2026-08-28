@@ -1,0 +1,507 @@
+{
+  "id": "tpl-blog-grid",
+  "type": "section",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-blog-h2",
+      "type": "h2",
+      "text": "最新文章",
+      "children": [],
+      "style": {
+        "textAlign": "center",
+        "fontSize": "32px",
+        "fontWeight": "700",
+        "color": "#111827",
+        "marginTop": "0",
+        "marginBottom": "8px"
+      },
+      "attrs": {
+        "className": "blog-title"
+      }
+    },
+    {
+      "id": "tpl-blog-p",
+      "type": "p",
+      "text": "阅读我们的设计灵感与实践经验",
+      "children": [],
+      "style": {
+        "textAlign": "center",
+        "fontSize": "16px",
+        "color": "#6b7280",
+        "marginTop": "0",
+        "marginBottom": "48px"
+      },
+      "attrs": {
+        "className": "blog-subtitle"
+      }
+    },
+    {
+      "id": "tpl-blog-grid",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-blog-c1",
+          "type": "article",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-blog-thumb1",
+              "type": "div",
+              "text": "",
+              "children": [],
+              "style": {
+                "width": "100%",
+                "height": "180px",
+                "borderRadius": "8px 8px 0 0",
+                "background": "linear-gradient(135deg, #dbeafe 0%, #ede9fe 100%)",
+                "display": "flex",
+                "alignItems": "center",
+                "justifyContent": "center",
+                "fontSize": "36px"
+              },
+              "attrs": {
+                "className": "blog-thumb"
+              }
+            },
+            {
+              "id": "tpl-blog-meta1",
+              "type": "div",
+              "text": "",
+              "children": [
+                {
+                  "id": "tpl-blog-cat1",
+                  "type": "span",
+                  "text": "设计",
+                  "children": [],
+                  "style": {
+                    "fontSize": "11px",
+                    "fontWeight": "600",
+                    "color": "#1e88e5",
+                    "textTransform": "uppercase",
+                    "letterSpacing": "1px"
+                  },
+                  "attrs": {
+                    "className": "blog-tag"
+                  }
+                },
+                {
+                  "id": "tpl-blog-date1",
+                  "type": "span",
+                  "text": "2026-08-20",
+                  "children": [],
+                  "style": {
+                    "fontSize": "12px",
+                    "color": "#9ca3af",
+                    "marginLeft": "8px"
+                  },
+                  "attrs": {
+                    "className": "blog-date"
+                  }
+                }
+              ],
+              "style": {
+                "display": "flex",
+                "alignItems": "center",
+                "paddingTop": "16px",
+                "paddingBottom": "4px"
+              }
+            },
+            {
+              "id": "tpl-blog-title1",
+              "type": "h3",
+              "text": "如何优雅地使用 Flexbox 布局",
+              "children": [],
+              "style": {
+                "fontSize": "18px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "lineHeight": "1.4",
+                "marginBottom": "8px",
+                "marginTop": "8px"
+              },
+              "attrs": {
+                "className": "blog-heading"
+              }
+            },
+            {
+              "id": "tpl-blog-excerpt1",
+              "type": "p",
+              "text": "Flexbox 是现代 CSS 布局的核心，掌握它能让你的页面排版事半功倍。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.7",
+                "color": "#6b7280",
+                "marginBottom": "16px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "blog-excerpt"
+              }
+            },
+            {
+              "id": "tpl-blog-readmore1",
+              "type": "a",
+              "text": "阅读全文 →",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "fontWeight": "600",
+                "color": "#1e88e5",
+                "textDecoration": "none"
+              },
+              "attrs": {
+                "href": "#",
+                "className": "blog-link"
+              }
+            }
+          ],
+          "style": {
+            "padding": "0",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "overflow": "hidden",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.04)"
+          },
+          "attrs": {
+            "className": "blog-card"
+          }
+        },
+        {
+          "id": "tpl-blog-c2",
+          "type": "article",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-blog-thumb2",
+              "type": "div",
+              "text": "",
+              "children": [],
+              "style": {
+                "width": "100%",
+                "height": "180px",
+                "borderRadius": "8px 8px 0 0",
+                "background": "linear-gradient(135deg, #fce7f3 0%, #ede9fe 100%)",
+                "display": "flex",
+                "alignItems": "center",
+                "justifyContent": "center",
+                "fontSize": "36px"
+              },
+              "attrs": {
+                "className": "blog-thumb"
+              }
+            },
+            {
+              "id": "tpl-blog-meta2",
+              "type": "div",
+              "text": "",
+              "children": [
+                {
+                  "id": "tpl-blog-cat2",
+                  "type": "span",
+                  "text": "教程",
+                  "children": [],
+                  "style": {
+                    "fontSize": "11px",
+                    "fontWeight": "600",
+                    "color": "#db2777",
+                    "textTransform": "uppercase",
+                    "letterSpacing": "1px"
+                  },
+                  "attrs": {
+                    "className": "blog-tag blog-tag-pink"
+                  }
+                },
+                {
+                  "id": "tpl-blog-date2",
+                  "type": "span",
+                  "text": "2026-08-15",
+                  "children": [],
+                  "style": {
+                    "fontSize": "12px",
+                    "color": "#9ca3af",
+                    "marginLeft": "8px"
+                  },
+                  "attrs": {
+                    "className": "blog-date"
+                  }
+                }
+              ],
+              "style": {
+                "display": "flex",
+                "alignItems": "center",
+                "paddingTop": "16px",
+                "paddingBottom": "4px"
+              }
+            },
+            {
+              "id": "tpl-blog-title2",
+              "type": "h3",
+              "text": "BlockCanvas 快速入门指南",
+              "children": [],
+              "style": {
+                "fontSize": "18px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "lineHeight": "1.4",
+                "marginBottom": "8px",
+                "marginTop": "8px"
+              },
+              "attrs": {
+                "className": "blog-heading"
+              }
+            },
+            {
+              "id": "tpl-blog-excerpt2",
+              "type": "p",
+              "text": "从安装到导出第一张网页，5 分钟了解 BlockCanvas 的全部核心功能。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.7",
+                "color": "#6b7280",
+                "marginBottom": "16px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "blog-excerpt"
+              }
+            },
+            {
+              "id": "tpl-blog-readmore2",
+              "type": "a",
+              "text": "阅读全文 →",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "fontWeight": "600",
+                "color": "#db2777",
+                "textDecoration": "none"
+              },
+              "attrs": {
+                "href": "#",
+                "className": "blog-link blog-link-pink"
+              }
+            }
+          ],
+          "style": {
+            "padding": "0",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "overflow": "hidden",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.04)"
+          },
+          "attrs": {
+            "className": "blog-card"
+          }
+        },
+        {
+          "id": "tpl-blog-c3",
+          "type": "article",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-blog-thumb3",
+              "type": "div",
+              "text": "",
+              "children": [],
+              "style": {
+                "width": "100%",
+                "height": "180px",
+                "borderRadius": "8px 8px 0 0",
+                "background": "linear-gradient(135deg, #d1fae5 0%, #cffafe 100%)",
+                "display": "flex",
+                "alignItems": "center",
+                "justifyContent": "center",
+                "fontSize": "36px"
+              },
+              "attrs": {
+                "className": "blog-thumb"
+              }
+            },
+            {
+              "id": "tpl-blog-meta3",
+              "type": "div",
+              "text": "",
+              "children": [
+                {
+                  "id": "tpl-blog-cat3",
+                  "type": "span",
+                  "text": "案例",
+                  "children": [],
+                  "style": {
+                    "fontSize": "11px",
+                    "fontWeight": "600",
+                    "color": "#059669",
+                    "textTransform": "uppercase",
+                    "letterSpacing": "1px"
+                  },
+                  "attrs": {
+                    "className": "blog-tag blog-tag-green"
+                  }
+                },
+                {
+                  "id": "tpl-blog-date3",
+                  "type": "span",
+                  "text": "2026-08-10",
+                  "children": [],
+                  "style": {
+                    "fontSize": "12px",
+                    "color": "#9ca3af",
+                    "marginLeft": "8px"
+                  },
+                  "attrs": {
+                    "className": "blog-date"
+                  }
+                }
+              ],
+              "style": {
+                "display": "flex",
+                "alignItems": "center",
+                "paddingTop": "16px",
+                "paddingBottom": "4px"
+              }
+            },
+            {
+              "id": "tpl-blog-title3",
+              "type": "h3",
+              "text": "用 BlockCanvas 搭建个人简历网站",
+              "children": [],
+              "style": {
+                "fontSize": "18px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "lineHeight": "1.4",
+                "marginBottom": "8px",
+                "marginTop": "8px"
+              },
+              "attrs": {
+                "className": "blog-heading"
+              }
+            },
+            {
+              "id": "tpl-blog-excerpt3",
+              "type": "p",
+              "text": "一步步教你从零搭建一个漂亮的个人作品集页面，包含头像、技能和联系方式。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.7",
+                "color": "#6b7280",
+                "marginBottom": "16px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "blog-excerpt"
+              }
+            },
+            {
+              "id": "tpl-blog-readmore3",
+              "type": "a",
+              "text": "阅读全文 →",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "fontWeight": "600",
+                "color": "#059669",
+                "textDecoration": "none"
+              },
+              "attrs": {
+                "href": "#",
+                "className": "blog-link blog-link-green"
+              }
+            }
+          ],
+          "style": {
+            "padding": "0",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "overflow": "hidden",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.04)"
+          },
+          "attrs": {
+            "className": "blog-card"
+          }
+        }
+      ],
+      "style": {
+        "display": "flex",
+        "gap": "20px",
+        "flexWrap": "wrap",
+        "justifyContent": "center"
+      },
+      "attrs": {
+        "className": "blog-grid"
+      }
+    }
+  ],
+  "style": {
+    "paddingTop": "64px",
+    "paddingRight": "24px",
+    "paddingBottom": "64px",
+    "paddingLeft": "24px",
+    "backgroundColor": "#f9fafb"
+  },
+  "attrs": {
+    "className": "blog-section"
+  },
+  "childStyles": [
+    {
+      "sel": ".blog-title",
+      "css": "margin: 0 auto 8px; font-size: 32px; font-weight: 700; color: #111827; text-align: center;"
+    },
+    {
+      "sel": ".blog-subtitle",
+      "css": "margin: 0 auto 48px; font-size: 16px; color: #6b7280; text-align: center;"
+    },
+    {
+      "sel": ".blog-card",
+      "css": "flex: 1 1 280px; max-width: 340px; box-sizing: border-box; overflow: hidden;"
+    },
+    {
+      "sel": ".blog-heading",
+      "css": "font-size: 18px; font-weight: 600; color: #111827; line-height: 1.4; margin: 8px 0 8px;"
+    },
+    {
+      "sel": ".blog-excerpt",
+      "css": "font-size: 14px; line-height: 1.7; color: #6b7280; margin: 0 0 16px;"
+    },
+    {
+      "sel": ".blog-tag",
+      "css": "font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;"
+    },
+    {
+      "sel": ".blog-tag-pink",
+      "css": "color: #db2777;"
+    },
+    {
+      "sel": ".blog-tag-green",
+      "css": "color: #059669;"
+    },
+    {
+      "sel": ".blog-date",
+      "css": "font-size: 12px; color: #9ca3af; margin-left: 8px;"
+    },
+    {
+      "sel": ".blog-link",
+      "css": "font-size: 14px; font-weight: 600; color: #1e88e5; text-decoration: none;"
+    },
+    {
+      "sel": ".blog-link:hover",
+      "css": "text-decoration: underline;"
+    },
+    {
+      "sel": ".blog-link-pink",
+      "css": "color: #db2777;"
+    },
+    {
+      "sel": ".blog-link-green",
+      "css": "color: #059669;"
+    }
+  ]
+}

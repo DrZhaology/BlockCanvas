@@ -112,8 +112,17 @@ export interface SelectorInfo {
   inlineCss: string | null;       // 行内样式元素的 CSS 声明文本（无类无 ID 时）
 }
 
-// 决定元素用什么方式写样式：类名 → ID → 行内 style
+// 决定元素用什么方式写样式：关系选择器 → 类名 → ID → 行内 style
 export function selectorForNode(node: SceneElement): SelectorInfo {
+  const rel = (node.attrs?.relSelector ?? '').trim();
+  if (rel) {
+    return {
+      selector: rel,
+      classAttr: (node.attrs?.className ?? '').trim() || null,
+      idAttr: (node.attrs?.id ?? '').trim() || null,
+      inlineCss: null
+    };
+  }
   const cls = (node.attrs?.className ?? '').trim();
   if (cls) {
     return {
@@ -127,7 +136,7 @@ export function selectorForNode(node: SceneElement): SelectorInfo {
   if (id) {
     return { selector: '#' + escapeSel(id), classAttr: null, idAttr: id, inlineCss: null };
   }
-  // 无类名无 ID：行内样式（不生成 hash 类，用户可加类名后自动迁移为规则）
+  // 无关系选择器、无类名无 ID：行内样式（不生成 hash 类，用户可加类名后自动迁移为规则）
   const cssText = styleToCssText(simplifyStyle(node.style));
   return { selector: '', classAttr: null, idAttr: null, inlineCss: cssText || null };
 }
@@ -145,6 +154,20 @@ export function cssTextToObject(text: string | null | undefined): Record<string,
     out[k.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())] = v;
   }
   return out;
+}
+
+// ============ 关系选择器（子元素样式） ============
+// sel 合法性：标签 / .类 / #id / 组合，空格(后代) 与 >(子代) 组合符；
+// 禁止逗号（多选择器）、属性/伪元素/通配等进阶语法（保持小白可控）
+export function isValidChildSelector(sel: string): boolean {
+  const s = sel.trim();
+  if (!s || s.length > 120) return false;
+  if (!/^[A-Za-z0-9_.\- >#:]+$/.test(s)) return false;
+  if (/[<>]{2,}/.test(s)) return false; // 连续组合符
+  // 每一段（按空格/>拆开）至少要有一个"锚"：标签名或 .类 或 #id
+  const parts = s.split(/[>\s]+/).filter(Boolean);
+  if (parts.length === 0) return false;
+  return parts.every((p) => /^[A-Za-z][A-Za-z0-9\-]*$/.test(p) || /^\./.test(p) || /^#/.test(p));
 }
 
 export interface StyleClassSet {
@@ -171,6 +194,7 @@ export function collectStyleClasses(root: SceneElement, ctx: StyleClassSet): voi
     const info = selectorForNode(node);
     const clsName = (node.attrs?.className ?? '').trim();
     const idName = (node.attrs?.id ?? '').trim();
+    const relName = (node.attrs?.relSelector ?? '').trim();
 
     if (info.inlineCss) {
       // 行内样式元素：不进规则表，样式写在 DOM style 属性上（画布与导出一致）
@@ -187,11 +211,11 @@ export function collectStyleClasses(root: SceneElement, ctx: StyleClassSet): voi
             ctx.rules.set(info.selector, cssText);
             ctx.order.push(info.selector);
           } else if (existing !== cssText) {
-            // 同名类/ID 但样式不同：不再自动合并（后者覆盖前者不直观），
+            // 同名类/ID/关系选择器但样式不同：不再自动合并（后者覆盖前者不直观），
             // 规则保留第一个出现的声明，并记冲突警告 → 「类名、ID 管理」统一
             ctx.warnings.push({
               selector: info.selector,
-              reason: '多个元素共用这个名称但样式不完全一致：目前以第一个为准。到「类名 · ID管理」里统一，或改用不同的名称'
+              reason: '多个元素共用这个名称但样式不完全一致：目前以第一个为准。到「类名 · ID总览」里统一，或改用不同的名称'
             });
           }
         }
@@ -206,7 +230,45 @@ export function collectStyleClasses(root: SceneElement, ctx: StyleClassSet): voi
           seenIds.set(idName, node.id);
         }
       }
-      if (!clsName && !idName && !info.inlineCss) {
+      // 子元素样式（容器级关系选择器）：`.父类 sel { ... }` / `#父id sel { ... }`
+      // 仅当本元素有类名/ID 时生效（否则没有可靠的挂靠点）
+      if (node.childStyles?.length && info.selector) {
+        for (const cs of node.childStyles) {
+          const sel = (cs.sel ?? '').trim();
+          const decls = styleToCssText(simplifyStyle(cssTextToObject(cs.css)));
+          if (!sel || !decls || !isValidChildSelector(sel)) continue;
+          const full = `${info.selector} ${sel}`;
+          const existing = ctx.rules.get(full);
+          if (existing === undefined) {
+            ctx.rules.set(full, decls);
+            ctx.order.push(full);
+          } else if (existing !== decls) {
+            ctx.warnings.push({
+              selector: full,
+              reason: '同一容器的子元素样式定义了不止一次：目前以第一个为准'
+            });
+          }
+        }
+      }
+      // 伪类样式：`:hover` / `:active` / `:focus` / `:link` / `:visited`
+      if (node.pseudoStyles && info.selector) {
+        for (const [pseudo, pseudoStyle] of Object.entries(node.pseudoStyles)) {
+          const decls = styleToCssText(simplifyStyle(pseudoStyle));
+          if (!decls) continue;
+          const full = `${info.selector}:${pseudo}`;
+          const existing = ctx.rules.get(full);
+          if (existing === undefined) {
+            ctx.rules.set(full, decls);
+            ctx.order.push(full);
+          } else if (existing !== decls) {
+            ctx.warnings.push({
+              selector: full,
+              reason: `伪类 :${pseudo} 样式定义了不止一次：目前以第一个为准`
+            });
+          }
+        }
+      }
+      if (!clsName && !idName && !relName && !info.inlineCss) {
         // 连行内样式都没有的裸元素（如默认无样式元素）：同样算"未命名"，提示可忽略
         ctx.unclassified.push({ id: node.id, type: node.type });
       }
@@ -216,7 +278,7 @@ export function collectStyleClasses(root: SceneElement, ctx: StyleClassSet): voi
   walk(root);
 }
 
-// 页面快速设置 → CSS 文本（4-D：可视化 body/a 常用项）
+// 页面快速设置 → CSS 文本（4-D：可视化 body/a 常用项 + 「页面」页签按需添加的扩展项）
 // 顺序：自动样式 → 快速设置 → 高级 CSS（高级在最后，用户写的规则总能覆盖快速设置）
 export function quickCssToCss(q: SceneGraph['quickCss'] | undefined): string {
   if (!q) return '';
@@ -224,9 +286,12 @@ export function quickCssToCss(q: SceneGraph['quickCss'] | undefined): string {
   if (q.bodyBg) bodyDecls.push(`background-color: ${q.bodyBg};`);
   if (q.textColor) bodyDecls.push(`color: ${q.textColor};`);
   if (q.fontFamily) bodyDecls.push(`font-family: ${q.fontFamily};`);
+  if (q.bodyFontSize) bodyDecls.push(`font-size: ${q.bodyFontSize};`);
+  if (q.bodyLineHeight) bodyDecls.push(`line-height: ${q.bodyLineHeight};`);
   const parts: string[] = [];
   if (bodyDecls.length > 0) parts.push(`body {\n  ${bodyDecls.join('\n  ')}\n}`);
   if (q.linkColor) parts.push(`a { color: ${q.linkColor}; text-decoration: underline; }`);
+  if (q.headingColor) parts.push(`h1, h2, h3, h4, h5, h6 { color: ${q.headingColor}; }`);
   return parts.join('\n\n');
 }
 

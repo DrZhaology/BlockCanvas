@@ -1,0 +1,164 @@
+{
+  "id": "tpl-cta",
+  "type": "section",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-cta-inner",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-cta-h2",
+          "type": "h2",
+          "text": "准备好开始了吗？",
+          "children": [],
+          "style": {
+            "fontSize": "36px",
+            "fontWeight": "800",
+            "color": "#ffffff",
+            "marginBottom": "16px",
+            "marginTop": "0",
+            "textAlign": "center"
+          },
+          "attrs": {
+            "className": "cta-title"
+          }
+        },
+        {
+          "id": "tpl-cta-p",
+          "type": "p",
+          "text": "加入数千名创作者，用积木的方式搭建你的第一个网站。无需注册，打开即用。",
+          "children": [],
+          "style": {
+            "fontSize": "17px",
+            "lineHeight": "1.7",
+            "color": "#bfdbfe",
+            "marginBottom": "36px",
+            "marginTop": "0",
+            "textAlign": "center",
+            "maxWidth": "560px",
+            "marginLeft": "auto",
+            "marginRight": "auto"
+          },
+          "attrs": {
+            "className": "cta-text"
+          }
+        },
+        {
+          "id": "tpl-cta-btns",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-cta-start",
+              "type": "button",
+              "text": "免费开始搭建",
+              "children": [],
+              "style": {
+                "paddingTop": "16px",
+                "paddingRight": "36px",
+                "paddingBottom": "16px",
+                "paddingLeft": "36px",
+                "fontSize": "16px",
+                "fontWeight": "700",
+                "color": "#1e3a5f",
+                "backgroundColor": "#ffffff",
+                "border": "none",
+                "borderRadius": "8px",
+                "cursor": "pointer",
+                "boxShadow": "0 4px 14px rgba(0,0,0,0.2)",
+                "marginRight": "12px"
+              },
+              "attrs": {
+                "className": "cta-btn cta-btn-primary"
+              }
+            },
+            {
+              "id": "tpl-cta-watch",
+              "type": "button",
+              "text": "观看演示",
+              "children": [],
+              "style": {
+                "paddingTop": "16px",
+                "paddingRight": "36px",
+                "paddingBottom": "16px",
+                "paddingLeft": "36px",
+                "fontSize": "16px",
+                "fontWeight": "600",
+                "color": "#ffffff",
+                "backgroundColor": "transparent",
+                "border": "2px solid rgba(255,255,255,0.4)",
+                "borderRadius": "8px",
+                "cursor": "pointer"
+              },
+              "attrs": {
+                "className": "cta-btn cta-btn-outline"
+              }
+            }
+          ],
+          "style": {
+            "display": "flex",
+            "justifyContent": "center",
+            "flexWrap": "wrap",
+            "gap": "12px"
+          },
+          "attrs": {
+            "className": "cta-btns"
+          }
+        }
+      ],
+      "style": {
+        "paddingTop": "72px",
+        "paddingRight": "32px",
+        "paddingBottom": "72px",
+        "paddingLeft": "32px",
+        "backgroundColor": "linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%)",
+        "textAlign": "center"
+      },
+      "attrs": {
+        "className": "cta-box"
+      }
+    }
+  ],
+  "style": {
+    "paddingTop": "0",
+    "paddingRight": "0",
+    "paddingBottom": "0",
+    "paddingLeft": "0",
+    "backgroundColor": "#1e3a5f"
+  },
+  "attrs": {
+    "className": "cta-section"
+  },
+  "childStyles": [
+    {
+      "sel": ".cta-title",
+      "css": "font-size: 36px; font-weight: 800; color: #ffffff; text-align: center; margin: 0 0 16px;"
+    },
+    {
+      "sel": ".cta-text",
+      "css": "font-size: 17px; line-height: 1.7; color: #bfdbfe; text-align: center; margin: 0 0 36px; max-width: 560px;"
+    },
+    {
+      "sel": ".cta-btn",
+      "css": "padding: 16px 36px; font-size: 16px; font-weight: 600; border-radius: 8px; cursor: pointer; box-sizing: border-box; border: none;"
+    },
+    {
+      "sel": ".cta-btn-primary",
+      "css": "background-color: #ffffff; color: #1e3a5f; box-shadow: 0 4px 14px rgba(0,0,0,0.2);"
+    },
+    {
+      "sel": ".cta-btn-primary:hover",
+      "css": "background-color: #f0f9ff; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,0,0,0.25);"
+    },
+    {
+      "sel": ".cta-btn-outline",
+      "css": "background-color: transparent; color: #ffffff; border: 2px solid rgba(255,255,255,0.4);"
+    },
+    {
+      "sel": ".cta-btn-outline:hover",
+      "css": "background-color: rgba(255,255,255,0.1); border-color: #ffffff;"
+    }
+  ]
+}

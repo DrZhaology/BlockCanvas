@@ -1,16 +1,22 @@
 import { useToolbar, type ToolbarItem } from '@store/toolbarStore';
+import type { PropertySchema } from '@lib/propertySchema';
 
 // BlockCanvas · 插件执行宿主
 // 原则：插件兼容程序，不是程序兼容插件。
 //   - 程序只提供一个稳定的 Bc 宿主对象，插件自己决定行为；
 //   - 插件 main 文件是一个立即执行函数 `(function (Bc) { ... })(Bc)`，
-//     通过 Bc.onStart / Bc.onStop / Bc.registerCss / Bc.registerCommand 接入程序；
+//     通过 Bc.onStart / Bc.onStop 接入；
 //   - 入口文件以源码字符串下发，渲染进程用 new Function 求值（CSP 已开 unsafe-eval），
 //     不改动象素级 DOM 结构，也不注入任何全局变量（每个插件拿到独立的 Bc）。
 //
-// 生命周期：
-//   refreshPlugins()：先停掉上一个批次所有插件、清掉它们注册的工具栏项，
-//           再扫描「已启用」插件并逐个执行 → 供启动、启用/禁用/导入/删除后刷新调用。
+// 插件可注册的能力：
+//   - Bc.registerElement：在元素面板新增按钮（type + label + help）
+//   - Bc.registerProperty：在属性面板新增 CSS 属性 schema 项
+//   - Bc.registerExportHook：导出 HTML 前后钩子（可修改 HTML 字符串）
+//   - Bc.registerCommand：注册工具栏按钮
+//   - Bc.registerCss：注入自定义 CSS
+//
+// 安全边界：插件只能读写渲染进程 DOM 和 React 状态，无法直接访问文件系统/网络。
 
 interface PluginBindings {
   start?: () => void;
@@ -23,6 +29,39 @@ interface ActivePlugin {
 }
 
 let active: ActivePlugin[] = [];
+
+// 全局注册表：插件贡献的内容
+const pluginElements: Array<{ type: string; label: string; help: { tag: string; what: string; where: string } }> = [];
+const pluginProperties: PropertySchema[] = [];
+const exportHooks: Array<{ pre?: (html: string) => string; post?: (html: string) => string }> = [];
+
+/** 导出前钩子：按注册顺序依次执行，可修改 HTML */
+export function applyExportPreHooks(html: string): string {
+  let result = html;
+  for (const hook of exportHooks) {
+    if (hook.pre) result = hook.pre(result);
+  }
+  return result;
+}
+
+/** 导出后钩子：按注册顺序依次执行，可修改 HTML */
+export function applyExportPostHooks(html: string): string {
+  let result = html;
+  for (const hook of exportHooks) {
+    if (hook.post) result = hook.post(result);
+  }
+  return result;
+}
+
+/** 获取插件注册的元素定义 */
+export function getPluginElements() {
+  return pluginElements;
+}
+
+/** 获取插件注册的属性 schema */
+export function getPluginProperties(): PropertySchema[] {
+  return pluginProperties;
+}
 
 // 每个插件一份独立的 Bc（绑定其 id），插件在其上挂 onStart/onStop、注册样式/命令
 function makeBc(pluginId: string) {
@@ -58,12 +97,40 @@ function makeBc(pluginId: string) {
     useToolbar.getState().addItem(item);
   };
 
+  // 注册新元素类型到左侧面板
+  const registerElement = (def: {
+    type: string;
+    label: string;
+    help: { tag: string; what: string; where: string };
+  }) => {
+    pluginElements.push(def);
+    // 触发面板重渲染（通过 dispatchEvent）
+    window.dispatchEvent(new CustomEvent('bc:plugin-elements-changed'));
+  };
+
+  // 注册新 CSS 属性到属性面板
+  const registerProperty = (schema: PropertySchema) => {
+    pluginProperties.push(schema);
+    window.dispatchEvent(new CustomEvent('bc:plugin-properties-changed'));
+  };
+
+  // 注册导出钩子（pre = 导出前修改 HTML，post = 导出后修改 HTML）
+  const registerExportHook = (hook: {
+    pre?: (html: string) => string;
+    post?: (html: string) => string;
+  }) => {
+    exportHooks.push(hook);
+  };
+
   return {
     bc: {
       onStart: (cb: () => void) => { bindings.start = cb; },
       onStop: (cb: () => void) => { bindings.stop = cb; },
       registerCss,
       registerCommand,
+      registerElement,
+      registerProperty,
+      registerExportHook,
       /** 透传给插件程序原生的 bc API（导出/预览/模板等） */
       api: window.bc,
       log: (...a: unknown[]) => console.log('[插件:' + pluginId + ']', ...a)

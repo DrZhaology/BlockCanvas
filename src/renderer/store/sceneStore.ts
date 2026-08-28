@@ -92,9 +92,7 @@ function defaultStyleFor(type: ElementType): ElementStyle {
     case 'img':
       return {
         width: '200px', height: '120px',
-        backgroundColor: '#eee',
-        borderStyle: 'dashed', borderColor: '#bbb',
-        borderTopWidth: '1px', borderRightWidth: '1px', borderBottomWidth: '1px', borderLeftWidth: '1px',
+        backgroundColor: '#e2e8f0',
         boxSizing: 'border-box'
       };
     case 'input':
@@ -125,18 +123,48 @@ function defaultStyleFor(type: ElementType): ElementStyle {
         backgroundColor: 'transparent',
         boxSizing: 'border-box'
       };
+    case 'table':
+      return { borderCollapse: 'collapse', minHeight: '40px', boxSizing: 'border-box' };
+    case 'th':
+    case 'td':
+      return {
+        paddingTop: '6px', paddingRight: '10px', paddingBottom: '6px', paddingLeft: '10px',
+        borderStyle: 'solid', borderColor: '#cbd5e1',
+        borderTopWidth: '1px', borderRightWidth: '1px', borderBottomWidth: '1px', borderLeftWidth: '1px',
+        ...(type === 'th' ? { backgroundColor: '#f1f5f9', fontWeight: '700', textAlign: 'left' } : {}),
+        boxSizing: 'border-box'
+      };
+    case 'blockquote':
+      return {
+        marginTop: '8px', marginRight: '0', marginBottom: '8px', marginLeft: '0',
+        paddingTop: '4px', paddingBottom: '4px', paddingLeft: '12px',
+        borderStyle: 'solid', borderColor: '#cbd5e1',
+        borderTopWidth: '0', borderRightWidth: '0', borderBottomWidth: '0', borderLeftWidth: '3px',
+        color: '#475569', lineHeight: '1.7',
+        backgroundColor: '#f8fafc', boxSizing: 'border-box'
+      };
+    case 'code':
+      return {
+        fontFamily: 'Consolas, "Courier New", monospace',
+        fontSize: '13px',
+        backgroundColor: '#f1f5f9',
+        paddingTop: '2px', paddingRight: '6px', paddingBottom: '2px', paddingLeft: '6px',
+        borderTopLeftRadius: '4px', borderTopRightRadius: '4px',
+        borderBottomRightRadius: '4px', borderBottomLeftRadius: '4px',
+        color: '#be185d'
+      };
+    case 'mark':
+      return { backgroundColor: '#fef08a', color: '#713f12' };
     case 'ul':
     case 'ol':
       return {
         display: 'block',
-        paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '32px',
-        minHeight: '40px',
-        borderStyle: 'dashed', borderColor: '#e0e0e0',
-        borderTopWidth: '1px', borderRightWidth: '1px', borderBottomWidth: '1px', borderLeftWidth: '1px',
+        paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '28px',
+        minHeight: '32px',
         boxSizing: 'border-box'
       };
     case 'li':
-      return { display: 'list-item' };
+      return { display: 'list-item', minHeight: '24px', paddingTop: '2px', paddingBottom: '2px' };
     case 'label':
       return {
         display: 'inline-block', fontSize: '13px', color: '#555',
@@ -145,10 +173,8 @@ function defaultStyleFor(type: ElementType): ElementStyle {
       };
     case 'form':
       return {
-        backgroundColor: '#f1f8f4', minHeight: '60px',
-        borderStyle: 'dashed', borderColor: '#c8e6c9',
-        borderTopWidth: '1px', borderRightWidth: '1px', borderBottomWidth: '1px', borderLeftWidth: '1px',
-        padding: '8px',
+        backgroundColor: '#f8fafc', minHeight: '60px',
+        padding: '12px',
         boxSizing: 'border-box'
       };
     default:
@@ -193,6 +219,38 @@ export function findNode(root: SceneElement, id: string): SceneElement | null {
     if (r) return r;
   }
   return null;
+}
+
+/** 找第一个 className 含某 token 的元素（可排除某个 id）——"该类的样子"以它为准 */
+function findFirstWithToken(root: SceneElement, token: string, excludeId?: string): SceneElement | null {
+  const walk = (n: SceneElement): SceneElement | null => {
+    if (n.id !== excludeId) {
+      const cls = (n.attrs?.className ?? '').trim();
+      if (cls && cls.split(/\s+/).includes(token)) return n;
+    }
+    for (const c of n.children) {
+      const r = walk(c);
+      if (r) return r;
+    }
+    return null;
+  };
+  return walk(root);
+}
+
+/** 找第一个 relSelector 相同的元素（可排除某个 id） */
+function findFirstWithRel(root: SceneElement, rel: string, excludeId?: string): SceneElement | null {
+  const walk = (n: SceneElement): SceneElement | null => {
+    if (n.id !== excludeId) {
+      const r = (n.attrs?.relSelector ?? '').trim();
+      if (r && r === rel) return n;
+    }
+    for (const c of n.children) {
+      const res = walk(c);
+      if (res) return res;
+    }
+    return null;
+  };
+  return walk(root);
 }
 
 function findParent(root: SceneElement, id: string, parent: SceneElement | null = null): SceneElement | null {
@@ -304,8 +362,8 @@ interface SceneStore {
   /** 多选剪切：复制 + 批量删除（一条 undo） */
   cutMany: (ids: string[]) => void;
   pasteInto: (parentId: string) => void;
-  /** 粘贴到具名兄弟末尾：refId=null 或 ref=root 时插到根末尾；否则插到 ref 父级末尾
-   *  （即粘贴的元素与 refId 同级，放在该父容器的最后） */
+  /** 粘贴：优先插入到当前选中元素的内部；若选中的是自闭合/无法包含子级的叶子元素，自动降级粘贴到其父容器；未选中则插到画布根末尾 */
+  paste: (selectedId?: string | null) => void;
   pasteSibling: (refId: string | null) => void;
 
   // 重排
@@ -328,8 +386,20 @@ interface SceneStore {
   updateStyleTransient: (id: string, partial: Partial<ElementStyle>) => void;
   // 类名编辑即同步：同 classString 的元素统一样式后（全量写回），编辑一个 = 编辑全部。
   // 无类名的元素只改自身。
-  // 类管理（「类名」页签）：把某名称（类/ID）下所有元素的样式统一为指定样式（一条 undo）
-  unifyClassName: (name: string, style: ElementStyle) => void;
+  // 类管理（「类名」页签）：把某名称（类/ID）下所有元素的样式统一为指定样式（一条 undo）。
+  // kind='class'：匹配 className 中**包含该 token** 的元素；kind='id'：只精确匹配 attrs.id
+  //（分开匹配，修复旧版 class/id 同名互相误伤的问题）
+  unifyClassName: (name: string, style: ElementStyle, kind?: 'class' | 'id') => void;
+  // 批量重命名类名 token：所有 className 含 oldName 的元素换成 newName（一条 undo）
+  renameClassToken: (oldName: string, newName: string) => void;
+  // 批量移除类名 token：所有 className 含该 token 的元素移除它（一条 undo）
+  removeClassToken: (name: string) => void;
+  // 子元素样式（关系选择器）：整体替换某元素的 childStyles 列表（配合 begin/end 会话一条 undo）
+  setChildStyles: (id: string, list: { sel: string; css: string }[]) => void;
+  // 设置单元素的关系选择器（如 .hero > h1）；applyToSiblings 为 true 时自动同步给容器内同标签的所有直接子元素
+  setRelSelector: (id: string, selector: string | null, applyToSiblings?: boolean) => void;
+  // 多选元素批量设置关系选择器
+  setMultiRelSelector: (ids: string[], selector: string | null) => void;
   // 标记一次连续编辑的开始：把当前 scene 推入 past 作为还原点
   beginStyleEdit: () => void;
   // 聚焦编辑会话（focus→blur）的收尾：只清标记不压栈
@@ -344,6 +414,9 @@ interface SceneStore {
   // 即使值被清空也保留，避免 user 编辑值时属性行消失）
   addVisibleProp: (id: string, key: string) => void;
   removeVisibleProp: (id: string, key: string) => void;
+  // 伪类样式（:hover/:active/:focus/:link 等）更新与移除
+  updatePseudoStyle: (id: string, pseudo: string, patch: Record<string, string>) => void;
+  removePseudoStyle: (id: string, pseudo: string, key?: string) => void;
   setText: (id: string, text: string) => void;
   renameElement: (id: string, name: string) => void; // 阶段1只用 type 当显示名，预留
   toggleHidden: (id: string) => void;
@@ -353,6 +426,10 @@ interface SceneStore {
   commit: () => void;
   undo: () => void;
   redo: () => void;
+
+  // 插入时是否智能继承同级选择器与样式（非根容器内有效）
+  autoInherit: boolean;
+  setAutoInherit: (v: boolean) => void;
 
   // 整体
   setScene: (s: SceneGraph) => void;
@@ -376,6 +453,11 @@ export const useScene = create<SceneStore>((set) => ({
   history: { past: [], future: [] },
   clipboard: null,
   styleEditPending: false,
+  autoInherit: typeof localStorage !== 'undefined' ? localStorage.getItem('bc-auto-inherit') !== '0' : true,
+  setAutoInherit: (v) => {
+    try { localStorage.setItem('bc-auto-inherit', v ? '1' : '0'); } catch {}
+    set(() => ({ autoInherit: v }));
+  },
 
   addElement: (type, parentId = null) => {
     set((st) => {
@@ -388,6 +470,35 @@ export const useScene = create<SceneStore>((set) => ({
         parent = findParent(scene.root, parent.id) ?? scene.root;
       }
       const el = createElement(type);
+
+      // 智能继承：仅在【非根容器】（parent !== scene.root）内部且开启 autoInherit 开关时触发。
+      // 画布根节点（body）下的直接子元素均为独立的大板块（如 Header, Hero, Main, Section, Footer），绝不自动继承！
+      if (st.autoInherit && parent !== scene.root) {
+        const siblingWithRel = parent.children.find((c) => {
+          const r = (c.attrs?.relSelector ?? '').trim();
+          if (!r) return false;
+          if (/:(?:first|last|nth)-/.test(r)) return false;
+          const match = r.match(/[>\s]+([a-zA-Z0-9_\-*]+)$/);
+          return match && (match[1] === type || match[1] === '*');
+        });
+        if (siblingWithRel) {
+          if (!el.attrs) el.attrs = {};
+          el.attrs.relSelector = siblingWithRel.attrs!.relSelector;
+          el.style = { ...deepClone(siblingWithRel.style) };
+        } else {
+          // 类名继承检查：若现有同类型直接子元素全部带有相同的非空类名（如所有 div 都是 card）
+          const sameTypeSiblings = parent.children.filter((c) => c.type === type && (c.attrs?.className ?? '').trim());
+          if (sameTypeSiblings.length > 0 && sameTypeSiblings.length === parent.children.filter((c) => c.type === type).length) {
+            const commonCls = sameTypeSiblings[0].attrs!.className!.trim();
+            if (sameTypeSiblings.every((c) => c.attrs!.className!.trim() === commonCls)) {
+              if (!el.attrs) el.attrs = {};
+              el.attrs.className = commonCls;
+              el.style = { ...deepClone(sameTypeSiblings[0].style) };
+            }
+          }
+        }
+      }
+
       parent.children.push(el);
       revealAncestors(scene.root, parent);
       scene.selectedId = el.id;
@@ -554,30 +665,31 @@ export const useScene = create<SceneStore>((set) => ({
     });
   },
 
-  // 粘贴成兄弟：ref=null 或是根 → 插根末尾；否则插到 ref 父级末尾（与 ref 同级）
-  pasteSibling: (refId) => {
+  // 粘贴（新逻辑）：优先插入到当前选中元素的内部；若选中的是自闭合/文本独占元素（无法容纳子级），降级插入到其父容器；若无选中则插到画布根末尾
+  paste: (selectedId = null) => {
     set((st) => {
       if (!st.clipboard) return st;
       const scene = deepClone(st.scene);
       let target: SceneElement;
-      if (refId === null || refId === undefined || refId === st.scene.root.id) {
+      if (!selectedId || selectedId === st.scene.root.id) {
         target = scene.root;
       } else {
-        const ref = findNode(scene.root, refId);
-        if (!ref) return st;
-        if (ref === scene.root) {
-          target = scene.root;
-        } else {
-          const parent = findParent(scene.root, refId);
-          if (!parent) return st;
-          target = parent;
-        }
+        const selNode = findNode(scene.root, selectedId);
+        target = selNode ?? scene.root;
       }
-      if (SELF_CLOSING_TAGS.has(target.type)) return st;
+      // 降级保护：自闭合或文本独占元素无法拥有子元素，自动退回其父级容器
+      while (target !== scene.root && (SELF_CLOSING_TAGS.has(target.type) || TEXT_ONLY_TAGS.has(target.type))) {
+        target = findParent(scene.root, target.id) ?? scene.root;
+      }
       appendPasted(scene, target, st.clipboard);
       revealAncestors(scene.root, target);
       return { scene, history: pushPast(st.history, st.scene) };
     });
+  },
+
+  // 兼容别名
+  pasteSibling: (refId) => {
+    useScene.getState().paste(refId);
   },
 
   moveChild: (id, direction) => {
@@ -657,7 +769,13 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
-      node.style = { ...node.style, ...partial };
+      for (const [k, v] of Object.entries(partial)) {
+        if (v === undefined) {
+          delete (node.style as Record<string, string | undefined>)[k];
+        } else {
+          node.style[k] = v;
+        }
+      }
       syncClassmates(scene.root, node);
       // 会话中（beginStyleEdit 已压检查点）不重复入栈；单次提交（无会话）才入栈。
       // 注意：这里不能重置 styleEditPending —— 否则"聚焦→改→选单位→改"过程中
@@ -674,23 +792,34 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
-      node.style = { ...node.style, ...partial };
+      for (const [k, v] of Object.entries(partial)) {
+        if (v === undefined) {
+          delete (node.style as Record<string, string | undefined>)[k];
+        } else {
+          node.style[k] = v;
+        }
+      }
       syncClassmates(scene.root, node);
       return { scene }; // 不动 history
     });
   },
 
-  // 类名/ID 管理（「类名」页签）：把名称下所有元素的样式统一（先改第一个同名的，再全量写回）
-  unifyClassName: (name, style) => {
+  // 类名/ID 管理（「类名」页签）：把名称下所有元素的样式统一（写回同一份样式，一条 undo）
+  // kind='class' 按 className 的单个 token 包含匹配；kind='id' 只精确匹配 attrs.id
+  unifyClassName: (name, style, kind = 'class') => {
     set((st) => {
       const scene = deepClone(st.scene);
       const trimmed = name.trim();
       if (!trimmed) return st;
       const ids: string[] = [];
       const walk = (n: SceneElement): void => {
-        const cls = (n.attrs?.className ?? '').trim();
-        const idv = (n.attrs?.id ?? '').trim();
-        if (cls === trimmed || (idv !== '' && idv === trimmed)) ids.push(n.id);
+        if (kind === 'class') {
+          const cls = (n.attrs?.className ?? '').trim();
+          if (cls.split(/\s+/).includes(trimmed)) ids.push(n.id);
+        } else {
+          const idv = (n.attrs?.id ?? '').trim();
+          if (idv === trimmed) ids.push(n.id);
+        }
         for (const c of n.children) walk(c);
       };
       walk(scene.root);
@@ -701,6 +830,60 @@ export const useScene = create<SceneStore>((set) => ({
         const n = findNode(scene.root, sid);
         if (n) n.style = { ...newStyle };
       }
+      return { scene, history: pushPast(st.history, st.scene) };
+    });
+  },
+
+  // 批量重命名类名 token：className 里逐 token 替换（一条 undo）
+  renameClassToken: (oldName, newName) => {
+    set((st) => {
+      const from = oldName.trim();
+      const to = newName.trim();
+      if (!from || !to || from === to) return st;
+      const scene = deepClone(st.scene);
+      let changed = false;
+      const walk = (n: SceneElement): void => {
+        const cls = (n.attrs?.className ?? '').trim();
+        if (cls) {
+          const tokens = cls.split(/\s+/);
+          if (tokens.includes(from)) {
+            const next = tokens.map((t) => (t === from ? to : t)).join(' ');
+            if (!n.attrs) n.attrs = {};
+            n.attrs.className = next;
+            changed = true;
+          }
+        }
+        for (const c of n.children) walk(c);
+      };
+      walk(scene.root);
+      if (!changed) return st;
+      return { scene, history: pushPast(st.history, st.scene) };
+    });
+  },
+
+  // 批量移除类名 token：从所有元素的 className 中删掉它（一条 undo；class 清空即删除属性）
+  removeClassToken: (name) => {
+    set((st) => {
+      const target = name.trim();
+      if (!target) return st;
+      const scene = deepClone(st.scene);
+      let changed = false;
+      const walk = (n: SceneElement): void => {
+        const cls = (n.attrs?.className ?? '').trim();
+        if (cls && cls.split(/\s+/).includes(target)) {
+          const next = cls.split(/\s+/).filter((t) => t !== target).join(' ');
+          if (!n.attrs) n.attrs = {};
+          if (next) {
+            n.attrs.className = next;
+          } else {
+            delete n.attrs.className;
+          }
+          changed = true;
+        }
+        for (const c of n.children) walk(c);
+      };
+      walk(scene.root);
+      if (!changed) return st;
       return { scene, history: pushPast(st.history, st.scene) };
     });
   },
@@ -722,16 +905,142 @@ export const useScene = create<SceneStore>((set) => ({
   },
 
   // 改 HTML 原生属性（class / id / src / alt / href 等）
+  // className 特殊协调（类名 = 一套衣服）：
+  //  - 加入一个已存在的类名 → 立刻穿上该组的样式（数据与显示同时变，不留幽灵冲突）
+  //  - 移除后不再有任何类名 → 把当前生效的组样式物化到元素自己（外观不变地"脱下来"）
   updateAttr: (id, key, value) => {
     set((st) => {
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
       if (!node.attrs) node.attrs = {};
-      if (value === '') delete node.attrs[key];
-      else node.attrs[key] = value;
+
+      if (key === 'relSelector') {
+        const val = value.trim();
+        if (val === '') {
+          delete node.attrs.relSelector;
+        } else {
+          node.attrs.relSelector = val;
+          // 查找是否有其他同名关系选择器的元素，若有则同步继承其样式
+          const existing = findFirstWithRel(scene.root, val, id);
+          if (existing) {
+            node.style = { ...deepClone(existing.style) };
+          }
+        }
+        const push = !st.styleEditPending;
+        return { scene, history: push ? pushPast(st.history, st.scene) : st.history };
+      }
+
+      if (key !== 'className') {
+        if (value === '') delete node.attrs[key];
+        else node.attrs[key] = value;
+        const push = !st.styleEditPending;
+        return { scene, history: push ? pushPast(st.history, st.scene) : st.history };
+      }
+
+      const oldTokens = (node.attrs?.className ?? '').trim().split(/\s+/).filter(Boolean);
+      const newTokens = value.trim().split(/\s+/).filter(Boolean);
+      const added = newTokens.filter((t) => !oldTokens.includes(t));
+
+      // 先收集（匹配靠 attrs，须在改 attrs 之前）：每个新增 token 的"组内第一个他人成员"
+      const groupStyle: ElementStyle | null = (() => {
+        for (const t of added) {
+          const first = findFirstWithToken(scene.root, t, id);
+          if (first) return deepClone(first.style);
+        }
+        return null;
+      })();
+      // 移除后变裸元素 → 物化旧组第一个成员的样式（自己是唯一成员则保持原样）
+      const materialize: ElementStyle | null =
+        oldTokens.length > 0 && newTokens.length === 0
+          ? (() => {
+              const first = findFirstWithToken(scene.root, oldTokens[0], id);
+              return first ? deepClone(first.style) : null;
+            })()
+          : null;
+
+      if (newTokens.length === 0) delete node.attrs.className;
+      else node.attrs.className = newTokens.join(' ');
+
+      if (groupStyle) node.style = { ...deepClone(groupStyle) };
+      else if (materialize) node.style = { ...materialize };
+
       const push = !st.styleEditPending;
       return { scene, history: push ? pushPast(st.history, st.scene) : st.history };
+    });
+  },
+
+  // 子元素样式（关系选择器）：整体替换列表（Inspector 编辑后 blur 提交；会话内不入栈多次）
+  setChildStyles: (id, list) => {
+    set((st) => {
+      const scene = deepClone(st.scene);
+      const node = findNode(scene.root, id);
+      if (!node) return st;
+      const cleaned = list
+        .map((c) => ({ sel: (c.sel ?? '').trim(), css: (c.css ?? '').trim() }))
+        .filter((c) => c.sel !== '');
+      if (cleaned.length === 0) delete node.childStyles;
+      else node.childStyles = cleaned;
+      const push = !st.styleEditPending;
+      return { scene, history: push ? pushPast(st.history, st.scene) : st.history };
+    });
+  },
+
+  // 设置单元素的关系选择器（如 .hero > h1）；applyToSiblings 为 true 时自动同步给容器内同标签的所有直接子元素
+  setRelSelector: (id, selector, applyToSiblings = false) => {
+    set((st) => {
+      const scene = deepClone(st.scene);
+      const node = findNode(scene.root, id);
+      if (!node) return st;
+      if (!node.attrs) node.attrs = {};
+
+      const sel = (selector ?? '').trim();
+      if (!sel) {
+        delete node.attrs.relSelector;
+      } else {
+        node.attrs.relSelector = sel;
+        // 如果同名关系选择器在别处已有样式，继承之
+        const existing = findFirstWithRel(scene.root, sel, id);
+        if (existing) {
+          node.style = { ...deepClone(existing.style) };
+        }
+        const parent = findParent(scene.root, id);
+        if (applyToSiblings && parent) {
+          // 提取选择器目标标签类型（例如 .hero > p -> p，.cards > * -> *）
+          const match = sel.match(/[>\s]+([a-zA-Z0-9_\-*]+)(?::[a-zA-Z0-9_\-]+)?$/);
+          const targetTag = match ? match[1] : node.type;
+          for (const c of parent.children) {
+            if (c.id !== id && (c.type === targetTag || targetTag === '*')) {
+              if (!c.attrs) c.attrs = {};
+              c.attrs.relSelector = sel;
+              c.style = { ...deepClone(node.style) };
+            }
+          }
+        }
+      }
+      return { scene, history: pushPast(st.history, st.scene) };
+    });
+  },
+
+  // 多选元素批量设置关系选择器
+  setMultiRelSelector: (ids, selector) => {
+    set((st) => {
+      const scene = deepClone(st.scene);
+      const sel = (selector ?? '').trim();
+      let firstStyle: ElementStyle | null = null;
+      for (const id of ids) {
+        const node = findNode(scene.root, id);
+        if (!node) continue;
+        if (!firstStyle) firstStyle = deepClone(node.style);
+        if (!node.attrs) node.attrs = {};
+        if (!sel) {
+          delete node.attrs.relSelector;
+        } else {
+          node.attrs.relSelector = sel;
+          if (firstStyle) node.style = { ...deepClone(firstStyle) };
+        }
+      }
+      return { scene, history: pushPast(st.history, st.scene) };
     });
   },
 
@@ -765,6 +1074,7 @@ export const useScene = create<SceneStore>((set) => ({
       const list = node.visibleProps ?? [];
       if (!list.includes(key)) list.push(key);
       node.visibleProps = list;
+      syncClassmates(scene.root, node);
       return { scene, history: pushPast(st.history, st.scene) };
     });
   },
@@ -779,15 +1089,73 @@ export const useScene = create<SceneStore>((set) => ({
         node.visibleProps = node.visibleProps.filter((k) => k !== key);
         if (node.visibleProps.length === 0) node.visibleProps = undefined;
       }
-      // 清空对应 style 字段（含 4 边拆分）
+      // 彻底删除对应 style 字段（含 4 边拆分）
       const item = SCHEMA_LOOKUP.get(key);
       if (item) {
         const keys = (item.input === 'box4' || item.input === 'trbl') && item.sides
           ? item.sides.map((s) => s.key)
           : [item.key];
-        for (const k of keys) (node.style as Record<string, string | undefined>)[k] = undefined;
+        for (const k of keys) {
+          delete (node.style as Record<string, string | undefined>)[k];
+        }
+      } else {
+        delete (node.style as Record<string, string | undefined>)[key];
       }
+      // 关键：全量同步给所有同类名、同关系选择器的元素，防止样式不一致导致类名ID冲突！
+      syncClassmates(scene.root, node);
       return { scene, history: pushPast(st.history, st.scene) };
+    });
+  },
+
+  updatePseudoStyle: (id, pseudo, patch) => {
+    set((st) => {
+      const scene = deepClone(st.scene);
+      const node = findNode(scene.root, id);
+      if (!node) return st;
+      if (!node.pseudoStyles) node.pseudoStyles = {};
+      const current = node.pseudoStyles[pseudo] ?? {};
+      const next = { ...current };
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === undefined || v === '') {
+          delete next[k];
+        } else {
+          next[k] = v;
+        }
+      }
+      if (Object.keys(next).length === 0) {
+        delete node.pseudoStyles[pseudo];
+        if (Object.keys(node.pseudoStyles).length === 0) node.pseudoStyles = undefined;
+      } else {
+        node.pseudoStyles[pseudo] = next;
+      }
+      syncClassmates(scene.root, node);
+      const push = !st.styleEditPending;
+      return { scene, history: push ? pushPast(st.history, st.scene) : st.history };
+    });
+  },
+
+  removePseudoStyle: (id, pseudo, key) => {
+    set((st) => {
+      const scene = deepClone(st.scene);
+      const node = findNode(scene.root, id);
+      if (!node || !node.pseudoStyles) return st;
+      if (!key) {
+        // 清空整个伪类状态
+        delete node.pseudoStyles[pseudo];
+        if (Object.keys(node.pseudoStyles).length === 0) node.pseudoStyles = undefined;
+      } else {
+        // 清除单个属性
+        if (node.pseudoStyles[pseudo]) {
+          delete node.pseudoStyles[pseudo][key];
+          if (Object.keys(node.pseudoStyles[pseudo]).length === 0) {
+            delete node.pseudoStyles[pseudo];
+            if (Object.keys(node.pseudoStyles).length === 0) node.pseudoStyles = undefined;
+          }
+        }
+      }
+      syncClassmates(scene.root, node);
+      const push = !st.styleEditPending;
+      return { scene, history: push ? pushPast(st.history, st.scene) : st.history };
     });
   },
 
@@ -853,7 +1221,7 @@ export const useScene = create<SceneStore>((set) => ({
       };
     }),
 
-  setScene: (s) => set(() => ({ scene: s, history: { past: [], future: [] }, styleEditPending: false }))
+  setScene: (s) => set((st) => ({ scene: s, history: st.history, styleEditPending: false }))
 }));
 
 function pushPast(h: History, snapshot: SceneGraph): History {
@@ -862,16 +1230,27 @@ function pushPast(h: History, snapshot: SceneGraph): History {
   return { past, future: [] };
 }
 
-// 「编辑即统一」：node 有类名(classString)时，把整棵树上所有同 classString 的
-// 元素样式全量覆盖为 node 当前样式 —— 类 = 一种样子，改一个全跟着变。
-// 无类名元素（或 root）不触发联动。
+// 「编辑即统一」：node 有类名(classString)或关系选择器(relSelector)时，
+// 把整棵树上所有同类名或同关系选择器的元素样式全量覆盖为 node 当前样式 —— 一改全改。
+// 无类名且无关系选择器的元素（或 root）不触发联动。
 function syncClassmates(root: SceneElement, node: SceneElement): void {
   const cls = (node.attrs?.className ?? '').trim();
-  if (!cls || node === root) return;
-  const target = deepClone(node.style);
+  const rel = (node.attrs?.relSelector ?? '').trim();
+  if ((!cls && !rel) || node === root) return;
+  const targetStyle = deepClone(node.style);
+  const targetVisible = node.visibleProps ? deepClone(node.visibleProps) : undefined;
+  const targetPseudo = node.pseudoStyles ? deepClone(node.pseudoStyles) : undefined;
   const walk = (n: SceneElement): void => {
-    if (n !== node && (n.attrs?.className ?? '').trim() === cls) {
-      n.style = { ...target };
+    if (n !== node) {
+      if (cls && (n.attrs?.className ?? '').trim() === cls) {
+        n.style = deepClone(targetStyle);
+        n.visibleProps = targetVisible ? deepClone(targetVisible) : undefined;
+        n.pseudoStyles = targetPseudo ? deepClone(targetPseudo) : undefined;
+      } else if (rel && (n.attrs?.relSelector ?? '').trim() === rel) {
+        n.style = deepClone(targetStyle);
+        n.visibleProps = targetVisible ? deepClone(targetVisible) : undefined;
+        n.pseudoStyles = targetPseudo ? deepClone(targetPseudo) : undefined;
+      }
     }
     for (const c of n.children) walk(c);
   };
@@ -880,3 +1259,43 @@ function syncClassmates(root: SceneElement, node: SceneElement): void {
 
 // re-export for components
 export { CONTAINER_TAGS, SELF_CLOSING_TAGS };
+
+if (typeof window !== 'undefined') {
+  (window as any).__sceneStore = useScene;
+
+  // 自动与多标签页 (TabStore) 联动：
+  // 严格区分：只有真正的 DOM 树内容/样式/属性/全局设置修改才标记未保存 dirty（点亮小圆点 •）；
+  // 纯选区变化 (selectedId/selectedIds) 只同步状态，绝不误触小圆点！
+  let lastSceneRef = useScene.getState().scene;
+  let lastPastLen = useScene.getState().history.past.length;
+  // 防抖标记：subscribe 回调可能在同一次 setState 批次中被多次触发，用本标记去重
+  let dirtyFlagScheduled = false;
+
+  useScene.subscribe((state) => {
+    if (state.scene === lastSceneRef) return;
+    if (dirtyFlagScheduled) return;
+    dirtyFlagScheduled = true;
+    requestAnimationFrame(() => { dirtyFlagScheduled = false; });
+
+    const prev = lastSceneRef;
+    lastSceneRef = state.scene;
+
+    // 判断是否发生了实质内容修改：
+    //  - root 树对象引用变了（增删改元素 / 样式变更）
+    //  - 全局 CSS / 快速设置变了
+    //  - 撤销历史有新条目入栈（表明用户执行了不可逆操作）
+    const curPastLen = state.history.past.length;
+    const isContentModified =
+      prev.root !== state.scene.root ||
+      prev.globalCss !== state.scene.globalCss ||
+      prev.quickCss !== state.scene.quickCss ||
+      curPastLen > lastPastLen;
+
+    lastPastLen = curPastLen;
+
+    const ts = (window as any).__tabStore;
+    if (ts && typeof ts.getState === 'function' && !ts.__isSwitchingTab) {
+      ts.getState().onSceneChange(state.scene, isContentModified);
+    }
+  });
+}

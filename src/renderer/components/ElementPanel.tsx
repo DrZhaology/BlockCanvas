@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { useScene } from '@store/sceneStore';
+import { useScene, findNode } from '@store/sceneStore';
 import type { ElementType } from '@lib/types';
 import { exportHTML } from '@lib/exporter';
+import { HelpButton } from './HelpButton';
+import { getPluginElements } from '@lib/pluginHost';
 
 // BlockCanvas · 元素面板
 // 阶段1：按类别分组，点击插入选中元素的父级（或根）
@@ -13,57 +15,87 @@ import { exportHTML } from '@lib/exporter';
 //   - 模板显示为运行时渲染缩略图：模板树 → exportHTML → iframe srcdoc，
 //     按内容真实比例自动缩放贴合所在列宽（不再固定尺寸拉伸/留白），随窗口宽度自适应列数
 
-type ElementDef = { type: ElementType; label: string; hint?: string };
+type ElementDef = {
+  type: ElementType;
+  label: string;
+  help: { tag: string; what: string; where: string };
+};
 
+// hover 讲解：tag=真实标签名；what=作用（通俗）；where=能放在哪/常见误用提醒。
+// 例：h1~h4 是"标题语义"，不能为了加粗大字去用——那是 strong/字号该干的事。
 const GROUPS: { title: string; items: ElementDef[] }[] = [
   {
     title: '容器',
     items: [
-      { type: 'div', label: '通用容器' },
-      { type: 'section', label: '区块' },
-      { type: 'header', label: '页眉' },
-      { type: 'nav', label: '导航' },
-      { type: 'main', label: '主区' },
-      { type: 'article', label: '文章' },
-      { type: 'aside', label: '侧栏' },
-      { type: 'footer', label: '页脚' }
+      { type: 'div', label: '通用容器', help: { tag: 'div', what: '什么都能装的盒子，用来圈出一块区域统一排版', where: '任意位置；没有特殊含义，纯布局用' } },
+      { type: 'section', label: '区块', help: { tag: 'section', what: '页面里一个主题段落区（如"产品介绍"一整段）', where: 'body 或其他容器内；一般带个标题' } },
+      { type: 'header', label: '页眉', help: { tag: 'header', what: '页顶区域：Logo、站名、主导航', where: '页面最上方或某个区块的开头' } },
+      { type: 'nav', label: '导航', help: { tag: 'nav', what: '装导航链接的容器', where: '通常在 header 里；里面放 a 链接' } },
+      { type: 'main', label: '主区', help: { tag: 'main', what: '页面的主体内容（一页只用一次）', where: 'body 直接子级，包住核心内容' } },
+      { type: 'article', label: '文章', help: { tag: 'article', what: '一篇独立成文的内容（文章/帖子/评论）', where: 'main 或 section 内' } },
+      { type: 'aside', label: '侧栏', help: { tag: 'aside', what: '和主线内容关系不大的旁栏（推荐位/广告/目录）', where: 'main 旁边或文章内部' } },
+      { type: 'figure', label: '图文块', help: { tag: 'figure', what: '"图 + 图注"打包的独立内容块', where: '正文里；里面常放 img + figcaption' } },
+      { type: 'footer', label: '页脚', help: { tag: 'footer', what: '页底区域：版权、联系方式、备案号', where: '页面最底部或区块结尾' } }
     ]
   },
   {
-    title: '文本',
+    title: '标题与段落',
     items: [
-      { type: 'h1', label: '标题1' },
-      { type: 'h2', label: '标题2' },
-      { type: 'h3', label: '标题3' },
-      { type: 'h4', label: '标题4' },
-      { type: 'p', label: '段落' },
-      { type: 'span', label: '行内文字' },
-      { type: 'label', label: '标签' },
-      { type: 'a', label: '链接' }
+      { type: 'h1', label: '标题1', help: { tag: 'h1', what: '全页最大的标题（一页只建议一个）', where: '页面顶部；⚠ 它是"标题语义"，别拿它当加大加粗用' } },
+      { type: 'h2', label: '标题2', help: { tag: 'h2', what: '二级标题：章节题目', where: 'h1 之后；⚠ 别为字体效果滥用，加粗请用 strong' } },
+      { type: 'h3', label: '标题3', help: { tag: 'h3', what: '三级标题：小节题目（卡片标题常用）', where: '任意容器内；层级要跟在 h2 下面' } },
+      { type: 'h4', label: '标题4', help: { tag: 'h4', what: '四级标题：更小的分组题', where: '同上，层级依次递减' } },
+      { type: 'p', label: '段落', help: { tag: 'p', what: '一段普通文字，网页里最常用的文本块', where: '任意容器内；一段一个 p' } },
+      { type: 'blockquote', label: '引用块', help: { tag: 'blockquote', what: '引用别人的一段话，默认带缩进左线', where: '正文中；里面可再放 p' } }
+    ]
+  },
+  {
+    title: '行内文字',
+    items: [
+      { type: 'span', label: '行内文字', help: { tag: 'span', what: '行内小段文字盒子（配合背景色做徽章等）', where: '放在 p / 标题等文字内部' } },
+      { type: 'strong', label: '重点加粗', help: { tag: 'strong', what: '语气强调的加粗（比 b 更有语义）', where: '文字内部包住要强调的词' } },
+      { type: 'em', label: '斜体强调', help: { tag: 'em', what: '语气强调的倾斜', where: '文字内部使用' } },
+      { type: 'mark', label: '高亮', help: { tag: 'mark', what: '荧光笔划过的黄色高亮', where: '文字内部标出关键词' } },
+      { type: 'small', label: '小字', help: { tag: 'small', what: '字号小一号的附属说明', where: '版权声明、备注等旁边' } },
+      { type: 'code', label: '代码', help: { tag: 'code', what: '等宽字体的行内代码样式', where: '文字内部包住代码/命令' } },
+      { type: 'del', label: '删除线', help: { tag: 'del', what: '已删除/作废的内容（划掉）', where: '文字内部；常见于价格改价' } },
+      { type: 'a', label: '链接', help: { tag: 'a', what: '点击跳转的超链接', where: '文字或导航里；href 属性填网址' } }
     ]
   },
   {
     title: '列表',
     items: [
-      { type: 'ul', label: '无序列表' },
-      { type: 'ol', label: '有序列表' },
-      { type: 'li', label: '列表项' }
+      { type: 'ul', label: '无序列表', help: { tag: 'ul', what: '圆点列表的外壳（不分先后顺序）', where: '里面只放 li 列表项' } },
+      { type: 'ol', label: '有序列表', help: { tag: 'ol', what: '带编号的步骤列表', where: '里面只放 li；步骤类内容用它' } },
+      { type: 'li', label: '列表项', help: { tag: 'li', what: '列表里的每一项', where: '只能放在 ul / ol 里面' } }
+    ]
+  },
+  {
+    title: '表格',
+    items: [
+      { type: 'table', label: '表格', help: { tag: 'table', what: '行列数据表的外壳（价格表/参数表）', where: '里面按 行 tr → 单元格 th/td 逐层嵌' } },
+      { type: 'tr', label: '表格行', help: { tag: 'tr', what: '表格的一行', where: '只能放在 table 里；行里放 th/td' } },
+      { type: 'th', label: '表头格', help: { tag: 'th', what: '表头单元格（自动加粗、浅灰底）', where: '放在第一行的 tr 里' } },
+      { type: 'td', label: '单元格', help: { tag: 'td', what: '普通数据单元格', where: '放在 tr 里；一行里 th+td 数量要一致' } }
     ]
   },
   {
     title: '表单与交互',
     items: [
-      { type: 'button', label: '按钮' },
-      { type: 'input', label: '输入框' },
-      { type: 'textarea', label: '文本域' },
-      { type: 'form', label: '表单容器' }
+      { type: 'button', label: '按钮', help: { tag: 'button', what: '可点击的按钮（后续积木编程接行为）', where: '表单里或任意位置' } },
+      { type: 'input', label: '输入框', help: { tag: 'input', what: '单行输入框', where: '通常放进 form 表单容器' } },
+      { type: 'textarea', label: '文本域', help: { tag: 'textarea', what: '多行输入框（留言/简介）', where: '同上；文字写在属性面板"文案"里' } },
+      { type: 'label', label: '标签文字', help: { tag: 'label', what: '输入框旁的说明文字', where: 'form 里紧挨着 input 放' } },
+      { type: 'form', label: '表单容器', help: { tag: 'form', what: '把一组输入框和提交按钮圈起来', where: '需要收集用户填写时使用' } }
     ]
   },
   {
-    title: '其他',
+    title: '多媒体与其他',
     items: [
-      { type: 'img', label: '图片' },
-      { type: 'hr', label: '分割线' }
+      { type: 'img', label: '图片', help: { tag: 'img', what: '插入一张图片', where: '任意位置；src 选本地文件或填网址' } },
+      { type: 'figcaption', label: '图注', help: { tag: 'figcaption', what: 'figure 图文块的说明文字', where: '只能放在 figure 内部' } },
+      { type: 'hr', label: '分割线', help: { tag: 'hr', what: '一条水平分割线，隔开两段内容', where: '任意两个区块之间' } },
+      { type: 'br', label: '换行', help: { tag: 'br', what: '强制换一行（空元素，无样式可调）', where: '文字内部需要断行的地方' } }
     ]
   }
 ];
@@ -72,7 +104,8 @@ type ScanResult = {
   plugins: { id: string; name: string; version: string; author: string; description: string; enabled: boolean; error: string | null }[];
   resources: {
     id: string; name: string; version: string; author: string; description: string;
-    templates: { id: string; name: string; description: string }[];
+    categories?: { id: string; name: string; description: string }[];
+    templates: { id: string; name: string; description: string; category?: string }[];
     enabled: boolean; error: string | null;
   }[];
   errors: string[];
@@ -89,13 +122,41 @@ export function ElementPanel() {
   const addElement = useScene((s) => s.addElement);
   const selectedId = useScene((s) => s.scene.selectedId);
   const insertTemplate = useScene((s) => s.insertTemplate);
+  const autoInherit = useScene((s) => s.autoInherit);
+  const setAutoInherit = useScene((s) => s.setAutoInherit);
   const [tab, setTab] = useState<'element' | 'templates'>('element');
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [busy, setBusy] = useState(false);
+  // hover 元素讲解卡：1s 延迟缓入
+  const [tip, setTip] = useState<{ def: ElementDef; x: number; y: number; below: boolean } | null>(null);
+  const hoverTimer = useRef<number>(0);
+  const clearHoverTimer = () => {
+    if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = 0; }
+  };
+
+  // 元素按钮展示模式：'both' 中文+代码标签 | 'zh' 仅中文 | 'tag' 仅英文标签
+  const [labelMode, setLabelMode] = useState<'both' | 'zh' | 'tag'>(() => {
+    try { return (localStorage.getItem('bc-elem-label-mode') as any) || 'both'; } catch { return 'both'; }
+  });
+
+  const cycleLabelMode = () => {
+    const next = labelMode === 'both' ? 'zh' : labelMode === 'zh' ? 'tag' : 'both';
+    setLabelMode(next);
+    try { localStorage.setItem('bc-elem-label-mode', next); } catch {}
+  };
 
   const rescan = () => window.bc.scanExtensions().then((r) => setScan(r));
 
-  useEffect(() => { rescan(); }, []);
+  useEffect(() => {
+    rescan();
+    // 监听插件注册新元素
+    const onPluginElements = () => setTab('element');
+    window.addEventListener('bc:plugin-elements-changed', onPluginElements);
+    return () => {
+      clearHoverTimer();
+      window.removeEventListener('bc:plugin-elements-changed', onPluginElements);
+    };
+  }, []);
 
   const onInsertTemplate = async (resId: string, tplId: string) => {
     setBusy(true);
@@ -111,45 +172,134 @@ export function ElementPanel() {
     }
   };
 
+  const root = useScene((s) => s.scene.root);
+  const selectedNode = selectedId ? findNode(root, selectedId) : null;
+  const targetLabel = selectedNode
+    ? `<${selectedNode.type}${selectedNode.attrs?.className ? '.' + selectedNode.attrs.className.split(/\s+/)[0] : ''}> 内部`
+    : '画布根（最外层）';
+
   return (
     <div className={"panel element-panel" + (tab === 'templates' ? ' tpl-mode' : '')}>
       <div className="inspector-tabs">
         <button
           className={"inspector-tab" + (tab === 'element' ? ' active' : '')}
           onClick={() => setTab('element')}
+          title="可插入的 HTML 元素"
         >元素</button>
         <button
           className={"inspector-tab" + (tab === 'templates' ? ' active' : '')}
           onClick={() => setTab('templates')}
+          title="预设组件模板库"
         >模板</button>
       </div>
 
       {tab === 'element' && (
-        <>
-          <div className="panel-title">元素</div>
-          <div className="hint" style={{ marginBottom: 10 }}>
-            {selectedId ? '点击按钮插入到当前选中元素的内部' : '点击按钮插入到画布根'}
+        <div className="elem-main-wrap">
+          <div className="elem-top-bar">
+            <div className="elem-target-hint">
+              <span>📌 目标:</span>
+              <b>{targetLabel}</b>
+            </div>
+            <div className="elem-inherit-wrap">
+              <button
+                className="elem-mode-btn"
+                onClick={cycleLabelMode}
+                title="切换元素按钮展示模式（中文+标签 / 仅中文 / 仅HTML标签）"
+              >
+                🏷️ {labelMode === 'both' ? '中文+标签' : labelMode === 'zh' ? '仅中文' : '仅代码标签'}
+              </button>
+              <button
+                className={"elem-inherit-btn" + (autoInherit ? ' active' : '')}
+                onClick={() => setAutoInherit(!autoInherit)}
+                title="点击切换插入继承模式"
+              >
+                <span>{autoInherit ? '⚡ 同级继承: 开' : '⊘ 独立新建: 关'}</span>
+              </button>
+              <HelpButton
+                title="插入时同级样式继承"
+                content={'【同级样式继承】开关作用：\n\n· ⚡ 开启（推荐）：当你在已有子元素的容器内（例如 .card-grid）再次插入相同类型的子元素时，新元素会自动套用同级已有的选择器与样式，省去重复调整！\n\n· ⊘ 关闭：新插入的元素保持默认纯净样式，不继承任何既有样式。\n\n注：画布最外层（根目录）不受影响，永远独立新建。'}
+              />
+            </div>
           </div>
           <div className="element-body">
             {GROUPS.map((g) => (
               <div key={g.title} className="element-group">
                 <div className="group-title">{g.title}</div>
                 <div className="element-grid">
-                  {g.items.map((it) => (
-                    <button
-                      key={it.type}
-                      className="element-btn"
-                      onClick={() => addElement(it.type, selectedId)}
-                      title={`插入 ${it.label}${it.hint ? ' (' + it.hint + ')' : ''}`}
-                    >
-                      {it.label}
-                    </button>
-                  ))}
+                  {g.items.map((it) => {
+                    const text = labelMode === 'tag' ? `<${it.help.tag}>` : it.label;
+                    const showTag = labelMode === 'both';
+                    return (
+                      <button
+                        key={it.type}
+                        className={"element-btn" + (showTag ? " has-tag" : "")}
+                        onClick={() => addElement(it.type, selectedId)}
+                        onMouseEnter={(e) => {
+                          clearHoverTimer();
+                          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          const vw = window.innerWidth;
+                          hoverTimer.current = window.setTimeout(() => {
+                            setTip({
+                              def: it,
+                              x: Math.min(Math.max(8, r.left), Math.max(8, vw - 288)),
+                              y: r.top,
+                              below: r.top < 190
+                            });
+                          }, 1000); // 1秒延迟
+                        }}
+                        onMouseLeave={() => {
+                          clearHoverTimer();
+                          setTip(null);
+                        }}
+                      >
+                        <span className="elem-btn-name">{text}</span>
+                        {showTag && <span className="elem-btn-tag">&lt;{it.help.tag}&gt;</span>}
+                      </button>
+                    );
+                  })}
+                  {(() => {
+                    const plugins = getPluginElements();
+                    if (plugins.length === 0) return null;
+                    return plugins.map((it) => (
+                      <button
+                        key={it.type}
+                        className="element-btn has-tag"
+                        onClick={() => addElement(it.type as ElementType, selectedId)}
+                        onMouseEnter={(e) => {
+                          clearHoverTimer();
+                          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          const vw = window.innerWidth;
+                          hoverTimer.current = window.setTimeout(() => {
+                            setTip({ def: it as any, x: Math.min(Math.max(8, r.left), Math.max(8, vw - 288)), y: r.top, below: r.top < 190 });
+                          }, 1000);
+                        }}
+                        onMouseLeave={() => { clearHoverTimer(); setTip(null); }}
+                      >
+                        <span className="elem-btn-name">{it.label}</span>
+                        <span className="elem-btn-tag">&lt;{it.help.tag}&gt;</span>
+                      </button>
+                    ));
+                  })()}
                 </div>
               </div>
             ))}
           </div>
-        </>
+        </div>
+      )}
+
+      {/* hover 元素讲解卡（fixed，不挤布局；离开按钮即消失） */}
+      {tab === 'element' && tip && (
+        <div
+          className="ele-tip"
+          style={{
+            left: tip.x,
+            ...(tip.below ? { top: tip.y + 34 } : { top: tip.y, transform: 'translateY(-100%)' })
+          }}
+        >
+          <div className="ele-tip-tag">&lt;{tip.def.help.tag}&gt; · {tip.def.label}</div>
+          <div className="ele-tip-row"><b>作用</b>{tip.def.help.what}</div>
+          <div className="ele-tip-row"><b>放哪</b>{tip.def.help.where}</div>
+        </div>
       )}
 
       {tab === 'templates' && (
@@ -172,12 +322,22 @@ function TemplateLibrary(props: {
   onInsert: (resId: string, tplId: string) => void;
 }) {
   const { scan, busy, onInsert } = props;
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('bc-tpl-collapsed');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {};
+  });
   const [search, setSearch] = useState('');
-  const [preview, setPreview] = useState<{ resId: string; tpl: { id: string; name: string; description: string } } | null>(null);
+  const [preview, setPreview] = useState<{ resId: string; tpl: { id: string; name: string; description: string; category?: string } } | null>(null);
 
-  const toggleCollapsed = (resId: string) => {
-    setCollapsed((prev) => ({ ...prev, [resId]: !prev[resId] }));
+  const toggleCollapsed = (key: string) => {
+    setCollapsed((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try { localStorage.setItem('bc-tpl-collapsed', JSON.stringify(next)); } catch {}
+      return next;
+    });
   };
 
   const kw = search.trim().toLowerCase();
@@ -191,6 +351,7 @@ function TemplateLibrary(props: {
             (t) => !kw
               || t.name.toLowerCase().includes(kw)
               || (t.description ?? '').toLowerCase().includes(kw)
+              || (t.category ?? '').toLowerCase().includes(kw)
               || r.name.toLowerCase().includes(kw)
           )
         }))
@@ -229,30 +390,83 @@ function TemplateLibrary(props: {
       {scan && kw !== '' && filtered.length === 0 && (
         <div className="hint">没有匹配「{search}」的模板。</div>
       )}
+
       {filtered.map((r) => {
-        const isCollapsed = !!collapsed[r.id];
+        const resCollapsed = !!collapsed[r.id];
+        // 按分类细分模板
+        const catMap = new Map<string, { id: string; name: string; templates: typeof r.templates }>();
+        for (const t of r.templates) {
+          const catId = t.category || '__uncategorized__';
+          if (!catMap.has(catId)) {
+            const catName = catId === '__uncategorized__'
+              ? '未分类'
+              : (r.categories ?? []).find((c: any) => c.id === catId)?.name || catId;
+            catMap.set(catId, { id: catId, name: catName, templates: [] });
+          }
+          catMap.get(catId)!.templates.push(t);
+        }
+        const cats = Array.from(catMap.values()).filter((c) => c.templates.length > 0);
+
         return (
           <div key={r.id} className="tpl-group">
-            <div className="tpl-group-header" onClick={() => toggleCollapsed(r.id)} title={isCollapsed ? '展开此资源包' : '收起此资源包'}>
-              <span className={"tpl-group-caret" + (isCollapsed ? '' : ' open')}>▸</span>
+            {/* 资源包标题 */}
+            <div className="tpl-group-header" onClick={() => toggleCollapsed(r.id)} title={resCollapsed ? '展开此资源包' : '收起此资源包'}>
+              <span className={"tpl-group-caret" + (resCollapsed ? '' : ' open')}>▸</span>
               <span className="tpl-group-name">{r.name}</span>
               <span className="tpl-group-meta">
                 {r.templates.length} 个模板{r.version ? ' · v' + r.version : ''}
               </span>
             </div>
             {r.error && <div className="hint" style={{ color: '#c0392b' }}>加载失败：{r.error}</div>}
-            {!isCollapsed && (
-              <div className="tpl-grid">
-                {r.templates.map((t) => (
-                  <TemplateCard
-                    key={t.id}
-                    resId={r.id}
-                    tpl={t}
-                    disabled={busy}
-                    onInsert={() => onInsert(r.id, t.id)}
-                    onPreview={() => setPreview({ resId: r.id, tpl: t })}
-                  />
-                ))}
+            {!resCollapsed && (
+              <div className="tpl-group-inner">
+                {cats.length > 1 ? (
+                  // 多分类：内部再按分类折叠展示
+                  cats.map((cat) => {
+                    const catCollapsed = !!collapsed[`${r.id}::${cat.id}`];
+                    return (
+                      <div key={cat.id} className="tpl-sub-group">
+                        <div
+                          className="tpl-sub-header"
+                          onClick={() => toggleCollapsed(`${r.id}::${cat.id}`)}
+                          title={catCollapsed ? '展开此分类' : '收起此分类'}
+                        >
+                          <span className={"tpl-sub-caret" + (catCollapsed ? '' : ' open')}>▸</span>
+                          <span className="tpl-sub-cat-badge">{cat.name}</span>
+                          <span className="tpl-group-meta">{cat.templates.length} 个模板</span>
+                        </div>
+                        {!catCollapsed && (
+                          <div className="tpl-grid">
+                            {cat.templates.map((t) => (
+                              <TemplateCard
+                                key={t.id}
+                                resId={r.id}
+                                tpl={t}
+                                disabled={busy}
+                                onInsert={() => onInsert(r.id, t.id)}
+                                onPreview={() => setPreview({ resId: r.id, tpl: t })}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  // 单分类或无分类：直接展示模板网格
+                  <div className="tpl-grid">
+                    {r.templates.map((t) => (
+                      <TemplateCard
+                        key={t.id}
+                        resId={r.id}
+                        tpl={t}
+                        disabled={busy}
+                        onInsert={() => onInsert(r.id, t.id)}
+                        onPreview={() => setPreview({ resId: r.id, tpl: t })}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

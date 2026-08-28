@@ -1,15 +1,27 @@
-// BlockCanvas · 深色模式插件（v2）
+// BlockCanvas · 深色模式插件（v3）
 // 入口约定：程序用 new Function('Bc', source)(Bc) 求值，Bc 是程序给的宿主对象。
 //
 // 方案：程序把全部浅色表面/hover 着色都收敛到 CSS 变量（:root 里 20+ 个 --* 语义变量），
-// 本插件深色时只覆盖这一组变量 + color-scheme，即可整体正确换肤，
-// 不用再逐条覆盖几十个选择器，也不会“点击后闪白”（hover/active 底色随变量变深）。
+// 本插件深色时只覆盖这一组变量 + color-scheme，即可整体正确换肤。
 //
-// 另外额外处理程序里写死的斜纹（!important 覆盖）、滚动条、::selection、placeholder。
+// v3 修复「自动模式下切深色闪一下黑又变白」：
+//  - 不再在闭包里缓存 curMode（v2 的病根）：apply / 按钮 / 媒体监听全部现读 localStorage，
+//    插件重载后的旧监听、双实例竞态都不会再用陈旧模式把深色撤掉；
+//  - 记录 lastDark 做变化检测：手动切换引起的 prefers-color-scheme "回声"再进 apply 时
+//    结论幂等，不会抖动；
+//  - auto 模式启动先把 nativeTheme 复位 system，并在下一拍复查一次，
+//    修正上一会话残留 themeSource 对 matchMedia 的污染。
+// 新增：深浅切换瞬间全界面 0.3s 颜色过渡动画（平时不挂 transition，零开销）。
 (function (Bc) {
-  // —— 音量：无 ——
   var NS = 'bc-dm';
   var MODE_KEY = NS + ':mode'; // auto | dark | light
+
+  var mql = window.matchMedia('(prefers-color-scheme: dark)');
+  var onMedia = null;
+  var removeCss = null;
+  var lastDark = null;   // 上次生效的明暗；null = 尚未应用过（首次不播动画）
+  var transEl = null;    // 过渡动画 <style>（临时）
+  var transTimer = 0;
 
   function readMode() {
     try {
@@ -21,28 +33,48 @@
     try { localStorage.setItem(MODE_KEY, m); } catch (e) { /* 忽略 */ }
   }
 
-  var mql = window.matchMedia('(prefers-color-scheme: dark)');
-  var onMedia = null;
-  var removeCss = null;
-  var curMode = readMode();
-
-  function isDark() {
-    return curMode === 'dark' || (curMode === 'auto' && mql.matches);
+  // 每次现读 localStorage + 现查 matchMedia —— 不缓存任何可变状态
+  function isDarkNow(mode) {
+    return mode === 'dark' || (mode === 'auto' && mql.matches);
   }
+
   // 同步顶部原生菜单栏/窗口 chrome 的明暗：CSS 改不到原生 chrome，
   // 只能借主进程 nativeTheme.themeSource（preload 桥暴露的 setNativeTheme）。
-  function syncNative() {
-    var w = window;
-    var src = curMode === 'dark' ? 'dark' : curMode === 'light' ? 'light' : 'system';
+  function syncNative(mode) {
     try {
-      if (w.bc && typeof w.bc.setNativeTheme === 'function') w.bc.setNativeTheme(src);
+      if (window.bc && typeof window.bc.setNativeTheme === 'function') {
+        window.bc.setNativeTheme(mode === 'dark' ? 'dark' : mode === 'light' ? 'light' : 'system');
+      }
     } catch (e) { /* ignore: 无桥时保持默认 */ }
   }
+
+  // 切换瞬间的 0.3s 颜色过渡：临时给全元素挂 transition，320ms 后移除
+  function playTransition() {
+    if (transEl) { transEl.remove(); transEl = null; }
+    transEl = document.createElement('style');
+    transEl.textContent =
+      '*,*::before,*::after{transition:background-color .3s ease,color .3s ease,' +
+      'border-color .3s ease,box-shadow .3s ease,fill .3s ease,stroke .3s ease !important;}';
+    document.head.appendChild(transEl);
+    if (transTimer) clearTimeout(transTimer);
+    transTimer = setTimeout(function () {
+      if (transEl) { transEl.remove(); transEl = null; }
+      transTimer = 0;
+    }, 320);
+  }
+
   function apply() {
+    var mode = readMode();
+    var dark = isDarkNow(mode);
     var root = document.documentElement;
-    if (isDark()) root.setAttribute('data-bc-dark', 'on');
+    if (dark) root.setAttribute('data-bc-dark', 'on');
     else root.removeAttribute('data-bc-dark');
-    syncNative();
+    // 只在明暗真正翻转时播 0.3s 过渡（首次应用不播，避免启动闪动画）
+    if (lastDark !== null && dark !== lastDark) playTransition();
+    lastDark = dark;
+    // 同步原生 chrome 放最后：手动切换触发的 prefers-color-scheme 回声再次进入本函数时，
+    // readMode/isDarkNow 结论不变 → 幂等，不会出现"黑一下又变白"
+    syncNative(mode);
   }
 
   // 深色变量组：值全部收敛到主题变量，因果反向 —— 程序读变量，插件写变量。
@@ -90,16 +122,22 @@
 
   Bc.onStart(function () {
     removeCss = Bc.registerCss(css);
-    onMedia = function () { if (curMode === 'auto') apply(); };
+    onMedia = function () { apply(); };
     if (mql.addEventListener) mql.addEventListener('change', onMedia);
+    else if (mql.addListener) mql.addListener(onMedia); // 兼容旧 Electron
     apply();
+    // auto 兜底：上一会话可能残留非 system 的 themeSource（异常退出没走到 onStop），
+    // 上面的 apply 已把它复位为 system；等一拍让 matchMedia 反映真实系统主题后再复查
+    setTimeout(function () { apply(); }, 60);
   });
 
   Bc.onStop(function () {
     document.documentElement.removeAttribute('data-bc-dark');
-    var w = window;
-    try { if (w.bc && typeof w.bc.setNativeTheme === 'function') w.bc.setNativeTheme('system'); } catch (e) { /* ignore */ }
+    if (transTimer) { clearTimeout(transTimer); transTimer = 0; }
+    if (transEl) { transEl.remove(); transEl = null; }
+    try { if (window.bc && typeof window.bc.setNativeTheme === 'function') window.bc.setNativeTheme('system'); } catch (e) { /* ignore */ }
     if (mql.removeEventListener && onMedia) { mql.removeEventListener('change', onMedia); onMedia = null; }
+    else if (mql.removeListener && onMedia) { mql.removeListener(onMedia); onMedia = null; }
     if (removeCss) { removeCss(); removeCss = null; }
   });
 
@@ -107,12 +145,14 @@
     id: 'toggle',
     icon: '🌙',
     label: function () {
-      return curMode === 'auto' ? '深色模式(自动)' : curMode === 'dark' ? '深色模式·开' : '深色模式·关';
+      var m = readMode();
+      return m === 'auto' ? '深色模式(自动)' : m === 'dark' ? '深色模式·开' : '深色模式·关';
     },
     title: '深色模式：自动跟随系统 / 手动切换深色或浅色',
     onClick: function () {
-      curMode = curMode === 'auto' ? 'dark' : curMode === 'dark' ? 'light' : 'auto';
-      saveMode(curMode);
+      var m = readMode();
+      m = m === 'auto' ? 'dark' : m === 'dark' ? 'light' : 'auto';
+      saveMode(m);
       apply();
     }
   });

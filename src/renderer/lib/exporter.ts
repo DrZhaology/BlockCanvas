@@ -1,6 +1,7 @@
 import type { SceneGraph, SceneElement } from '@lib/types';
 import { SELF_CLOSING_TAGS } from '@lib/types';
 import { collectStyleClasses, buildStyleBlock, createStyleClassSet, type StyleClassSet } from '@lib/styleClass';
+import { applyExportPostHooks } from './pluginHost';
 
 // BlockCanvas · HTML 导出器
 // 阶段 3 第 1 轮（类名化）：样式抽进 <style> 块，相同样式共用规则。
@@ -101,8 +102,20 @@ export function exportHTML(scene: SceneGraph): ExportResult {
   for (const c of scene.root.children) collectStyleClasses(c, ctx);
 
   const styleBlock = buildStyleBlock(ctx, scene.globalCss, scene.quickCss);
-  const styleHtml = styleBlock
-    ? `  <style>\n${indentLines(styleBlock, '    ')}\n  </style>\n`
+  // 基础重置默认【不】添加（用户可在「页面」页签按需勾选）：
+  // ① 去白边：html,body 默认 8px 边距 ② 标题/段落默认间距：h1~h6、p、列表等 UA 外边距
+  // （真实网站都有 CSS Reset；还原网站排版时勾上第二项即可对齐原站观感）
+  const RESET_TAGS = 'h1, h2, h3, h4, h5, h6, p, ul, ol, figure, blockquote, table';
+  const resets: string[] = [];
+  if (scene.quickCss?.resetMargin === '1') {
+    resets.push('/* ==== 基础重置：去掉浏览器默认边距（「页面」页签已开启） ==== */\nhtml, body { margin: 0; padding: 0; }');
+  }
+  if (scene.quickCss?.resetHeadingMargin === '1') {
+    resets.push('/* ==== 重置标题/段落/列表的浏览器默认外边距 ==== */\n' + RESET_TAGS + ' { margin: 0; }');
+  }
+  const fullStyleBlock = [...resets, styleBlock].filter(Boolean).join('\n\n');
+  const styleHtml = fullStyleBlock
+    ? `  <style>\n${indentLines(fullStyleBlock, '    ')}\n  </style>\n`
     : '';
 
   const bodyInner = scene.root.children
@@ -122,5 +135,5 @@ ${bodyInner}
 </body>
 </html>`;
 
-  return { html, warnings: ctx.warnings, unclassified: ctx.unclassified };
+  return { html: applyExportPostHooks(html), warnings: ctx.warnings, unclassified: ctx.unclassified };
 }

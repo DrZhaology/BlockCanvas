@@ -8,18 +8,7 @@
       "type": "span",
       "text": "我的站点",
       "children": [],
-      "style": {
-        "display": "inline-block",
-        "paddingTop": "0px",
-        "paddingRight": "0px",
-        "paddingBottom": "0px",
-        "paddingLeft": "0px",
-        "backgroundColor": "rgba(0,0,0,0)",
-        "boxSizing": "border-box",
-        "color": "#ffffff",
-        "fontSize": "18px",
-        "fontWeight": "bold"
-      },
+      "style": {},
       "attrs": {
         "className": "site-brand"
       }
@@ -34,11 +23,7 @@
           "type": "a",
           "text": "首页",
           "children": [],
-          "style": {
-            "color": "#cfe3f7",
-            "textDecoration": "none",
-            "fontSize": "14px"
-          },
+          "style": {},
           "attrs": {
             "href": "#",
             "className": "nav-link"
@@ -49,11 +34,7 @@
           "type": "a",
           "text": "关于",
           "children": [],
-          "style": {
-            "color": "#cfe3f7",
-            "textDecoration": "none",
-            "fontSize": "14px"
-          },
+          "style": {},
           "attrs": {
             "href": "#",
             "className": "nav-link"
@@ -64,11 +45,7 @@
           "type": "a",
           "text": "联系",
           "children": [],
-          "style": {
-            "color": "#cfe3f7",
-            "textDecoration": "none",
-            "fontSize": "14px"
-          },
+          "style": {},
           "attrs": {
             "href": "#",
             "className": "nav-link"
@@ -76,9 +53,6 @@
         }
       ],
       "style": {
-        "backgroundColor": "rgba(0,0,0,0)",
-        "minHeight": "60px",
-        "boxSizing": "border-box",
         "display": "flex",
         "gap": "16px",
         "alignItems": "center"
@@ -103,5 +77,19 @@
   },
   "attrs": {
     "className": "site-nav"
-  }
+  },
+  "childStyles": [
+    {
+      "sel": ".site-brand",
+      "css": "color: #ffffff; font-size: 18px; font-weight: bold;"
+    },
+    {
+      "sel": ".nav-link",
+      "css": "color: #cfe3f7; text-decoration: none; font-size: 14px;"
+    },
+    {
+      "sel": ".nav-link:hover",
+      "css": "color: #ffffff; text-decoration: underline;"
+    }
+  ]
 }

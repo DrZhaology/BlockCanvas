@@ -1,21 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
-import { SCHEMA } from '@lib/propertySchema';
+import { SCHEMA, checkApplicability } from '@lib/propertySchema';
 import type { PropertySchema, PropertyCategory } from '@lib/propertySchema';
 import type { ElementType } from '@lib/types';
+import { getPluginProperties } from '@lib/pluginHost';
 
 // BlockCanvas · "+ 添加属性"下拉
 // - 按类别分组展示；顶部搜索框支持中英文（中文名 / 英文 key / 类别 / 4 边 key）
-// - 搜索时扁平化展示，每个条目右侧标注类别
-// - 已添加项不在下拉里出现；Escape / 点外部关闭
+// - 动态检测适用性：对当前不适用的属性置灰显示并标注原因（如行内元素不能设外边距等）
+// - 统一对齐：左侧统一 [父]/[子] 标识占位与属性名，右侧展示类别与不生效提示
 
 interface Props {
   type: ElementType;
-  visibleKeys: string[];      // 已显示的属性 key 列表（含 width/height 默认）
+  elementStyle?: Record<string, string | undefined>;
+  visibleKeys: string[];      // 已显示的属性 key 列表
   onAdd: (key: string) => void;
 }
 
 const CATEGORY_ORDER: PropertyCategory[] = [
-  '盒模型', '颜色', '字体', '边框', '阴影', '定位', 'Flex 布局', '其他'
+  '盒模型', '颜色', '字体与排版', '边框与阴影', '列表', '多媒体', '定位', 'Flex & Grid 布局', '其他'
 ];
 
 export function AddPropertyMenu(props: Props) {
@@ -47,30 +49,55 @@ export function AddPropertyMenu(props: Props) {
     if (!q) return true;
     const camelDash = s.key.replace(/([A-Z])/g, (m) => '-' + m.toLowerCase());
     const sideKeys = (s.sides ?? []).map((sd) => sd.key).join(' ');
-    const hay =
-      `${s.label} ${s.key} ${camelDash} ${sideKeys} ${s.category}`.toLowerCase();
+    const hay = `${s.label} ${s.key} ${camelDash} ${sideKeys} ${s.category} ${s.placeholder ?? ''}`.toLowerCase();
     return hay.includes(q);
   };
 
-  // 候选 = 该元素还没显示的属性（不随搜索词变化，决定按钮是否可点）
-  const baseCandidates = SCHEMA.filter((s) => {
-    if (!isApplicableForType(s, props.type)) return false;
-    if (props.visibleKeys.includes(s.key)) return false;
-    return true;
-  });
-  // 当前搜索词过滤后的展示列表（空搜索词 = 全部）
+  // 候选 = 该元素还没显示的属性（含插件扩展属性）
+  const allSchema = [...SCHEMA, ...getPluginProperties()];
+  const baseCandidates = allSchema.filter((s) => !props.visibleKeys.includes(s.key));
+  // 搜索过滤后的展示列表
   const candidates = q ? baseCandidates.filter(matches) : baseCandidates;
 
-  // 按类别分组（无搜索时）
+  // 按类别分组
   const grouped: Record<PropertyCategory, PropertySchema[]> = {
-    '盒模型': [], '颜色': [], '字体': [], '边框': [], '阴影': [], '定位': [], 'Flex 布局': [], '其他': []
+    '盒模型': [], '颜色': [], '字体与排版': [], '边框与阴影': [], '列表': [], '多媒体': [], '定位': [], 'Flex & Grid 布局': [], '其他': []
   };
-  for (const c of candidates) grouped[c.category].push(c);
+  for (const c of candidates) {
+    if (grouped[c.category]) grouped[c.category].push(c);
+    else (grouped['其他'] = grouped['其他'] || []).push(c);
+  }
 
   const addAndClose = (key: string) => {
     props.onAdd(key);
-    setSearch(''); // 清掉搜索词，避免残留导致下次按钮误判为无候选
+    setSearch('');
     setOpen(false);
+  };
+
+  const renderItem = (s: PropertySchema) => {
+    const app = checkApplicability(s, props.type, props.elementStyle);
+    return (
+      <button
+        key={s.key}
+        className={"add-prop-item" + (!app.applicable ? " is-disabled" : "")}
+        onClick={() => { if (app.applicable) addAndClose(s.key); }}
+        disabled={!app.applicable}
+        title={!app.applicable ? `暂不可用: ${app.disabledReason}` : s.help ? `${s.label}\n${s.help.content}` : s.label}
+      >
+        <div className="add-prop-item-left">
+          {s.scope ? (
+            <span className="prop-scope" title={s.scope === '父' ? '作用在父容器上，管子元素排布' : '作用在自身/子元素上'}>{s.scope}</span>
+          ) : (
+            <span className="prop-scope-space" />
+          )}
+          <span className="add-prop-item-label">{s.label}</span>
+        </div>
+        <div className="add-prop-item-right">
+          {!app.applicable && <span className="add-prop-disabled-tag" title={app.disabledReason}>不生效</span>}
+          {q && <span className="add-prop-item-cat">{s.category}</span>}
+        </div>
+      </button>
+    );
   };
 
   return (
@@ -79,7 +106,7 @@ export function AddPropertyMenu(props: Props) {
         className="add-prop-trigger"
         onClick={() => setOpen(!open)}
         disabled={baseCandidates.length === 0 && !open}
-        title="添加 CSS 属性"
+        title="添加 CSS 样式属性"
       >
         + 添加属性 {open ? '▴' : '▾'}
       </button>
@@ -93,7 +120,7 @@ export function AddPropertyMenu(props: Props) {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="搜索属性：中文 / English（如：圆角、margin）"
+                placeholder="搜索属性：中文 / CSS 名（如：过渡、圆角、border、wrap）"
               />
               {search && (
                 <button className="add-prop-search-clear" onClick={() => { setSearch(''); searchRef.current?.focus(); }}>×</button>
@@ -104,35 +131,14 @@ export function AddPropertyMenu(props: Props) {
                 <div className="add-prop-empty">没有匹配的属性</div>
               )}
               {q ? (
-                // 搜索态：扁平列表 + 右侧类别小标
-                candidates.map((s) => (
-                  <button
-                    key={s.key}
-                    className="add-prop-item"
-                    onClick={() => addAndClose(s.key)}
-                    title={s.help ? s.help.title : s.label}
-                  >
-                    <span className="add-prop-item-label">{s.label}</span>
-                    <span className="add-prop-item-cat">{s.category}</span>
-                  </button>
-                ))
+                candidates.map((s) => renderItem(s))
               ) : (
-                // 分组态
                 CATEGORY_ORDER.map((cat) => {
-                  if (grouped[cat].length === 0) return null;
+                  if (!grouped[cat] || grouped[cat].length === 0) return null;
                   return (
                     <div key={cat} className="add-prop-group">
                       <div className="add-prop-group-title">{cat}</div>
-                      {grouped[cat].map((s) => (
-                        <button
-                          key={s.key}
-                          className="add-prop-item"
-                          onClick={() => addAndClose(s.key)}
-                          title={s.help ? s.help.title : s.label}
-                        >
-                          {s.label}
-                        </button>
-                      ))}
+                      {grouped[cat].map((s) => renderItem(s))}
                     </div>
                   );
                 })
@@ -143,9 +149,4 @@ export function AddPropertyMenu(props: Props) {
       )}
     </div>
   );
-}
-
-function isApplicableForType(s: PropertySchema, type: ElementType): boolean {
-  if (!s.excludeTypes) return true;
-  return !s.excludeTypes.includes(type);
 }

@@ -1,0 +1,157 @@
+{
+  "id": "tpl-logo-cloud",
+  "type": "section",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-logo-p",
+      "type": "p",
+      "text": "受到全球 1000+ 领先企业的信赖",
+      "children": [],
+      "style": {
+        "textAlign": "center",
+        "fontSize": "14px",
+        "fontWeight": "500",
+        "color": "#9ca3af",
+        "textTransform": "uppercase",
+        "letterSpacing": "2px",
+        "marginBottom": "32px",
+        "marginTop": "0"
+      },
+      "attrs": {
+        "className": "logo-label"
+      }
+    },
+    {
+      "id": "tpl-logo-row",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-logo-item1",
+          "type": "div",
+          "text": "Acme",
+          "children": [],
+          "style": {
+            "fontSize": "22px",
+            "fontWeight": "800",
+            "color": "#d1d5db",
+            "letterSpacing": "-0.5px"
+          },
+          "attrs": {
+            "className": "logo-item"
+          }
+        },
+        {
+          "id": "tpl-logo-item2",
+          "type": "div",
+          "text": "Globex",
+          "children": [],
+          "style": {
+            "fontSize": "22px",
+            "fontWeight": "800",
+            "color": "#d1d5db",
+            "letterSpacing": "-0.5px"
+          },
+          "attrs": {
+            "className": "logo-item"
+          }
+        },
+        {
+          "id": "tpl-logo-item3",
+          "type": "div",
+          "text": "Soylent",
+          "children": [],
+          "style": {
+            "fontSize": "22px",
+            "fontWeight": "800",
+            "color": "#d1d5db",
+            "letterSpacing": "-0.5px"
+          },
+          "attrs": {
+            "className": "logo-item"
+          }
+        },
+        {
+          "id": "tpl-logo-item4",
+          "type": "div",
+          "text": "Initech",
+          "children": [],
+          "style": {
+            "fontSize": "22px",
+            "fontWeight": "800",
+            "color": "#d1d5db",
+            "letterSpacing": "-0.5px"
+          },
+          "attrs": {
+            "className": "logo-item"
+          }
+        },
+        {
+          "id": "tpl-logo-item5",
+          "type": "div",
+          "text": "Umbrella",
+          "children": [],
+          "style": {
+            "fontSize": "22px",
+            "fontWeight": "800",
+            "color": "#d1d5db",
+            "letterSpacing": "-0.5px"
+          },
+          "attrs": {
+            "className": "logo-item"
+          }
+        },
+        {
+          "id": "tpl-logo-item6",
+          "type": "div",
+          "text": "Stark",
+          "children": [],
+          "style": {
+            "fontSize": "22px",
+            "fontWeight": "800",
+            "color": "#d1d5db",
+            "letterSpacing": "-0.5px"
+          },
+          "attrs": {
+            "className": "logo-item"
+          }
+        }
+      ],
+      "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "justifyContent": "center",
+        "flexWrap": "wrap",
+        "gap": "40px"
+      },
+      "attrs": {
+        "className": "logo-row"
+      }
+    }
+  ],
+  "style": {
+    "paddingTop": "48px",
+    "paddingRight": "24px",
+    "paddingBottom": "48px",
+    "paddingLeft": "24px",
+    "backgroundColor": "#ffffff"
+  },
+  "attrs": {
+    "className": "logo-section"
+  },
+  "childStyles": [
+    {
+      "sel": ".logo-label",
+      "css": "text-align: center; font-size: 14px; font-weight: 500; color: #9ca3af; text-transform: uppercase; letter-spacing: 2px; margin: 0 0 32px;"
+    },
+    {
+      "sel": ".logo-item",
+      "css": "font-size: 22px; font-weight: 800; color: #d1d5db; white-space: nowrap;"
+    },
+    {
+      "sel": ".logo-item:hover",
+      "css": "color: #6b7280;"
+    }
+  ]
+}
