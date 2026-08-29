@@ -28,18 +28,23 @@ export const FALLBACK_OPTIONS: Array<{ label: string; value: string }> = [
 
 interface Props {
   elementId: string;
+  pseudo?: string | null;
 }
 
 export function FontFamilyInput(props: Props) {
-  const { elementId } = props;
+  const { elementId, pseudo } = props;
   const scene = useScene((s) => s.scene);
   const beginStyleEdit = useScene((s) => s.beginStyleEdit);
   const endStyleEdit = useScene((s) => s.endStyleEdit);
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
+  const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
 
+  const isPseudo = Boolean(pseudo);
   const node = findNode(scene.root, elementId);
-  const currentValue = (node?.style?.fontFamily as string) ?? '';
+  const currentValue = isPseudo
+    ? ((node?.pseudoStyles?.[pseudo!]?.fontFamily as string) ?? '')
+    : ((node?.style?.fontFamily as string) ?? '');
 
   const [textVal, setTextVal] = useState(currentValue);
   const [customMode, setCustomMode] = useState(false);
@@ -66,7 +71,11 @@ export function FontFamilyInput(props: Props) {
   }, [currentValue]);
 
   const commit = (v: string) => {
-    updateStyle(elementId, { fontFamily: v } as any);
+    if (isPseudo) {
+      updatePseudoStyle(elementId, pseudo!, { fontFamily: v || undefined as any });
+    } else {
+      updateStyle(elementId, { fontFamily: v } as any);
+    }
   };
 
   const onSelectPreset = (val: string) => {

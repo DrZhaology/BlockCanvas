@@ -20,6 +20,7 @@ interface Props {
   unit: string;
   /** 是否允许 auto 占位 */
   allowAuto?: boolean;
+  pseudo?: string | null;
 }
 
 export function NumberUnitInput(props: Props) {
@@ -28,11 +29,14 @@ export function NumberUnitInput(props: Props) {
   const endStyleEdit = useScene((s) => s.endStyleEdit);
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
-  const { elementId, schemaKey, unit: defaultUnit, allowAuto } = props;
+  const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
+  const { elementId, schemaKey, unit: defaultUnit, allowAuto, pseudo } = props;
 
+  const isPseudo = Boolean(pseudo);
   const node = findNode(scene.root, elementId);
-  const style = (node?.style ?? {}) as Record<string, string | undefined>;
-  const value = style[schemaKey] ?? '';
+  const value = isPseudo
+    ? ((node?.pseudoStyles?.[pseudo!]?.[schemaKey] as string) ?? '')
+    : ((node?.style?.[schemaKey] as string) ?? '');
 
   // 解析存储值 → {数字部分, 单位部分}；写不进的当"自定义"透传
   const parsed = parseValue(value);
@@ -48,7 +52,13 @@ export function NumberUnitInput(props: Props) {
     setU(normalizeUnit(p, defaultUnit));
   }, [value]);
 
-  const commit = (v: string) => updateStyle(elementId, { [schemaKey]: v } as any);
+  const commit = (v: string) => {
+    if (isPseudo) {
+      updatePseudoStyle(elementId, pseudo!, { [schemaKey]: v || undefined as any });
+    } else {
+      updateStyle(elementId, { [schemaKey]: v } as any);
+    }
+  };
 
   const units = [...CSS_UNITS, ...(allowAuto ? ['auto'] : []), 'custom'];
 
@@ -59,7 +69,11 @@ export function NumberUnitInput(props: Props) {
       setU(currentUnit);
     }
     setNum(v);
-    updateStyleTransient(elementId, { [schemaKey]: compose(v, currentUnit) } as any);
+    if (isPseudo) {
+      updatePseudoStyle(elementId, pseudo!, { [schemaKey]: compose(v, currentUnit) });
+    } else {
+      updateStyleTransient(elementId, { [schemaKey]: compose(v, currentUnit) } as any);
+    }
   };
 
   const onUnitChange = (nu: string) => {

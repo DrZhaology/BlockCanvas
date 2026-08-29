@@ -1116,7 +1116,7 @@ export const useScene = create<SceneStore>((set) => ({
       const current = node.pseudoStyles[pseudo] ?? {};
       const next = { ...current };
       for (const [k, v] of Object.entries(patch)) {
-        if (v === undefined || v === '') {
+        if (v === undefined) {
           delete next[k];
         } else {
           next[k] = v;

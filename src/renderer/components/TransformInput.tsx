@@ -74,9 +74,10 @@ export function TransformInput({ elementId, pseudo }: Props) {
   const endStyleEdit = useScene((s) => s.endStyleEdit);
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
+  const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
 
-  const node = findNode(scene.root, elementId);
   const isPseudo = Boolean(pseudo);
+  const node = findNode(scene.root, elementId);
   const currentStr = (
     isPseudo
       ? (node?.pseudoStyles?.[pseudo!]?.transform as string)
@@ -103,27 +104,7 @@ export function TransformInput({ elementId, pseudo }: Props) {
 
   const commitValue = (valStr: string) => {
     if (isPseudo) {
-      const nextPs = { ...(node?.pseudoStyles ?? {}) };
-      if (!valStr) {
-        if (nextPs[pseudo!]) {
-          const nextStyle = { ...nextPs[pseudo!] };
-          delete nextStyle.transform;
-          nextPs[pseudo!] = nextStyle;
-        }
-      } else {
-        nextPs[pseudo!] = { ...(nextPs[pseudo!] ?? {}), transform: valStr };
-      }
-      useScene.setState((s) => {
-        const update = (n: any): any => {
-          if (n.id === elementId) return { ...n, pseudoStyles: nextPs };
-          return { ...n, children: n.children.map(update) };
-        };
-        return { scene: { ...s.scene, root: update(s.scene.root) } };
-      });
-      setTimeout(() => {
-        const ts = (window as any).__tabStore;
-        if (ts) ts.getState().markActiveTabDirty(true);
-      }, 50);
+      updatePseudoStyle(elementId, pseudo!, { transform: valStr || undefined as any });
     } else {
       updateStyle(elementId, { transform: valStr || undefined });
     }

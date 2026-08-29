@@ -365,6 +365,7 @@ html[data-bc-dark] .tab-close-btn:hover {
   grid-template-columns: var(--bc-left-width, 230px) 1fr var(--bc-right-width, 320px);
   grid-template-rows: 1fr;
   min-height: 0;
+  transition: grid-template-rows 0.22s cubic-bezier(0.16, 1, 0.3, 1), grid-template-columns 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .workspace[data-layout='bottom'] {
   /* 右下角归属性面板：右列贯穿上下行，左上画布、左下元素面板 */
@@ -1726,6 +1727,46 @@ body.bc-resizing-col, body.bc-resizing-col * { cursor: col-resize !important; us
   cursor: pointer;
 }
 .tpl-search-clear:hover { background: var(--hover); color: var(--danger); }
+
+/* 模板库「口袋」撑开/收拢按钮 */
+.tpl-pocket-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+.tpl-pocket-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--hover-accent);
+}
+.tpl-pocket-btn.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(30, 136, 229, 0.25);
+}
+
+/* 口袋撑开时的网格多列布局适配 */
+.workspace[data-layout='bottom'].pocket-expanded .element-panel.tpl-mode .tpl-grid {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+.workspace:not([data-layout='bottom']).pocket-expanded .element-panel.tpl-mode .tpl-grid {
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+}
 .tpl-group { margin-top: 10px; }
 .tpl-group-inner { padding-left: 12px; margin-top: 4px; }
 .tpl-sub-group { margin-top: 6px; }

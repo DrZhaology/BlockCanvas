@@ -47,6 +47,7 @@ export default function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('personalization');
   const [showAbout, setShowAbout] = useState(false);
   const [_updating, setUpdating] = useState(false);
+  const [pocketExpanded, setPocketExpanded] = useState(false);
   const applyZoom = (fn: (z: number) => number) => setZoom(fn);
 
   useKeyboardShortcuts(setView);
@@ -222,7 +223,13 @@ export default function App() {
       window.dispatchEvent(new CustomEvent('bc:preview'));
     };
 
+    const onSetPocket = (e: Event) => {
+      const v = (e as CustomEvent).detail;
+      setPocketExpanded(typeof v === 'boolean' ? v : (prev) => !prev);
+    };
+
     window.addEventListener('bc:set-layout', onSetLayout);
+    window.addEventListener('bc:set-pocket', onSetPocket);
     window.addEventListener('bc:open-projects', openProjects);
     window.addEventListener('bc:open-settings', () => openSettings());
     window.addEventListener('menu:layout-left', toLeft);
@@ -259,6 +266,7 @@ export default function App() {
 
     return () => {
       window.removeEventListener('bc:set-layout', onSetLayout);
+      window.removeEventListener('bc:set-pocket', onSetPocket);
       window.removeEventListener('bc:open-projects', openProjects);
       window.removeEventListener('bc:open-settings', () => openSettings());
       window.removeEventListener('menu:layout-left', toLeft);
@@ -304,70 +312,81 @@ export default function App() {
             zoom={zoom}
             onZoomChange={setZoom}
           />
-          <div
-            className="workspace"
-            data-layout={layout}
-            style={{
-              '--bc-bottom-height': bottomHeight + 'px',
-              '--bc-right-width': rightWidth + 'px',
-              '--bc-left-width': leftWidth + 'px'
-            } as React.CSSProperties}
-          >
-            <div className="elem-pane-wrap">
-              <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>
-              {layout === 'left' && (
-                <div
-                  className="panel-resizer panel-resizer-left"
-                  onMouseDown={(e) => startResize(e, 'left', setLeftWidth, LEFT_WIDTH_MIN, leftWidth)}
-                >
-                  <div className="panel-resizer-handle" />
-                </div>
-              )}
-            </div>
-            <div className="canvas-area">
-              <ErrorBoundary label="画布">
-                <Canvas
-                  canvasWidth={canvasWidth}
-                  zoom={zoom}
-                  onZoomChange={applyZoom}
-                  onUserResize={(px) => setCanvasWidth(px + 'px')}
-                />
-              </ErrorBoundary>
-              {layout === 'bottom' && (
-                <div
-                  className="panel-resizer panel-resizer-horizontal"
-                  onMouseDown={(e) => startResize(e, 'bottom', setBottomHeight, BOTTOM_HEIGHT_MIN, bottomHeight)}
-                >
-                  <div className="panel-resizer-handle" />
-                </div>
-              )}
-            </div>
-            <div className="right-pane-wrap">
+          {(() => {
+            const effectiveBottomHeight = pocketExpanded
+              ? Math.max(520, Math.round(window.innerHeight * 0.65))
+              : bottomHeight;
+            const effectiveLeftWidth = pocketExpanded
+              ? Math.max(580, Math.round(window.innerWidth * 0.45))
+              : leftWidth;
+
+            return (
               <div
-                className="panel-resizer panel-resizer-vertical"
-                onMouseDown={(e) => startResize(e, 'right', setRightWidth, RIGHT_WIDTH_MIN, rightWidth)}
+                className={"workspace" + (pocketExpanded ? " pocket-expanded" : "")}
+                data-layout={layout}
+                style={{
+                  '--bc-bottom-height': effectiveBottomHeight + 'px',
+                  '--bc-right-width': rightWidth + 'px',
+                  '--bc-left-width': effectiveLeftWidth + 'px'
+                } as React.CSSProperties}
               >
-                <div className="panel-resizer-handle" />
-              </div>
-              <div className="right-pane">
-                <div className="tab-bar">
-                  <button
-                    className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
-                    onClick={() => setRightTab('layers')}
-                  >图层</button>
-                  <button
-                    className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
-                    onClick={() => setRightTab('inspector')}
-                  >属性</button>
+                <div className="elem-pane-wrap">
+                  <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>
+                  {layout === 'left' && (
+                    <div
+                      className="panel-resizer panel-resizer-left"
+                      onMouseDown={(e) => startResize(e, 'left', setLeftWidth, LEFT_WIDTH_MIN, leftWidth)}
+                    >
+                      <div className="panel-resizer-handle" />
+                    </div>
+                  )}
                 </div>
-                <div className="tab-body">
-                  <ErrorBoundary label="右侧面板">
-                    {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
+                <div className="canvas-area">
+                  <ErrorBoundary label="画布">
+                    <Canvas
+                      canvasWidth={canvasWidth}
+                      zoom={zoom}
+                      onZoomChange={applyZoom}
+                      onUserResize={(px) => setCanvasWidth(px + 'px')}
+                    />
                   </ErrorBoundary>
+                  {layout === 'bottom' && (
+                    <div
+                      className="panel-resizer panel-resizer-horizontal"
+                      onMouseDown={(e) => startResize(e, 'bottom', setBottomHeight, BOTTOM_HEIGHT_MIN, bottomHeight)}
+                    >
+                      <div className="panel-resizer-handle" />
+                    </div>
+                  )}
+                </div>
+                <div className="right-pane-wrap">
+                  <div
+                    className="panel-resizer panel-resizer-vertical"
+                    onMouseDown={(e) => startResize(e, 'right', setRightWidth, RIGHT_WIDTH_MIN, rightWidth)}
+                  >
+                    <div className="panel-resizer-handle" />
+                  </div>
+                  <div className="right-pane">
+                    <div className="tab-bar">
+                      <button
+                        className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
+                        onClick={() => setRightTab('layers')}
+                      >图层</button>
+                      <button
+                        className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
+                        onClick={() => setRightTab('inspector')}
+                      >属性</button>
+                    </div>
+                    <div className="tab-body">
+                      <ErrorBoundary label="右侧面板">
+                        {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
+                      </ErrorBoundary>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
+            );
+          })()}
         </>
       )}
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />

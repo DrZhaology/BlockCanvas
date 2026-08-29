@@ -236,19 +236,40 @@ export function ColorField(props: ColorFieldProps) {
 // ============ 元素属性绑定：背景色 / 文字颜色 / 边框颜色 ============
 interface Props {
   elementId: string;
-  styleKey: 'backgroundColor' | 'color' | 'borderColor';
+  styleKey: 'backgroundColor' | 'color' | 'borderColor' | string;
   fallback?: string;
+  pseudo?: string | null;
 }
 
 export function ColorPicker(props: Props) {
-  const { elementId, styleKey, fallback = '#ffffff' } = props;
+  const { elementId, styleKey, fallback = '#ffffff', pseudo } = props;
   const scene = useScene((s) => s.scene);
   const beginStyleEdit = useScene((s) => s.beginStyleEdit);
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
+  const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
 
+  const isPseudo = Boolean(pseudo);
   const node = findInTree(scene.root, elementId);
-  const currentValue = (node?.style?.[styleKey] as string) ?? '';
+  const currentValue = isPseudo
+    ? ((node?.pseudoStyles?.[pseudo!]?.[styleKey] as string) ?? '')
+    : ((node?.style?.[styleKey] as string) ?? '');
+
+  const commit = (v: string) => {
+    if (isPseudo) {
+      updatePseudoStyle(elementId, pseudo!, { [styleKey]: v });
+    } else {
+      updateStyle(elementId, { [styleKey]: v } as any);
+    }
+  };
+
+  const onChangeVal = (v: string) => {
+    if (isPseudo) {
+      updatePseudoStyle(elementId, pseudo!, { [styleKey]: v });
+    } else {
+      updateStyleTransient(elementId, { [styleKey]: v } as any);
+    }
+  };
 
   return (
     <div className="color-picker-row">
@@ -256,10 +277,10 @@ export function ColorPicker(props: Props) {
         value={currentValue}
         fallback={fallback}
         onInputFocus={() => { beginStyleEdit(); }}
-        onChange={(v) => updateStyleTransient(elementId, { [styleKey]: v } as any)}
-        onInputBlur={(v) => updateStyle(elementId, { [styleKey]: v } as any)}
+        onChange={onChangeVal}
+        onInputBlur={commit}
         onModalOpen={() => { beginStyleEdit(); }}
-        onModalClose={(v) => updateStyle(elementId, { [styleKey]: v } as any)}
+        onModalClose={commit}
       />
     </div>
   );

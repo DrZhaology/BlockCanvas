@@ -158,6 +158,13 @@ export function ElementPanel() {
     };
   }, []);
 
+  // 切回「元素」页签时自动收拢口袋
+  useEffect(() => {
+    if (tab !== 'templates') {
+      window.dispatchEvent(new CustomEvent('bc:set-pocket', { detail: false }));
+    }
+  }, [tab]);
+
   const onInsertTemplate = async (resId: string, tplId: string) => {
     setBusy(true);
     try {
@@ -331,6 +338,22 @@ function TemplateLibrary(props: {
   });
   const [search, setSearch] = useState('');
   const [preview, setPreview] = useState<{ resId: string; tpl: { id: string; name: string; description: string; category?: string } } | null>(null);
+  const [pocketExpanded, setPocketExpanded] = useState(false);
+
+  const togglePocket = () => {
+    const next = !pocketExpanded;
+    setPocketExpanded(next);
+    window.dispatchEvent(new CustomEvent('bc:set-pocket', { detail: next }));
+  };
+
+  useEffect(() => {
+    const onPocket = (e: Event) => {
+      const v = (e as CustomEvent).detail;
+      if (typeof v === 'boolean') setPocketExpanded(v);
+    };
+    window.addEventListener('bc:set-pocket', onPocket);
+    return () => window.removeEventListener('bc:set-pocket', onPocket);
+  }, []);
 
   const toggleCollapsed = (key: string) => {
     setCollapsed((prev) => {
@@ -362,14 +385,23 @@ function TemplateLibrary(props: {
 
   return (
     <>
-      <div className="panel-title">
-        模板库
-        <span className="group-sub">{scan ? `共 ${total} 个` : '扫描中…'}</span>
+      <div className="panel-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          模板库
+          <span className="group-sub">{scan ? `共 ${total} 个` : '扫描中…'}</span>
+        </div>
+        <button
+          className={"tpl-pocket-btn" + (pocketExpanded ? " active" : "")}
+          onClick={togglePocket}
+          title={pocketExpanded ? "收拢面板（恢复默认尺寸）" : "👝 撑开口袋：大面积展开面板，一次性轻松浏览全部模板"}
+        >
+          {pocketExpanded ? "👝 收拢口袋" : "👝 撑开口袋"}
+        </button>
       </div>
       <div className="tpl-search-row">
         <input
           className="tpl-search-input"
-          placeholder="搜索模板名称/描述/资源包…"
+          placeholder="搜索模板名称/描述/资源包/分类…"
           value={search}
           spellCheck={false}
           onChange={(e) => setSearch(e.target.value)}

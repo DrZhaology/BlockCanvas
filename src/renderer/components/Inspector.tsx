@@ -696,6 +696,22 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
                           const patch: Record<string, string> = {};
                           if ((item.input === 'box4' || item.input === 'trbl') && item.sides) {
                             for (const s of item.sides) patch[s.key] = '';
+                          } else if (item.input === 'transform') {
+                            patch[item.key] = 'translateY(-4px)';
+                          } else if (item.input === 'shadow') {
+                            patch[item.key] = '0 8px 24px rgba(0, 0, 0, 0.12)';
+                          } else if (item.input === 'textShadow') {
+                            patch[item.key] = '0 2px 4px rgba(0, 0, 0, 0.3)';
+                          } else if (item.input === 'opacity') {
+                            patch[item.key] = '0.8';
+                          } else if (item.input === 'lineHeight') {
+                            patch[item.key] = '1.6';
+                          } else if (item.input === 'color') {
+                            patch[item.key] = (selected.style as any)?.[item.key] || '#1e88e5';
+                          } else if (item.input === 'select' && item.options && item.options.length > 0) {
+                            patch[item.key] = item.options[0];
+                          } else if (item.input === 'number') {
+                            patch[item.key] = (selected.style as any)?.[item.key] || (item.unit ? '16' + item.unit : '16');
                           } else {
                             patch[item.key] = '';
                           }
@@ -744,17 +760,34 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
                                 <OpacityInput elementId={elementId} pseudo={activePseudo} />
                               )}
                               {item.input === 'lineHeight' && (
-                                <LineHeightInput elementId={elementId} />
+                                <LineHeightInput elementId={elementId} pseudo={activePseudo} />
+                              )}
+                              {item.input === 'font' && (
+                                <FontFamilyInput elementId={elementId} pseudo={activePseudo} />
                               )}
                               {item.input === 'color' && (
-                                <ColorField
+                                <ColorPicker
+                                  elementId={elementId}
+                                  styleKey={key}
+                                  fallback={item.placeholder}
+                                  pseudo={activePseudo}
+                                />
+                              )}
+                              {item.input === 'number' && item.unit && (
+                                <NumberUnitInput
+                                  elementId={elementId}
+                                  schemaKey={key}
+                                  unit={item.unit}
+                                  allowAuto={item.allowAuto}
+                                  pseudo={activePseudo}
+                                />
+                              )}
+                              {item.input === 'number' && !item.unit && (
+                                <input
+                                  type="number"
+                                  className="prop-input"
                                   value={v}
-                                  fallback="#ffffff"
-                                  onInputBlur={(nv) => onVal(nv || '')}
-                                  onChange={onVal}
-                                  onInputFocus={() => {}}
-                                  onModalOpen={() => {}}
-                                  onModalClose={(nv) => onVal(nv)}
+                                  onChange={(e) => onVal(e.target.value)}
                                 />
                               )}
                               {item.input === 'select' && item.options && (
@@ -762,13 +795,12 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
                                   {item.options.map((opt) => <option key={opt} value={opt}>{item.optionLabels?.[opt] ?? opt}</option>)}
                                 </select>
                               )}
-                              {(item.input === 'box4' || item.input === 'trbl') && item.sides ? (
-                                <input className="prop-input" value={v} onChange={(e) => onVal(e.target.value)} placeholder="例：8px 4px" />
-                              ) : item.input === 'font' ? (
-                                <input className="prop-input" value={v} onChange={(e) => onVal(e.target.value)} placeholder="字体族" />
-                              ) : !['transform', 'shadow', 'textShadow', 'opacity', 'lineHeight', 'color', 'select'].includes(item.input) ? (
-                                <input className="prop-input" value={v} onChange={(e) => onVal(e.target.value)} />
-                              ) : null}
+                              {(item.input === 'box4' || item.input === 'trbl') && (
+                                <input className="prop-input" value={v} onChange={(e) => onVal(e.target.value)} placeholder={item.placeholder || '例：8px 16px'} />
+                              )}
+                              {item.input === 'text' && (
+                                <input className="prop-input" value={v} onChange={(e) => onVal(e.target.value)} placeholder={item.placeholder} />
+                              )}
                             </div>
                           </div>
                         );

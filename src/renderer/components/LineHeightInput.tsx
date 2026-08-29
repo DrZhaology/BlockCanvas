@@ -7,17 +7,22 @@ import { useScene, findNode } from '@store/sceneStore';
 
 interface Props {
   elementId: string;
+  pseudo?: string | null;
 }
 
-export function LineHeightInput({ elementId }: Props) {
+export function LineHeightInput({ elementId, pseudo }: Props) {
   const scene = useScene((s) => s.scene);
   const beginStyleEdit = useScene((s) => s.beginStyleEdit);
   const endStyleEdit = useScene((s) => s.endStyleEdit);
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
+  const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
 
+  const isPseudo = Boolean(pseudo);
   const node = findNode(scene.root, elementId);
-  const currentStr = (node?.style?.lineHeight as string) ?? '';
+  const currentStr = isPseudo
+    ? ((node?.pseudoStyles?.[pseudo!]?.lineHeight as string) ?? '')
+    : ((node?.style?.lineHeight as string) ?? '');
   const currentNum = parseFloat(currentStr);
 
   const [val, setVal] = useState(Number.isNaN(currentNum) ? 1.6 : currentNum);
@@ -33,11 +38,16 @@ export function LineHeightInput({ elementId }: Props) {
   const apply = (v: number, commit = false) => {
     setVal(v);
     const str = String(v);
-    if (commit) {
-      updateStyle(elementId, { lineHeight: str || undefined });
-      endStyleEdit();
+    if (isPseudo) {
+      updatePseudoStyle(elementId, pseudo!, { lineHeight: (str || undefined) as any });
+      if (commit) endStyleEdit();
     } else {
-      updateStyleTransient(elementId, { lineHeight: str || undefined });
+      if (commit) {
+        updateStyle(elementId, { lineHeight: str || undefined });
+        endStyleEdit();
+      } else {
+        updateStyleTransient(elementId, { lineHeight: str || undefined });
+      }
     }
   };
 
