@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useScene, findNode } from '@store/sceneStore';
-import { TEXT_TAGS, SELF_CLOSING_TAGS } from '@lib/types';
+import { TEXT_TAGS, SELF_CLOSING_TAGS, BLOCK_LEVEL_TAGS } from '@lib/types';
 import type { ElementType, SceneElement, SceneGraph } from '@lib/types';
 import { SCHEMA, ATTRS_SCHEMA, DEFAULT_VISIBLE_PROPS,
   getSchemaItem, isApplicable, hasStyleValue, applyUnit, UNIT_HELP_TEXT
@@ -450,8 +450,17 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
     const patch: Record<string, string> = {};
     if ((item.input === 'box4' || item.input === 'trbl') && item.sides) {
       for (const s of item.sides) patch[s.key] = '';
+    } else if (item.input === 'number' && item.unit) {
+      patch[item.key] = '0' + item.unit;
     } else {
       patch[item.key] = '';
+    }
+    // 块级元素：首次添加任何样式属性时，自动确保 display=block（兼容老旧浏览器）
+    if (BLOCK_LEVEL_TAGS.has(elementType)) {
+      const curDisplay = (selected.style as any)?.display;
+      if (!curDisplay) {
+        patch.display = 'block';
+      }
     }
     updateStyle(elementId, patch);
     addVisibleProp(elementId, key);

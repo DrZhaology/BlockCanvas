@@ -16,6 +16,8 @@ export type ElementType =
   | 'h2'
   | 'h3'
   | 'h4'
+  | 'h5'
+  | 'h6'
   | 'p'
   | 'span'
   | 'strong'
@@ -42,7 +44,8 @@ export type ElementType =
   | 'figcaption'
   | 'hr'
   | 'br'
-  | 'form';
+  | 'form'
+  | 'pre';
 
 // 自闭合元素：无 children，渲染与导出都需特殊处理（Canvas.tsx 和 exporter.ts 共用）
 export const SELF_CLOSING_TAGS: ReadonlySet<ElementType> = new Set(['img', 'input', 'hr', 'br']);
@@ -55,6 +58,14 @@ export const TEXT_ONLY_TAGS: ReadonlySet<ElementType> = new Set(['textarea']);
 export const CONTAINER_TAGS: ReadonlySet<ElementType> = new Set([
   'div', 'section', 'header', 'nav', 'footer', 'main', 'article', 'aside',
   'figure', 'blockquote', 'ul', 'ol', 'li', 'table', 'tr', 'th', 'td', 'form'
+]);
+
+// 默认块级容器（block 显示模式）：这些元素在 HTML 规范中默认就是 block 级
+// 用于属性面板：首次添加样式时自动注入 display:block，消除行内样式显示问题
+export const BLOCK_LEVEL_TAGS: ReadonlySet<ElementType> = new Set([
+  'div', 'section', 'header', 'nav', 'footer', 'main', 'article', 'aside',
+  'figure', 'blockquote', 'ul', 'ol', 'li', 'table', 'tr', 'th', 'td', 'form',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'hr', 'pre'
 ]);
 
 // 文本型元素：可有 text 内容，且在面板里允许编辑文字
