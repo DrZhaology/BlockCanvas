@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useScene, findNode } from '@store/sceneStore';
-import { TEXT_TAGS, SELF_CLOSING_TAGS, BLOCK_LEVEL_TAGS } from '@lib/types';
+import { TEXT_TAGS, SELF_CLOSING_TAGS } from '@lib/types';
 import type { ElementType, SceneElement, SceneGraph } from '@lib/types';
 import { SCHEMA, ATTRS_SCHEMA, DEFAULT_VISIBLE_PROPS,
   getSchemaItem, isApplicable, hasStyleValue, applyUnit, UNIT_HELP_TEXT
@@ -498,13 +498,6 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
     } else {
       patch[item.key] = '';
     }
-    // 块级元素：首次添加任何样式属性时，自动确保 display=block（兼容老旧浏览器）
-    if (BLOCK_LEVEL_TAGS.has(elementType)) {
-      const curDisplay = (selected.style as any)?.display;
-      if (!curDisplay) {
-        patch.display = 'block';
-      }
-    }
     updateStyle(elementId, patch);
     addVisibleProp(elementId, key);
     onJustAdded(key);
@@ -527,12 +520,14 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   const clsText = (selected.attrs?.className ?? '').trim();
   const hasId = Boolean((selected.attrs?.id ?? '').trim());
   const idText = (selected.attrs?.id ?? '').trim();
+  const isNamed = hasRel || hasCls || hasId;
   const stylePropCount = Object.keys(selected.style || {}).filter((k) => selected.style[k] !== undefined && selected.style[k] !== '').length;
-  const hasInlineStyle = stylePropCount > 0;
+  // 仅在无任何类名、无关系选择器、无ID且有自定义样式时，才标注为未命名的行内样式
+  const hasInlineStyle = !isNamed && stylePropCount > 0;
 
   return (
     <>
-      {/* 顶部元素信息栏（自适应展示 标签 + 关系选择器 / 类名 / ID / 行内样式） */}
+      {/* 顶部元素信息栏（自适应展示 标签 + 关系选择器 / 类名 / ID / 独立样式） */}
       <div className="panel-title-header">
         <div className="panel-title-left">
           <span className="panel-title-prefix">属性 ·</span>
@@ -542,7 +537,11 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
           {hasRel && <span className="panel-title-badge is-rel" title={`关系选择器: ${relText}`}>⚡ {relText}</span>}
           {hasCls && <span className="panel-title-badge is-cls" title={`类名: .${clsText.split(/\s+/).join(' .')}`}>.{clsText.split(/\s+/).join(' .')}</span>}
           {hasId && <span className="panel-title-badge is-id" title={`ID: #${idText}`}>#{idText}</span>}
-          {hasInlineStyle && <span className="panel-title-badge is-inline" title={`设置了 ${stylePropCount} 个样式属性`}>行内样式</span>}
+          {hasInlineStyle && (
+            <span className="panel-title-badge is-inline" title={`未设置类名或选择器，当前包含 ${stylePropCount} 项独立样式`}>
+              独立样式
+            </span>
+          )}
         </div>
       </div>
 
