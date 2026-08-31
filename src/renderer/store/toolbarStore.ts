@@ -41,6 +41,7 @@ interface ToolbarState {
   removeItem: (id: string) => void;
   setVisible: (id: string, on: boolean) => void;
   setOrder: (ids: string[]) => void;
+  reset: () => void;
 }
 
 const LS_VISIBLE = 'bc-toolbar-visible';
@@ -95,6 +96,15 @@ export const useToolbar = create<ToolbarState>((set) => ({
       const clean = ids.filter((id) => st.items.some((x) => x.id === id));
       save(LS_ORDER, clean);
       return { order: clean };
+    }),
+
+  reset: () =>
+    set(() => {
+      try {
+        localStorage.removeItem(LS_VISIBLE);
+        localStorage.removeItem(LS_ORDER);
+      } catch {}
+      return { visible: {}, order: [] };
     })
 }));
 

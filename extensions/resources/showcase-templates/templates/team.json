@@ -1,0 +1,382 @@
+{
+  "id": "tpl-team",
+  "type": "section",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-team-h2",
+      "type": "h2",
+      "text": "关于我们",
+      "children": [],
+      "style": {},
+      "attrs": {
+        "className": "team-title"
+      }
+    },
+    {
+      "id": "tpl-team-p",
+      "type": "p",
+      "text": "一群热爱产品的人，聚在一起做点不一样的东西。",
+      "children": [],
+      "style": {},
+      "attrs": {
+        "className": "team-subtitle"
+      }
+    },
+    {
+      "id": "tpl-team-grid",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-team-m1",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-team-img1",
+              "type": "div",
+              "text": "陈",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "team-avatar"
+              }
+            },
+            {
+              "id": "tpl-team-name1",
+              "type": "h3",
+              "text": "陈逸飞",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "team-name"
+              }
+            },
+            {
+              "id": "tpl-team-role1",
+              "type": "p",
+              "text": "创始人 & CEO",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "team-role"
+              }
+            },
+            {
+              "id": "tpl-team-bio1",
+              "type": "p",
+              "text": "前大厂技术负责人，相信低代码是面向未来的生产力工具。",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "team-bio"
+              }
+            },
+            {
+              "id": "tpl-team-social1",
+              "type": "div",
+              "text": "",
+              "children": [
+                {
+                  "id": "tpl-team-tw1",
+                  "type": "a",
+                  "text": "Twitter",
+                  "children": [],
+                  "style": {},
+                  "attrs": {
+                    "href": "#",
+                    "className": "team-social-link"
+                  }
+                },
+                {
+                  "id": "tpl-team-gh1",
+                  "type": "a",
+                  "text": "GitHub",
+                  "children": [],
+                  "style": {},
+                  "attrs": {
+                    "href": "#",
+                    "className": "team-social-link"
+                  }
+                }
+              ],
+              "style": {
+                "display": "flex",
+                "justifyContent": "center"
+              },
+              "attrs": {
+                "className": "team-socials"
+              }
+            }
+          ],
+          "style": {
+            "padding": "24px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.06)"
+          },
+          "attrs": {
+            "className": "team-card"
+          }
+        },
+        {
+          "id": "tpl-team-m2",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-team-img2",
+              "type": "div",
+              "text": "林",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "team-avatar"
+              }
+            },
+            {
+              "id": "tpl-team-name2",
+              "type": "h3",
+              "text": "林小棠",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "team-name"
+              }
+            },
+            {
+              "id": "tpl-team-role2",
+              "type": "p",
+              "text": "设计总监",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "team-role"
+              }
+            },
+            {
+              "id": "tpl-team-bio2",
+              "type": "p",
+              "text": "做过十年 UI/UX，现在把经验变成工具让每个人都能做设计。",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "team-bio"
+              }
+            },
+            {
+              "id": "tpl-team-social2",
+              "type": "div",
+              "text": "",
+              "children": [
+                {
+                  "id": "tpl-team-tw2",
+                  "type": "a",
+                  "text": "Twitter",
+                  "children": [],
+                  "style": {},
+                  "attrs": {
+                    "href": "#",
+                    "className": "team-social-link"
+                  }
+                },
+                {
+                  "id": "tpl-team-dribbble",
+                  "type": "a",
+                  "text": "Dribbble",
+                  "children": [],
+                  "style": {},
+                  "attrs": {
+                    "href": "#",
+                    "className": "team-social-link"
+                  }
+                }
+              ],
+              "style": {
+                "display": "flex",
+                "justifyContent": "center"
+              },
+              "attrs": {
+                "className": "team-socials"
+              }
+            }
+          ],
+          "style": {
+            "padding": "24px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.06)"
+          },
+          "attrs": {
+            "className": "team-card"
+          }
+        },
+        {
+          "id": "tpl-team-m3",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-team-img3",
+              "type": "div",
+              "text": "赵",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "team-avatar"
+              }
+            },
+            {
+              "id": "tpl-team-name3",
+              "type": "h3",
+              "text": "赵子轩",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "team-name"
+              }
+            },
+            {
+              "id": "tpl-team-role3",
+              "type": "p",
+              "text": "技术合伙人",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "team-role"
+              }
+            },
+            {
+              "id": "tpl-team-bio3",
+              "type": "p",
+              "text": "全栈工程师，把复杂的工程封装成简单的拖拽体验。",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "team-bio"
+              }
+            },
+            {
+              "id": "tpl-team-social3",
+              "type": "div",
+              "text": "",
+              "children": [
+                {
+                  "id": "tpl-team-gh2",
+                  "type": "a",
+                  "text": "GitHub",
+                  "children": [],
+                  "style": {},
+                  "attrs": {
+                    "href": "#",
+                    "className": "team-social-link"
+                  }
+                },
+                {
+                  "id": "tpl-team-li3",
+                  "type": "a",
+                  "text": "LinkedIn",
+                  "children": [],
+                  "style": {},
+                  "attrs": {
+                    "href": "#",
+                    "className": "team-social-link"
+                  }
+                }
+              ],
+              "style": {
+                "display": "flex",
+                "justifyContent": "center"
+              },
+              "attrs": {
+                "className": "team-socials"
+              }
+            }
+          ],
+          "style": {
+            "padding": "24px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.06)"
+          },
+          "attrs": {
+            "className": "team-card"
+          }
+        }
+      ],
+      "style": {
+        "display": "flex",
+        "gap": "20px",
+        "flexWrap": "wrap",
+        "justifyContent": "center"
+      },
+      "attrs": {
+        "className": "team-grid"
+      }
+    }
+  ],
+  "style": {
+    "paddingTop": "64px",
+    "paddingRight": "24px",
+    "paddingBottom": "64px",
+    "paddingLeft": "24px",
+    "backgroundColor": "#f9fafb"
+  },
+  "attrs": {
+    "className": "team-section"
+  },
+  "childStyles": [
+    {
+      "sel": ".team-title",
+      "css": "margin: 0 auto 8px; font-size: 32px; font-weight: 700; color: #111827; text-align: center;"
+    },
+    {
+      "sel": ".team-subtitle",
+      "css": "margin: 0 auto 48px; font-size: 16px; color: #6b7280; text-align: center; line-height: 1.6;"
+    },
+    {
+      "sel": ".team-card",
+      "css": "flex: 1 1 260px; max-width: 300px; box-sizing: border-box; text-align: center;"
+    },
+    {
+      "sel": ".team-avatar",
+      "css": "width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; margin: 0 auto 16px;"
+    },
+    {
+      "sel": ".team-card:nth-child(1) .team-avatar",
+      "css": "background-color: #bfdbfe; color: #1e40af;"
+    },
+    {
+      "sel": ".team-card:nth-child(2) .team-avatar",
+      "css": "background-color: #fce7f3; color: #be185d;"
+    },
+    {
+      "sel": ".team-card:nth-child(3) .team-avatar",
+      "css": "background-color: #d1fae5; color: #047857;"
+    },
+    {
+      "sel": ".team-name",
+      "css": "font-size: 18px; font-weight: 600; color: #111827; margin: 0 0 4px;"
+    },
+    {
+      "sel": ".team-role",
+      "css": "font-size: 14px; font-weight: 500; margin: 0 0 12px;"
+    },
+    {
+      "sel": ".team-bio",
+      "css": "font-size: 13px; line-height: 1.7; color: #6b7280; margin: 0 0 16px;"
+    },
+    {
+      "sel": ".team-social-link",
+      "css": "font-size: 13px; color: #6b7280; text-decoration: none; margin-right: 12px;"
+    },
+    {
+      "sel": ".team-social-link:hover",
+      "css": "color: #1e88e5; text-decoration: underline;"
+    }
+  ]
+}

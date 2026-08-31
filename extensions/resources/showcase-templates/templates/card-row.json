@@ -13,13 +13,7 @@
           "type": "h3",
           "text": "只点不改代码",
           "children": [],
-          "style": {
-            "marginTop": "0px",
-            "marginBottom": "8px",
-            "fontSize": "18px",
-            "fontWeight": "bold",
-            "color": "#111827"
-          },
+          "style": {},
           "attrs": {
             "className": "card-title"
           }
@@ -29,13 +23,7 @@
           "type": "p",
           "text": "每个按钮、每个框都对应一个能看懂的选项，改完立刻在画布上看到结果。",
           "children": [],
-          "style": {
-            "marginTop": "0px",
-            "marginBottom": "0px",
-            "lineHeight": "1.7",
-            "color": "#6b7280",
-            "fontSize": "14px"
-          },
+          "style": {},
           "attrs": {
             "className": "card-text"
           }
@@ -69,13 +57,7 @@
           "type": "h3",
           "text": "样式自动复用",
           "children": [],
-          "style": {
-            "marginTop": "0px",
-            "marginBottom": "8px",
-            "fontSize": "18px",
-            "fontWeight": "bold",
-            "color": "#111827"
-          },
+          "style": {},
           "attrs": {
             "className": "card-title"
           }
@@ -83,15 +65,9 @@
         {
           "id": "tpl-c2-p",
           "type": "p",
-          "text": "相同的样式会自动合并成一条规则，导出文件又小又整洁，还能用全局 CSS 覆盖。",
+          "text": "标题和正文的公共样式写在容器的「子元素样式」里，导出成 .cards-row .card-title 这样的关系选择器。",
           "children": [],
-          "style": {
-            "marginTop": "0px",
-            "marginBottom": "0px",
-            "lineHeight": "1.7",
-            "color": "#6b7280",
-            "fontSize": "14px"
-          },
+          "style": {},
           "attrs": {
             "className": "card-text"
           }
@@ -125,13 +101,7 @@
           "type": "h3",
           "text": "立即可预览",
           "children": [],
-          "style": {
-            "marginTop": "0px",
-            "marginBottom": "8px",
-            "fontSize": "18px",
-            "fontWeight": "bold",
-            "color": "#111827"
-          },
+          "style": {},
           "attrs": {
             "className": "card-title"
           }
@@ -141,13 +111,7 @@
           "type": "p",
           "text": "按 Ctrl+P 就能把当前页面在浏览器里打开，所见即所得，随时检查效果。",
           "children": [],
-          "style": {
-            "marginTop": "0px",
-            "marginBottom": "0px",
-            "lineHeight": "1.7",
-            "color": "#6b7280",
-            "fontSize": "14px"
-          },
+          "style": {},
           "attrs": {
             "className": "card-text"
           }
@@ -173,14 +137,26 @@
     }
   ],
   "style": {
-    "backgroundColor": "rgba(0,0,0,0)",
     "minHeight": "60px",
     "boxSizing": "border-box",
     "display": "flex",
-    "justifyContent": "space-between",
     "gap": "16px"
   },
   "attrs": {
     "className": "cards-row"
-  }
+  },
+  "childStyles": [
+    {
+      "sel": ".card",
+      "css": "flex: 1 1 0px; box-sizing: border-box;"
+    },
+    {
+      "sel": ".card-title",
+      "css": "margin: 0 0 8px; font-size: 18px; font-weight: bold; color: #111827;"
+    },
+    {
+      "sel": ".card-text",
+      "css": "margin: 0; line-height: 1.7; color: #6b7280; font-size: 14px;"
+    }
+  ]
 }

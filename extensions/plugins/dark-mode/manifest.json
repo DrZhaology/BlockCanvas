@@ -2,8 +2,8 @@
   "id": "dark-mode",
   "type": "plugin",
   "name": "深色模式",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "BlockCanvas",
-  "description": "把编辑器界面切成深色观感，默认跟随系统深色/浅色，也可手动切换。纯插件实现，不改动程序源码。",
+  "description": "把编辑器界面切成深色观感，默认跟随系统深色/浅色，也可手动切换；切换带 0.3s 平滑过渡。纯插件实现，不改动程序源码。",
   "main": "index.js"
 }

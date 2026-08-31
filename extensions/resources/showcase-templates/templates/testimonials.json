@@ -1,0 +1,477 @@
+{
+  "id": "tpl-testimonials",
+  "type": "section",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-testi-h2",
+      "type": "h2",
+      "text": "用户好评",
+      "children": [],
+      "style": {
+        "textAlign": "center",
+        "fontSize": "32px",
+        "fontWeight": "700",
+        "color": "#111827",
+        "marginTop": "0",
+        "marginBottom": "8px"
+      },
+      "attrs": {
+        "className": "testi-title"
+      }
+    },
+    {
+      "id": "tpl-testi-p",
+      "type": "p",
+      "text": "听听他们怎么说",
+      "children": [],
+      "style": {
+        "textAlign": "center",
+        "fontSize": "16px",
+        "color": "#6b7280",
+        "marginTop": "0",
+        "marginBottom": "48px"
+      },
+      "attrs": {
+        "className": "testi-subtitle"
+      }
+    },
+    {
+      "id": "tpl-testi-grid",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-testi-c1",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-testi-stars1",
+              "type": "p",
+              "text": "★★★★★",
+              "children": [],
+              "style": {
+                "fontSize": "16px",
+                "color": "#f59e0b",
+                "letterSpacing": "2px",
+                "marginBottom": "12px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "testi-stars"
+              }
+            },
+            {
+              "id": "tpl-testi-quote1",
+              "type": "p",
+              "text": "用 BlockCanvas 做landing page效率翻了三倍，拖拖拽拽就能出专业效果，再也不用跟设计师撕逼了。",
+              "children": [],
+              "style": {
+                "fontSize": "15px",
+                "lineHeight": "1.7",
+                "color": "#374151",
+                "marginBottom": "20px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "testi-quote"
+              }
+            },
+            {
+              "id": "tpl-testi-author1",
+              "type": "div",
+              "text": "",
+              "children": [
+                {
+                  "id": "tpl-testi-avatar1",
+                  "type": "div",
+                  "text": "",
+                  "children": [],
+                  "style": {
+                    "width": "40px",
+                    "height": "40px",
+                    "borderRadius": "50%",
+                    "backgroundColor": "#dbeafe",
+                    "display": "inline-flex",
+                    "alignItems": "center",
+                    "justifyContent": "center",
+                    "fontSize": "18px",
+                    "fontWeight": "700",
+                    "color": "#1e88e5"
+                  },
+                  "attrs": {
+                    "className": "testi-avatar"
+                  }
+                },
+                {
+                  "id": "tpl-testi-info1",
+                  "type": "div",
+                  "text": "",
+                  "children": [
+                    {
+                      "id": "tpl-testi-name1",
+                      "type": "p",
+                      "text": "张明远",
+                      "children": [],
+                      "style": {
+                        "fontSize": "14px",
+                        "fontWeight": "600",
+                        "color": "#111827",
+                        "marginBottom": "2px",
+                        "marginTop": "0"
+                      },
+                      "attrs": {
+                        "className": "testi-name"
+                      }
+                    },
+                    {
+                      "id": "tpl-testi-role1",
+                      "type": "p",
+                      "text": "独立开发者",
+                      "children": [],
+                      "style": {
+                        "fontSize": "13px",
+                        "color": "#6b7280",
+                        "marginBottom": "0",
+                        "marginTop": "0"
+                      },
+                      "attrs": {
+                        "className": "testi-role"
+                      }
+                    }
+                  ],
+                  "style": {
+                    "display": "flex",
+                    "flexDirection": "column",
+                    "marginLeft": "12px"
+                  }
+                }
+              ],
+              "style": {
+                "display": "flex",
+                "alignItems": "center"
+              },
+              "attrs": {
+                "className": "testi-author"
+              }
+            }
+          ],
+          "style": {
+            "padding": "24px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.06)"
+          },
+          "attrs": {
+            "className": "testi-card"
+          }
+        },
+        {
+          "id": "tpl-testi-c2",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-testi-stars2",
+              "type": "p",
+              "text": "★★★★★",
+              "children": [],
+              "style": {
+                "fontSize": "16px",
+                "color": "#f59e0b",
+                "letterSpacing": "2px",
+                "marginBottom": "12px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "testi-stars"
+              }
+            },
+            {
+              "id": "tpl-testi-quote2",
+              "type": "p",
+              "text": "以前写 CSS 调布局调半天，现在左边改样式右边实时预览，做个人作品集一小时内搞定，太强了。",
+              "children": [],
+              "style": {
+                "fontSize": "15px",
+                "lineHeight": "1.7",
+                "color": "#374151",
+                "marginBottom": "20px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "testi-quote"
+              }
+            },
+            {
+              "id": "tpl-testi-author2",
+              "type": "div",
+              "text": "",
+              "children": [
+                {
+                  "id": "tpl-testi-avatar2",
+                  "type": "div",
+                  "text": "",
+                  "children": [],
+                  "style": {
+                    "width": "40px",
+                    "height": "40px",
+                    "borderRadius": "50%",
+                    "backgroundColor": "#fce7f3",
+                    "display": "inline-flex",
+                    "alignItems": "center",
+                    "justifyContent": "center",
+                    "fontSize": "18px",
+                    "fontWeight": "700",
+                    "color": "#db2777"
+                  },
+                  "attrs": {
+                    "className": "testi-avatar"
+                  }
+                },
+                {
+                  "id": "tpl-testi-info2",
+                  "type": "div",
+                  "text": "",
+                  "children": [
+                    {
+                      "id": "tpl-testi-name2",
+                      "type": "p",
+                      "text": "李思琪",
+                      "children": [],
+                      "style": {
+                        "fontSize": "14px",
+                        "fontWeight": "600",
+                        "color": "#111827",
+                        "marginBottom": "2px",
+                        "marginTop": "0"
+                      },
+                      "attrs": {
+                        "className": "testi-name"
+                      }
+                    },
+                    {
+                      "id": "tpl-testi-role2",
+                      "type": "p",
+                      "text": "产品设计师",
+                      "children": [],
+                      "style": {
+                        "fontSize": "13px",
+                        "color": "#6b7280",
+                        "marginBottom": "0",
+                        "marginTop": "0"
+                      },
+                      "attrs": {
+                        "className": "testi-role"
+                      }
+                    }
+                  ],
+                  "style": {
+                    "display": "flex",
+                    "flexDirection": "column",
+                    "marginLeft": "12px"
+                  }
+                }
+              ],
+              "style": {
+                "display": "flex",
+                "alignItems": "center"
+              },
+              "attrs": {
+                "className": "testi-author"
+              }
+            }
+          ],
+          "style": {
+            "padding": "24px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.06)"
+          },
+          "attrs": {
+            "className": "testi-card"
+          }
+        },
+        {
+          "id": "tpl-testi-c3",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-testi-stars3",
+              "type": "p",
+              "text": "★★★★★",
+              "children": [],
+              "style": {
+                "fontSize": "16px",
+                "color": "#f59e0b",
+                "letterSpacing": "2px",
+                "marginBottom": "12px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "testi-stars"
+              }
+            },
+            {
+              "id": "tpl-testi-quote3",
+              "type": "p",
+              "text": "公司官网、活动落地页、博客首页全是它搭的，导出就是干净的 HTML/CSS，直接给前端复用。",
+              "children": [],
+              "style": {
+                "fontSize": "15px",
+                "lineHeight": "1.7",
+                "color": "#374151",
+                "marginBottom": "20px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "testi-quote"
+              }
+            },
+            {
+              "id": "tpl-testi-author3",
+              "type": "div",
+              "text": "",
+              "children": [
+                {
+                  "id": "tpl-testi-avatar3",
+                  "type": "div",
+                  "text": "",
+                  "children": [],
+                  "style": {
+                    "width": "40px",
+                    "height": "40px",
+                    "borderRadius": "50%",
+                    "backgroundColor": "#d1fae5",
+                    "display": "inline-flex",
+                    "alignItems": "center",
+                    "justifyContent": "center",
+                    "fontSize": "18px",
+                    "fontWeight": "700",
+                    "color": "#059669"
+                  },
+                  "attrs": {
+                    "className": "testi-avatar"
+                  }
+                },
+                {
+                  "id": "tpl-testi-info3",
+                  "type": "div",
+                  "text": "",
+                  "children": [
+                    {
+                      "id": "tpl-testi-name3",
+                      "type": "p",
+                      "text": "王浩宇",
+                      "children": [],
+                      "style": {
+                        "fontSize": "14px",
+                        "fontWeight": "600",
+                        "color": "#111827",
+                        "marginBottom": "2px",
+                        "marginTop": "0"
+                      },
+                      "attrs": {
+                        "className": "testi-name"
+                      }
+                    },
+                    {
+                      "id": "tpl-testi-role3",
+                      "type": "p",
+                      "text": "创业团队负责人",
+                      "children": [],
+                      "style": {
+                        "fontSize": "13px",
+                        "color": "#6b7280",
+                        "marginBottom": "0",
+                        "marginTop": "0"
+                      },
+                      "attrs": {
+                        "className": "testi-role"
+                      }
+                    }
+                  ],
+                  "style": {
+                    "display": "flex",
+                    "flexDirection": "column",
+                    "marginLeft": "12px"
+                  }
+                }
+              ],
+              "style": {
+                "display": "flex",
+                "alignItems": "center"
+              },
+              "attrs": {
+                "className": "testi-author"
+              }
+            }
+          ],
+          "style": {
+            "padding": "24px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.06)"
+          },
+          "attrs": {
+            "className": "testi-card"
+          }
+        }
+      ],
+      "style": {
+        "display": "flex",
+        "gap": "20px",
+        "flexWrap": "wrap",
+        "justifyContent": "center"
+      },
+      "attrs": {
+        "className": "testi-grid"
+      }
+    }
+  ],
+  "style": {
+    "paddingTop": "64px",
+    "paddingRight": "24px",
+    "paddingBottom": "64px",
+    "paddingLeft": "24px",
+    "backgroundColor": "#ffffff"
+  },
+  "attrs": {
+    "className": "testimonials-section"
+  },
+  "childStyles": [
+    {
+      "sel": ".testi-title",
+      "css": "margin: 0 auto 8px; font-size: 32px; font-weight: 700; color: #111827; text-align: center;"
+    },
+    {
+      "sel": ".testi-subtitle",
+      "css": "margin: 0 auto 48px; font-size: 16px; color: #6b7280; text-align: center;"
+    },
+    {
+      "sel": ".testi-card",
+      "css": "flex: 1 1 280px; max-width: 340px; box-sizing: border-box;"
+    },
+    {
+      "sel": ".testi-stars",
+      "css": "font-size: 16px; color: #f59e0b; letter-spacing: 2px; margin: 0 0 12px; text-align: center;"
+    },
+    {
+      "sel": ".testi-quote",
+      "css": "font-size: 15px; line-height: 1.7; color: #374151; margin: 0 0 20px; font-style: italic;"
+    },
+    {
+      "sel": ".testi-name",
+      "css": "font-size: 14px; font-weight: 600; color: #111827; margin: 0 0 2px;"
+    },
+    {
+      "sel": ".testi-role",
+      "css": "font-size: 13px; color: #6b7280; margin: 0;"
+    }
+  ]
+}

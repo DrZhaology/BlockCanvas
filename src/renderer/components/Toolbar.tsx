@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo, Fragment } from 'react';
 import { useScene } from '@store/sceneStore';
 import { exportHTML, type ExportResult } from '@lib/exporter';
 import { styleToCssText, simplifyStyle } from '@lib/styleClass';
@@ -40,6 +40,15 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   const [zoomEditVal, setZoomEditVal] = useState('');
   // 「⋯ 更多」下拉开合（只收纳插件命令）
   const [moreOpen, setMoreOpen] = useState(false);
+  // 元素轮廓可视化：开启后所有画布元素显示暗蓝 dotted 边框（仅编辑器可见，不导出）
+  const [outlines, setOutlines] = useState<boolean>(() => {
+    try { return localStorage.getItem('bc-outlines') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    document.body.classList.toggle('bc-outlines-on', outlines);
+    try { localStorage.setItem('bc-outlines', outlines ? '1' : '0'); } catch { /* ignore */ }
+    return () => document.body.classList.remove('bc-outlines-on');
+  }, [outlines]);
 
   // 右侧动态区：内置按钮（含三块）按默认序排；插件命令（plg. 前缀）收进「⋯ 更多」
   const items = useToolbar((s) => s.items);
@@ -72,7 +81,12 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
       if (n.id !== scene.root.id) {
         const cls = (n.attrs?.className ?? '').trim();
         const idv = (n.attrs?.id ?? '').trim();
-        if (cls) {
+        const rel = (n.attrs?.relSelector ?? '').trim();
+        if (rel) {
+          const list = clsStyles.get(rel) ?? [];
+          list.push(styleToCssText(simplifyStyle(n.style)));
+          clsStyles.set(rel, list);
+        } else if (cls) {
           const list = clsStyles.get(cls) ?? [];
           list.push(styleToCssText(simplifyStyle(n.style)));
           clsStyles.set(cls, list);
@@ -106,7 +120,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
       parts.push(`样式提示 ${result.warnings.length} 处，如 ${first.selector}：${first.reason}${more > 0 ? ` 等 ${more} 处` : ''}`);
     }
     if (result.unclassified.length > 0) {
-      parts.push(`${result.unclassified.length} 个元素还没有类名：在「属性 → 类名 Class」起个名字，或用「类名管理」统一管理`);
+      parts.push(`${result.unclassified.length} 个元素还没有类名：选中它后在属性面板「+ 类名」回车即可`);
     }
     if (parts.length === 0) return;
     const msg = parts.join('；');
@@ -121,9 +135,9 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     const res = await window.bc.exportHTML(result.html, 'index.html');
     if (!res.ok && !res.canceled) {
       alert('导出失败：' + (res.error ?? '未知错误'));
-    } else if (res.ok) {
+    } else if (res.ok && res.path) {
       showExportTips(result);
-      console.log('已导出：', res.path);
+      alert('✨ HTML 网页导出成功！\n\n文件保存路径：\n' + res.path);
     }
   };
   const doPreview = async () => {
@@ -166,12 +180,12 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     },
     {
       id: 'paste', label: () => { const n = useScene.getState().scene.selectedIds.length; return '⎘ 粘贴' + (n > 1 ? `(${n})` : ''); },
-      title: '粘贴 (Ctrl+V) — 插入到选中层级末尾（无选中时插到画布末尾）',
-      onClick: () => { const st = useScene.getState(); st.pasteSibling(st.scene.selectedId); },
+      title: '粘贴 (Ctrl+V) — 插入到当前选中元素内部（无选中时插到画布末尾）',
+      onClick: () => { const st = useScene.getState(); st.paste(st.scene.selectedId); },
       disabled: () => useScene.getState().clipboard === null
     },
     {
-      id: 'duplicate', label: '⛏ 副本', title: '原地副本 (Ctrl+D)',
+      id: 'duplicate', label: '📑 副本', title: '原地创建副本 (Ctrl+D)',
       onClick: () => { const st = useScene.getState(); if (st.scene.selectedId) st.duplicateElement(st.scene.selectedId); },
       disabled: () => !useScene.getState().scene.selectedId
     },
@@ -186,14 +200,18 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
       onClick: doPreview
     },
     {
-      id: 'export-html', label: '⬇ 导出 HTML', title: '导出 HTML (Ctrl+E)', cls: 'btn-primary',
+      id: 'projects-center', label: '📁 全部项目', title: '浏览全部本地项目库与专属快照备份', cls: 'btn-secondary',
+      onClick: () => window.dispatchEvent(new CustomEvent('bc:open-projects'))
+    },
+    {
+      id: 'export-html', label: '⬇ 导出 HTML', title: '导出 HTML 网页文件 (Ctrl+E)', cls: 'btn-primary',
       onClick: doExport
     }
   ];
 
   // —— 注册右侧动态区的项 ——
   useEffect(() => {
-    // 动态按钮（导出元素模板 / 取消选中）
+    // 动态按钮（导出元素模板 / 取消选中 / 设置）
     const dynamic: ToolbarItem[] = [
       {
         id: 'export-template', label: '🔖 导出元素模板', title: '把选中元素（含子级）导出为模板 JSON 文件',
@@ -208,6 +226,10 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
         id: 'clear-selection', label: '取消选中', title: '取消选中 (Esc)', order: 8, defaultVisible: true, cls: 'btn-ghost',
         onClick: () => useScene.getState().selectElement(null),
         disabled: () => !useScene.getState().scene.selectedId
+      },
+      {
+        id: 'settings-entry', label: '⚙️ 设置', title: '偏好设置 (Ctrl+,)', order: 90, defaultVisible: true, cls: 'btn-ghost',
+        onClick: () => window.dispatchEvent(new CustomEvent('bc:open-settings'))
       }
     ];
     for (const it of dynamic) useToolbar.getState().addItem(it);
@@ -224,22 +246,37 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   const labelOf = (it: { label?: string | (() => string); id: string }) => (typeof it.label === 'function' ? it.label() : (it.label ?? it.id));
   const disabledOf = (it: { disabled?: () => boolean }) => (it.disabled ? it.disabled() : false);
 
-  // —— 缩放：按住百分比左右拖拽（阻尼，最小 1%） ——
+  // —— 缩放：按住百分比左右拖拽（阻尼，最小 1%）——
+  // Pointer Lock：拖拽期间隐藏光标且冻结，松开后光标回到按下位置；失败退回 CSS 隐藏。
+  const zoomAccRef = useRef(0);
   const startZoomDrag = (e: React.PointerEvent) => {
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     setZoomDrag({ startX: e.clientX, startPct: pct });
+    zoomAccRef.current = 0;
     document.body.classList.add('bc-zoom-dragging');
+    try {
+      const el = e.currentTarget as unknown as { requestPointerLock?: () => unknown };
+      if (typeof el.requestPointerLock === 'function') {
+        const r = el.requestPointerLock();
+        if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => { /* CSS 兜底 */ });
+      }
+    } catch { /* CSS 兜底 */ }
   };
   const moveZoomDrag = (e: React.PointerEvent) => {
     if (!zoomDrag) return;
-    const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoomDrag.startPct + dragSteps(e.clientX - zoomDrag.startX)));
+    // 锁定期间 clientX 冻结，用 movementX 累计；未锁定退回 clientX 差值
+    const dx = document.pointerLockElement
+      ? Math.round((zoomAccRef.current += e.movementX || 0))
+      : e.clientX - zoomDrag.startX;
+    const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, zoomDrag.startPct + dragSteps(dx)));
     onZoomChange(next / 100);
   };
   const endZoomDrag = (e: React.PointerEvent) => {
     (e.currentTarget as HTMLElement)?.releasePointerCapture?.(e.pointerId);
     setZoomDrag(null);
     document.body.classList.remove('bc-zoom-dragging');
+    try { if (document.pointerLockElement) document.exitPointerLock(); } catch { /* ignore */ }
   };
   // 双击手输缩放
   const applyZoomEdit = () => {
@@ -248,6 +285,15 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     if (Number.isNaN(n)) return;
     onZoomChange(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, n)) / 100);
   };
+
+  // —— 元素轮廓开关按钮：渲染时贴在「类名/ID」块左侧 ——
+  const outlineBtn = (
+    <button
+      className={"tb-outline-btn" + (outlines ? ' active' : '')}
+      onClick={() => setOutlines((v) => !v)}
+      title="显示元素轮廓：给画布所有元素加暗蓝色虚线框，方便看清 div 占位与嵌套；只是程序里的可视化辅助，导出的 HTML 不含"
+    >⬚ 轮廓</button>
+  );
 
   // —— 三个块的可变渲染（每渲染重建，拿到最新 props，块才能用当前 props 交互） ——
   const widgetMap: Record<string, React.ReactNode> = {
@@ -309,7 +355,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
             )}
             {issues.conflicts.length > 0 && (
               <div className="issue-block">
-                <div className="issue-block-head">{issues.conflicts.length} 个名称样式不统一（已在「类名管理」标记）</div>
+                <div className="issue-block-head">{issues.conflicts.length} 个名称样式不统一（可在「类名」页签一键统一）</div>
                 {issues.conflicts.map((c) => (
                   <button key={c.name} className="issue-item" onClick={() => { window.dispatchEvent(new CustomEvent('bc:open-class')); setIssuesOpen(false); }}>.{c.name}（{c.count} 个元素）→ 去统一</button>
                 ))}
@@ -324,7 +370,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
               </div>
             )}
             {issues.total === 0 && <div className="hint" style={{ margin: 8 }}>一切健康：所有元素都有类名 / ID，且同名样式统一。</div>}
-            <button className="issue-go-cls" onClick={() => { window.dispatchEvent(new CustomEvent('bc:open-class')); setIssuesOpen(false); }}>打开「类名 / ID 管理」→</button>
+            <button className="issue-go-cls" onClick={() => { window.dispatchEvent(new CustomEvent('bc:open-class')); setIssuesOpen(false); }}>打开「类名 / ID 总览」→</button>
           </div>
         )}
       </div>
@@ -367,21 +413,27 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
 
       <span className="sep" />
 
-      {/* —— 右：右对齐；内置按钮按默认序渲染，插件命令收进最右「⋯ 更多」 —— */}
+      {/* —— 右：右对齐；内置按钮按默认序渲染，界限清晰统一 —— */}
       <div className="tb-pool">
-        {barItems.map((it) =>
-          it.block ? (
-            <div key={it.id} className="tb-pool-item">{widgetMap[it.id]}</div>
-          ) : (
-            <button
-              key={it.id}
-              className={"tb-pool-btn " + (it.cls ?? '')}
-              title={it.title}
-              onClick={it.onClick}
-              disabled={disabledOf(it)}
-            >{it.icon && <span className="tb-icon">{it.icon}</span>}{labelOf(it)}</button>
-          )
-        )}
+        {barItems.map((it) => (
+          <Fragment key={it.id}>
+            {it.id === 'blk.clsid' && (
+              <div className="tb-pool-item">{outlineBtn}</div>
+            )}
+            <div className="tb-pool-item">
+              {it.block ? (
+                widgetMap[it.id]
+              ) : (
+                <button
+                  className={"tb-pool-btn " + (it.cls ?? '')}
+                  title={it.title}
+                  onClick={it.onClick}
+                  disabled={disabledOf(it)}
+                >{it.icon && <span className="tb-icon">{it.icon}</span>}{labelOf(it)}</button>
+              )}
+            </div>
+          </Fragment>
+        ))}
 
         {/* 「⋯ 更多」：收纳插件命令（无插件时不显示） */}
         {pluginItems.length > 0 && (

@@ -1,0 +1,188 @@
+{
+  "id": "tpl-statistics",
+  "type": "section",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-stats-grid",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-stats-item1",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-stats-num1",
+              "type": "h2",
+              "text": "10,000+",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "stat-number"
+              }
+            },
+            {
+              "id": "tpl-stats-desc1",
+              "type": "p",
+              "text": "活跃用户",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "stat-desc"
+              }
+            }
+          ],
+          "style": {
+            "textAlign": "center",
+            "padding": "24px 16px"
+          },
+          "attrs": {
+            "className": "stat-item"
+          }
+        },
+        {
+          "id": "tpl-stats-item2",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-stats-num2",
+              "type": "h2",
+              "text": "50M+",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "stat-number"
+              }
+            },
+            {
+              "id": "tpl-stats-desc2",
+              "type": "p",
+              "text": "页面被导出",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "stat-desc"
+              }
+            }
+          ],
+          "style": {
+            "textAlign": "center",
+            "padding": "24px 16px",
+            "borderLeft": "1px solid rgba(255,255,255,0.15)",
+            "borderRight": "1px solid rgba(255,255,255,0.15)"
+          },
+          "attrs": {
+            "className": "stat-item"
+          }
+        },
+        {
+          "id": "tpl-stats-item3",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-stats-num3",
+              "type": "h2",
+              "text": "99.9%",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "stat-number"
+              }
+            },
+            {
+              "id": "tpl-stats-desc3",
+              "type": "p",
+              "text": "服务可用性",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "stat-desc"
+              }
+            }
+          ],
+          "style": {
+            "textAlign": "center",
+            "padding": "24px 16px",
+            "borderRight": "1px solid rgba(255,255,255,0.15)"
+          },
+          "attrs": {
+            "className": "stat-item"
+          }
+        },
+        {
+          "id": "tpl-stats-item4",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-stats-num4",
+              "type": "h2",
+              "text": "4.9/5",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "stat-number"
+              }
+            },
+            {
+              "id": "tpl-stats-desc4",
+              "type": "p",
+              "text": "用户满意度",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "stat-desc"
+              }
+            }
+          ],
+          "style": {
+            "textAlign": "center",
+            "padding": "24px 16px"
+          },
+          "attrs": {
+            "className": "stat-item"
+          }
+        }
+      ],
+      "style": {
+        "display": "flex",
+        "flexWrap": "wrap"
+      },
+      "attrs": {
+        "className": "stats-grid"
+      }
+    }
+  ],
+  "style": {
+    "paddingTop": "56px",
+    "paddingRight": "24px",
+    "paddingBottom": "56px",
+    "paddingLeft": "24px",
+    "backgroundColor": "#1e3a5f"
+  },
+  "attrs": {
+    "className": "stats-section"
+  },
+  "childStyles": [
+    {
+      "sel": ".stat-item",
+      "css": "flex: 1 1 180px; text-align: center; box-sizing: border-box;"
+    },
+    {
+      "sel": ".stat-number",
+      "css": "font-size: 48px; font-weight: 800; line-height: 1.1; margin: 0 0 4px;"
+    },
+    {
+      "sel": ".stat-number:nth-of-type(1)",
+      "css": "color: #60a5fa;"
+    },
+    {
+      "sel": ".stat-desc",
+      "css": "font-size: 15px; color: #93c5fd; margin: 0;"
+    }
+  ]
+}

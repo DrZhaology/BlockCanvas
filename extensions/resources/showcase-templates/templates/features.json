@@ -1,0 +1,503 @@
+{
+  "id": "tpl-feature-grid",
+  "type": "section",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-feat-h2",
+      "type": "h2",
+      "text": "为什么选择 BlockCanvas",
+      "children": [],
+      "style": {
+        "textAlign": "center",
+        "fontSize": "32px",
+        "fontWeight": "700",
+        "color": "#111827",
+        "marginTop": "0",
+        "marginBottom": "8px"
+      },
+      "attrs": {
+        "className": "feat-title"
+      }
+    },
+    {
+      "id": "tpl-feat-p",
+      "type": "p",
+      "text": "六个核心优势，让你的网页搭建事半功倍",
+      "children": [],
+      "style": {
+        "textAlign": "center",
+        "fontSize": "16px",
+        "color": "#6b7280",
+        "marginTop": "0",
+        "marginBottom": "56px"
+      },
+      "attrs": {
+        "className": "feat-subtitle"
+      }
+    },
+    {
+      "id": "tpl-feat-grid",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-feat-c1",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-feat-icon1",
+              "type": "div",
+              "text": "⚡",
+              "children": [],
+              "style": {
+                "width": "48px",
+                "height": "48px",
+                "borderRadius": "12px",
+                "backgroundColor": "#eff6ff",
+                "display": "flex",
+                "alignItems": "center",
+                "justifyContent": "center",
+                "fontSize": "24px",
+                "marginBottom": "16px"
+              },
+              "attrs": {
+                "className": "feat-icon"
+              }
+            },
+            {
+              "id": "tpl-feat-name1",
+              "type": "h3",
+              "text": "零代码操作",
+              "children": [],
+              "style": {
+                "fontSize": "18px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "marginBottom": "8px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "feat-name"
+              }
+            },
+            {
+              "id": "tpl-feat-desc1",
+              "type": "p",
+              "text": "拖拽元素、调整样式、实时预览，无需任何编程基础即可完成专业级网页搭建。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.7",
+                "color": "#6b7280",
+                "marginBottom": "0",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "feat-desc"
+              }
+            }
+          ],
+          "style": {
+            "padding": "28px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.04)"
+          },
+          "attrs": {
+            "className": "feat-card"
+          }
+        },
+        {
+          "id": "tpl-feat-c2",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-feat-icon2",
+              "type": "div",
+              "text": "🎨",
+              "children": [],
+              "style": {
+                "width": "48px",
+                "height": "48px",
+                "borderRadius": "12px",
+                "backgroundColor": "#fdf2f8",
+                "display": "flex",
+                "alignItems": "center",
+                "justifyContent": "center",
+                "fontSize": "24px",
+                "marginBottom": "16px"
+              },
+              "attrs": {
+                "className": "feat-icon"
+              }
+            },
+            {
+              "id": "tpl-feat-name2",
+              "type": "h3",
+              "text": "样式即时同步",
+              "children": [],
+              "style": {
+                "fontSize": "18px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "marginBottom": "8px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "feat-name"
+              }
+            },
+            {
+              "id": "tpl-feat-desc2",
+              "type": "p",
+              "text": "修改一个元素的样式，同类的其他元素自动同步更新，保持整体视觉一致性。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.7",
+                "color": "#6b7280",
+                "marginBottom": "0",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "feat-desc"
+              }
+            }
+          ],
+          "style": {
+            "padding": "28px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.04)"
+          },
+          "attrs": {
+            "className": "feat-card"
+          }
+        },
+        {
+          "id": "tpl-feat-c3",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-feat-icon3",
+              "type": "div",
+              "text": "📦",
+              "children": [],
+              "style": {
+                "width": "48px",
+                "height": "48px",
+                "borderRadius": "12px",
+                "backgroundColor": "#ecfdf5",
+                "display": "flex",
+                "alignItems": "center",
+                "justifyContent": "center",
+                "fontSize": "24px",
+                "marginBottom": "16px"
+              },
+              "attrs": {
+                "className": "feat-icon"
+              }
+            },
+            {
+              "id": "tpl-feat-name3",
+              "type": "h3",
+              "text": "干净代码导出",
+              "children": [],
+              "style": {
+                "fontSize": "18px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "marginBottom": "8px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "feat-name"
+              }
+            },
+            {
+              "id": "tpl-feat-desc3",
+              "type": "p",
+              "text": "导出标准 HTML + CSS，无框架依赖，可直接投入生产环境或交给前端二次开发。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.7",
+                "color": "#6b7280",
+                "marginBottom": "0",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "feat-desc"
+              }
+            }
+          ],
+          "style": {
+            "padding": "28px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.04)"
+          },
+          "attrs": {
+            "className": "feat-card"
+          }
+        },
+        {
+          "id": "tpl-feat-c4",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-feat-icon4",
+              "type": "div",
+              "text": "🔌",
+              "children": [],
+              "style": {
+                "width": "48px",
+                "height": "48px",
+                "borderRadius": "12px",
+                "backgroundColor": "#faf5ff",
+                "display": "flex",
+                "alignItems": "center",
+                "justifyContent": "center",
+                "fontSize": "24px",
+                "marginBottom": "16px"
+              },
+              "attrs": {
+                "className": "feat-icon"
+              }
+            },
+            {
+              "id": "tpl-feat-name4",
+              "type": "h3",
+              "text": "模板插件系统",
+              "children": [],
+              "style": {
+                "fontSize": "18px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "marginBottom": "8px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "feat-name"
+              }
+            },
+            {
+              "id": "tpl-feat-desc4",
+              "type": "p",
+              "text": "丰富的模板库和插件生态，一键插入导航栏、卡片组、表单等常用组件。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.7",
+                "color": "#6b7280",
+                "marginBottom": "0",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "feat-desc"
+              }
+            }
+          ],
+          "style": {
+            "padding": "28px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.04)"
+          },
+          "attrs": {
+            "className": "feat-card"
+          }
+        },
+        {
+          "id": "tpl-feat-c5",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-feat-icon5",
+              "type": "div",
+              "text": "💾",
+              "children": [],
+              "style": {
+                "width": "48px",
+                "height": "48px",
+                "borderRadius": "12px",
+                "backgroundColor": "#fff7ed",
+                "display": "flex",
+                "alignItems": "center",
+                "justifyContent": "center",
+                "fontSize": "24px",
+                "marginBottom": "16px"
+              },
+              "attrs": {
+                "className": "feat-icon"
+              }
+            },
+            {
+              "id": "tpl-feat-name5",
+              "type": "h3",
+              "text": "本地便携存储",
+              "children": [],
+              "style": {
+                "fontSize": "18px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "marginBottom": "8px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "feat-name"
+              }
+            },
+            {
+              "id": "tpl-feat-desc5",
+              "type": "p",
+              "text": "所有数据保存在本地 data/ 目录，无需注册账号，不依赖云端，隐私安全。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.7",
+                "color": "#6b7280",
+                "marginBottom": "0",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "feat-desc"
+              }
+            }
+          ],
+          "style": {
+            "padding": "28px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.04)"
+          },
+          "attrs": {
+            "className": "feat-card"
+          }
+        },
+        {
+          "id": "tpl-feat-c6",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-feat-icon6",
+              "type": "div",
+              "text": "🌙",
+              "children": [],
+              "style": {
+                "width": "48px",
+                "height": "48px",
+                "borderRadius": "12px",
+                "backgroundColor": "#f0f9ff",
+                "display": "flex",
+                "alignItems": "center",
+                "justifyContent": "center",
+                "fontSize": "24px",
+                "marginBottom": "16px"
+              },
+              "attrs": {
+                "className": "feat-icon"
+              }
+            },
+            {
+              "id": "tpl-feat-name6",
+              "type": "h3",
+              "text": "深色模式支持",
+              "children": [],
+              "style": {
+                "fontSize": "18px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "marginBottom": "8px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "feat-name"
+              }
+            },
+            {
+              "id": "tpl-feat-desc6",
+              "type": "p",
+              "text": "内置深色主题插件，一键切换视觉风格，照顾不同场景下的使用体验。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.7",
+                "color": "#6b7280",
+                "marginBottom": "0",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "feat-desc"
+              }
+            }
+          ],
+          "style": {
+            "padding": "28px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "12px",
+            "border": "1px solid #f3f4f6",
+            "boxShadow": "0 1px 4px rgba(0,0,0,0.04)"
+          },
+          "attrs": {
+            "className": "feat-card"
+          }
+        }
+      ],
+      "style": {
+        "display": "grid",
+        "gridTemplateColumns": "repeat(3, 1fr)",
+        "gap": "20px",
+        "maxWidth": "960px",
+        "margin": "0 auto"
+      },
+      "attrs": {
+        "className": "feat-grid"
+      }
+    }
+  ],
+  "style": {
+    "paddingTop": "64px",
+    "paddingRight": "24px",
+    "paddingBottom": "64px",
+    "paddingLeft": "24px",
+    "backgroundColor": "#f9fafb"
+  },
+  "attrs": {
+    "className": "features-section"
+  },
+  "childStyles": [
+    {
+      "sel": ".feat-title",
+      "css": "margin: 0 auto 8px; font-size: 32px; font-weight: 700; color: #111827; text-align: center;"
+    },
+    {
+      "sel": ".feat-subtitle",
+      "css": "margin: 0 auto 56px; font-size: 16px; color: #6b7280; text-align: center;"
+    },
+    {
+      "sel": ".feat-card",
+      "css": "box-sizing: border-box;"
+    },
+    {
+      "sel": ".feat-name",
+      "css": "font-size: 18px; font-weight: 600; color: #111827; margin: 0 0 8px;"
+    },
+    {
+      "sel": ".feat-desc",
+      "css": "font-size: 14px; line-height: 1.7; color: #6b7280; margin: 0;"
+    }
+  ]
+}

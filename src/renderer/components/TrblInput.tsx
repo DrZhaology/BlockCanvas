@@ -20,6 +20,8 @@ interface Props {
   fallback?: string;
   /** 数值缺单位时自动补全（如 'px'），见 schema.unit */
   unit?: string;
+  /** 隐藏「单位」下拉：单位直接写在输入框里（如 10px、1rem），裸数字按 unit 补 */
+  hideUnit?: boolean;
 }
 
 export function TrblInput(props: Props) {
@@ -28,7 +30,7 @@ export function TrblInput(props: Props) {
   const endStyleEdit = useScene((s) => s.endStyleEdit);
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
-  const { elementId, sides, fallback, unit } = props;
+  const { elementId, sides, fallback, unit, hideUnit } = props;
 
   const node = findNode(scene.root, elementId);
   const style = (node?.style ?? {}) as Record<string, string | undefined>;
@@ -79,28 +81,30 @@ export function TrblInput(props: Props) {
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         }}
       />
-      <select
-        className="unit-select"
-        value={u}
-        onChange={(e) => {
-          const nu = e.target.value;
-          setU(nu);
-          // 换单位：所有"缺单位"的数字带上新单位，写死的单位（auto/50% 等）不动
-          const parsed = parseShorthand(text, sides);
-          if (parsed) {
-            const patch = withUnit(parsed, nu);
-            updateStyle(elementId, patch);
-            setText(shorthandFromValues(patch, sides));
-          }
-        }}
-        title="没有写单位的数字自动补这个单位"
-      >
-        {CSS_UNITS.map((un) => (
-          <option key={un} value={un} title={UNIT_LABELS[un]}>
-            {un}
-          </option>
-        ))}
-      </select>
+      {!hideUnit && (
+        <select
+          className="unit-select"
+          value={u}
+          onChange={(e) => {
+            const nu = e.target.value;
+            setU(nu);
+            // 换单位：所有"缺单位"的数字带上新单位，写死的单位（auto/50% 等）不动
+            const parsed = parseShorthand(text, sides);
+            if (parsed) {
+              const patch = withUnit(parsed, nu);
+              updateStyle(elementId, patch);
+              setText(shorthandFromValues(patch, sides));
+            }
+          }}
+          title="没有写单位的数字自动补这个单位"
+        >
+          {CSS_UNITS.map((un) => (
+            <option key={un} value={un} title={UNIT_LABELS[un]}>
+              {un}
+            </option>
+          ))}
+        </select>
+      )}
     </div>
   );
 }

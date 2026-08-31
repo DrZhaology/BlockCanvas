@@ -1,0 +1,262 @@
+{
+  "id": "tpl-hero-split",
+  "type": "section",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-split-inner",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-split-left",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-split-tag",
+              "type": "span",
+              "text": "全新发布",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "split-tag"
+              }
+            },
+            {
+              "id": "tpl-split-h1",
+              "type": "h1",
+              "text": "让每个人都能轻松搭建专业网页",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "split-headline"
+              }
+            },
+            {
+              "id": "tpl-split-p",
+              "type": "p",
+              "text": "BlockCanvas 积木画布让你通过可视化拖拽的方式构建网页，无需编写一行代码，导出即用。",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "split-desc"
+              }
+            },
+            {
+              "id": "tpl-split-btns",
+              "type": "div",
+              "text": "",
+              "children": [
+                {
+                  "id": "tpl-split-get",
+                  "type": "button",
+                  "text": "开始免费使用",
+                  "children": [],
+                  "style": {},
+                  "attrs": {
+                    "className": "split-btn split-btn-primary"
+                  }
+                },
+                {
+                  "id": "tpl-split-demo",
+                  "type": "button",
+                  "text": "观看演示 ▶",
+                  "children": [],
+                  "style": {},
+                  "attrs": {
+                    "className": "split-btn split-btn-secondary"
+                  }
+                }
+              ],
+              "style": {
+                "display": "flex",
+                "gap": "12px",
+                "flexWrap": "wrap"
+              },
+              "attrs": {
+                "className": "split-btns"
+              }
+            },
+            {
+              "id": "tpl-split-proof",
+              "type": "div",
+              "text": "",
+              "children": [
+                {
+                  "id": "tpl-split-avatars",
+                  "type": "div",
+                  "text": "",
+                  "children": [
+                    {
+                      "id": "tpl-split-av1",
+                      "type": "div",
+                      "text": "A",
+                      "children": [],
+                      "style": {},
+                      "attrs": {
+                        "className": "proof-avatar"
+                      }
+                    },
+                    {
+                      "id": "tpl-split-av2",
+                      "type": "div",
+                      "text": "B",
+                      "children": [],
+                      "style": {},
+                      "attrs": {
+                        "className": "proof-avatar"
+                      }
+                    },
+                    {
+                      "id": "tpl-split-av3",
+                      "type": "div",
+                      "text": "C",
+                      "children": [],
+                      "style": {},
+                      "attrs": {
+                        "className": "proof-avatar"
+                      }
+                    }
+                  ],
+                  "style": {
+                    "display": "inline-flex"
+                  },
+                  "attrs": {
+                    "className": "proof-avatars"
+                  }
+                },
+                {
+                  "id": "tpl-split-proof-text",
+                  "type": "span",
+                  "text": "已有 10,000+ 创作者",
+                  "children": [],
+                  "style": {},
+                  "attrs": {
+                    "className": "proof-text"
+                  }
+                }
+              ],
+              "style": {
+                "marginTop": "24px"
+              },
+              "attrs": {
+                "className": "split-proof"
+              }
+            }
+          ],
+          "style": {
+            "paddingRight": "40px"
+          },
+          "attrs": {
+            "className": "split-content"
+          }
+        },
+        {
+          "id": "tpl-split-right",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-split-visual",
+              "type": "div",
+              "text": "",
+              "children": [],
+              "style": {},
+              "attrs": {
+                "className": "split-visual"
+              }
+            }
+          ],
+          "style": {
+            "flex": "1 1 400px",
+            "minWidth": "280px"
+          },
+          "attrs": {
+            "className": "split-visual-wrap"
+          }
+        }
+      ],
+      "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "60px",
+        "paddingTop": "80px",
+        "paddingRight": "48px",
+        "paddingBottom": "80px",
+        "paddingLeft": "48px"
+      },
+      "attrs": {
+        "className": "split-layout"
+      }
+    }
+  ],
+  "style": {
+    "paddingTop": "0",
+    "paddingRight": "0",
+    "paddingBottom": "0",
+    "paddingLeft": "0",
+    "backgroundColor": "#ffffff"
+  },
+  "attrs": {
+    "className": "hero-split-section"
+  },
+  "childStyles": [
+    {
+      "sel": ".split-tag",
+      "css": "display: inline-block; padding: 4px 12px; font-size: 12px; font-weight: 600; color: #1e88e5; background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 20px; margin-bottom: 20px;"
+    },
+    {
+      "sel": ".split-headline",
+      "css": "font-size: 48px; font-weight: 800; color: #111827; line-height: 1.15; margin: 0 0 20px;"
+    },
+    {
+      "sel": ".split-desc",
+      "css": "font-size: 18px; line-height: 1.7; color: #4b5563; margin: 0 0 32px; max-width: 480px;"
+    },
+    {
+      "sel": ".split-btn",
+      "css": "padding: 14px 28px; font-size: 15px; font-weight: 600; border-radius: 8px; cursor: pointer; box-sizing: border-box; border: none;"
+    },
+    {
+      "sel": ".split-btn-primary",
+      "css": "background-color: #1e88e5; color: #ffffff; box-shadow: 0 4px 12px rgba(30,136,229,0.3);"
+    },
+    {
+      "sel": ".split-btn-primary:hover",
+      "css": "background-color: #1976d2; transform: translateY(-1px); box-shadow: 0 6px 16px rgba(30,136,229,0.4);"
+    },
+    {
+      "sel": ".split-btn-secondary",
+      "css": "background-color: transparent; color: #1e88e5; border: 2px solid #bfdbfe;"
+    },
+    {
+      "sel": ".split-btn-secondary:hover",
+      "css": "background-color: #eff6ff; border-color: #1e88e5;"
+    },
+    {
+      "sel": ".proof-avatar",
+      "css": "width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; border: 2px solid #ffffff; margin-left: -6px;"
+    },
+    {
+      "sel": ".proof-avatar:nth-child(1)",
+      "css": "background-color: #bfdbfe; color: #1e40af;"
+    },
+    {
+      "sel": ".proof-avatar:nth-child(2)",
+      "css": "background-color: #fce7f3; color: #be185d;"
+    },
+    {
+      "sel": ".proof-avatar:nth-child(3)",
+      "css": "background-color: #d1fae5; color: #047857;"
+    },
+    {
+      "sel": ".proof-text",
+      "css": "font-size: 13px; color: #6b7280; margin-left: 8px; vertical-align: middle;"
+    },
+    {
+      "sel": ".split-visual",
+      "css": "width: 100%; height: 360px; border-radius: 16px; background: linear-gradient(135deg, #dbeafe 0%, #ede9fe 50%, #fce7f3 100%); box-shadow: 0 20px 60px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center;"
+    }
+  ]
+}

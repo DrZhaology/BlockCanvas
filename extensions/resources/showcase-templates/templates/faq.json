@@ -1,0 +1,281 @@
+{
+  "id": "tpl-faq",
+  "type": "section",
+  "text": "",
+  "children": [
+    {
+      "id": "tpl-faq-h2",
+      "type": "h2",
+      "text": "常见问题",
+      "children": [],
+      "style": {
+        "textAlign": "center",
+        "fontSize": "32px",
+        "fontWeight": "700",
+        "color": "#111827",
+        "marginTop": "0",
+        "marginBottom": "8px"
+      },
+      "attrs": {
+        "className": "faq-title"
+      }
+    },
+    {
+      "id": "tpl-faq-p",
+      "type": "p",
+      "text": "找不到答案？随时联系我们。",
+      "children": [],
+      "style": {
+        "textAlign": "center",
+        "fontSize": "16px",
+        "color": "#6b7280",
+        "marginTop": "0",
+        "marginBottom": "48px"
+      },
+      "attrs": {
+        "className": "faq-subtitle"
+      }
+    },
+    {
+      "id": "tpl-faq-list",
+      "type": "div",
+      "text": "",
+      "children": [
+        {
+          "id": "tpl-faq-item1",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-faq-q1",
+              "type": "h3",
+              "text": "BlockCanvas 适合初学者吗？",
+              "children": [],
+              "style": {
+                "fontSize": "16px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "marginBottom": "8px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "faq-question"
+              }
+            },
+            {
+              "id": "tpl-faq-a1",
+              "type": "p",
+              "text": "完全适合！我们专门为不懂代码的人设计，点一点就能搭建网页，导出就是干净的 HTML 和 CSS，后续想深入也可以自由编辑代码。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.8",
+                "color": "#4b5563",
+                "marginBottom": "0",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "faq-answer"
+              }
+            }
+          ],
+          "style": {
+            "padding": "20px 24px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "10px",
+            "border": "1px solid #e5e7eb",
+            "marginBottom": "12px"
+          },
+          "attrs": {
+            "className": "faq-item"
+          }
+        },
+        {
+          "id": "tpl-faq-item2",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-faq-q2",
+              "type": "h3",
+              "text": "导出的代码能直接用吗？",
+              "children": [],
+              "style": {
+                "fontSize": "16px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "marginBottom": "8px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "faq-question"
+              }
+            },
+            {
+              "id": "tpl-faq-a2",
+              "type": "p",
+              "text": "可以。导出的是标准 HTML + 内联 CSS，无框架依赖、无冗余代码，可以直接丢进任何服务器或静态托管平台使用。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.8",
+                "color": "#4b5563",
+                "marginBottom": "0",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "faq-answer"
+              }
+            }
+          ],
+          "style": {
+            "padding": "20px 24px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "10px",
+            "border": "1px solid #e5e7eb",
+            "marginBottom": "12px"
+          },
+          "attrs": {
+            "className": "faq-item"
+          }
+        },
+        {
+          "id": "tpl-faq-item3",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-faq-q3",
+              "type": "h3",
+              "text": "免费版有哪些限制？",
+              "children": [],
+              "style": {
+                "fontSize": "16px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "marginBottom": "8px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "faq-question"
+              }
+            },
+            {
+              "id": "tpl-faq-a3",
+              "type": "p",
+              "text": "免费版可以创建 1 个项目，使用基础组件模板，导出代码无水印。如需更多项目或高级模板，可升级至专业版或企业版。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.8",
+                "color": "#4b5563",
+                "marginBottom": "0",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "faq-answer"
+              }
+            }
+          ],
+          "style": {
+            "padding": "20px 24px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "10px",
+            "border": "1px solid #e5e7eb",
+            "marginBottom": "12px"
+          },
+          "attrs": {
+            "className": "faq-item"
+          }
+        },
+        {
+          "id": "tpl-faq-item4",
+          "type": "div",
+          "text": "",
+          "children": [
+            {
+              "id": "tpl-faq-q4",
+              "type": "h3",
+              "text": "是否支持团队协作？",
+              "children": [],
+              "style": {
+                "fontSize": "16px",
+                "fontWeight": "600",
+                "color": "#111827",
+                "marginBottom": "8px",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "faq-question"
+              }
+            },
+            {
+              "id": "tpl-faq-a4",
+              "type": "p",
+              "text": "专业版和企业版支持多成员协作，可分配不同的编辑权限，实时同步项目状态，非常适合小团队共享工作流。",
+              "children": [],
+              "style": {
+                "fontSize": "14px",
+                "lineHeight": "1.8",
+                "color": "#4b5563",
+                "marginBottom": "0",
+                "marginTop": "0"
+              },
+              "attrs": {
+                "className": "faq-answer"
+              }
+            }
+          ],
+          "style": {
+            "padding": "20px 24px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "10px",
+            "border": "1px solid #e5e7eb"
+          },
+          "attrs": {
+            "className": "faq-item"
+          }
+        }
+      ],
+      "style": {
+        "maxWidth": "720px",
+        "margin": "0 auto"
+      },
+      "attrs": {
+        "className": "faq-list"
+      }
+    }
+  ],
+  "style": {
+    "paddingTop": "64px",
+    "paddingRight": "24px",
+    "paddingBottom": "64px",
+    "paddingLeft": "24px",
+    "backgroundColor": "#ffffff"
+  },
+  "attrs": {
+    "className": "faq-section"
+  },
+  "childStyles": [
+    {
+      "sel": ".faq-title",
+      "css": "margin: 0 auto 8px; font-size: 32px; font-weight: 700; color: #111827; text-align: center;"
+    },
+    {
+      "sel": ".faq-subtitle",
+      "css": "margin: 0 auto 48px; font-size: 16px; color: #6b7280; text-align: center;"
+    },
+    {
+      "sel": ".faq-item",
+      "css": "box-sizing: border-box;"
+    },
+    {
+      "sel": ".faq-question",
+      "css": "font-size: 16px; font-weight: 600; color: #111827; margin: 0 0 8px;"
+    },
+    {
+      "sel": ".faq-answer",
+      "css": "font-size: 14px; line-height: 1.8; color: #4b5563; margin: 0;"
+    }
+  ]
+}
