@@ -42,10 +42,7 @@ function defaultAttrsFor(type: ElementType): SceneElement['attrs'] {
   }
 }
 
-// 按元素类型给个看得见的默认样式（小白拖出来不懵）
-// 容器带默认 padding 8px：浏览器原生只有 body 有 8px 外边距，div 等没有默认间距，
-// 导致"div 里插 div"内外两层贴死。给容器加 8px 内边距 = 内外元素之间保留空隙
-// （导入导出一致，div 套 div 也能看出两层）。
+// 按元素类型给个基础干净的默认样式（仅保留宽、高、背景等核心必要属性）
 function defaultStyleFor(type: ElementType): ElementStyle {
   switch (type) {
     case 'div':
@@ -57,8 +54,9 @@ function defaultStyleFor(type: ElementType): ElementStyle {
     case 'article':
     case 'aside':
       return {
-        backgroundColor: '#d4e7ff', minHeight: '60px', boxSizing: 'border-box',
-        padding: '8px'
+        width: '100%',
+        minHeight: '80px',
+        backgroundColor: '#eaf2ff'
       };
     case 'h1':
       return { fontSize: '32px', fontWeight: '700' };
@@ -72,85 +70,58 @@ function defaultStyleFor(type: ElementType): ElementStyle {
       return { lineHeight: '1.6' };
     case 'button':
       return {
-        paddingTop: '8px', paddingRight: '16px', paddingBottom: '8px', paddingLeft: '16px',
-        backgroundColor: '#1e88e5', color: '#fff',
-        borderStyle: 'none',
-        borderTopLeftRadius: '4px', borderTopRightRadius: '4px',
-        borderBottomRightRadius: '4px', borderBottomLeftRadius: '4px',
-        cursor: 'pointer',
-        boxSizing: 'border-box'
+        width: '120px',
+        height: '36px',
+        backgroundColor: '#1e88e5',
+        color: '#ffffff',
+        cursor: 'pointer'
       };
     case 'a':
       return { color: '#1e88e5', textDecoration: 'underline' };
     case 'span':
       return {
-        display: 'inline-block',
-        paddingTop: '2px', paddingRight: '6px', paddingBottom: '2px', paddingLeft: '6px',
-        backgroundColor: '#fff3cd',
-        boxSizing: 'border-box'
+        backgroundColor: '#fff3cd'
       };
     case 'img':
       return {
-        width: '200px', height: '120px',
-        backgroundColor: '#e2e8f0',
-        boxSizing: 'border-box'
+        width: '200px',
+        height: '120px',
+        backgroundColor: '#e2e8f0'
       };
     case 'input':
       return {
-        paddingTop: '6px', paddingRight: '8px', paddingBottom: '6px', paddingLeft: '8px',
-        borderStyle: 'solid', borderColor: '#ccc',
-        borderTopWidth: '1px', borderRightWidth: '1px', borderBottomWidth: '1px', borderLeftWidth: '1px',
-        borderTopLeftRadius: '4px', borderTopRightRadius: '4px',
-        borderBottomRightRadius: '4px', borderBottomLeftRadius: '4px',
-        boxSizing: 'border-box'
+        width: '200px',
+        height: '32px',
+        backgroundColor: '#ffffff'
       };
     case 'textarea':
       return {
-        width: '280px', height: '80px',
-        paddingTop: '6px', paddingRight: '8px', paddingBottom: '6px', paddingLeft: '8px',
-        borderStyle: 'solid', borderColor: '#ccc',
-        borderTopWidth: '1px', borderRightWidth: '1px', borderBottomWidth: '1px', borderLeftWidth: '1px',
-        borderTopLeftRadius: '4px', borderTopRightRadius: '4px',
-        borderBottomRightRadius: '4px', borderBottomLeftRadius: '4px',
-        boxSizing: 'border-box'
+        width: '280px',
+        height: '80px',
+        backgroundColor: '#ffffff'
       };
     case 'hr':
       return {
-        // 分割线可见性：borderTop 1px 实线 + 浅灰色（UA 默认 inset 边框在去掉样式后不可见）
-        borderStyle: 'solid', borderColor: '#c8ccd4',
-        borderTopWidth: '1px', borderBottomWidth: '0', borderRightWidth: '0', borderLeftWidth: '0',
-        marginTop: '12px', marginRight: '0', marginBottom: '12px', marginLeft: '0',
-        backgroundColor: 'transparent',
-        boxSizing: 'border-box'
+        width: '100%',
+        height: '1px',
+        backgroundColor: '#c8ccd4'
       };
     case 'table':
-      return { borderCollapse: 'collapse', minHeight: '40px', boxSizing: 'border-box' };
+      return { width: '100%', minHeight: '60px', backgroundColor: '#ffffff' };
     case 'th':
     case 'td':
       return {
-        paddingTop: '6px', paddingRight: '10px', paddingBottom: '6px', paddingLeft: '10px',
-        borderStyle: 'solid', borderColor: '#cbd5e1',
-        borderTopWidth: '1px', borderRightWidth: '1px', borderBottomWidth: '1px', borderLeftWidth: '1px',
-        ...(type === 'th' ? { backgroundColor: '#f1f5f9', fontWeight: '700', textAlign: 'left' } : {}),
-        boxSizing: 'border-box'
+        minHeight: '32px',
+        backgroundColor: type === 'th' ? '#f1f5f9' : '#ffffff'
       };
     case 'blockquote':
       return {
-        marginTop: '8px', marginRight: '0', marginBottom: '8px', marginLeft: '0',
-        paddingTop: '4px', paddingBottom: '4px', paddingLeft: '12px',
-        borderStyle: 'solid', borderColor: '#cbd5e1',
-        borderTopWidth: '0', borderRightWidth: '0', borderBottomWidth: '0', borderLeftWidth: '3px',
-        color: '#475569', lineHeight: '1.7',
-        backgroundColor: '#f8fafc', boxSizing: 'border-box'
+        minHeight: '40px',
+        backgroundColor: '#f8fafc'
       };
     case 'code':
       return {
-        fontFamily: 'Consolas, "Courier New", monospace',
-        fontSize: '13px',
         backgroundColor: '#f1f5f9',
-        paddingTop: '2px', paddingRight: '6px', paddingBottom: '2px', paddingLeft: '6px',
-        borderTopLeftRadius: '4px', borderTopRightRadius: '4px',
-        borderBottomRightRadius: '4px', borderBottomLeftRadius: '4px',
         color: '#be185d'
       };
     case 'mark':
@@ -158,27 +129,22 @@ function defaultStyleFor(type: ElementType): ElementStyle {
     case 'ul':
     case 'ol':
       return {
-        display: 'block',
-        paddingTop: '0', paddingRight: '0', paddingBottom: '0', paddingLeft: '28px',
+        width: '100%',
         minHeight: '32px',
-        boxSizing: 'border-box'
+        backgroundColor: '#f8fafc'
       };
     case 'li':
-      return { display: 'list-item', minHeight: '24px', paddingTop: '2px', paddingBottom: '2px' };
+      return { minHeight: '24px' };
     case 'label':
-      return {
-        display: 'inline-block', fontSize: '13px', color: '#555',
-        paddingTop: '2px', paddingRight: '6px', paddingBottom: '2px', paddingLeft: '6px',
-        boxSizing: 'border-box'
-      };
+      return { color: '#555555' };
     case 'form':
       return {
-        backgroundColor: '#f8fafc', minHeight: '60px',
-        padding: '12px',
-        boxSizing: 'border-box'
+        width: '100%',
+        minHeight: '80px',
+        backgroundColor: '#f8fafc'
       };
     default:
-      return { minHeight: '32px' };
+      return { width: '100%', minHeight: '40px' };
   }
 }
 

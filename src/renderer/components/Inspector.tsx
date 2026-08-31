@@ -384,10 +384,18 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   const elementId = selected.id;
   const elementType = selected.type;
 
-  // 折叠状态（可独立展开/收起）- 从 localStorage 恢复，默认全部折叠 (false)
+  // 折叠状态（可独立展开/收起）- 同类名/同选择器元素共享折叠记忆
+  const secStorageKey = (() => {
+    const rel = (selected.attrs?.relSelector ?? '').trim();
+    if (rel) return 'bc-inspector-sec-rel-' + rel.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cls = (selected.attrs?.className ?? '').trim();
+    if (cls) return 'bc-inspector-sec-cls-' + cls.split(/\s+/)[0];
+    return 'bc-inspector-sec-id-' + elementId;
+  })();
+
   const [secOpen, setSecOpen] = useState<{ identity: boolean; layout: boolean; css: boolean; pseudo: boolean }>(() => {
     try {
-      const saved = localStorage.getItem('bc-inspector-sec-' + elementId);
+      const saved = localStorage.getItem(secStorageKey) || localStorage.getItem('bc-inspector-sec-' + elementId);
       if (saved) {
         const p = JSON.parse(saved);
         return { identity: p.identity ?? false, layout: p.layout ?? false, css: p.css ?? false, pseudo: p.pseudo ?? false };
@@ -396,18 +404,53 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
     return { identity: false, layout: false, css: false, pseudo: false };
   });
 
-  // 折叠状态变更时持久化
+  // 折叠状态变更时持久化到共享 key
   useEffect(() => {
     try {
-      localStorage.setItem('bc-inspector-sec-' + elementId, JSON.stringify(secOpen));
+      localStorage.setItem(secStorageKey, JSON.stringify(secOpen));
     } catch {}
-  }, [secOpen, elementId]);
+  }, [secOpen, secStorageKey]);
+
+  // 元素切换时，根据新元素的共享 key 重新恢复折叠状态
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(secStorageKey) || localStorage.getItem('bc-inspector-sec-' + elementId);
+      if (saved) {
+        const p = JSON.parse(saved);
+        setSecOpen({ identity: p.identity ?? false, layout: p.layout ?? false, css: p.css ?? false, pseudo: p.pseudo ?? false });
+      }
+    } catch {}
+  }, [secStorageKey, elementId]);
 
   // 伪类编辑区：:hover / :active / :focus / :link
   const PSEUDO_CLASSES = ['hover', 'active', 'focus', 'link'] as const;
   type PseudoClass = typeof PSEUDO_CLASSES[number];
-  const [activePseudo, setActivePseudo] = useState<PseudoClass | null>(null);
   const pseudoStyles = selected.pseudoStyles ?? {};
+
+  // 智能默认选中：若当前元素已有 :hover 覆盖，自动切到 :hover 标签，避免用户误以为 hover 丢失
+  const [activePseudo, setActivePseudo] = useState<PseudoClass | null>(() => {
+    if (pseudoStyles.hover && Object.keys(pseudoStyles.hover).length > 0) return 'hover';
+    if (pseudoStyles.active && Object.keys(pseudoStyles.active).length > 0) return 'active';
+    if (pseudoStyles.focus && Object.keys(pseudoStyles.focus).length > 0) return 'focus';
+    if (pseudoStyles.link && Object.keys(pseudoStyles.link).length > 0) return 'link';
+    return null;
+  });
+
+  // 切换元素时，自动定位到该元素已有的第一个伪类状态（若有），否则回到默认状态
+  useEffect(() => {
+    const ps = selected.pseudoStyles ?? {};
+    if (ps.hover && Object.keys(ps.hover).length > 0) {
+      setActivePseudo('hover');
+    } else if (ps.active && Object.keys(ps.active).length > 0) {
+      setActivePseudo('active');
+    } else if (ps.focus && Object.keys(ps.focus).length > 0) {
+      setActivePseudo('focus');
+    } else if (ps.link && Object.keys(ps.link).length > 0) {
+      setActivePseudo('link');
+    } else {
+      setActivePseudo(null);
+    }
+  }, [elementId]);
 
   // 更新伪类样式的辅助函数（直接通过 store 更新，自动联动同类名/同选择器元素）
   const updatePseudoStyle = (pseudo: PseudoClass | null, patch: Record<string, string>) => {
@@ -659,16 +702,20 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
             </div>
 
             <div className="pseudo-tabs">
-              {PSEUDO_CLASSES.map((pc) => (
-                <button
-                  key={pc}
-                  className={'pseudo-tab' + (activePseudo === pc ? ' active' : '')}
-                  onClick={() => setActivePseudo(pc === activePseudo ? null : pc)}
-                  title={`编辑 :${pc} 状态下的外观`}
-                >
-                  :{pc} {pc === 'hover' ? '(悬停)' : pc === 'active' ? '(按下)' : pc === 'focus' ? '(聚焦)' : '(链接)'}
-                </button>
-              ))}
+              {PSEUDO_CLASSES.map((pc) => {
+                const count = Object.keys(pseudoStyles[pc] ?? {}).length;
+                return (
+                  <button
+                    key={pc}
+                    className={'pseudo-tab' + (activePseudo === pc ? ' active' : '') + (count > 0 ? ' has-override' : '')}
+                    onClick={() => setActivePseudo(pc === activePseudo ? null : pc)}
+                    title={`编辑 :${pc} 状态下的外观${count > 0 ? `（已有 ${count} 项样式覆盖）` : ''}`}
+                  >
+                    :{pc} {pc === 'hover' ? '(悬停)' : pc === 'active' ? '(按下)' : pc === 'focus' ? '(聚焦)' : '(链接)'}
+                    {count > 0 && <span className="pseudo-tab-dot" title={`已设置 ${count} 项覆盖`} />}
+                  </button>
+                );
+              })}
               <button
                 className={'pseudo-tab' + (activePseudo === null ? ' active' : '')}
                 onClick={() => setActivePseudo(null)}
@@ -989,8 +1036,15 @@ function MultiRelSelectorRow(props: { ids: string[] }) {
         <span>
           批量关系选择器
           <HelpButton
-            title="批量关系选择器"
-            content={`给选中的 ${ids.length} 个元素统一设置关系选择器：\n\n· 系统会自动推导它们的共同父容器（如 .card-grid > div）\n· 一键应用后，全部选中元素共享同一套后代样式，无需单独起 class`}
+            title="批量关系选择器与符号通俗说明"
+            content={
+              '【关系选择器通俗说明】：\n\n' +
+              '• >（直接子元素）：例如 .card > h3 —— 只匹配 .card 容器里的「亲儿子」标题，孙子层级不生效；\n' +
+              '• 空格（所有后代）：例如 .hero p —— 匹配 .hero 容器内「所有层级」的段落（亲儿子、孙子都生效）；\n' +
+              '• +（紧邻弟弟）：例如 h2 + p —— 只匹配紧跟在 h2 后面的第一个段落；\n' +
+              '• :first-child / :last-child：只匹配第一个或最后一个子元素。\n\n' +
+              '点击「⚡ 批量关联父级」，系统会自动推导并为您推荐最干净的标准选择器，一键套用！'
+            }
           />
           <span className="prop-scope">批量</span>
         </span>
@@ -1033,22 +1087,32 @@ function MultiRelSelectorRow(props: { ids: string[] }) {
                 <div className="hint" style={{ marginBottom: 6 }}>
                   共同父容器 <b>{inferResult.anchorName}</b>，选择应用于全部 {ids.length} 个元素：
                 </div>
-                {inferResult.candidates.map((c: RelCandidate, i: number) => (
-                  <button
-                    key={i}
-                    className={"cls-infer-item" + (c.recommended ? ' recommended' : '')}
-                    onClick={() => {
-                      setMultiRelSelector(ids, c.selector);
-                      setInferOpen(false);
-                    }}
-                  >
-                    <div className="cls-infer-item-sel">
-                      <code>{c.selector}</code>
-                      {c.recommended && <span className="cls-infer-badge">推荐</span>}
-                    </div>
-                    <div className="cls-infer-item-desc">{c.description}</div>
-                  </button>
-                ))}
+                {inferResult.candidates.map((c: RelCandidate, i: number) => {
+                  const symbolExpl = c.selector.includes(' > ')
+                    ? '（> 仅直接子级）'
+                    : c.selector.includes(' + ')
+                    ? '（+ 紧邻同级）'
+                    : c.selector.includes(' ')
+                    ? '（空格 所有后代）'
+                    : '';
+                  return (
+                    <button
+                      key={i}
+                      className={"cls-infer-item" + (c.recommended ? ' recommended' : '')}
+                      onClick={() => {
+                        setMultiRelSelector(ids, c.selector);
+                        setInferOpen(false);
+                      }}
+                    >
+                      <div className="cls-infer-item-sel">
+                        <code>{c.selector}</code>
+                        {c.recommended && <span className="cls-infer-badge">推荐</span>}
+                        {symbolExpl && <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>{symbolExpl}</span>}
+                      </div>
+                      <div className="cls-infer-item-desc">{c.description}</div>
+                    </button>
+                  );
+                })}
               </div>
             ) : (
               <div className="cls-infer-err">
@@ -1151,8 +1215,17 @@ function RelationalSelectorRow(props: { elementId: string; element: SceneElement
         <span>
           关系选择器
           <HelpButton
-            title="智能关系选择器"
-            content={'通过父子关系定位元素，无需为每个子元素起 class：\n\n· 点击「⚡ 自动关联父级」，系统自动向上找父容器（如 .hero、.card），推导生成 .hero > h1、.card > p 等手写级选择器\n· 若选择全部同类（如 .main > div），该容器下所有同标签直接子元素会自动同步该选择器与样式'}
+            title="智能关系选择器与符号通俗说明"
+            content={
+              '【关系选择器通俗说明】：\n\n' +
+              '• >（直接子元素）：例如 .card > h3 —— 只匹配 .card 容器里的「亲儿子」标题，孙子层级不生效；\n' +
+              '• 空格（所有后代）：例如 .hero p —— 匹配 .hero 容器内「所有层级」的段落（亲儿子、孙子都生效）；\n' +
+              '• +（紧邻弟弟）：例如 h2 + p —— 只匹配紧跟在 h2 后面的第一个段落；\n' +
+              '• :first-child / :last-child：只匹配第一个或最后一个子元素。\n\n' +
+              '通过父子关系定位元素，无需为每个子元素起 class：\n' +
+              '· 点击「⚡ 自动关联父级」，系统自动向上找父容器（如 .hero、.card），推导生成 .hero > h1、.card > p 等手写级选择器；\n' +
+              '· 若选择全部同类（如 .main > div），该容器下所有同标签直接子元素会自动同步该选择器与样式。'
+            }
           />
           <span className="prop-scope">父→子</span>
         </span>
@@ -1196,22 +1269,32 @@ function RelationalSelectorRow(props: { elementId: string; element: SceneElement
                 <div className="hint" style={{ marginBottom: 6 }}>
                   匹配到上层容器 <b>{inferResult.anchorName}</b>，选择一个规则：
                 </div>
-                {inferResult.candidates.map((c: RelCandidate, i: number) => (
-                  <button
-                    key={i}
-                    className={"cls-infer-item" + (c.recommended ? ' recommended' : '')}
-                    onClick={() => {
-                      setRelSelector(elementId, c.selector, !!c.isGroup);
-                      setInferOpen(false);
-                    }}
-                  >
-                    <div className="cls-infer-item-sel">
-                      <code>{c.selector}</code>
-                      {c.recommended && <span className="cls-infer-badge">推荐</span>}
-                    </div>
-                    <div className="cls-infer-item-desc">{c.description}</div>
-                  </button>
-                ))}
+                {inferResult.candidates.map((c: RelCandidate, i: number) => {
+                  const symbolExpl = c.selector.includes(' > ')
+                    ? '（> 仅直接子级）'
+                    : c.selector.includes(' + ')
+                    ? '（+ 紧邻同级）'
+                    : c.selector.includes(' ')
+                    ? '（空格 所有后代）'
+                    : '';
+                  return (
+                    <button
+                      key={i}
+                      className={"cls-infer-item" + (c.recommended ? ' recommended' : '')}
+                      onClick={() => {
+                        setRelSelector(elementId, c.selector, !!c.isGroup);
+                        setInferOpen(false);
+                      }}
+                    >
+                      <div className="cls-infer-item-sel">
+                        <code>{c.selector}</code>
+                        {c.recommended && <span className="cls-infer-badge">推荐</span>}
+                        {symbolExpl && <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>{symbolExpl}</span>}
+                      </div>
+                      <div className="cls-infer-item-desc">{c.description}</div>
+                    </button>
+                  );
+                })}
               </div>
             ) : (
               <div className="cls-infer-err">

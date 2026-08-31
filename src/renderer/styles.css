@@ -2763,6 +2763,23 @@ body.bc-resizing-col, body.bc-resizing-col * { cursor: col-resize !important; us
 }
 .pseudo-tab:hover { border-color: var(--accent); color: var(--accent); }
 .pseudo-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.pseudo-tab.has-override:not(.active) {
+  border-color: #3b82f6;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+.pseudo-tab-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  background: #f59e0b;
+  border-radius: 50%;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.pseudo-tab.active .pseudo-tab-dot {
+  background: #ffffff;
+}
 .pseudo-hint {
   font-size: 11px;
   color: var(--accent);
