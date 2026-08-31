@@ -421,13 +421,24 @@ const CanvasNode = React.memo(function CanvasNode(props: {
   );
 });
 
-// 图片 src 转换：本地绝对路径（Windows C:\... 或 \\网络路径）转成 bc-img:// 协议，
+// 图片 src 转换：保证画布实时预览任何相对路径、绝对路径、网络 URL 和 base64
 function toRenderableSrc(raw: string): string {
   const t = raw.trim();
   if (!t) return t;
-  if (/^(https?:|data:|blob:)/i.test(t) || /^[a-z]+:\/\//i.test(t) || t.startsWith('/')) return t;
+  // 网络链接 / Base64 / Blob
+  if (/^(https?:|data:|blob:)/i.test(t)) return t;
+  // 已经带有协议头的路径
+  if (/^[a-z0-9+.-]+:\/\//i.test(t)) {
+    if (t.startsWith('file://')) {
+      const pathPart = t.replace(/^file:\/\/\/?/i, '');
+      return 'bc-img://file/' + encodeURIComponent(pathPart);
+    }
+    return t;
+  }
+  // Windows 盘符绝对路径 (C:\... 或 C:/...)
   if (/^[a-zA-Z]:[\\/]/.test(t) || t.startsWith('\\\\')) {
     return 'bc-img://file/' + encodeURIComponent(t);
   }
-  return t;
+  // 相对路径（如 ./images/pic.png、images/pic.png、../pic.jpg 或 /pic.png）
+  return 'bc-img://file/' + encodeURIComponent(t);
 }

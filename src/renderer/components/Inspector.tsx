@@ -1599,7 +1599,7 @@ function ImgPickerRow(props: { elementId: string }) {
 
   const [pathMode, setPathMode] = useState<'rel' | 'abs' | 'url'>(() => {
     if (currentSrc.startsWith('http://') || currentSrc.startsWith('https://')) return 'url';
-    if (/^[a-zA-Z]:[\\/]/.test(currentSrc) || currentSrc.startsWith('\\\\')) return 'abs';
+    if (/^[a-zA-Z]:[\\/]/.test(currentSrc) || currentSrc.startsWith('\\\\') || currentSrc.startsWith('file://')) return 'abs';
     return 'rel';
   });
 
@@ -1609,14 +1609,27 @@ function ImgPickerRow(props: { elementId: string }) {
     updateAttr(props.elementId, 'src', res.path);
   };
 
+  // 检测是否是可能在导出 file:// 协议下失效的路径并给出温馨提示
+  const isAbsOrFileProto = /^[a-zA-Z]:[\\/]/.test(currentSrc) || currentSrc.startsWith('\\\\') || currentSrc.startsWith('file://');
+
   return (
     <div className="prop-row">
       <div className="prop-row-header">
         <span>
           图片路径 (src)
           <HelpButton
-            title="图片路径模式"
-            content={'支持三种图片引用方式：\n\n1. 相对路径（推荐）：图片位于工程目录中（如 ./images/pic.png），项目移动或打包后图片依然有效！\n2. 绝对路径：本机固定路径（如 D:\\photos\\pic.jpg）。\n3. 网络 URL：直接粘贴在线图片链接（https://...）。'}
+            title="图片路径与 file:// 协议说明"
+            content={
+              '【图片路径模式说明】：\n\n' +
+              '1. 相对路径（强烈推荐 · ⭐⭐⭐）：\n' +
+              '   例如 ./images/photo.png 或 images/photo.png。\n' +
+              '   导出的 HTML 文件直接双击在浏览器打开（file:// 协议）或部署上线均能完美显示！\n\n' +
+              '2. 网络图片 URL：\n' +
+              '   例如 https://example.com/pic.jpg。\n' +
+              '   只要电脑能联网，无论本地打开还是线上均能正常显示。\n\n' +
+              '3. 本地绝对路径（如 D:\\photo.jpg 或 file://...）：\n' +
+              '   ⚠️ 编辑器内已做专属特权通道强行正常预览；但导出的 HTML 在现代浏览器由于同源安全限制，通过 file:// 协议可能无法跨盘符读取，建议将图片放入与导出的 HTML 相同或子文件夹内，使用相对路径！'
+            }
           />
         </span>
         <div className="img-mode-seg">
@@ -1643,6 +1656,11 @@ function ImgPickerRow(props: { elementId: string }) {
           </button>
         )}
       </div>
+      {isAbsOrFileProto && (
+        <div style={{ marginTop: 4, fontSize: 11, color: '#d97706', lineHeight: 1.4 }}>
+          ⚠️ 提示：当前为绝对路径。编辑器内已强行支持预览，但导出 HTML 在浏览器中直接双击 (file://) 打开时受跨域安全限制可能无法跨盘显示，推荐使用相对路径 (./images/...)。
+        </div>
+      )}
     </div>
   );
 }

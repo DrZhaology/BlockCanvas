@@ -781,9 +781,30 @@ app.whenReady().then(() => {
   protocol.handle('bc-img', async (request) => {
     try {
       const url = new URL(request.url);
-      const rawPath = decodeURIComponent(url.pathname.replace(/^\//, ''));
+      let rawPath = decodeURIComponent(url.pathname.replace(/^\/file\//i, '').replace(/^\//, ''));
       if (!rawPath) return new Response(null, { status: 400 });
-      return await net.fetch(pathToFileURL(rawPath).toString());
+
+      // 如果是相对路径，自动基于当前项目目录 / app 根目录 / data 目录解析
+      if (!/^[a-zA-Z]:[\\/]/.test(rawPath) && !rawPath.startsWith('\\\\')) {
+        const cleanRel = rawPath.replace(/^\.?\/+/, '');
+        const candidates = [
+          join(dataRoot(), 'projects', cleanRel),
+          join(dataRoot(), cleanRel),
+          join(app.getAppPath(), cleanRel),
+          join(dirname(process.execPath), cleanRel)
+        ];
+        for (const cand of candidates) {
+          if (existsSync(cand)) {
+            rawPath = cand;
+            break;
+          }
+        }
+      }
+
+      if (existsSync(rawPath)) {
+        return await net.fetch(pathToFileURL(rawPath).toString());
+      }
+      return new Response(null, { status: 404 });
     } catch {
       return new Response(null, { status: 400 });
     }
