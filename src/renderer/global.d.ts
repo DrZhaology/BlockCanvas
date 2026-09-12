@@ -74,6 +74,7 @@ declare global {
       // 自动更新
       checkUpdate: () => Promise<{
         ok: boolean;
+        isDev?: boolean;
         error?: string;
         localVersion?: string;
         latestVersion?: string;

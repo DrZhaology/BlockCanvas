@@ -145,6 +145,9 @@
                     "display": "flex",
                     "flexDirection": "column",
                     "marginLeft": "12px"
+                  },
+                  "attrs": {
+                    "className": "testi-info"
                   }
                 }
               ],
@@ -219,13 +222,13 @@
                     "width": "40px",
                     "height": "40px",
                     "borderRadius": "50%",
-                    "backgroundColor": "#fce7f3",
+                    "backgroundColor": "#dbeafe",
                     "display": "inline-flex",
                     "alignItems": "center",
                     "justifyContent": "center",
                     "fontSize": "18px",
                     "fontWeight": "700",
-                    "color": "#db2777"
+                    "color": "#1e88e5"
                   },
                   "attrs": {
                     "className": "testi-avatar"
@@ -272,6 +275,9 @@
                     "display": "flex",
                     "flexDirection": "column",
                     "marginLeft": "12px"
+                  },
+                  "attrs": {
+                    "className": "testi-info"
                   }
                 }
               ],
@@ -346,13 +352,13 @@
                     "width": "40px",
                     "height": "40px",
                     "borderRadius": "50%",
-                    "backgroundColor": "#d1fae5",
+                    "backgroundColor": "#dbeafe",
                     "display": "inline-flex",
                     "alignItems": "center",
                     "justifyContent": "center",
                     "fontSize": "18px",
                     "fontWeight": "700",
-                    "color": "#059669"
+                    "color": "#1e88e5"
                   },
                   "attrs": {
                     "className": "testi-avatar"
@@ -399,6 +405,9 @@
                     "display": "flex",
                     "flexDirection": "column",
                     "marginLeft": "12px"
+                  },
+                  "attrs": {
+                    "className": "testi-info"
                   }
                 }
               ],

@@ -230,7 +230,8 @@
             "padding": "20px 24px",
             "backgroundColor": "#ffffff",
             "borderRadius": "10px",
-            "border": "1px solid #e5e7eb"
+            "border": "1px solid #e5e7eb",
+            "marginBottom": "12px"
           },
           "attrs": {
             "className": "faq-item"

@@ -124,7 +124,9 @@ export function ElementPanel() {
   const insertTemplate = useScene((s) => s.insertTemplate);
   const autoInherit = useScene((s) => s.autoInherit);
   const setAutoInherit = useScene((s) => s.setAutoInherit);
-  const [tab, setTab] = useState<'element' | 'templates'>('element');
+  const [tab, setTab] = useState<'element' | 'templates'>(() => {
+    try { return (localStorage.getItem('bc-elem-tab') as any) || 'element'; } catch { return 'element'; }
+  });
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [busy, setBusy] = useState(false);
   // hover 元素讲解卡：1s 延迟缓入
@@ -132,6 +134,11 @@ export function ElementPanel() {
   const hoverTimer = useRef<number>(0);
   const clearHoverTimer = () => {
     if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = 0; }
+  };
+
+  const changeTab = (nextTab: 'element' | 'templates') => {
+    setTab(nextTab);
+    try { localStorage.setItem('bc-elem-tab', nextTab); } catch {}
   };
 
   // 元素按钮展示模式：'both' 中文+代码标签 | 'zh' 仅中文 | 'tag' 仅英文标签
@@ -150,7 +157,7 @@ export function ElementPanel() {
   useEffect(() => {
     rescan();
     // 监听插件注册新元素
-    const onPluginElements = () => setTab('element');
+    const onPluginElements = () => changeTab('element');
     window.addEventListener('bc:plugin-elements-changed', onPluginElements);
     return () => {
       clearHoverTimer();
@@ -158,9 +165,14 @@ export function ElementPanel() {
     };
   }, []);
 
-  // 切回「元素」页签时自动收拢口袋
+  // 切到「模板」按用户记忆恢复口袋，切回「元素」自动收拢
   useEffect(() => {
-    if (tab !== 'templates') {
+    if (tab === 'templates') {
+      const isExp = (() => {
+        try { return localStorage.getItem('bc-pocket-expanded') === 'true'; } catch { return false; }
+      })();
+      window.dispatchEvent(new CustomEvent('bc:set-pocket', { detail: isExp }));
+    } else {
       window.dispatchEvent(new CustomEvent('bc:set-pocket', { detail: false }));
     }
   }, [tab]);
@@ -190,12 +202,12 @@ export function ElementPanel() {
       <div className="inspector-tabs">
         <button
           className={"inspector-tab" + (tab === 'element' ? ' active' : '')}
-          onClick={() => setTab('element')}
+          onClick={() => changeTab('element')}
           title="可插入的 HTML 元素"
         >元素</button>
         <button
           className={"inspector-tab" + (tab === 'templates' ? ' active' : '')}
-          onClick={() => setTab('templates')}
+          onClick={() => changeTab('templates')}
           title="预设组件模板库"
         >模板</button>
       </div>
@@ -338,11 +350,14 @@ function TemplateLibrary(props: {
   });
   const [search, setSearch] = useState('');
   const [preview, setPreview] = useState<{ resId: string; tpl: { id: string; name: string; description: string; category?: string } } | null>(null);
-  const [pocketExpanded, setPocketExpanded] = useState(false);
+  const [pocketExpanded, setPocketExpanded] = useState(() => {
+    try { return localStorage.getItem('bc-pocket-expanded') === 'true'; } catch { return false; }
+  });
 
   const togglePocket = () => {
     const next = !pocketExpanded;
     setPocketExpanded(next);
+    try { localStorage.setItem('bc-pocket-expanded', String(next)); } catch {}
     window.dispatchEvent(new CustomEvent('bc:set-pocket', { detail: next }));
   };
 

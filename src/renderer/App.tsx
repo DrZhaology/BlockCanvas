@@ -47,7 +47,13 @@ export default function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('personalization');
   const [showAbout, setShowAbout] = useState(false);
   const [_updating, setUpdating] = useState(false);
-  const [pocketExpanded, setPocketExpanded] = useState(false);
+  const [pocketExpanded, setPocketExpanded] = useState(() => {
+    try {
+      return localStorage.getItem('bc-elem-tab') === 'templates' && localStorage.getItem('bc-pocket-expanded') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const applyZoom = (fn: (z: number) => number) => setZoom(fn);
 
   useKeyboardShortcuts(setView);
@@ -334,8 +340,12 @@ export default function App() {
                   <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>
                   {layout === 'left' && (
                     <div
-                      className="panel-resizer panel-resizer-left"
-                      onMouseDown={(e) => startResize(e, 'left', setLeftWidth, LEFT_WIDTH_MIN, leftWidth)}
+                      className={"panel-resizer panel-resizer-left" + (pocketExpanded ? " is-disabled" : "")}
+                      onMouseDown={(e) => {
+                        if (pocketExpanded) return;
+                        startResize(e, 'left', setLeftWidth, LEFT_WIDTH_MIN, leftWidth);
+                      }}
+                      title={pocketExpanded ? "已撑开口袋，宽度调整已锁定" : undefined}
                     >
                       <div className="panel-resizer-handle" />
                     </div>
@@ -352,8 +362,12 @@ export default function App() {
                   </ErrorBoundary>
                   {layout === 'bottom' && (
                     <div
-                      className="panel-resizer panel-resizer-horizontal"
-                      onMouseDown={(e) => startResize(e, 'bottom', setBottomHeight, BOTTOM_HEIGHT_MIN, bottomHeight)}
+                      className={"panel-resizer panel-resizer-horizontal" + (pocketExpanded ? " is-disabled" : "")}
+                      onMouseDown={(e) => {
+                        if (pocketExpanded) return;
+                        startResize(e, 'bottom', setBottomHeight, BOTTOM_HEIGHT_MIN, bottomHeight);
+                      }}
+                      title={pocketExpanded ? "已撑开口袋，高度调整已锁定" : undefined}
                     >
                       <div className="panel-resizer-handle" />
                     </div>

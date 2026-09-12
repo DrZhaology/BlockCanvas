@@ -477,7 +477,11 @@ html[data-bc-dark] .tab-close-btn:hover {
   box-shadow: 0 0 0 9999px rgba(30, 136, 229, 0.02);
 }
 /* 框选进行中：全窗口十字光标 */
-body.bc-marqueeing, body.bc-marqueeing * { cursor: crosshair !important; }
+body.bc-marqueeing, body.bc-marqueeing * {
+  cursor: crosshair !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
 .canvas-empty {
   color: var(--text-muted);
   text-align: center;
@@ -551,8 +555,8 @@ body.bc-marqueeing, body.bc-marqueeing * { cursor: crosshair !important; }
   cursor: pointer;
 }
 .btn-danger {
-  margin-top: 14px;
-  width: 100%;
+  margin-top: 0;
+  width: auto;
   height: 28px;
   background: transparent;
   border: 1px solid var(--danger);
@@ -1135,6 +1139,11 @@ body.bc-outlines-on .canvas [data-bc-cg] {
   position: relative;
   z-index: 30;
   touch-action: none;
+}
+.panel-resizer.is-disabled {
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
 }
 /* 竖向拖手（贴在 right 面板左缘，贯穿右上两格）。
    边框由面板自身提供（right-pane border-left），拖手本身不再画线，避免双重外边框 */
@@ -4460,6 +4469,7 @@ html[data-bc-dark] .recovery-banner {
   overflow-y: auto;
 }
 .fluent-nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -4476,6 +4486,17 @@ html[data-bc-dark] .recovery-banner {
   background: var(--bg-panel);
   border-color: var(--border);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.fluent-nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 2px;
 }
 .fluent-nav-icon { font-size: 16px; flex-shrink: 0; }
 .fluent-nav-meta { display: flex; flex-direction: column; min-width: 0; }
@@ -4523,6 +4544,7 @@ html[data-bc-dark] .recovery-banner {
   width: 100%;
   max-width: 840px;
   margin: 0 auto;
+  animation: popFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .fluent-group-title {
   font-size: 12px;
@@ -4536,11 +4558,20 @@ html[data-bc-dark] .recovery-banner {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 18px;
+  padding: 13px 20px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-panel);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.fluent-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+html[data-bc-dark] .fluent-card:hover {
+  border-color: #4b5563;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 .fluent-card-icon { font-size: 20px; flex-shrink: 0; }
 .fluent-card-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -4984,14 +5015,26 @@ html[data-bc-dark] .pc-cover-badge {
   justify-content: flex-end;
   animation: popFadeIn 0.15s ease;
 }
+@keyframes drawerSlideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0.8;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
 .pc-drawer {
   width: 420px;
   max-width: 90vw;
   height: 100%;
   background: var(--bg-panel);
-  box-shadow: -6px 0 24px rgba(0, 0, 0, 0.16);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
+  animation: drawerSlideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
 }
 .pc-drawer-header {
   height: 48px;
@@ -5122,8 +5165,13 @@ html[data-bc-dark] .dd-modal-header {
   background: var(--panel-tint);
   border-top: 1px solid var(--border);
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 10px;
+}
+.dd-modal-footer button {
+  margin: 0 !important;
+  flex-shrink: 0;
 }
 .dd-modal-footer .btn-danger:disabled {
   opacity: 0.35;

@@ -110,6 +110,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const dy = e.clientY - d.startY;
     if (!d.active && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
     d.active = true;
+    window.getSelection()?.removeAllRanges();
     setMarquee({
       x: Math.min(d.startX, e.clientX),
       y: Math.min(d.startY, e.clientY),
@@ -123,6 +124,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     endMarquee();
     dragRef.current = null;
     setMarquee(null);
+    window.getSelection()?.removeAllRanges();
     if (!d) return;
     if (!d.active) return; // 没拖成框 = 普通点击，交给 onClick 清空选区
     suppressClickRef.current = true;
@@ -156,6 +158,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     // 元素上的按下由元素自身处理（选中/多选），不在此起框
     const t = e.target as HTMLElement;
     if (t !== e.currentTarget && t !== canvasRef.current) return;
+    e.preventDefault();
+    window.getSelection()?.removeAllRanges();
     dragRef.current = { startX: e.clientX, startY: e.clientY, active: false, ctrl: e.ctrlKey || e.metaKey };
     document.body.classList.add('bc-marqueeing');
     window.addEventListener('pointermove', onWindowMove);
