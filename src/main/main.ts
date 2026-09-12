@@ -166,6 +166,14 @@ ipcMain.handle('data:clear-orphan-backups', () => clearOrphanBackups());
 ipcMain.handle('update:get-version', () => getLocalVersion());
 
 ipcMain.handle('update:check', async () => {
+  if (!app.isPackaged) {
+    return {
+      ok: false,
+      isDev: true,
+      hasUpdate: false,
+      error: '当前处于源码开发调试模式 (pnpm dev)，检测与安装更新仅在正式构建打包后的版本中可用。'
+    };
+  }
   const localVer = getLocalVersion();
   const release = await fetchLatestRelease();
   if (!release) return { ok: false, error: '无法连接到更新服务器' };

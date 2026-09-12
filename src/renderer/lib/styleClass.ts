@@ -175,12 +175,27 @@ export interface StyleClassSet {
   inlineCss: Map<string, string | null>; // 行内样式元素：节点 id → CSS 声明文本（无样式时为 null）
   rules: Map<string, string>;            // selector → 声明文本（冲突时保留首个）
   order: string[];                       // 选择器首次出现顺序
+  tabletRules: Map<string, string>;      // selector → 平板端声明文本 (@media max-width: 768px)
+  tabletOrder: string[];
+  mobileRules: Map<string, string>;      // selector → 手机端声明文本 (@media max-width: 480px)
+  mobileOrder: string[];
   warnings: { selector: string; reason: string }[]; // 样式不统一（同名不同样式）/ 重复 ID → 提示
   unclassified: { id: string; type: string }[];     // 无类名无 ID 的元素（行内样式）→ 建议加类名
 }
 
 export function createStyleClassSet(): StyleClassSet {
-  return { byId: new Map(), inlineCss: new Map(), rules: new Map(), order: [], warnings: [], unclassified: [] };
+  return {
+    byId: new Map(),
+    inlineCss: new Map(),
+    rules: new Map(),
+    order: [],
+    tabletRules: new Map(),
+    tabletOrder: [],
+    mobileRules: new Map(),
+    mobileOrder: [],
+    warnings: [],
+    unclassified: []
+  };
 }
 
 // 深度优先收集整棵树的类名与规则（同名类样式不同不合并：保留首个 + 冲突警告）
@@ -268,6 +283,27 @@ export function collectStyleClasses(root: SceneElement, ctx: StyleClassSet): voi
           }
         }
       }
+      // 响应式断点样式：平板 (max-width: 768px) 与 手机 (max-width: 480px)
+      if (node.responsive && info.selector) {
+        if (node.responsive.tablet) {
+          const tCss = styleToCssText(simplifyStyle(node.responsive.tablet));
+          if (tCss) {
+            if (!ctx.tabletRules.has(info.selector)) {
+              ctx.tabletRules.set(info.selector, tCss);
+              ctx.tabletOrder.push(info.selector);
+            }
+          }
+        }
+        if (node.responsive.mobile) {
+          const mCss = styleToCssText(simplifyStyle(node.responsive.mobile));
+          if (mCss) {
+            if (!ctx.mobileRules.has(info.selector)) {
+              ctx.mobileRules.set(info.selector, mCss);
+              ctx.mobileOrder.push(info.selector);
+            }
+          }
+        }
+      }
       if (!clsName && !idName && !relName && !info.inlineCss) {
         // 连行内样式都没有的裸元素（如默认无样式元素）：同样算"未命名"，提示可忽略
         ctx.unclassified.push({ id: node.id, type: node.type });
@@ -307,6 +343,14 @@ export function buildStyleBlock(ctx: StyleClassSet, globalCss?: string, quickCss
   const parts: string[] = [];
   if (rulesBlock) {
     parts.push('/* ==== 自动生成的样式（放最前面；你写的全局 CSS 放最后，同权重规则后写者胜，可以覆盖这里） ==== */\n' + rulesBlock);
+  }
+  if (ctx.tabletOrder.length > 0) {
+    const tabletLines = ctx.tabletOrder.map((sel) => `  ${sel} { ${ctx.tabletRules.get(sel)} }`).join('\n');
+    parts.push('/* ==== 平板端响应式样式 (max-width: 768px) ==== */\n@media (max-width: 768px) {\n' + tabletLines + '\n}');
+  }
+  if (ctx.mobileOrder.length > 0) {
+    const mobileLines = ctx.mobileOrder.map((sel) => `  ${sel} { ${ctx.mobileRules.get(sel)} }`).join('\n');
+    parts.push('/* ==== 手机端响应式样式 (max-width: 480px) ==== */\n@media (max-width: 480px) {\n' + mobileLines + '\n}');
   }
   if (quickBlock) {
     parts.push('/* ==== 页面快速设置 ==== */\n' + quickBlock);

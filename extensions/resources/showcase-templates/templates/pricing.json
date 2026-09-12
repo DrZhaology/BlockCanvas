@@ -131,6 +131,9 @@
               "style": {
                 "paddingLeft": "20px",
                 "marginBottom": "24px"
+              },
+              "attrs": {
+                "className": "plan-features"
               }
             },
             {
@@ -214,7 +217,7 @@
               "style": {
                 "fontSize": "36px",
                 "fontWeight": "700",
-                "color": "#1e88e5",
+                "color": "#111827",
                 "marginBottom": "16px"
               },
               "attrs": {
@@ -290,6 +293,9 @@
               "style": {
                 "paddingLeft": "20px",
                 "marginBottom": "24px"
+              },
+              "attrs": {
+                "className": "plan-features"
               }
             },
             {
@@ -416,6 +422,9 @@
               "style": {
                 "paddingLeft": "20px",
                 "marginBottom": "24px"
+              },
+              "attrs": {
+                "className": "plan-features"
               }
             },
             {

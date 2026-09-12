@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useScene, findNode } from '@store/sceneStore';
+import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { CSS_UNITS, UNIT_LABELS } from '@lib/propertySchema';
 import { StepDrag } from '@comp/StepDrag';
 import { dragSteps } from '@lib/drag';
@@ -30,13 +30,15 @@ export function NumberUnitInput(props: Props) {
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
   const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
   const { elementId, schemaKey, unit: defaultUnit, allowAuto, pseudo } = props;
 
   const isPseudo = Boolean(pseudo);
   const node = findNode(scene.root, elementId);
+  const effStyle = node ? (getEffectiveStyle(node, activeBreakpoint) as any) : {};
   const value = isPseudo
     ? ((node?.pseudoStyles?.[pseudo!]?.[schemaKey] as string) ?? '')
-    : ((node?.style?.[schemaKey] as string) ?? '');
+    : ((effStyle[schemaKey] as string) ?? '');
 
   // 解析存储值 → {数字部分, 单位部分}；写不进的当"自定义"透传
   const parsed = parseValue(value);

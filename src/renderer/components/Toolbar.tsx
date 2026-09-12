@@ -239,6 +239,26 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     }
   }, []);
 
+  const setActiveBreakpoint = useScene((s) => s.setActiveBreakpoint);
+
+  const handleWidthChange = (val: string) => {
+    onCanvasWidthChange(val);
+    if (val === '375px') {
+      setActiveBreakpoint('mobile');
+    } else if (val === '768px') {
+      setActiveBreakpoint('tablet');
+    } else if (val === 'auto' || val === '1440px') {
+      setActiveBreakpoint('desktop');
+    } else {
+      const px = parseInt(val, 10);
+      if (!isNaN(px)) {
+        if (px <= 480) setActiveBreakpoint('mobile');
+        else if (px <= 768) setActiveBreakpoint('tablet');
+        else setActiveBreakpoint('desktop');
+      }
+    }
+  };
+
   // 画布宽度：自定义像素值显示在选择框里
   const WIDTH_OPTIONS = ['auto', '1440px', '768px', '375px'];
   const customWidth = canvasWidth !== 'auto' && !WIDTH_OPTIONS.includes(canvasWidth) ? canvasWidth : null;
@@ -300,12 +320,12 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     'blk.canvas-width': (
       <div className="tb-block tb-width" title="画布宽度：自适应 = 当前编辑区宽度（所见即所得）；预设断点用于预览响应式效果">
         <span className="tb-block-label">画布</span>
-        <select className="tb-width-select" value={canvasWidth} onChange={(e) => onCanvasWidthChange(e.target.value)}>
+        <select className="tb-width-select" value={canvasWidth} onChange={(e) => handleWidthChange(e.target.value)}>
           {customWidth && <option value={customWidth}>📏 {parseInt(customWidth)}px</option>}
           <option value="auto">自适应窗口</option>
-          <option value="1440px">桌面 1440px</option>
-          <option value="768px">平板 768px</option>
-          <option value="375px">手机 375px</option>
+          <option value="1440px">💻 桌面 1440px</option>
+          <option value="768px">📱 平板 768px</option>
+          <option value="375px">📱 手机 375px</option>
         </select>
       </div>
     ),

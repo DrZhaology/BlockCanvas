@@ -202,7 +202,18 @@ export interface SceneElement {
   childStyles?: { sel: string; css: string }[];
   // 伪类样式：key 为伪类名（hover/active/focus/link），value 为该状态下的样式覆盖
   pseudoStyles?: Record<string, ElementStyle>;
+  // 响应式断点样式覆盖（阶段 4・三断点体系）：
+  // 电脑端（Desktop, >768px）为基准源 (style 字段)；
+  // 平板（Tablet, ≤768px）与手机（Mobile, ≤480px）记录覆盖差异属性
+  responsive?: {
+    tablet?: ElementStyle;
+    mobile?: ElementStyle;
+  };
 }
+
+export type Breakpoint = 'desktop' | 'tablet' | 'mobile';
+
+export const BREAKPOINTS = ['desktop', 'tablet', 'mobile'] as const;
 
 export interface SceneGraph {
   root: SceneElement; // <body> 角色

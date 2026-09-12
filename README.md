@@ -103,10 +103,10 @@ pnpm test:e2e       # 构建 + 跑 Playwright 端到端测试
 powershell -ExecutionPolicy Bypass -File build-exe.ps1
 ```
 
-产物为 `dist\win-unpacked\`（绿色便携文件夹）+ `dist\BlockCanvas-0.3.1-win64.zip`。
-绿色便携：**免安装、不写 AppData**；`extensions/` 放在 exe 旁边、可写，随时增删插件/资源包。
+产物为 `dist\win-unpacked\`（绿色便携文件夹）+ `dist\BlockCanvas-0.4.0-win64.zip`。
+绿色便携：**免安装、不写 AppData**；`data/extensions/` 内置插件/资源包随 zip 分发，开箱即用。
 
-> 版本号规则：`0.X.X` = 阶段测试版，`X.X` = 正式版（如 1.0、2.3）。当前 `0.3.1`。
+> 版本号规则：`0.X.X` = 阶段测试版，`X.X` = 正式版（如 1.0、2.3）。当前 `0.4.0`。
 
 ## 📁 目录结构
 

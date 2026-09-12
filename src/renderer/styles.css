@@ -467,6 +467,145 @@ html[data-bc-dark] .tab-close-btn:hover {
   position: relative;
 }
 
+/* 手机真机视口沉浸式模拟外框 (375px 移动端专属) */
+.canvas.is-mobile-frame {
+  border-radius: 40px !important;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.22), 0 0 0 8px #1e222b, 0 0 0 10px #3c4250 !important;
+  margin-top: 24px;
+  margin-bottom: 40px;
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.canvas-mobile-island {
+  position: sticky;
+  top: 8px;
+  width: 96px;
+  height: 22px;
+  background: #111317;
+  border-radius: 12px;
+  margin: 8px auto 14px;
+  z-index: 85;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* Inspector 响应式断点切换栏 */
+.inspector-bp-bar {
+  padding: 6px 0 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.inspector-bp-tabs {
+  display: flex;
+  background: var(--panel-tint);
+  padding: 3px;
+  border-radius: 6px;
+  gap: 3px;
+}
+.bp-tab-btn {
+  flex: 1;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+}
+.bp-tab-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.bp-tab-btn.active {
+  background: var(--bg-panel);
+  border-color: var(--border);
+  color: var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.bp-dot {
+  width: 5px;
+  height: 5px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+.bp-tab-btn.has-override:not(.active) .bp-dot {
+  background: #f59e0b;
+}
+
+/* 响应式提示与移动端快捷操作栏 */
+.inspector-bp-banner {
+  padding: 8px 10px;
+  background: #f0f7ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+html[data-bc-dark] .inspector-bp-banner {
+  background: #1e293b;
+  border-color: #334155;
+}
+.inspector-bp-banner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #1e40af;
+}
+html[data-bc-dark] .inspector-bp-banner-head {
+  color: #93c5fd;
+}
+.bp-clear-btn {
+  color: #2563eb !important;
+  border-color: #93c5fd !important;
+  font-size: 10.5px !important;
+  height: 22px !important;
+  padding: 0 6px !important;
+}
+.inspector-bp-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.bp-quick-btn {
+  font-size: 11px !important;
+  padding: 2px 8px !important;
+  height: 24px !important;
+  border-radius: 4px !important;
+  background: var(--bg-panel) !important;
+}
+.bp-quick-btn.active {
+  background: #ef4444 !important;
+  color: #ffffff !important;
+  border-color: #dc2626 !important;
+}
+.prop-bp-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  margin-left: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.prop-bp-badge:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
 /* 拖框选中：Windows 桌面式框选矩形（fixed 覆盖层，可延伸到画布外条纹区） */
 .marquee-box {
   position: fixed;
@@ -477,7 +616,11 @@ html[data-bc-dark] .tab-close-btn:hover {
   box-shadow: 0 0 0 9999px rgba(30, 136, 229, 0.02);
 }
 /* 框选进行中：全窗口十字光标 */
-body.bc-marqueeing, body.bc-marqueeing * { cursor: crosshair !important; }
+body.bc-marqueeing, body.bc-marqueeing * {
+  cursor: crosshair !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
 .canvas-empty {
   color: var(--text-muted);
   text-align: center;
@@ -551,8 +694,8 @@ body.bc-marqueeing, body.bc-marqueeing * { cursor: crosshair !important; }
   cursor: pointer;
 }
 .btn-danger {
-  margin-top: 14px;
-  width: 100%;
+  margin-top: 0;
+  width: auto;
   height: 28px;
   background: transparent;
   border: 1px solid var(--danger);
@@ -1135,6 +1278,11 @@ body.bc-outlines-on .canvas [data-bc-cg] {
   position: relative;
   z-index: 30;
   touch-action: none;
+}
+.panel-resizer.is-disabled {
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
 }
 /* 竖向拖手（贴在 right 面板左缘，贯穿右上两格）。
    边框由面板自身提供（right-pane border-left），拖手本身不再画线，避免双重外边框 */
@@ -4460,6 +4608,7 @@ html[data-bc-dark] .recovery-banner {
   overflow-y: auto;
 }
 .fluent-nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -4476,6 +4625,17 @@ html[data-bc-dark] .recovery-banner {
   background: var(--bg-panel);
   border-color: var(--border);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.fluent-nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 2px;
 }
 .fluent-nav-icon { font-size: 16px; flex-shrink: 0; }
 .fluent-nav-meta { display: flex; flex-direction: column; min-width: 0; }
@@ -4523,6 +4683,7 @@ html[data-bc-dark] .recovery-banner {
   width: 100%;
   max-width: 840px;
   margin: 0 auto;
+  animation: popFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .fluent-group-title {
   font-size: 12px;
@@ -4536,11 +4697,20 @@ html[data-bc-dark] .recovery-banner {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 18px;
+  padding: 13px 20px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-panel);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.fluent-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+html[data-bc-dark] .fluent-card:hover {
+  border-color: #4b5563;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 .fluent-card-icon { font-size: 20px; flex-shrink: 0; }
 .fluent-card-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -4984,14 +5154,26 @@ html[data-bc-dark] .pc-cover-badge {
   justify-content: flex-end;
   animation: popFadeIn 0.15s ease;
 }
+@keyframes drawerSlideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0.8;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
 .pc-drawer {
   width: 420px;
   max-width: 90vw;
   height: 100%;
   background: var(--bg-panel);
-  box-shadow: -6px 0 24px rgba(0, 0, 0, 0.16);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
+  animation: drawerSlideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
 }
 .pc-drawer-header {
   height: 48px;
@@ -5031,6 +5213,92 @@ html[data-bc-dark] .pc-cover-badge {
 .pc-backup-meta { display: flex; flex-direction: column; gap: 2px; }
 .pc-backup-tag { font-size: 12.5px; font-weight: 600; color: var(--text); }
 .pc-backup-time { font-size: 11px; color: var(--text-muted); }
+
+/* 快捷键速查模态弹窗 */
+.shortcuts-modal-card {
+  width: 680px;
+  max-width: 92vw;
+  max-height: 85vh;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: popFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.shortcuts-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  background: var(--panel-tint);
+  border-bottom: 1px solid var(--border);
+}
+.shortcuts-modal-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.shortcuts-modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.shortcuts-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.shortcuts-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 6px 12px;
+}
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.shortcut-kbd {
+  font-family: 'Consolas', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.shortcut-desc {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+.shortcuts-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--panel-tint);
+  border-top: 1px solid var(--border);
+}
 
 /* =========================================================
    双重删除安全防护模态弹窗 (Double Delete Safety Modal)
@@ -5122,8 +5390,13 @@ html[data-bc-dark] .dd-modal-header {
   background: var(--panel-tint);
   border-top: 1px solid var(--border);
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 10px;
+}
+.dd-modal-footer button {
+  margin: 0 !important;
+  flex-shrink: 0;
 }
 .dd-modal-footer .btn-danger:disabled {
   opacity: 0.35;

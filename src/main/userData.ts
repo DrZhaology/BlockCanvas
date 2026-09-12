@@ -360,7 +360,43 @@ export function getStorageStats(): StorageStats {
   };
 }
 
-export function clearAppCache(): { ok: boolean; freedBytes: number } {
+/**
+ * 递归深度清理目录下的所有文件，保留空目录结构；遇锁跳过，最大化安全释放空间
+ */
+function cleanDirFilesRecursively(dir: string): number {
+  if (!existsSync(dir)) return 0;
+  let freed = 0;
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const e of entries) {
+      const full = join(dir, e.name);
+      if (e.isDirectory()) {
+        freed += cleanDirFilesRecursively(full);
+        try { rmSync(full, { recursive: false }); } catch {}
+      } else if (e.isFile()) {
+        try {
+          const sz = statSync(full).size;
+          unlinkSync(full);
+          freed += sz;
+        } catch {}
+      }
+    }
+  } catch {}
+  return freed;
+}
+
+export async function clearAppCache(): Promise<{ ok: boolean; freedBytes: number }> {
+  // 1. 调用 Chromium 内部 session 清理接口（清除内存与活动网络缓存）
+  try {
+    const { session } = await import('electron');
+    if (session && session.defaultSession) {
+      await session.defaultSession.clearCache();
+      await session.defaultSession.clearStorageData({
+        storages: ['shadercache', 'cachestorage']
+      });
+    }
+  } catch {}
+
   const uData = join(dataRoot(), 'user-data');
   const cacheDirs = [
     join(uData, 'Cache'),
@@ -370,25 +406,17 @@ export function clearAppCache(): { ok: boolean; freedBytes: number } {
     join(uData, 'DawnWebGPUCache'),
     join(uData, 'blob_storage')
   ];
-  let before = 0;
-  for (const d of cacheDirs) before += getDirSize(d);
 
-  // 只清除目录内的文件，保留目录结构（避免 Chromium 重建后重新占满）
+  let freedBytes = 0;
+
+  // 2. 递归深度逐文件清空缓存目录（保留目录壳防重构报错）
   for (const d of cacheDirs) {
-    if (!existsSync(d)) continue;
-    try {
-      for (const entry of readdirSync(d, { withFileTypes: true })) {
-        const full = join(d, entry.name);
-        if (entry.isDirectory()) {
-          rmSync(full, { recursive: true, force: true });
-        } else {
-          unlinkSync(full);
-        }
-      }
-    } catch {}
+    if (existsSync(d)) {
+      freedBytes += cleanDirFilesRecursively(d);
+    }
   }
 
-  // 顺带清理 backups 根目录下早期残留的孤立文件（非文件夹）
+  // 3. 顺带清理 backups 根目录下早期残留的孤立文件（非文件夹）
   const bRoot = join(dataRoot(), 'backups');
   if (existsSync(bRoot)) {
     try {
@@ -396,7 +424,7 @@ export function clearAppCache(): { ok: boolean; freedBytes: number } {
         if (e.isFile() && e.name.endsWith('.bcproj')) {
           try {
             const f = join(bRoot, e.name);
-            before += statSync(f).size;
+            freedBytes += statSync(f).size;
             unlinkSync(f);
           } catch {}
         }
@@ -404,7 +432,7 @@ export function clearAppCache(): { ok: boolean; freedBytes: number } {
     } catch {}
   }
 
-  return { ok: true, freedBytes: before };
+  return { ok: true, freedBytes };
 }
 
 export function clearOrphanBackups(): { ok: boolean; cleanedCount: number; freedBytes: number } {

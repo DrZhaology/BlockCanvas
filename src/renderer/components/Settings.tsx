@@ -95,8 +95,12 @@ export function Settings(props: Props) {
       const result = await window.bc.checkUpdate();
       if (!result.ok) {
         if (resultCard) resultCard.style.display = '';
-        if (resultTitle) resultTitle.textContent = '检测失败';
-        if (resultDesc) resultDesc.innerHTML = `<span style="color:#c62828">${result.error || '无法连接到更新服务器'}</span><br/>请确认网络通畅且已关闭 Watt Toolkit。`;
+        if (resultTitle) resultTitle.textContent = result.isDev ? '开发调试模式' : '检测失败';
+        if (resultDesc) {
+          resultDesc.innerHTML = result.isDev
+            ? `<span style="color:var(--text-muted)">当前处于源码调试环境 (pnpm dev)，在线检测更新仅在正式构建打包后的绿色版中生效。</span>`
+            : `<span style="color:#c62828">${result.error || '无法连接到更新服务器'}</span><br/>请确认网络通畅且已关闭 Watt Toolkit。`;
+        }
         return;
       }
       if (resultCard) resultCard.style.display = '';

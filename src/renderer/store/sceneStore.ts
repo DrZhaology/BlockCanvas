@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { SceneElement, SceneGraph, ElementType, ElementStyle } from '@lib/types';
+import type { SceneElement, SceneGraph, ElementType, ElementStyle, Breakpoint } from '@lib/types';
 import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS } from '@lib/types';
 import { SCHEMA } from '@lib/propertySchema';
 
@@ -304,8 +304,21 @@ interface History {
   future: SceneGraph[];
 }
 
+/**
+ * 计算元素在指定断点下的级联有效样式（Desktop -> Tablet -> Mobile）
+ */
+export function getEffectiveStyle(node: SceneElement, breakpoint: Breakpoint = 'desktop'): ElementStyle {
+  if (breakpoint === 'desktop') return node.style;
+  const tabStyle = node.responsive?.tablet ?? {};
+  if (breakpoint === 'tablet') {
+    return { ...node.style, ...tabStyle };
+  }
+  const mobStyle = node.responsive?.mobile ?? {};
+  return { ...node.style, ...tabStyle, ...mobStyle };
+}
+
 // ============ Store ============
-interface SceneStore {
+export interface SceneStore {
   scene: SceneGraph;
   history: History;
   // 内部剪贴板：单个元素或元素数组（多选复制/剪切）。数组元素永不为空。
@@ -313,6 +326,9 @@ interface SceneStore {
   /** beginStyleEdit 标记了"连续编辑"进行中：结束时的 updateStyle/updateAttr 不再额外入栈
    *（检查点已在 beginStyleEdit 压入），防止一次编辑压两栈导致撤销回不到编辑前 */
   styleEditPending: boolean;
+  /** 当前编辑所处的响应式断点（桌面 / 平板 / 手机） */
+  activeBreakpoint: Breakpoint;
+  setActiveBreakpoint: (bp: Breakpoint) => void;
 
   // 增删
   addElement: (type: ElementType, parentId?: string | null) => void;
@@ -347,9 +363,11 @@ interface SceneStore {
   selectMany: (ids: string[]) => void;
 
   // 改样式 / 文案 / 元名 / 锁定 / 隐藏
-  updateStyle: (id: string, partial: Partial<ElementStyle>) => void;
+  updateStyle: (id: string, partial: Partial<ElementStyle>, breakpointOverride?: Breakpoint) => void;
   // 瞬态改样式（连续拖动用，不入历史，结束时调 commit 入栈一次）
-  updateStyleTransient: (id: string, partial: Partial<ElementStyle>) => void;
+  updateStyleTransient: (id: string, partial: Partial<ElementStyle>, breakpointOverride?: Breakpoint) => void;
+  // 清空指定属性或断点的响应式覆盖（还原继承电脑端）
+  clearBreakpointOverride: (id: string, propKey?: string, breakpoint?: Breakpoint) => void;
   // 类名编辑即同步：同 classString 的元素统一样式后（全量写回），编辑一个 = 编辑全部。
   // 无类名的元素只改自身。
   // 类管理（「类名」页签）：把某名称（类/ID）下所有元素的样式统一为指定样式（一条 undo）。
@@ -419,6 +437,8 @@ export const useScene = create<SceneStore>((set) => ({
   history: { past: [], future: [] },
   clipboard: null,
   styleEditPending: false,
+  activeBreakpoint: 'desktop',
+  setActiveBreakpoint: (bp) => set({ activeBreakpoint: bp }),
   autoInherit: typeof localStorage !== 'undefined' ? localStorage.getItem('bc-auto-inherit') !== '0' : true,
   setAutoInherit: (v) => {
     try { localStorage.setItem('bc-auto-inherit', v ? '1' : '0'); } catch {}
@@ -730,16 +750,34 @@ export const useScene = create<SceneStore>((set) => ({
 
   // 改样式（入历史，单步操作；连续编辑收尾时检查点已在 beginStyleEdit 压栈，不再重复入栈）
   // 同 classString 的元素自动同步（编辑即统一：类 = 一种样子，改一个全改）
-  updateStyle: (id, partial) => {
+  updateStyle: (id, partial, breakpointOverride) => {
     set((st) => {
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
-      for (const [k, v] of Object.entries(partial)) {
-        if (v === undefined) {
-          delete (node.style as Record<string, string | undefined>)[k];
-        } else {
-          node.style[k] = v;
+      const bp = breakpointOverride ?? st.activeBreakpoint;
+      if (bp === 'desktop') {
+        for (const [k, v] of Object.entries(partial)) {
+          if (v === undefined) {
+            delete (node.style as Record<string, string | undefined>)[k];
+          } else {
+            node.style[k] = v;
+          }
+        }
+      } else {
+        if (!node.responsive) node.responsive = {};
+        if (!node.responsive[bp]) node.responsive[bp] = {};
+        const curBpStyle = node.responsive[bp]!;
+        for (const [k, v] of Object.entries(partial)) {
+          if (v === undefined || v === '') {
+            delete (curBpStyle as Record<string, string | undefined>)[k];
+          } else {
+            (curBpStyle as Record<string, string | undefined>)[k] = v;
+          }
+        }
+        if (Object.keys(curBpStyle).length === 0) {
+          delete node.responsive[bp];
+          if (Object.keys(node.responsive).length === 0) node.responsive = undefined;
         }
       }
       syncClassmates(scene.root, node);
@@ -753,20 +791,64 @@ export const useScene = create<SceneStore>((set) => ({
 
   // 改样式（瞬态，不入历史）——用于颜色拖动等连续输入
   // 调用方在交互开始前调 beginStyleEdit() 标记起点、交互结束调 commit() 入栈一次
-  updateStyleTransient: (id, partial) => {
+  updateStyleTransient: (id, partial, breakpointOverride) => {
     set((st) => {
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
-      for (const [k, v] of Object.entries(partial)) {
-        if (v === undefined) {
-          delete (node.style as Record<string, string | undefined>)[k];
-        } else {
-          node.style[k] = v;
+      const bp = breakpointOverride ?? st.activeBreakpoint;
+      if (bp === 'desktop') {
+        for (const [k, v] of Object.entries(partial)) {
+          if (v === undefined) {
+            delete (node.style as Record<string, string | undefined>)[k];
+          } else {
+            node.style[k] = v;
+          }
+        }
+      } else {
+        if (!node.responsive) node.responsive = {};
+        if (!node.responsive[bp]) node.responsive[bp] = {};
+        const curBpStyle = node.responsive[bp]!;
+        for (const [k, v] of Object.entries(partial)) {
+          if (v === undefined || v === '') {
+            delete (curBpStyle as Record<string, string | undefined>)[k];
+          } else {
+            (curBpStyle as Record<string, string | undefined>)[k] = v;
+          }
+        }
+        if (Object.keys(curBpStyle).length === 0) {
+          delete node.responsive[bp];
+          if (Object.keys(node.responsive).length === 0) node.responsive = undefined;
         }
       }
       syncClassmates(scene.root, node);
       return { scene }; // 不动 history
+    });
+  },
+
+  clearBreakpointOverride: (id, propKey, breakpoint) => {
+    set((st) => {
+      const scene = deepClone(st.scene);
+      const node = findNode(scene.root, id);
+      if (!node || !node.responsive) return st;
+      const bp = breakpoint ?? st.activeBreakpoint;
+      if (bp === 'desktop') return st;
+      if (!node.responsive[bp]) return st;
+
+      if (propKey) {
+        delete (node.responsive[bp] as Record<string, string | undefined>)[propKey];
+        if (Object.keys(node.responsive[bp]!).length === 0) {
+          delete node.responsive[bp];
+        }
+      } else {
+        delete node.responsive[bp];
+      }
+      if (Object.keys(node.responsive).length === 0) {
+        node.responsive = undefined;
+      }
+      syncClassmates(scene.root, node);
+      const push = !st.styleEditPending;
+      return { scene, history: push ? pushPast(st.history, st.scene) : st.history };
     });
   },
 
@@ -1206,16 +1288,19 @@ function syncClassmates(root: SceneElement, node: SceneElement): void {
   const targetStyle = deepClone(node.style);
   const targetVisible = node.visibleProps ? deepClone(node.visibleProps) : undefined;
   const targetPseudo = node.pseudoStyles ? deepClone(node.pseudoStyles) : undefined;
+  const targetResponsive = node.responsive ? deepClone(node.responsive) : undefined;
   const walk = (n: SceneElement): void => {
     if (n !== node) {
       if (cls && (n.attrs?.className ?? '').trim() === cls) {
         n.style = deepClone(targetStyle);
         n.visibleProps = targetVisible ? deepClone(targetVisible) : undefined;
         n.pseudoStyles = targetPseudo ? deepClone(targetPseudo) : undefined;
+        n.responsive = targetResponsive ? deepClone(targetResponsive) : undefined;
       } else if (rel && (n.attrs?.relSelector ?? '').trim() === rel) {
         n.style = deepClone(targetStyle);
         n.visibleProps = targetVisible ? deepClone(targetVisible) : undefined;
         n.pseudoStyles = targetPseudo ? deepClone(targetPseudo) : undefined;
+        n.responsive = targetResponsive ? deepClone(targetResponsive) : undefined;
       }
     }
     for (const c of n.children) walk(c);

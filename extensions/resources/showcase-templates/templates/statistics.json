@@ -36,7 +36,8 @@
           ],
           "style": {
             "textAlign": "center",
-            "padding": "24px 16px"
+            "padding": "24px 16px",
+            "boxSizing": "border-box"
           },
           "attrs": {
             "className": "stat-item"
@@ -71,8 +72,7 @@
           "style": {
             "textAlign": "center",
             "padding": "24px 16px",
-            "borderLeft": "1px solid rgba(255,255,255,0.15)",
-            "borderRight": "1px solid rgba(255,255,255,0.15)"
+            "boxSizing": "border-box"
           },
           "attrs": {
             "className": "stat-item"
@@ -107,7 +107,7 @@
           "style": {
             "textAlign": "center",
             "padding": "24px 16px",
-            "borderRight": "1px solid rgba(255,255,255,0.15)"
+            "boxSizing": "border-box"
           },
           "attrs": {
             "className": "stat-item"
@@ -141,7 +141,8 @@
           ],
           "style": {
             "textAlign": "center",
-            "padding": "24px 16px"
+            "padding": "24px 16px",
+            "boxSizing": "border-box"
           },
           "attrs": {
             "className": "stat-item"

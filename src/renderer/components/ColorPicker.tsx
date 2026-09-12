@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useScene } from '@store/sceneStore';
+import { useScene, getEffectiveStyle } from '@store/sceneStore';
 
 // BlockCanvas · ColorField 富颜色选择器（通用内核）
 // 支持：Hex / RGB / RGBA / 英文色名 + 任意 CSS 颜色文本
@@ -248,12 +248,14 @@ export function ColorPicker(props: Props) {
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
   const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
 
   const isPseudo = Boolean(pseudo);
   const node = findInTree(scene.root, elementId);
+  const effStyle = node ? (getEffectiveStyle(node, activeBreakpoint) as any) : {};
   const currentValue = isPseudo
     ? ((node?.pseudoStyles?.[pseudo!]?.[styleKey] as string) ?? '')
-    : ((node?.style?.[styleKey] as string) ?? '');
+    : ((effStyle[styleKey] as string) ?? '');
 
   const commit = (v: string) => {
     if (isPseudo) {
