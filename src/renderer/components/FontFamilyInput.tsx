@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useScene, findNode } from '@store/sceneStore';
+import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 
 // BlockCanvas · 字体族选择器（预设字体 + 主字体 + 备选字体族）
 // - 新手友好：内置系统无衬线、微软雅黑、苹方、宋体、楷体、Consolas 代码等宽等中文常用预设
@@ -39,12 +39,14 @@ export function FontFamilyInput(props: Props) {
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
   const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
 
   const isPseudo = Boolean(pseudo);
   const node = findNode(scene.root, elementId);
+  const effStyle = node ? (getEffectiveStyle(node, activeBreakpoint) as any) : {};
   const currentValue = isPseudo
     ? ((node?.pseudoStyles?.[pseudo!]?.fontFamily as string) ?? '')
-    : ((node?.style?.fontFamily as string) ?? '');
+    : ((effStyle?.fontFamily as string) ?? '');
 
   const [textVal, setTextVal] = useState(currentValue);
   const [customMode, setCustomMode] = useState(false);

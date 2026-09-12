@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useScene, findNode } from '@store/sceneStore';
+import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { ColorField } from './ColorPicker';
 
 // BlockCanvas · 盒子阴影可视化组件 (BoxShadowInput)
@@ -69,13 +69,15 @@ export function BoxShadowInput({ elementId, pseudo }: Props) {
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
   const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
 
   const node = findNode(scene.root, elementId);
+  const effStyle = node ? (getEffectiveStyle(node, activeBreakpoint) as any) : {};
   const isPseudo = Boolean(pseudo);
   const currentStr = (
     isPseudo
       ? (node?.pseudoStyles?.[pseudo!]?.boxShadow as string)
-      : (node?.style?.boxShadow as string)
+      : (effStyle?.boxShadow as string)
   ) ?? '';
 
   const parsed = parseBoxShadow(currentStr);

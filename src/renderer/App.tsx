@@ -9,7 +9,8 @@ import { ProjectsCenter } from '@comp/ProjectsCenter';
 import { Settings, type SettingsSection } from '@comp/Settings';
 import { ProjectTabBar } from '@comp/ProjectTabBar';
 import { AboutModal } from '@comp/About';
-import { useScene } from '@store/sceneStore';
+import { ShortcutsModal } from '@comp/ShortcutsModal';
+import { useScene, findNode } from '@store/sceneStore';
 import { useTabStore } from '@store/tabStore';
 import { refreshPlugins } from '@lib/pluginHost';
 
@@ -46,6 +47,7 @@ export default function App() {
   const [view, setView] = useState<AppView>('editor');
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('personalization');
   const [showAbout, setShowAbout] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const [_updating, setUpdating] = useState(false);
   const [pocketExpanded, setPocketExpanded] = useState(() => {
     try {
@@ -56,7 +58,7 @@ export default function App() {
   });
   const applyZoom = (fn: (z: number) => number) => setZoom(fn);
 
-  useKeyboardShortcuts(setView);
+  useKeyboardShortcuts(setView, () => setShowShortcuts(true));
 
   // 1. 启动时像 Windows 11 记事本一样秒级恢复上次会话
   useEffect(() => {
@@ -404,6 +406,7 @@ export default function App() {
         </>
       )}
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
+      <ShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
     </div>
   );
 }
@@ -442,7 +445,7 @@ function startResize(
 }
 
 // ============ 全局快捷键 + 菜单事件 ============
-function useKeyboardShortcuts(setView: (v: AppView) => void) {
+function useKeyboardShortcuts(setView: (v: AppView) => void, onOpenShortcuts?: () => void) {
   useEffect(() => {
     const triggerUndo = () => useScene.getState().undo();
     const triggerRedo = () => useScene.getState().redo();
@@ -481,6 +484,37 @@ function useKeyboardShortcuts(setView: (v: AppView) => void) {
       st.selectMany(ids);
     };
 
+    // 像素级方向键微调（选中的第一个元素）
+    const triggerNudge = (axis: 'x' | 'y', delta: number) => {
+      const st = useScene.getState();
+      const id = st.scene.selectedId;
+      if (!id) return;
+      const node = findNode(st.scene.root, id);
+      if (!node) return;
+
+      st.beginStyleEdit();
+      const pos = node.style.position;
+      if (pos === 'absolute' || pos === 'fixed' || pos === 'relative') {
+        if (axis === 'x') {
+          const curLeft = parseFloat(node.style.left || '0') || 0;
+          st.updateStyle(id, { left: Math.round(curLeft + delta) + 'px' });
+        } else {
+          const curTop = parseFloat(node.style.top || '0') || 0;
+          st.updateStyle(id, { top: Math.round(curTop + delta) + 'px' });
+        }
+      } else {
+        // 常规流式元素：微调对应方向的外边距
+        if (axis === 'x') {
+          const curMargin = parseFloat(node.style.marginLeft || '0') || 0;
+          st.updateStyle(id, { marginLeft: Math.round(curMargin + delta) + 'px' });
+        } else {
+          const curMargin = parseFloat(node.style.marginTop || '0') || 0;
+          st.updateStyle(id, { marginTop: Math.round(curMargin + delta) + 'px' });
+        }
+      }
+      st.endStyleEdit();
+    };
+
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
@@ -517,13 +551,27 @@ function useKeyboardShortcuts(setView: (v: AppView) => void) {
       }
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); triggerDelete(); return; }
       if (e.key === 'Escape') { e.preventDefault(); useScene.getState().selectElement(null); return; }
+
+      // 快捷键速查表
+      if ((e.key === '?' || (e.shiftKey && e.key === '/')) && !mod) {
+        e.preventDefault();
+        onOpenShortcuts?.();
+        return;
+      }
+
+      // 方向键微调
+      const step = e.shiftKey ? 10 : 1;
+      if (e.key === 'ArrowUp') { e.preventDefault(); triggerNudge('y', -step); return; }
+      if (e.key === 'ArrowDown') { e.preventDefault(); triggerNudge('y', step); return; }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); triggerNudge('x', -step); return; }
+      if (e.key === 'ArrowRight') { e.preventDefault(); triggerNudge('x', step); return; }
     };
     window.addEventListener('keydown', onKey);
 
     return () => {
       window.removeEventListener('keydown', onKey);
     };
-  }, [setView]);
+  }, [setView, onOpenShortcuts]);
 }
 
 function usePersistentState<T>(key: string, initial: T): [T, (v: T) => void] {

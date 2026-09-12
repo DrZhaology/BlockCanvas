@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useScene, findNode } from '@store/sceneStore';
+import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 
 // BlockCanvas · 不透明度可视化组件 (OpacityInput)
 // - 胶囊预设：100% 实体、80% 轻透、50% 半透明、20% 幽灵、0% 隐藏
@@ -18,13 +18,15 @@ export function OpacityInput({ elementId, pseudo }: Props) {
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
   const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
 
   const node = findNode(scene.root, elementId);
+  const effStyle = node ? (getEffectiveStyle(node, activeBreakpoint) as any) : {};
   const isPseudo = Boolean(pseudo);
   const currentStr = (
     isPseudo
       ? (node?.pseudoStyles?.[pseudo!]?.opacity as string)
-      : (node?.style?.opacity as string)
+      : (effStyle?.opacity as string)
   ) ?? '';
   const currentNum = currentStr === '' ? 1 : parseFloat(currentStr);
 

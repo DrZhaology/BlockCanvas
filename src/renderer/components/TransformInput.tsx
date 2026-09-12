@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useScene, findNode } from '@store/sceneStore';
+import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 
 // BlockCanvas · 变换与缩放可视化输入组件 (TransformInput)
 // - 小白胶囊预设：悬浮上移、轻微放大、按下回弹、旋转等一键设置
@@ -75,13 +75,15 @@ export function TransformInput({ elementId, pseudo }: Props) {
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
   const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
 
   const isPseudo = Boolean(pseudo);
   const node = findNode(scene.root, elementId);
+  const effStyle = node ? (getEffectiveStyle(node, activeBreakpoint) as any) : {};
   const currentStr = (
     isPseudo
       ? (node?.pseudoStyles?.[pseudo!]?.transform as string)
-      : (node?.style?.transform as string)
+      : (effStyle?.transform as string)
   ) ?? '';
 
   const parsed = parseTransform(currentStr);

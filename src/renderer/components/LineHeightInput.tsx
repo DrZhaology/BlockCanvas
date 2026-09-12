@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useScene, findNode } from '@store/sceneStore';
+import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 
 // BlockCanvas · 文本行高可视化组件 (LineHeightInput)
 // - 常用胶囊预设：1.2 紧凑标题、1.5 舒适、1.6 标准正文、1.8 宽松、2.0 双倍
@@ -17,12 +17,14 @@ export function LineHeightInput({ elementId, pseudo }: Props) {
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
   const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
 
   const isPseudo = Boolean(pseudo);
   const node = findNode(scene.root, elementId);
+  const effStyle = node ? (getEffectiveStyle(node, activeBreakpoint) as any) : {};
   const currentStr = isPseudo
     ? ((node?.pseudoStyles?.[pseudo!]?.lineHeight as string) ?? '')
-    : ((node?.style?.lineHeight as string) ?? '');
+    : ((effStyle?.lineHeight as string) ?? '');
   const currentNum = parseFloat(currentStr);
 
   const [val, setVal] = useState(Number.isNaN(currentNum) ? 1.6 : currentNum);

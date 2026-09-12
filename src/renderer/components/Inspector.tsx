@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useScene, findNode } from '@store/sceneStore';
-import { TEXT_TAGS, SELF_CLOSING_TAGS } from '@lib/types';
+import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
+import { TEXT_TAGS, SELF_CLOSING_TAGS, CONTAINER_TAGS } from '@lib/types';
 import type { ElementType, SceneElement, SceneGraph } from '@lib/types';
 import { SCHEMA, ATTRS_SCHEMA, DEFAULT_VISIBLE_PROPS,
   getSchemaItem, isApplicable, hasStyleValue, applyUnit, UNIT_HELP_TEXT
@@ -381,8 +381,30 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   const removeVisibleProp = useScene((s) => s.removeVisibleProp);
   const updatePseudoStyleStore = useScene((s) => s.updatePseudoStyle);
   const removePseudoStyleStore = useScene((s) => s.removePseudoStyle);
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
+  const setActiveBreakpoint = useScene((s) => s.setActiveBreakpoint);
+  const clearBreakpointOverride = useScene((s) => s.clearBreakpointOverride);
   const elementId = selected.id;
   const elementType = selected.type;
+
+  const hasTabletOverride = Boolean(selected.responsive?.tablet && Object.keys(selected.responsive.tablet).length > 0);
+  const hasMobileOverride = Boolean(selected.responsive?.mobile && Object.keys(selected.responsive.mobile).length > 0);
+  const hasCurBpOverride = Boolean(
+    activeBreakpoint !== 'desktop' &&
+    selected.responsive?.[activeBreakpoint] &&
+    Object.keys(selected.responsive[activeBreakpoint]!).length > 0
+  );
+
+  const isCurrentHidden = Boolean(activeBreakpoint !== 'desktop' && selected.responsive?.[activeBreakpoint]?.display === 'none');
+  const toggleHideOnDevice = () => {
+    updateStyle(elementId, { display: isCurrentHidden ? undefined : 'none' });
+  };
+  const toggleColumnLayout = () => {
+    updateStyle(elementId, { display: 'flex', flexDirection: 'column' });
+  };
+  const toggleFullWidth = () => {
+    updateStyle(elementId, { width: '100%', boxSizing: 'border-box' });
+  };
 
   // 折叠状态（可独立展开/收起）- 同类名/同选择器元素共享折叠记忆
   const secStorageKey = (() => {
@@ -544,6 +566,80 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
           )}
         </div>
       </div>
+
+      {/* 响应式断点模式切换条 */}
+      <div className="inspector-bp-bar">
+        <div className="inspector-bp-tabs">
+          <button
+            className={'bp-tab-btn' + (activeBreakpoint === 'desktop' ? ' active' : '')}
+            onClick={() => setActiveBreakpoint('desktop')}
+            title="电脑端基础样式（全局基准，移动端自动继承）"
+          >
+            💻 电脑默认
+          </button>
+          <button
+            className={'bp-tab-btn' + (activeBreakpoint === 'tablet' ? ' active' : '') + (hasTabletOverride ? ' has-override' : '')}
+            onClick={() => setActiveBreakpoint('tablet')}
+            title="平板端 (≤768px) 样式定制"
+          >
+            📱 平板 (768px)
+            {hasTabletOverride && <span className="bp-dot" title="已有平板端定制覆盖" />}
+          </button>
+          <button
+            className={'bp-tab-btn' + (activeBreakpoint === 'mobile' ? ' active' : '') + (hasMobileOverride ? ' has-override' : '')}
+            onClick={() => setActiveBreakpoint('mobile')}
+            title="手机端 (≤480px) 样式定制"
+          >
+            📱 手机 (375px)
+            {hasMobileOverride && <span className="bp-dot" title="已有手机端定制覆盖" />}
+          </button>
+        </div>
+      </div>
+
+      {/* 移动端快捷操作与覆盖说明条 */}
+      {activeBreakpoint !== 'desktop' && (
+        <div className="inspector-bp-banner">
+          <div className="inspector-bp-banner-head">
+            <span>
+              正在定制 <b>{activeBreakpoint === 'mobile' ? '手机端 (≤480px)' : '平板端 (≤768px)'}</b> 样式覆盖
+            </span>
+            {hasCurBpOverride && (
+              <button
+                className="btn-mini btn-ghost bp-clear-btn"
+                onClick={() => clearBreakpointOverride(elementId, undefined, activeBreakpoint)}
+                title="清空当前设备上的所有定制覆盖，完全恢复电脑端继承"
+              >
+                ↺ 还原继承
+              </button>
+            )}
+          </div>
+          <div className="inspector-bp-actions">
+            <button
+              className={'btn-mini bp-quick-btn' + (isCurrentHidden ? ' active' : '')}
+              onClick={toggleHideOnDevice}
+              title={isCurrentHidden ? '取消隐藏，在当前设备重新显示' : '在当前设备上隐藏此元素 (display: none)'}
+            >
+              {isCurrentHidden ? '👁️ 取消隐藏' : '🚫 在此设备隐藏'}
+            </button>
+            {CONTAINER_TAGS.has(elementType) && (
+              <button
+                className="btn-mini bp-quick-btn"
+                onClick={toggleColumnLayout}
+                title="将容器在当前设备转为上下单列竖排 (适合手机单手阅读)"
+              >
+                🔄 一键切竖排
+              </button>
+            )}
+            <button
+              className="btn-mini bp-quick-btn"
+              onClick={toggleFullWidth}
+              title="将宽度设为 100% 撑满屏幕 (手机端卡片与按钮常用)"
+            >
+              ↔ 撑满全宽
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 0. 文案内容（针对文本元素）——置顶最上方第一位，直接输入 */}
       {TEXT_TAGS.has(elementType) && (
@@ -1326,9 +1422,16 @@ function PropertyRow(props: {
   const endStyleEdit = useScene((s) => s.endStyleEdit);
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
+  const clearBreakpointOverride = useScene((s) => s.clearBreakpointOverride);
 
   const node = findNode(scene.root, elementId);
-  const app = checkApplicability(schemaItem, elementType, node?.style as any);
+  const effStyle = node ? getEffectiveStyle(node, activeBreakpoint) : {};
+  const app = checkApplicability(schemaItem, elementType, effStyle as any);
+  const isOverridden = Boolean(
+    activeBreakpoint !== 'desktop' &&
+    node?.responsive?.[activeBreakpoint]?.[schemaItem.key] !== undefined
+  );
 
   // 取当前 store 里的值（用于受控 input 的初始值 + 外部更新时同步）
   // trbl 简写输入由 TrblInput 自管，不走这里的单值同步
@@ -1337,9 +1440,9 @@ function PropertyRow(props: {
     if (!node) return '';
     if (schemaItem.input === 'box4' && schemaItem.sides) {
       const side0 = schemaItem.sides[0];
-      return (side0 && (node.style as Record<string, string | undefined>)[side0.key]) ?? '';
+      return (side0 && (effStyle as Record<string, string | undefined>)[side0.key]) ?? '';
     }
-    return (node.style as Record<string, string | undefined>)[schemaItem.key] ?? '';
+    return (effStyle as Record<string, string | undefined>)[schemaItem.key] ?? '';
   })();
 
   // 本地 state：受控输入的最新值，避免 onBlur 拿到闭包旧值
@@ -1371,6 +1474,18 @@ function PropertyRow(props: {
             </span>
           )}
           {schemaItem.label}{help}
+          {isOverridden && (
+            <span
+              className="prop-bp-badge"
+              title={`在当前 ${activeBreakpoint} 设备已覆盖定制（电脑端为: ${(node?.style as any)?.[schemaItem.key] || '未设'}）。点击清除覆盖，还原继承`}
+              onClick={(e) => {
+                e.stopPropagation();
+                clearBreakpointOverride(elementId, schemaItem.key);
+              }}
+            >
+              📱覆盖 ↺
+            </span>
+          )}
           {!app.applicable && (
             <span className="prop-warn-tag" title={app.disabledReason}>
               ⚠ {app.disabledReason?.slice(0, 14)}…

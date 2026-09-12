@@ -14,7 +14,7 @@ const PROXY_HOST = '127.0.0.1';
 const PROXY_PORT = 26561;
 const OWNER = 'DrZhaology';
 const REPO = 'BlockCanvas';
-const ZIP = 'E:\\Develop\\BlockCanvas-0.3.1-win64.zip';
+const ZIP = 'E:\\Develop\\BlockCanvas-0.4.0-win64.zip';
 
 const TOKEN = process.env.GIT_TOKEN;
 if (!TOKEN) { console.error('GIT_TOKEN 未设置'); process.exit(1); }
@@ -71,9 +71,9 @@ async function main() {
 
   // 1) 创建 Release
   const body = JSON.stringify({
-    tag_name: 'v0.3.1',
-    name: 'BlockCanvas v0.3.1（阶段3测试版）',
-    body: `BlockCanvas 积木画布 · v0.3.1\n\n### 本轮更新\n- 新增自动更新系统：启动静默检测 GitHub Releases，设置页可手动检测，下载 zip 后精确覆盖更新（保留 data/ 全部用户数据）\n- 扩展目录统一至 data/extensions/，内置插件（深色模式）和资源包（新手模板 14 个）随更新自动同步\n- 修复检查更新显示版本号 0.0.0 的 BUG（改用 app.getVersion() 兼容 asar）\n- 修复缓存清理无效问题（改为只清文件不清目录，避免 Chromium 立即重建）\n- 修复设置页「一键立即清理」按钮垂直偏移\n- 设置中心新增「自动更新」检测卡片，明确提示 Watt Toolkit 兼容问题\n\n### 特性\n- 纯绿色便携：所有数据存 data/ 目录，不写 AppData 和注册表\n- 拖拖拽拽画界面，14 个高质量模板一键插入\n- 伪类交互编辑（:hover/:active/:focus/:link），全量可视化属性（transform/shadow/transition…）\n- 导出干净、语义化的 HTML + CSS\n\n### 使用\n解压即用；把插件/资源包放进同目录 extensions/ 即可。\n\n### 了解更多\n[功能规划](https://github.com/DrZhaology/BlockCanvas/blob/main/docs/功能规划.md) ｜ [开发历程](https://github.com/DrZhaology/BlockCanvas/blob/main/docs/开发历程.md) ｜ [许可证 MIT](https://github.com/DrZhaology/BlockCanvas/blob/main/LICENSE)`,
+    tag_name: 'v0.4.0',
+    name: 'BlockCanvas v0.4.0（阶段4三断点响应式正式版）',
+    body: `BlockCanvas 积木画布 · v0.4.0\n\n### 阶段4重大里程碑：三断点响应式体系 + 全键盘高频快捷键\n- 三断点响应式引擎：电脑 (Desktop, >768px) / 平板 (Tablet, 481~768px) / 手机 (Mobile, ≤480px)\n- 级联继承模型：电脑端为样式源，平板/手机仅记录覆盖差异，支持一键还原继承与覆盖小圆点提示\n- 专业 CSS 导出：自动编译为标准 @media (max-width: 768px) 与 @media (max-width: 480px) 媒体查询\n- 移动端高频胶囊：一键手机隐藏 (display:none)、一键转竖排 (flex-direction:column)、一键撑满全宽 (100%)\n- 手机端真机视口：375px 模式下配备沉浸式微圆角真机外框\n- 全键盘生产力：Delete 删除、Ctrl+D 原地克隆、Esc 取消选择、方向键 1px/10px 微调、? 键呼出速查表\n- 模板库全绿通过 0 冲突，口袋撑开记忆，设置中心 Fluent 规范升级\n\n### 了解更多\n[功能规划](https://github.com/DrZhaology/BlockCanvas/blob/main/docs/功能规划.md) ｜ [开发历程](https://github.com/DrZhaology/BlockCanvas/blob/main/docs/开发历程.md) ｜ [设计语言](https://github.com/DrZhaology/BlockCanvas/blob/main/docs/设计语言.md) ｜ [许可证 MIT](https://github.com/DrZhaology/BlockCanvas/blob/main/LICENSE)`,
     draft: false,
     prerelease: true
   });

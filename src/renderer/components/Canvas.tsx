@@ -1,8 +1,8 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
-import { useScene, findParent } from '@store/sceneStore';
+import { useScene, findParent, getEffectiveStyle } from '@store/sceneStore';
 import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS, TEXT_TAGS } from '@lib/types';
 import type { SceneElement } from '@lib/types';
-import { selectorForNode, collectStyleClasses, buildStyleBlock, createStyleClassSet, quickCssToCss, cssTextToObject } from '@lib/styleClass';
+import { selectorForNode, collectStyleClasses, buildStyleBlock, createStyleClassSet, quickCssToCss, cssTextToObject, simplifyStyle } from '@lib/styleClass';
 import { classColor } from '@lib/classColor';
 
 // BlockCanvas · 画布
@@ -72,6 +72,27 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   const selectedId = useScene((s) => s.scene.selectedId);
   const selectedIds = useScene((s) => s.scene.selectedIds);
   const select = useScene((s) => s.selectElement);
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
+
+  // 画布专用断点生效规则：在当前非桌面断点下，为 .canvas 内所有匹配元素强行应用该断点样式规则
+  const canvasResponsiveCss = useMemo(() => {
+    const parts: string[] = [];
+    if (activeBreakpoint === 'tablet' || activeBreakpoint === 'mobile') {
+      if (styleSet.tabletOrder.length > 0) {
+        const lines = styleSet.tabletOrder.map((sel) => `.canvas ${sel} { ${styleSet.tabletRules.get(sel)} }`).join('\n');
+        parts.push(lines);
+      }
+    }
+    if (activeBreakpoint === 'mobile') {
+      if (styleSet.mobileOrder.length > 0) {
+        const lines = styleSet.mobileOrder.map((sel) => `.canvas ${sel} { ${styleSet.mobileRules.get(sel)} }`).join('\n');
+        parts.push(lines);
+      }
+    }
+    return parts.join('\n');
+  }, [styleSet, activeBreakpoint]);
+
+  const isMobileView = canvasWidth === '375px' || activeBreakpoint === 'mobile';
   const toggleSelect = useScene((s) => s.toggleSelect);
   const selectMany = useScene((s) => s.selectMany);
 
@@ -223,9 +244,12 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       {classColorCss && (
         <style className="bc-class-colors">{classColorCss}</style>
       )}
+      {canvasResponsiveCss && (
+        <style className="bc-canvas-responsive-css">{canvasResponsiveCss}</style>
+      )}
       <div
         ref={canvasRef}
-        className="canvas"
+        className={"canvas" + (isMobileView ? " is-mobile-frame" : "")}
         style={{
           ...(canvasWidth === 'auto' ? undefined : { width: canvasWidth }),
           transform: zoom === 1 ? undefined : `scale(${zoom})`,
@@ -233,6 +257,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
         }}
         onWheel={onCanvasWheel}
       >
+        {isMobileView && <div className="canvas-mobile-island" title="iPhone 手机真机视口模拟" />}
         {root.children.map((c) => (
           <CanvasNode key={c.id} node={c} depth={0} selectedIds={selectedIds} onSelect={select} onSelectParent={selectParent} onToggleSelect={toggleSelect} />
         ))}
@@ -312,9 +337,14 @@ const CanvasNode = React.memo(function CanvasNode(props: {
   const baseStyle: React.CSSProperties = {
     cursor: node.locked ? 'default' : 'pointer'
   };
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
   // 无类名无 ID：样式照抄导出的 style 属性值（同一文本 → 画布 = 导出）
   if (selInfo.inlineCss) {
     Object.assign(baseStyle, cssTextToObject(selInfo.inlineCss));
+    if (activeBreakpoint !== 'desktop') {
+      const eff = getEffectiveStyle(node, activeBreakpoint);
+      Object.assign(baseStyle, simplifyStyle(eff));
+    }
   }
   // flex 横排容器里，空的无宽子容器会被压缩到 0 宽 → 完全不可见不可点（"插进去看不到"）。
   // 编辑器专用兜底：无显式 width 的容器/hr 补 min-width 60px（不进 node.style、不导出）；

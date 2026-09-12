@@ -13,7 +13,7 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $destDir = 'E:\Develop'
-$ver = '0.3.1'
+$ver = '0.4.0'
 $appDir = Join-Path $root 'dist\win-unpacked'
 $zipName = "BlockCanvas-$ver-win64.zip"
 $zipPath = Join-Path $root "dist\$zipName"
