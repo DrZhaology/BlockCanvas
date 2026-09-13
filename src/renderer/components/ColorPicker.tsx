@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useScene, getEffectiveStyle } from '@store/sceneStore';
 
 // BlockCanvas · ColorField 富颜色选择器（通用内核）
@@ -45,13 +46,34 @@ export function ColorField(props: ColorFieldProps) {
   const [g, setG] = useState<number>(255);
   const [b, setB] = useState<number>(255);
   const [a, setA] = useState<number>(1);
+  const [hexText, setHexText] = useState<string>('#ffffff');
   // 始终记录"最新输入值"，避免关闭 modal 时用闭包里的旧值回写
   const draftRef = useRef(value);
+
+  // —— 高频输入节流（HEX 取色器 / RGBA 滑杆）——
+  // 原生 color picker 拖动时会以远高于屏幕刷新率的频率触发 input 事件，
+  // 每次都写回 store 会造成明显卡顿；这里按帧合并，只提交每帧最后一个值。
+  const rafRef = useRef(0);
+  const pendingRef = useRef<string | null>(null);
+  const emitThrottled = (v: string) => {
+    pendingRef.current = v;
+    if (rafRef.current) return;
+    rafRef.current = window.requestAnimationFrame(() => {
+      rafRef.current = 0;
+      const val = pendingRef.current;
+      pendingRef.current = null;
+      if (val !== null) props.onChange(val);
+    });
+  };
+  useEffect(() => () => { if (rafRef.current) window.cancelAnimationFrame(rafRef.current); }, []);
 
   // 外部值变化时同步 RGBA 滑块（撤销/重做/切换元素）
   useEffect(() => {
     const parsed = parseColor(value || fallback);
-    if (parsed) { setR(parsed.r); setG(parsed.g); setB(parsed.b); setA(parsed.a); }
+    if (parsed) {
+      setR(parsed.r); setG(parsed.g); setB(parsed.b); setA(parsed.a);
+      setHexText(rgbToHex(parsed.r, parsed.g, parsed.b));
+    }
   }, [value, fallback]);
 
   // 开 modal 前 snapshot 原色（对比条带的"原色"用它），并解析 RGBA 初始滑杆
@@ -60,7 +82,10 @@ export function ColorField(props: ColorFieldProps) {
     setDraft(value);
     draftRef.current = value;
     const parsed = parseColor(value || fallback);
-    if (parsed) { setR(parsed.r); setG(parsed.g); setB(parsed.b); setA(parsed.a); }
+    if (parsed) {
+      setR(parsed.r); setG(parsed.g); setB(parsed.b); setA(parsed.a);
+      setHexText(rgbToHex(parsed.r, parsed.g, parsed.b));
+    }
     props.onModalOpen?.();
     setModalOpen(true);
   };
@@ -73,10 +98,11 @@ export function ColorField(props: ColorFieldProps) {
   // 改 RGBA 滑块
   const onRgbaChange = (nr: number, ng: number, nb: number, na: number) => {
     setR(nr); setG(ng); setB(nb); setA(na);
-    const newColor = `rgba(${nr}, ${ng}, ${nb}, ${na.toFixed(2)})`;
+    setHexText(rgbToHex(nr, ng, nb));
+    const newColor = na < 1 ? `rgba(${nr}, ${ng}, ${nb}, ${na.toFixed(2)})` : rgbToHex(nr, ng, nb);
     setDraft(newColor);
     draftRef.current = newColor;
-    props.onChange(newColor);
+    emitThrottled(newColor);
   };
 
   // 改颜色名下拉
@@ -93,26 +119,47 @@ export function ColorField(props: ColorFieldProps) {
     props.onChange(name);
     // 同时同步 RGBA 滑块
     const parsed = parseColor(hex);
-    if (parsed) { setR(parsed.r); setG(parsed.g); setB(parsed.b); setA(parsed.a); }
+    if (parsed) {
+      setR(parsed.r); setG(parsed.g); setB(parsed.b); setA(parsed.a);
+      setHexText(rgbToHex(parsed.r, parsed.g, parsed.b));
+    }
   };
 
-  // 改文本框（modal 内外的文本输入共用）
+  // 改文本框（modal 内外的文本输入共用，只在输入有效颜色时才写入 store）
   const onTextInput = (v: string) => {
     setDraft(v);
     draftRef.current = v;
-    props.onChange(v);
-    // 尝试同步滑块
-    const parsed = parseColor(v);
-    if (parsed) { setR(parsed.r); setG(parsed.g); setB(parsed.b); setA(parsed.a); }
+    const parsed = parseColor(v.trim());
+    if (parsed) {
+      setR(parsed.r); setG(parsed.g); setB(parsed.b); setA(parsed.a);
+      setHexText(rgbToHex(parsed.r, parsed.g, parsed.b));
+      emitThrottled(v.trim());
+    } else if (v.trim() === '' || v.trim() === 'transparent') {
+      emitThrottled(v.trim());
+    }
   };
 
-  // 改 hex 取色器
+  // 改 hex 取色器（原生 input[type="color"]）
   const onHexpicker = (hex: string) => {
+    setHexText(hex);
     setDraft(hex);
     draftRef.current = hex;
-    props.onChange(hex);
+    emitThrottled(hex);
     const parsed = parseColor(hex);
-    if (parsed) { setR(parsed.r); setG(parsed.g); setB(parsed.b); };
+    if (parsed) { setR(parsed.r); setG(parsed.g); setB(parsed.b); }
+  };
+
+  // 直接手输十六进制文本（丝滑响应，无任何卡顿）
+  const onHexTextChange = (txt: string) => {
+    setHexText(txt);
+    const parsed = parseColor(txt.trim());
+    if (parsed) {
+      setR(parsed.r); setG(parsed.g); setB(parsed.b);
+      const newColor = txt.trim();
+      setDraft(newColor);
+      draftRef.current = newColor;
+      emitThrottled(newColor);
+    }
   };
 
   return (
@@ -133,7 +180,9 @@ export function ColorField(props: ColorFieldProps) {
         onClick={(e) => { e.stopPropagation(); openModal(); }}
         title={value === 'transparent' ? '当前颜色：透明 (transparent)' : '打开调色盘'}
       />
-      {modalOpen && (
+      {/* 调色盘用 Portal 挂到 body：既不会被属性面板的 overflow 裁切，
+          也不会被父级 transform（如折叠动画）变成包含块导致遮罩错位 */}
+      {modalOpen && createPortal(
         <div className="cp-backdrop" onClick={(e) => { e.stopPropagation(); closeModal(); }}>
           <div className="cp-modal" onClick={(e) => e.stopPropagation()}>
             <div className="cp-modal-header">
@@ -185,12 +234,24 @@ export function ColorField(props: ColorFieldProps) {
             </div>
 
             <div className="cp-section">
-              <div className="cp-section-label">Hex（快选，不含 Alpha）</div>
-              <input
-                type="color"
-                value={rgbToHex(r, g, b)}
-                onChange={(e) => onHexpicker(e.target.value)}
-              />
+              <div className="cp-section-label">HEX 颜色（支持实时手动修改与色块快选）</div>
+              <div className="cp-hex-row">
+                <input
+                  type="color"
+                  className="cp-native-color"
+                  value={rgbToHex(r, g, b)}
+                  onChange={(e) => onHexpicker(e.target.value)}
+                  title="点击打开系统调色盘"
+                />
+                <input
+                  type="text"
+                  className="cp-hex-input"
+                  value={hexText}
+                  placeholder="#1e88e5"
+                  spellCheck={false}
+                  onChange={(e) => onHexTextChange(e.target.value)}
+                />
+              </div>
             </div>
 
             <div className="cp-section">
@@ -227,7 +288,8 @@ export function ColorField(props: ColorFieldProps) {
               <button className="cp-ok" onClick={closeModal}>应用</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

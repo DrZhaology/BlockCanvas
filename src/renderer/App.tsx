@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toolbar } from '@comp/Toolbar';
 import { ElementPanel } from '@comp/ElementPanel';
 import { Canvas } from '@comp/Canvas';
+import { CanvasOverlays } from '@comp/CanvasOverlays';
 import { Inspector } from '@comp/Inspector';
 import { LayerTree } from '@comp/LayerTree';
 import { ErrorBoundary } from '@comp/ErrorBoundary';
@@ -13,6 +14,7 @@ import { ShortcutsModal } from '@comp/ShortcutsModal';
 import { useScene, findNode } from '@store/sceneStore';
 import { useTabStore } from '@store/tabStore';
 import { refreshPlugins } from '@lib/pluginHost';
+import { DEVICE_LIST, widthToBreakpoint, type DeviceId } from '@lib/device';
 
 // BlockCanvas · 主界面
 // - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
@@ -31,8 +33,8 @@ const LEFT_WIDTH_DEFAULT = 230;
 const LEFT_WIDTH_MIN = 160;
 const BOTTOM_HEIGHT_DEFAULT = 250;
 const BOTTOM_HEIGHT_MIN = 175;
-const RIGHT_WIDTH_DEFAULT = 320;
-const RIGHT_WIDTH_MIN = 224;
+const RIGHT_WIDTH_DEFAULT = 384;
+const RIGHT_WIDTH_MIN = 300;
 
 export type AppView = 'editor' | 'projects' | 'settings';
 
@@ -45,6 +47,18 @@ export default function App() {
   const [leftWidth, setLeftWidth] = usePersistentState<number>(LEFT_WIDTH_KEY, LEFT_WIDTH_DEFAULT);
   const [zoom, setZoom] = useState(1);
   const [view, setView] = useState<AppView>('editor');
+  // 视图切换：先播 0.17s 出场动画，再换内容（新内容自带淡入）→ 进出都有动画
+  const [viewLeaving, setViewLeaving] = useState(false);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const switchView = useCallback((next: AppView) => {
+    if (next === viewRef.current) return;
+    setViewLeaving(true);
+    window.setTimeout(() => {
+      setView(next);
+      setViewLeaving(false);
+    }, 170);
+  }, []);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('personalization');
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -58,7 +72,27 @@ export default function App() {
   });
   const applyZoom = (fn: (z: number) => number) => setZoom(fn);
 
-  useKeyboardShortcuts(setView, () => setShowShortcuts(true));
+  useKeyboardShortcuts(switchView, () => setShowShortcuts(true));
+
+  // 0. 设备 / 断点 / 画布宽度 三合一同步
+  //    - 画布宽度变化 → 自动推导当前编辑断点（电脑 / 平板 / 手机）
+  //    - 任意地方广播 bc:set-device → 反推标准画布宽度
+  useEffect(() => {
+    const bp = widthToBreakpoint(canvasWidth);
+    if (useScene.getState().activeBreakpoint !== bp) {
+      useScene.getState().setActiveBreakpoint(bp);
+    }
+  }, [canvasWidth]);
+
+  useEffect(() => {
+    const onSetDevice = (e: Event) => {
+      const d = (e as CustomEvent).detail as DeviceId;
+      const target = DEVICE_LIST.find((x) => x.id === d);
+      if (target) setCanvasWidth(target.width);
+    };
+    window.addEventListener('bc:set-device', onSetDevice);
+    return () => window.removeEventListener('bc:set-device', onSetDevice);
+  }, [setCanvasWidth]);
 
   // 1. 启动时像 Windows 11 记事本一样秒级恢复上次会话
   useEffect(() => {
@@ -172,13 +206,13 @@ export default function App() {
     };
     const toLeft = () => setLayout('left');
     const toBottom = () => setLayout('bottom');
-    const openProjects = () => setView('projects');
+    const openProjects = () => switchView('projects');
     const openSettings = (sec?: SettingsSection) => {
       setSettingsSection(sec || 'personalization');
-      setView('settings');
+      switchView('settings');
     };
     const openClass = () => {
-      setView('editor');
+      switchView('editor');
       setRightTab('inspector');
       window.dispatchEvent(new CustomEvent('bc:open-class'));
     };
@@ -186,7 +220,7 @@ export default function App() {
 
     const onNewTab = () => {
       useTabStore.getState().newTab();
-      setView('editor');
+      switchView('editor');
     };
 
     const onSaveProject = async () => {
@@ -219,7 +253,7 @@ export default function App() {
       const res = await window.bc.openProjectFile();
       if (res.ok && res.project?.scene) {
         useTabStore.getState().newTab(res.project.name || '已打开工程', res.project.scene, res.path);
-        setView('editor');
+        switchView('editor');
       }
     };
 
@@ -293,118 +327,121 @@ export default function App() {
       window.removeEventListener('menu:preview', onPreview);
       offs.forEach((off) => off && off());
     };
-  }, [setLayout, setView]);
+  }, [setLayout, switchView]);
 
   return (
     <div className="app">
-      {view === 'projects' ? (
-        <ProjectsCenter
-          onBack={() => setView('editor')}
-        />
-      ) : view === 'settings' ? (
-        <Settings
-          onBack={() => setView('editor')}
-          onOpenWebManager={() => setView('projects')}
-          initialSection={settingsSection}
-          layout={layout}
-          onLayoutChange={setLayout}
-          canvasWidth={canvasWidth}
-          onCanvasWidthChange={setCanvasWidth}
-        />
-      ) : (
-        <>
-          <ProjectTabBar />
-          <Toolbar
+      <div className={"view-switch" + (viewLeaving ? " is-leaving" : "")}>
+        {view === 'projects' ? (
+          <ProjectsCenter
+            onBack={() => switchView('editor')}
+          />
+        ) : view === 'settings' ? (
+          <Settings
+            onBack={() => switchView('editor')}
+            onOpenWebManager={() => switchView('projects')}
+            initialSection={settingsSection}
+            layout={layout}
+            onLayoutChange={setLayout}
             canvasWidth={canvasWidth}
             onCanvasWidthChange={setCanvasWidth}
-            zoom={zoom}
-            onZoomChange={setZoom}
           />
-          {(() => {
-            const effectiveBottomHeight = pocketExpanded
-              ? Math.max(520, Math.round(window.innerHeight * 0.65))
-              : bottomHeight;
-            const effectiveLeftWidth = pocketExpanded
-              ? Math.max(580, Math.round(window.innerWidth * 0.45))
-              : leftWidth;
+        ) : (
+          <>
+            <ProjectTabBar />
+            <Toolbar
+              canvasWidth={canvasWidth}
+              onCanvasWidthChange={setCanvasWidth}
+              zoom={zoom}
+              onZoomChange={setZoom}
+            />
+            {(() => {
+              const effectiveBottomHeight = pocketExpanded
+                ? Math.max(520, Math.round(window.innerHeight * 0.65))
+                : bottomHeight;
+              const effectiveLeftWidth = pocketExpanded
+                ? Math.max(580, Math.round(window.innerWidth * 0.45))
+                : leftWidth;
 
-            return (
-              <div
-                className={"workspace" + (pocketExpanded ? " pocket-expanded" : "")}
-                data-layout={layout}
-                style={{
-                  '--bc-bottom-height': effectiveBottomHeight + 'px',
-                  '--bc-right-width': rightWidth + 'px',
-                  '--bc-left-width': effectiveLeftWidth + 'px'
-                } as React.CSSProperties}
-              >
-                <div className="elem-pane-wrap">
-                  <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>
-                  {layout === 'left' && (
+              return (
+                <div
+                  className={"workspace" + (pocketExpanded ? " pocket-expanded" : "")}
+                  data-layout={layout}
+                  style={{
+                    '--bc-bottom-height': effectiveBottomHeight + 'px',
+                    '--bc-right-width': rightWidth + 'px',
+                    '--bc-left-width': effectiveLeftWidth + 'px'
+                  } as React.CSSProperties}
+                >
+                  <div className="elem-pane-wrap">
+                    <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>
+                    {layout === 'left' && (
+                      <div
+                        className={"panel-resizer panel-resizer-left" + (pocketExpanded ? " is-disabled" : "")}
+                        onMouseDown={(e) => {
+                          if (pocketExpanded) return;
+                          startResize(e, 'left', setLeftWidth, LEFT_WIDTH_MIN, leftWidth);
+                        }}
+                        title={pocketExpanded ? "已撑开口袋，宽度调整已锁定" : undefined}
+                      >
+                        <div className="panel-resizer-handle" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="canvas-area">
+                    <ErrorBoundary label="画布">
+                      <Canvas
+                        canvasWidth={canvasWidth}
+                        zoom={zoom}
+                        onZoomChange={applyZoom}
+                        onUserResize={(px) => setCanvasWidth(px + 'px')}
+                      />
+                    </ErrorBoundary>
+                    <CanvasOverlays canvasWidth={canvasWidth} />
+                    {layout === 'bottom' && (
+                      <div
+                        className={"panel-resizer panel-resizer-horizontal" + (pocketExpanded ? " is-disabled" : "")}
+                        onMouseDown={(e) => {
+                          if (pocketExpanded) return;
+                          startResize(e, 'bottom', setBottomHeight, BOTTOM_HEIGHT_MIN, bottomHeight);
+                        }}
+                        title={pocketExpanded ? "已撑开口袋，高度调整已锁定" : undefined}
+                      >
+                        <div className="panel-resizer-handle" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="right-pane-wrap">
                     <div
-                      className={"panel-resizer panel-resizer-left" + (pocketExpanded ? " is-disabled" : "")}
-                      onMouseDown={(e) => {
-                        if (pocketExpanded) return;
-                        startResize(e, 'left', setLeftWidth, LEFT_WIDTH_MIN, leftWidth);
-                      }}
-                      title={pocketExpanded ? "已撑开口袋，宽度调整已锁定" : undefined}
+                      className="panel-resizer panel-resizer-vertical"
+                      onMouseDown={(e) => startResize(e, 'right', setRightWidth, RIGHT_WIDTH_MIN, rightWidth)}
                     >
                       <div className="panel-resizer-handle" />
                     </div>
-                  )}
-                </div>
-                <div className="canvas-area">
-                  <ErrorBoundary label="画布">
-                    <Canvas
-                      canvasWidth={canvasWidth}
-                      zoom={zoom}
-                      onZoomChange={applyZoom}
-                      onUserResize={(px) => setCanvasWidth(px + 'px')}
-                    />
-                  </ErrorBoundary>
-                  {layout === 'bottom' && (
-                    <div
-                      className={"panel-resizer panel-resizer-horizontal" + (pocketExpanded ? " is-disabled" : "")}
-                      onMouseDown={(e) => {
-                        if (pocketExpanded) return;
-                        startResize(e, 'bottom', setBottomHeight, BOTTOM_HEIGHT_MIN, bottomHeight);
-                      }}
-                      title={pocketExpanded ? "已撑开口袋，高度调整已锁定" : undefined}
-                    >
-                      <div className="panel-resizer-handle" />
-                    </div>
-                  )}
-                </div>
-                <div className="right-pane-wrap">
-                  <div
-                    className="panel-resizer panel-resizer-vertical"
-                    onMouseDown={(e) => startResize(e, 'right', setRightWidth, RIGHT_WIDTH_MIN, rightWidth)}
-                  >
-                    <div className="panel-resizer-handle" />
-                  </div>
-                  <div className="right-pane">
-                    <div className="tab-bar">
-                      <button
-                        className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
-                        onClick={() => setRightTab('layers')}
-                      >图层</button>
-                      <button
-                        className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
-                        onClick={() => setRightTab('inspector')}
-                      >属性</button>
-                    </div>
-                    <div className="tab-body">
-                      <ErrorBoundary label="右侧面板">
-                        {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
-                      </ErrorBoundary>
+                    <div className="right-pane">
+                      <div className="tab-bar">
+                        <button
+                          className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
+                          onClick={() => setRightTab('layers')}
+                        >图层</button>
+                        <button
+                          className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
+                          onClick={() => setRightTab('inspector')}
+                        >属性</button>
+                      </div>
+                      <div className="tab-body">
+                        <ErrorBoundary label="右侧面板">
+                          {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
+                        </ErrorBoundary>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            );
-          })()}
-        </>
-      )}
+              );
+            })()}
+          </>
+        )}
+      </div>
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
       <ShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
     </div>

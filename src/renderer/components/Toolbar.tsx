@@ -3,23 +3,31 @@ import { useScene } from '@store/sceneStore';
 import { exportHTML, type ExportResult } from '@lib/exporter';
 import { styleToCssText, simplifyStyle } from '@lib/styleClass';
 import type { SceneElement } from '@lib/types';
-import { useToolbar, type ToolbarItem } from '@store/toolbarStore';
+import { useToolbar, isVisibleOnBar, type ToolbarItem } from '@store/toolbarStore';
 import { dragSteps } from '@lib/drag';
+import { widthLabel } from '@lib/device';
 
 // BlockCanvas · 顶部工具栏
-//  - 左固定组：复制/剪切/粘贴/副本/删除 ｜ 预览/导出HTML —— 不可改。
-//  - 右侧动态区（右对齐）：画布宽度块 / 缩放块 / 类名ID块 + 导出元素模板 / 取消选中，
-//    按默认序渲染；最右端「⋯ 更多」收纳插件命令。
-//  - 缩放块：按住百分比左右拖拽微调（阻尼），双击手输数值；旁置「归位」。
+// v0.4.1 重排：按「编辑 → 视图 → 检查 → 输出」四段式分组，段间用细分隔线明确界限，
+// 按钮统一为同一套尺寸与配色（只有「导出 HTML」是主按钮），设置收敛为图标按钮靠最右。
+// 左侧固定操作组不可改；右侧按 toolbarStore 的 order / visible 渲染（设置页可管理显隐）。
 
 const ZOOM_MIN = 50;   // % 最小
 const ZOOM_MAX = 200;  // % 最大
 
-// 三块统一 id（注册进 toolbarStore，占排序/显隐位；渲染由下方 widgetMap 提供）
+// 分组定义：id 对应 toolbarStore 里的 item id
+const GROUPS: Array<{ key: string; ids: string[] }> = [
+  { key: 'edit', ids: ['copy', 'cut', 'paste', 'duplicate', 'delete'] },
+  { key: 'view', ids: ['blk.device', 'blk.zoom', 'outline'] },
+  { key: 'inspect', ids: ['blk.clsid', 'export-template', 'clear-selection'] },
+  { key: 'output', ids: ['preview', 'projects-center', 'export-html', 'settings-entry'] }
+];
+
+// 注册进 toolbarStore 的块级组件（渲染由 widgetMap 提供）
 const BLOCKS: { id: string; label: string; order: number }[] = [
-  { id: 'blk.canvas-width', label: '画布宽度', order: 60 },
+  { id: 'blk.device', label: '设备 / 画布宽度', order: 60 },
   { id: 'blk.zoom', label: '缩放', order: 70 },
-  { id: 'blk.clsid', label: '类名/ID', order: 80 }
+  { id: 'blk.clsid', label: '类名/ID 检查', order: 80 }
 ];
 
 export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }: {
@@ -50,14 +58,17 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     return () => document.body.classList.remove('bc-outlines-on');
   }, [outlines]);
 
-  // 右侧动态区：内置按钮（含三块）按默认序排；插件命令（plg. 前缀）收进「⋯ 更多」
   const items = useToolbar((s) => s.items);
-  const allSorted = useMemo(
-    () => [...items].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)),
+  const visible = useToolbar((s) => s.visible);
+  const itemMap = useMemo(() => {
+    const m = new Map<string, ToolbarItem>();
+    for (const it of items) m.set(it.id, it);
+    return m;
+  }, [items]);
+  const pluginItems = useMemo(
+    () => [...items].filter((it) => it.id.startsWith('plg.')).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)),
     [items]
   );
-  const barItems = allSorted.filter((it) => !it.id.startsWith('plg.'));
-  const pluginItems = allSorted.filter((it) => it.id.startsWith('plg.'));
   const pct = Math.round(zoom * 100);
 
   // 点「⋯ 更多」之外关闭下拉
@@ -129,7 +140,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     tipsTimer.current = window.setTimeout(() => setTips(null), 6000);
   };
 
-  // —— 内建操作（用 getState 取最新，供固定/动态按钮复用）——
+  // —— 内建操作 ——
   const doExport = async () => {
     const result = exportHTML(useScene.getState().scene);
     const res = await window.bc.exportHTML(result.html, 'index.html');
@@ -161,113 +172,117 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     else alert('导出失败：' + (res.error ?? '未知错误'));
   };
 
-  // —— 左侧固定操作组（布局固定，用户不可改）——
-  const fixedOps: {
-    id: string; label: string | (() => string); title: string; cls?: string;
+  // —— 全部按钮操作（统一注册进 toolbarStore，设置页可管理显隐）——
+  type ToolbarOp = {
+    id: string; label: () => string; title: string; cls: string;
     onClick: () => void; disabled?: () => boolean;
-  }[] = [
+  };
+
+  const OPS: ToolbarOp[] = [
+    // —— 编辑组 ——
     {
-      id: 'copy', label: () => { const n = useScene.getState().scene.selectedIds.length; return '⧉ 复制' + (n > 1 ? `(${n})` : ''); },
+      id: 'copy', cls: 'tb-btn-ghost',
+      label: () => { const n = useScene.getState().scene.selectedIds.length; return '⧉ 复制' + (n > 1 ? `(${n})` : ''); },
       title: '复制 (Ctrl+C)\n多选：复制全部选中元素',
       onClick: () => { const st = useScene.getState(); if (st.scene.selectedIds.length) st.copyMany(st.scene.selectedIds); },
       disabled: () => useScene.getState().scene.selectedIds.length === 0
     },
     {
-      id: 'cut', label: () => { const n = useScene.getState().scene.selectedIds.length; return '✂ 剪切' + (n > 1 ? `(${n})` : ''); },
+      id: 'cut', cls: 'tb-btn-ghost',
+      label: () => { const n = useScene.getState().scene.selectedIds.length; return '✂ 剪切' + (n > 1 ? `(${n})` : ''); },
       title: '剪切 (Ctrl+X)\n多选：剪切全部选中元素',
       onClick: () => { const st = useScene.getState(); if (st.scene.selectedIds.length) st.cutMany(st.scene.selectedIds); },
       disabled: () => useScene.getState().scene.selectedIds.length === 0
     },
     {
-      id: 'paste', label: () => { const n = useScene.getState().scene.selectedIds.length; return '⎘ 粘贴' + (n > 1 ? `(${n})` : ''); },
+      id: 'paste', cls: 'tb-btn-ghost',
+      label: () => { const n = useScene.getState().scene.selectedIds.length; return '⎘ 粘贴' + (n > 1 ? `(${n})` : ''); },
       title: '粘贴 (Ctrl+V) — 插入到当前选中元素内部（无选中时插到画布末尾）',
       onClick: () => { const st = useScene.getState(); st.paste(st.scene.selectedId); },
       disabled: () => useScene.getState().clipboard === null
     },
     {
-      id: 'duplicate', label: '📑 副本', title: '原地创建副本 (Ctrl+D)',
+      id: 'duplicate', cls: 'tb-btn-ghost',
+      label: () => '📑 副本', title: '原地创建副本 (Ctrl+D)',
       onClick: () => { const st = useScene.getState(); if (st.scene.selectedId) st.duplicateElement(st.scene.selectedId); },
       disabled: () => !useScene.getState().scene.selectedId
     },
     {
-      id: 'delete', label: () => { const n = useScene.getState().scene.selectedIds.length; return '🗑 删除' + (n > 1 ? `(${n})` : ''); },
-      title: '删除 (Delete) — 多选时批量删除', cls: 'toolbar-del',
+      id: 'delete', cls: 'tb-btn-ghost toolbar-del',
+      label: () => { const n = useScene.getState().scene.selectedIds.length; return '🗑 删除' + (n > 1 ? `(${n})` : ''); },
+      title: '删除 (Delete) — 多选时批量删除',
       onClick: () => { const st = useScene.getState(); if (st.scene.selectedIds.length) st.removeMany(st.scene.selectedIds); },
       disabled: () => useScene.getState().scene.selectedIds.length === 0
     },
+    // —— 检查组 ——
     {
-      id: 'preview', label: '▶ 预览', title: '在默认浏览器中预览 (Ctrl+P)', cls: 'btn-ghost',
-      onClick: doPreview
+      id: 'export-template', cls: 'tb-btn-ghost',
+      label: () => '🔖 导出元素模板', title: '把选中元素（含子级）导出为模板 JSON 文件',
+      onClick: doExportTemplate,
+      disabled: () => {
+        const st = useScene.getState();
+        return !st.scene.selectedId || st.scene.selectedId === st.scene.root.id;
+      }
     },
     {
-      id: 'projects-center', label: '📁 全部项目', title: '浏览全部本地项目库与专属快照备份', cls: 'btn-secondary',
+      id: 'clear-selection', cls: 'tb-btn-ghost',
+      label: () => '取消选中', title: '取消选中 (Esc)',
+      onClick: () => useScene.getState().selectElement(null),
+      disabled: () => !useScene.getState().scene.selectedId
+    },
+    // —— 输出组 ——
+    { id: 'preview', cls: 'tb-btn-ghost', label: () => '▶ 预览', title: '在默认浏览器中预览 (Ctrl+P)', onClick: doPreview },
+    {
+      id: 'projects-center', cls: 'tb-btn-soft', label: () => '📁 全部项目',
+      title: '浏览全部本地项目库与专属快照备份',
       onClick: () => window.dispatchEvent(new CustomEvent('bc:open-projects'))
     },
+    { id: 'export-html', cls: 'tb-btn-primary', label: () => '⬇ 导出 HTML', title: '导出 HTML 网页文件 (Ctrl+E)', onClick: doExport },
     {
-      id: 'export-html', label: '⬇ 导出 HTML', title: '导出 HTML 网页文件 (Ctrl+E)', cls: 'btn-primary',
-      onClick: doExport
+      id: 'settings-entry', cls: 'tb-btn-icon', label: () => '⚙', title: '偏好设置 (Ctrl+,)',
+      onClick: () => window.dispatchEvent(new CustomEvent('bc:open-settings'))
     }
   ];
 
-  // —— 注册右侧动态区的项 ——
+  const opMap = useMemo(() => {
+    const m = new Map<string, ToolbarOp>();
+    for (const o of OPS) m.set(o.id, o);
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // —— 注册右侧动态区的项（顺序与分组由 GROUPS 决定，这里只提供显隐默认值） ——
   useEffect(() => {
-    // 动态按钮（导出元素模板 / 取消选中 / 设置）
-    const dynamic: ToolbarItem[] = [
-      {
-        id: 'export-template', label: '🔖 导出元素模板', title: '把选中元素（含子级）导出为模板 JSON 文件',
-        order: 7, defaultVisible: true, cls: 'btn-ghost',
-        onClick: doExportTemplate,
-        disabled: () => {
-          const st = useScene.getState();
-          return !st.scene.selectedId || st.scene.selectedId === st.scene.root.id;
-        }
-      },
-      {
-        id: 'clear-selection', label: '取消选中', title: '取消选中 (Esc)', order: 8, defaultVisible: true, cls: 'btn-ghost',
-        onClick: () => useScene.getState().selectElement(null),
-        disabled: () => !useScene.getState().scene.selectedId
-      },
-      {
-        id: 'settings-entry', label: '⚙️ 设置', title: '偏好设置 (Ctrl+,)', order: 90, defaultVisible: true, cls: 'btn-ghost',
-        onClick: () => window.dispatchEvent(new CustomEvent('bc:open-settings'))
-      }
-    ];
-    for (const it of dynamic) useToolbar.getState().addItem(it);
-    // 三个块级组件（画布宽度 / 缩放 / 类名ID）：渲染由 widgetMap 提供
+    const orderOf: Record<string, number> = {
+      'export-template': 82,
+      'clear-selection': 84,
+      'outline': 74,
+      'preview': 90,
+      'projects-center': 92,
+      'export-html': 94,
+      'settings-entry': 96,
+      'copy': 10, 'cut': 12, 'paste': 14, 'duplicate': 16, 'delete': 18
+    };
+    const reg: ToolbarItem[] = OPS.map((o) => ({
+      id: o.id,
+      label: o.label,
+      title: o.title,
+      order: orderOf[o.id] ?? 50,
+      defaultVisible: true,
+      cls: o.cls
+    }));
+    for (const it of reg) useToolbar.getState().addItem(it);
     for (const b of BLOCKS) {
       useToolbar.getState().addItem({ id: b.id, label: b.label, block: true, order: b.order, defaultVisible: true });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const setActiveBreakpoint = useScene((s) => s.setActiveBreakpoint);
-
-  const handleWidthChange = (val: string) => {
-    onCanvasWidthChange(val);
-    if (val === '375px') {
-      setActiveBreakpoint('mobile');
-    } else if (val === '768px') {
-      setActiveBreakpoint('tablet');
-    } else if (val === 'auto' || val === '1440px') {
-      setActiveBreakpoint('desktop');
-    } else {
-      const px = parseInt(val, 10);
-      if (!isNaN(px)) {
-        if (px <= 480) setActiveBreakpoint('mobile');
-        else if (px <= 768) setActiveBreakpoint('tablet');
-        else setActiveBreakpoint('desktop');
-      }
-    }
-  };
-
-  // 画布宽度：自定义像素值显示在选择框里
+  // 画布宽度：自定义像素值显示在设备条上
   const WIDTH_OPTIONS = ['auto', '1440px', '768px', '375px'];
   const customWidth = canvasWidth !== 'auto' && !WIDTH_OPTIONS.includes(canvasWidth) ? canvasWidth : null;
 
-  const labelOf = (it: { label?: string | (() => string); id: string }) => (typeof it.label === 'function' ? it.label() : (it.label ?? it.id));
-  const disabledOf = (it: { disabled?: () => boolean }) => (it.disabled ? it.disabled() : false);
-
   // —— 缩放：按住百分比左右拖拽（阻尼，最小 1%）——
-  // Pointer Lock：拖拽期间隐藏光标且冻结，松开后光标回到按下位置；失败退回 CSS 隐藏。
   const zoomAccRef = useRef(0);
   const startZoomDrag = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -285,7 +300,6 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   };
   const moveZoomDrag = (e: React.PointerEvent) => {
     if (!zoomDrag) return;
-    // 锁定期间 clientX 冻结，用 movementX 累计；未锁定退回 clientX 差值
     const dx = document.pointerLockElement
       ? Math.round((zoomAccRef.current += e.movementX || 0))
       : e.clientX - zoomDrag.startX;
@@ -298,7 +312,6 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     document.body.classList.remove('bc-zoom-dragging');
     try { if (document.pointerLockElement) document.exitPointerLock(); } catch { /* ignore */ }
   };
-  // 双击手输缩放
   const applyZoomEdit = () => {
     setZoomEdit(false);
     const n = parseInt(zoomEditVal, 10);
@@ -306,26 +319,25 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     onZoomChange(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, n)) / 100);
   };
 
-  // —— 元素轮廓开关按钮：渲染时贴在「类名/ID」块左侧 ——
-  const outlineBtn = (
-    <button
-      className={"tb-outline-btn" + (outlines ? ' active' : '')}
-      onClick={() => setOutlines((v) => !v)}
-      title="显示元素轮廓：给画布所有元素加暗蓝色虚线框，方便看清 div 占位与嵌套；只是程序里的可视化辅助，导出的 HTML 不含"
-    >⬚ 轮廓</button>
-  );
-
-  // —— 三个块的可变渲染（每渲染重建，拿到最新 props，块才能用当前 props 交互） ——
+  // —— 各「块」的可变渲染 ——
   const widgetMap: Record<string, React.ReactNode> = {
-    'blk.canvas-width': (
-      <div className="tb-block tb-width" title="画布宽度：自适应 = 当前编辑区宽度（所见即所得）；预设断点用于预览响应式效果">
+    'blk.device': (
+      <div className="tb-block tb-device" title="画布宽度：自适应 = 铺满编辑区；也可拖动画布左右边缘自定义。设备切换在画布顶部的设备条上">
         <span className="tb-block-label">画布</span>
-        <select className="tb-width-select" value={canvasWidth} onChange={(e) => handleWidthChange(e.target.value)}>
-          {customWidth && <option value={customWidth}>📏 {parseInt(customWidth)}px</option>}
+        <select
+          className="tb-width-select"
+          value={customWidth ? 'custom' : canvasWidth}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === 'custom') return;
+            onCanvasWidthChange(v);
+          }}
+        >
+          {customWidth && <option value="custom">📏 自定义 {widthLabel(customWidth)}</option>}
           <option value="auto">自适应窗口</option>
-          <option value="1440px">💻 桌面 1440px</option>
-          <option value="768px">📱 平板 768px</option>
-          <option value="375px">📱 手机 375px</option>
+          <option value="1440px">桌面 1440px</option>
+          <option value="768px">平板 768px</option>
+          <option value="375px">手机 375px</option>
         </select>
       </div>
     ),
@@ -353,7 +365,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
             onDoubleClick={() => { setZoomEdit(true); setZoomEditVal(String(pct)); }}
           >{pct}%</span>
         )}
-        <button className="tb-zoom-reset" disabled={zoom === 1} onClick={() => onZoomChange(1)} title="恢复 100% 显示">{zoom === 1 ? '100%' : '归位'}</button>
+        <button className="tb-zoom-reset" disabled={zoom === 1} onClick={() => onZoomChange(1)} title={zoom === 1 ? '当前已是 100%' : '恢复 100% 显示'}>⟲ 归位</button>
       </div>
     ),
     'blk.clsid': (
@@ -368,7 +380,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
               <div className="issue-block">
                 <div className="issue-block-head">{issues.unnamed.length} 个元素未设置类名 / ID（样式将用行内方式）</div>
                 {issues.unnamed.slice(0, 8).map((u) => (
-                  <button key={u.id} className="issue-item" onClick={() => { useScene.getState().selectElement(u.id); setIssuesOpen(false); }}>&lt;{u.type}&gt; 点此选中</button>
+                  <button key={u.id} className="issue-item" onClick={() => { useScene.getState().selectElement(u.id); setIssuesOpen(false); window.dispatchEvent(new CustomEvent('bc:reveal-element', { detail: u.id })); }}>&lt;{u.type}&gt; 点此选中</button>
                 ))}
                 {issues.unnamed.length > 8 && <div className="issue-more">…还有 {issues.unnamed.length - 8} 个</div>}
               </div>
@@ -385,7 +397,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
               <div className="issue-block">
                 <div className="issue-block-head">{issues.dupIds.length} 个 ID 重复使用</div>
                 {issues.dupIds.map((d) => (
-                  <button key={d.name} className="issue-item" onClick={() => { useScene.getState().selectElement(d.ids[1]); setIssuesOpen(false); }}>#{d.name} 重复 → 点此选中第二个</button>
+                  <button key={d.name} className="issue-item" onClick={() => { useScene.getState().selectElement(d.ids[1]); window.dispatchEvent(new CustomEvent('bc:reveal-element', { detail: d.ids[1] })); setIssuesOpen(false); }}>#{d.name} 重复 → 点此选中第二个</button>
                 ))}
               </div>
             )}
@@ -414,68 +426,69 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     return () => window.removeEventListener('mousedown', onDoc);
   }, [issuesOpen]);
 
+  // 分组渲染：每个 item 先查 store 是否可见，再决定渲染成块 / 按钮 / 局部按钮
+  const renderItem = (id: string) => {
+    if (id === 'outline') {
+      return (
+        <button
+          key={id}
+          className={'tb-btn-ghost tb-outline-btn' + (outlines ? ' active' : '')}
+          onClick={() => setOutlines((v) => !v)}
+          title="显示元素轮廓：给画布所有元素加暗蓝色虚线框，方便看清 div 占位与嵌套；只是程序里的可视化辅助，导出的 HTML 不含"
+        >⬚ 轮廓</button>
+      );
+    }
+    const it = itemMap.get(id);
+    if (it) {
+      if (!isVisibleOnBar(it, visible)) return null;
+      if (it.block) return <Fragment key={id}>{widgetMap[id]}</Fragment>;
+    }
+    const op = opMap.get(id);
+    if (!op) return null;
+    return (
+      <button
+        key={id}
+        className={op.cls}
+        title={op.title}
+        onClick={op.onClick}
+        disabled={op.disabled ? op.disabled() : false}
+      >{op.label()}</button>
+    );
+  };
+
   return (
     <div className="toolbar">
-      {/* —— 左：固定操作组（不可改） —— */}
-      <div className="tb-fixed">
-        {fixedOps.slice(0, 5).map((b) => (
-          <button key={b.id} className={b.cls ?? ''} title={b.title} onClick={b.onClick} disabled={b.disabled ? b.disabled() : false}>
-            {labelOf(b)}
-          </button>
-        ))}
-        <span className="tb-fixed-sep" />
-        {fixedOps.slice(5).map((b) => (
-          <button key={b.id} className={b.cls ?? ''} title={b.title} onClick={b.onClick} disabled={b.disabled ? b.disabled() : false}>
-            {labelOf(b)}
-          </button>
-        ))}
-      </div>
-
-      <span className="sep" />
-
-      {/* —— 右：右对齐；内置按钮按默认序渲染，界限清晰统一 —— */}
-      <div className="tb-pool">
-        {barItems.map((it) => (
-          <Fragment key={it.id}>
-            {it.id === 'blk.clsid' && (
-              <div className="tb-pool-item">{outlineBtn}</div>
-            )}
-            <div className="tb-pool-item">
-              {it.block ? (
-                widgetMap[it.id]
-              ) : (
-                <button
-                  className={"tb-pool-btn " + (it.cls ?? '')}
-                  title={it.title}
-                  onClick={it.onClick}
-                  disabled={disabledOf(it)}
-                >{it.icon && <span className="tb-icon">{it.icon}</span>}{labelOf(it)}</button>
-              )}
-            </div>
+      {GROUPS.map((g, gi) => {
+        const nodes = g.ids.map(renderItem).filter(Boolean);
+        if (nodes.length === 0) return null;
+        return (
+          <Fragment key={g.key}>
+            {gi > 0 && <span className="tb-group-sep" />}
+            <div className={'tb-group tb-group-' + g.key}>{nodes}</div>
           </Fragment>
-        ))}
+        );
+      })}
 
-        {/* 「⋯ 更多」：收纳插件命令（无插件时不显示） */}
-        {pluginItems.length > 0 && (
-          <div className="tb-more-wrap">
-            <button className="tb-more-btn" title="插件命令" onClick={() => setMoreOpen((o) => !o)}>
-              ⋯ 更多
-            </button>
-            {moreOpen && (
-              <div className="tb-more-pop">
-                {pluginItems.map((it) => (
-                  <button
-                    key={it.id}
-                    className="tb-more-item"
-                    title={it.title}
-                    onClick={() => { it.onClick?.(); setMoreOpen(false); }}
-                  >{it.icon && <span className="tb-icon">{it.icon}</span>}{labelOf(it)}</button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {/* 「⋯ 更多」：收纳插件命令（无插件时不显示） */}
+      {pluginItems.length > 0 && (
+        <div className="tb-more-wrap">
+          <button className="tb-more-btn" title="插件命令" onClick={() => setMoreOpen((o) => !o)}>
+            ⋯ 更多
+          </button>
+          {moreOpen && (
+            <div className="tb-more-pop">
+              {pluginItems.map((it) => (
+                <button
+                  key={it.id}
+                  className="tb-more-item"
+                  title={it.title}
+                  onClick={() => { it.onClick?.(); setMoreOpen(false); }}
+                >{it.icon && <span className="tb-icon">{it.icon}</span>}{typeof it.label === 'function' ? it.label() : it.label}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {tips && <div className="export-tips">{tips}</div>}
     </div>

@@ -54,7 +54,7 @@
     transEl = document.createElement('style');
     transEl.textContent =
       '*,*::before,*::after{transition:background-color .3s ease,color .3s ease,' +
-      'border-color .3s ease,box-shadow .3s ease,fill .3s ease,stroke .3s ease !important;}';
+      'border-color .3s ease,box-shadow .3s ease,fill .3s ease,stroke .3s ease;}';
     document.head.appendChild(transEl);
     if (transTimer) clearTimeout(transTimer);
     transTimer = setTimeout(function () {
@@ -95,13 +95,6 @@
       '--conflict-bg:#3a2a12; --amber-bg:#3a2c14; --issue-bg:#352b16; ' +
       '--err-boundary-bg:#2b2021; --err-boundary-msg-bg:#352022; ' +
       'color-scheme:dark; ' +
-    '} ' +
-    // 程序写死的斜纹底（变量覆盖不到，需 !important 直接改）
-    'html[data-bc-dark] .canvas-wrap { ' +
-      'background:repeating-linear-gradient(45deg, var(--stripe) 0 8px, transparent 8px 16px) !important; ' +
-    '} ' +
-    'html[data-bc-dark] .tpl-preview-body { ' +
-      'background:repeating-linear-gradient(45deg, var(--stripe2) 0 8px, transparent 8px 16px) !important; ' +
     '} ' +
     // 滚动条 + 文本选区 + 占位符
     'html[data-bc-dark] ::-webkit-scrollbar-thumb { background:var(--thumb); } ' +

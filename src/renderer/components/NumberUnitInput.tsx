@@ -134,6 +134,10 @@ export function NumberUnitInput(props: Props) {
         className="num-unit-num"
         value={num}
         placeholder={isAuto ? 'auto' : '只填数字'}
+        // 单位选 auto 时数值无意义（值就是 auto），禁用数字框避免用户输入被忽略而困惑；
+        // 想改回来直接切右侧单位下拉即可。
+        disabled={isAuto}
+        title={isAuto ? '当前单位为 auto（自动计算），数值由浏览器决定；想指定具体数值请切换右侧单位' : undefined}
         onFocus={() => {
           editingRef.current = true;
           beginStyleEdit();

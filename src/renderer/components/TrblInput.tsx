@@ -1,16 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useScene, findNode } from '@store/sceneStore';
-import { applyUnit, CSS_UNITS, UNIT_LABELS } from '@lib/propertySchema';
+import { CSS_UNITS, UNIT_LABELS } from '@lib/propertySchema';
 
-// BlockCanvas · 简写输入（trbl：top/right/bottom/left）
-// 一个输入框，支持 1~4 个值（空格分隔，顺序 上 右 下 左）：
-//   - 1 个值：四周相同，如 10px
-//   - 2 个值：上下 / 左右，如 0 auto
-//   - 3 个值：上 / 左右 / 下
-//   - 4 个值：上 右 下 左 分别，如 8px 4px 8px 4px
-// 输入时实时（transient）预览；失焦或回车时按 CSS 简写规则拆成 4 边字段提交。
-// 超过 4 个值判为非法：失焦时回滚显示，不提交。
-// 显示时反向合并：全相等显示 1 个值、上下/左右相等显示 2 个值、左右相等显示 3 个值。
+// BlockCanvas · 四值输入（上 / 右 / 下 / 左 分开填写）
+// 设计动机：过去是一个"简写输入框"（要用户自己记住 `8px 4px 8px 4px` 的 CSS 简写顺序），
+// 新手看不懂也容易写错。现在改为 4 个独立数值框，各自带单位，一眼看清、逐个填。
+//   - 仍支持任意 CSS 值：auto / 50% / calc(100% - 20px) 直接写进框里
+//   - 「四边同步」开关：勾上后改一个，其余三个自动跟随（做四周等距留白时更快）
+//   - 落库仍写 4 个 longhand 字段，导出时由 simplifyStyle 自动合并成简写 → 代码依旧干净
 
 interface SideDef { key: string; label: string }
 
@@ -20,144 +17,180 @@ interface Props {
   fallback?: string;
   /** 数值缺单位时自动补全（如 'px'），见 schema.unit */
   unit?: string;
-  /** 隐藏「单位」下拉：单位直接写在输入框里（如 10px、1rem），裸数字按 unit 补 */
+  /** 隐藏「单位」下拉：单位直接写在输入框右侧（如 10px、1rem），裸数字按 unit 补 */
   hideUnit?: boolean;
 }
 
 export function TrblInput(props: Props) {
+  const { elementId, sides, fallback, unit, hideUnit } = props;
   const scene = useScene((s) => s.scene);
   const beginStyleEdit = useScene((s) => s.beginStyleEdit);
   const endStyleEdit = useScene((s) => s.endStyleEdit);
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
   const updateStyle = useScene((s) => s.updateStyle);
-  const { elementId, sides, fallback, unit, hideUnit } = props;
+
+  const [u, setU] = useState(unit ?? 'px');
+  const [sync, setSync] = useState(false);
 
   const node = findNode(scene.root, elementId);
   const style = (node?.style ?? {}) as Record<string, string | undefined>;
 
-  // 由 4 边字段反向合并出的显示值（外部变化时同步）
-  const displayShorthand = toShorthand(style, sides);
+  useEffect(() => { setU(unit ?? 'px'); }, [unit, elementId]);
 
-  const [text, setText] = useState(displayShorthand);
-  const [u, setU] = useState(unit ?? 'px');
-  const editingRef = useRef(false);
-  // 非编辑态（撤销/重做/外部修改）时跟着 store 走；编辑中不打断用户输入
-  useEffect(() => {
-    if (!editingRef.current) setText(displayShorthand);
-  }, [displayShorthand]);
+  if (!node) return null;
+
+  const write = (key: string, raw: string, transient: boolean) => {
+    const patch: Record<string, string> = {};
+    if (sync) {
+      for (const s of sides) patch[s.key] = normalize(raw, u);
+    } else {
+      patch[key] = normalize(raw, u);
+    }
+    if (transient) updateStyleTransient(elementId, patch);
+    else updateStyle(elementId, patch);
+  };
+
+  const changeUnit = (nu: string) => {
+    setU(nu);
+    const patch: Record<string, string> = {};
+    for (const s of sides) {
+      const v = style[s.key];
+      if (v) patch[s.key] = normalize(stripUnit(v, u), nu);
+    }
+    if (Object.keys(patch).length > 0) updateStyle(elementId, patch);
+  };
 
   return (
-    <div className="trbl-row">
-      <input
-        type="text"
-        className="trbl-input"
-        value={text}
-        placeholder={fallback ? `例：${fallback} / 0 auto / 8px 4px 8px 4px` : '1~4 个值，空格分隔'}
-        title="填 1~4 个值，空格分隔，顺序：上 右 下 左。例：10px（四周）、0 auto（上下/左右）、8px 4px 8px 4px"
-        onFocus={() => {
-          editingRef.current = true;
-          beginStyleEdit();
-        }}
-        onChange={(e) => {
-          const v = e.target.value;
-          setText(v);
-          const parsed = parseShorthand(v, sides);
-          if (parsed) updateStyleTransient(elementId, withUnit(parsed, u));
-        }}
-        onBlur={() => {
-          editingRef.current = false;
-          const parsed = parseShorthand(text, sides);
-          if (parsed) {
-            const patch = withUnit(parsed, u);
-            updateStyle(elementId, patch);
-            setText(shorthandFromValues(patch, sides));
-          } else {
-            // 非法输入（如多于 4 个值）：回滚显示，不提交
-            setText(displayShorthand);
-          }
-          endStyleEdit();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-        }}
-      />
-      {!hideUnit && (
-        <select
-          className="unit-select"
-          value={u}
-          onChange={(e) => {
-            const nu = e.target.value;
-            setU(nu);
-            // 换单位：所有"缺单位"的数字带上新单位，写死的单位（auto/50% 等）不动
-            const parsed = parseShorthand(text, sides);
-            if (parsed) {
-              const patch = withUnit(parsed, nu);
-              updateStyle(elementId, patch);
-              setText(shorthandFromValues(patch, sides));
-            }
-          }}
-          title="没有写单位的数字自动补这个单位"
-        >
-          {CSS_UNITS.map((un) => (
-            <option key={un} value={un} title={UNIT_LABELS[un]}>
-              {un}
-            </option>
-          ))}
-        </select>
-      )}
+    <div className="trbl4">
+      <div className="trbl4-head">
+        <span className="trbl4-head-title">
+          上 / 右 / 下 / 左 分开填写
+          {fallback ? <span className="trbl4-head-hint">（例：{fallback}）</span> : null}
+        </span>
+        <div className="trbl4-head-right">
+          <label className="trbl4-sync" title="勾选后：改任意一边，其余三边自动跟随（做四周等距留白更快）">
+            <input type="checkbox" checked={sync} onChange={(e) => setSync(e.target.checked)} />
+            四边同步
+          </label>
+          {!hideUnit && (
+            <select
+              className="unit-select trbl4-unit-select"
+              value={u}
+              onChange={(e) => changeUnit(e.target.value)}
+              title="没有写单位的数字自动补这个单位"
+            >
+              {CSS_UNITS.map((un) => (
+                <option key={un} value={un} title={UNIT_LABELS[un]}>{un}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+
+      <div className="trbl4-grid">
+        {sides.map((s) => (
+          <Trbl4Cell
+            key={s.key}
+            label={s.label}
+            value={style[s.key] ?? ''}
+            unit={u}
+            elementId={elementId}
+            onBegin={beginStyleEdit}
+            onEnd={endStyleEdit}
+            onChange={(raw) => write(s.key, raw, true)}
+            onCommit={(raw) => write(s.key, raw, false)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
-// ============ 简写 patch 数值补单位（每个值独立处理） ============
-function withUnit(patch: Record<string, string>, unit?: string): Record<string, string> {
-  if (!unit) return patch;
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(patch)) out[k] = applyUnit(v, unit);
-  return out;
+function Trbl4Cell(props: {
+  label: string;
+  value: string;
+  unit: string;
+  elementId: string;
+  onBegin: () => void;
+  onEnd: () => void;
+  onChange: (raw: string) => void;
+  onCommit: (raw: string) => void;
+}) {
+  const { label, value, unit } = props;
+  const [draft, setDraft] = useState(value);
+  const editingRef = useRef(false);
+
+  useEffect(() => {
+    if (!editingRef.current) setDraft(value);
+  }, [value]);
+
+  const { num, hasUnit } = splitVal(value, unit);
+
+  return (
+    <div className="trbl4-cell">
+      <span className="trbl4-label">{label}</span>
+      <div className="trbl4-input-wrap">
+        <span className={'trbl4-spacer' + (hasUnit ? '' : ' is-hidden')}>{unit}</span>
+        <input
+          type="text"
+          className="trbl4-input"
+          value={editingRef.current ? draft : (num || '')}
+          placeholder="0"
+          spellCheck={false}
+          onFocus={() => { editingRef.current = true; setDraft(num || ''); props.onBegin(); }}
+          onChange={(e) => {
+            const raw = e.target.value;
+            setDraft(raw);
+            props.onChange(raw);
+          }}
+          onBlur={() => {
+            editingRef.current = false;
+            props.onCommit(draft);
+            setDraft('');
+            props.onEnd();
+          }}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+        />
+        <span className={'trbl4-unit' + (hasUnit ? '' : ' is-hidden')}>{unit}</span>
+      </div>
+    </div>
+  );
 }
 
-// ============ 解析：CSS 简写 → 4 边字段（按 sides 顺序） ============
-// 返回 null 表示非法（值个数超过 4）
-export function parseShorthand(v: string, sides: SideDef[]): Record<string, string> | null {
-  const tokens = v.trim().split(/\s+/).filter((t) => t.length > 0);
-  if (tokens.length > 4) return null;
-
-  const vals: string[] = ['', '', '', ''];
-  if (tokens.length === 1) {
-    vals.fill(tokens[0]);
-  } else if (tokens.length === 2) {
-    vals[0] = tokens[0]; vals[1] = tokens[1];
-    vals[2] = tokens[0]; vals[3] = tokens[1];
-  } else if (tokens.length === 3) {
-    vals[0] = tokens[0]; vals[1] = tokens[1];
-    vals[2] = tokens[2]; vals[3] = tokens[1];
-  } else if (tokens.length === 4) {
-    vals[0] = tokens[0]; vals[1] = tokens[1];
-    vals[2] = tokens[2]; vals[3] = tokens[3];
-  }
-
-  const out: Record<string, string> = {};
-  sides.forEach((s, i) => { out[s.key] = vals[i]; });
-  return out;
+// ============ 数值 / 单位拆分 ============
+// 16px + 单位 px → 显示 "16" 并展示 px 后缀
+// auto / 50% / calc(...) 等 → 原样显示且不展示后缀
+function splitVal(v: string, unit: string): { num: string; hasUnit: boolean } {
+  if (!v) return { num: '', hasUnit: true };
+  const m = v.match(/^([+-]?(?:\d+\.?\d*|\.\d+))\s*([a-z%]*)$/i);
+  if (m && (!m[2] || m[2].toLowerCase() === unit.toLowerCase())) return { num: m[1], hasUnit: true };
+  return { num: v, hasUnit: false };
 }
 
-// ============ 合并：4 边字段 → 最简简写（展示用/入库后回显） ============
-function shorthandFromValues(patch: Record<string, string>, sides: SideDef[]): string {
-  return shorthandFromVals(sides.map((s) => patch[s.key] ?? ''));
+function stripUnit(v: string, unit: string): string {
+  const m = v.match(/^([+-]?(?:\d+\.?\d*|\.\d+))\s*([a-z%]*)$/i);
+  if (m && (!m[2] || m[2].toLowerCase() === unit.toLowerCase())) return m[1];
+  return v;
 }
 
-export function toShorthand(style: Record<string, string | undefined>, sides: SideDef[]): string {
+// ============ 裸数字补单位（其余值原样保留） ============
+function normalize(raw: string, unit: string): string {
+  const t = raw.trim();
+  if (t === '') return '';
+  if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(t)) return t + unit;
+  return t;
+}
+
+// ============ 兼容导出（旧调用方可能引用） ============
+export interface TrblSideDef { key: string; label: string }
+
+/** 4 边字段 → 最简简写（导出/展示用） */
+export function toShorthand(style: Record<string, string | undefined>, sides: TrblSideDef[]): string {
   const vals = sides.map((s) => style[s.key] ?? '');
   if (vals.every((v) => v === '')) return '';
-  // 个别边缺省（罕见）：按 CSS 简写语义用首值补齐，避免显示误导
   const first = vals.find((v) => v !== '') ?? '';
   const filled = vals.map((v) => (v === '' ? first : v));
-  return shorthandFromVals(filled);
-}
-
-function shorthandFromVals(vals: string[]): string {
-  const [a, b, c, d] = vals;
+  const [a, b, c, d] = filled;
   if (a === b && b === c && c === d) return a;
   if (a === c && b === d) return `${a} ${b}`;
   if (b === d) return `${a} ${b} ${c}`;

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { TEXT_TAGS, SELF_CLOSING_TAGS, CONTAINER_TAGS } from '@lib/types';
 import type { ElementType, SceneElement, SceneGraph } from '@lib/types';
-import { SCHEMA, ATTRS_SCHEMA, DEFAULT_VISIBLE_PROPS,
+import { SCHEMA, ATTRS_SCHEMA, DEFAULT_VISIBLE_PROPS, NUMBER_PRESETS, presetValue, isBareNumber,
   getSchemaItem, isApplicable, hasStyleValue, applyUnit, UNIT_HELP_TEXT
 } from '@lib/propertySchema';
 import { getPluginProperties } from '@lib/pluginHost';
@@ -19,9 +19,14 @@ import { TextShadowInput } from './TextShadowInput';
 import { TransitionInput } from './TransitionInput';
 import { OpacityInput } from './OpacityInput';
 import { LineHeightInput } from './LineHeightInput';
-import { FlexHelper } from './FlexHelper';
+import { QuickHelper, HELPER_MANAGED_KEYS } from './QuickHelper';
+import { PseudoFxPanel } from './PseudoFx';
+import { BackgroundInput } from './BackgroundInput';
+import { Collapse } from './Collapse';
 import { ClassManager } from './ClassManager';
 import { classColor, isValidClassToken } from '@lib/classColor';
+import { isGradient } from '@lib/gradient';
+import { requestDevice } from '@lib/device';
 import { checkApplicability } from '@lib/propertySchema';
 import { inferRelationalSelectors, inferMultiRelationalSelectors, type RelCandidate, type RelInferResult } from '@lib/relationInfer';
 
@@ -309,7 +314,7 @@ function PageCssBody(props: {
         <div className="hint" style={{ fontSize: 12, opacity: 0.75 }}>
           放最后生效，可以覆盖上面所有样式：比如给某个元素写 .banner {'{ background-color: #ffd; }'}
         </div>
-        {advancedOpen && (
+        <Collapse open={advancedOpen}>
           <div className="page-advanced-body">
             <div className="page-css-help">
               <HelpButton
@@ -326,7 +331,7 @@ function PageCssBody(props: {
               onBlur={onCommit}
             />
           </div>
-        )}
+        </Collapse>
       </div>
     </>
   );
@@ -381,11 +386,18 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   const removeVisibleProp = useScene((s) => s.removeVisibleProp);
   const updatePseudoStyleStore = useScene((s) => s.updatePseudoStyle);
   const removePseudoStyleStore = useScene((s) => s.removePseudoStyle);
+  const beginStyleEdit = useScene((s) => s.beginStyleEdit);
+  const endStyleEdit = useScene((s) => s.endStyleEdit);
   const activeBreakpoint = useScene((s) => s.activeBreakpoint);
-  const setActiveBreakpoint = useScene((s) => s.setActiveBreakpoint);
   const clearBreakpointOverride = useScene((s) => s.clearBreakpointOverride);
   const elementId = selected.id;
   const elementType = selected.type;
+  // 是否已有可挂 CSS 规则的"名字"（类名 / 关系选择器 / ID）—— 没有名字则伪类导出后不生效
+  const hasSelector = Boolean(
+    (selected.attrs?.relSelector ?? '').trim() ||
+    (selected.attrs?.className ?? '').trim() ||
+    (selected.attrs?.id ?? '').trim()
+  );
 
   const hasTabletOverride = Boolean(selected.responsive?.tablet && Object.keys(selected.responsive.tablet).length > 0);
   const hasMobileOverride = Boolean(selected.responsive?.mobile && Object.keys(selected.responsive.mobile).length > 0);
@@ -444,6 +456,19 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
     } catch {}
   }, [secStorageKey, elementId]);
 
+  // 「快捷助手 → 是否显示到下方 CSS 属性」开关（按选择器共用记忆：同类名/同关系选择器共享一份）
+  const helperCssKey = 'bc-helper-in-css-' + secStorageKey.replace(/^bc-inspector-sec-/, '');
+  const [showHelperInCss, setShowHelperInCss] = useState<boolean>(() => {
+    try { return localStorage.getItem(helperCssKey) !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { setShowHelperInCss(localStorage.getItem(helperCssKey) !== '0'); } catch {}
+  }, [helperCssKey]);
+  const changeShowHelperInCss = (v: boolean) => {
+    setShowHelperInCss(v);
+    try { localStorage.setItem(helperCssKey, v ? '1' : '0'); } catch {}
+  };
+
   // 伪类编辑区：:hover / :active / :focus / :link
   const PSEUDO_CLASSES = ['hover', 'active', 'focus', 'link'] as const;
   type PseudoClass = typeof PSEUDO_CLASSES[number];
@@ -498,12 +523,30 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   // 1. + DEFAULT_VISIBLE_PROPS (现已默认为空，精简干净)
   // 2. style 里有非空值的所有 schema 属性（含 box4/trbl 4 边任一有值便视为已添加）
   // 3. visibleProps 列表里显式添加过的 key（即使 style 值被清空为空串也不消失）
+  // 4. 「背景颜色」行：渐变（background-image）也算已设置，走同一个入口切换纯色/渐变；
+  //    但"文字渐变"（-webkit-text-fill-color: transparent）由快捷助手代管，不在此重复出现
+  // 5. 快捷助手代管的属性（布局 / 文字渐变）：当「是否显示到下方 CSS 属性」关闭时隐藏
+  //    （用户从 + 添加属性 显式加过的除外，避免误藏用户手动加的属性）
   const visibleSchema: typeof SCHEMA = [];
   const visiblePropList = selected.visibleProps ?? [];
   const allSchema = [...SCHEMA, ...getPluginProperties()];
+  const isTextGradientEl = selected.style.WebkitTextFillColor === 'transparent';
+  // 「过渡动画 (transition)」由「交互状态 (伪类)」区域的滑块统一管理，
+  // 不再在下方「CSS 样式属性」里重复出现一条（用户若从 + 添加属性 显式加过，仍然显示）
+  const PSEUDO_MANAGED_KEYS = new Set(['transition']);
   for (const s of allSchema) {
     if (!isApplicable(s, selected.type)) continue;
-    if (DEFAULT_VISIBLE_PROPS.includes(s.key) || hasStyleValue(selected.style, s as any) || visiblePropList.includes(s.key)) {
+    const extraBg = s.key === 'backgroundColor' && isGradient(selected.style.backgroundImage) && !isTextGradientEl;
+    const byValue = hasStyleValue(selected.style, s as any) || extraBg;
+    const helperHidden =
+      !showHelperInCss && HELPER_MANAGED_KEYS.has(s.key) && !visiblePropList.includes(s.key);
+    const pseudoHidden =
+      PSEUDO_MANAGED_KEYS.has(s.key) && !visiblePropList.includes(s.key);
+    if (
+      DEFAULT_VISIBLE_PROPS.includes(s.key) ||
+      visiblePropList.includes(s.key) ||
+      (byValue && !helperHidden && !pseudoHidden)
+    ) {
       visibleSchema.push(s as any);
     }
   }
@@ -567,32 +610,35 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
         </div>
       </div>
 
-      {/* 响应式断点模式切换条 */}
+      {/* 响应式断点模式切换条（与画布宽度、画布顶部设备条三合一同步） */}
       <div className="inspector-bp-bar">
         <div className="inspector-bp-tabs">
           <button
             className={'bp-tab-btn' + (activeBreakpoint === 'desktop' ? ' active' : '')}
-            onClick={() => setActiveBreakpoint('desktop')}
-            title="电脑端基础样式（全局基准，移动端自动继承）"
+            onClick={() => requestDevice('desktop')}
+            title="电脑端基础样式（全局基准，平板/手机自动继承）。点此画布宽度也会切回自适应"
           >
             💻 电脑默认
           </button>
           <button
             className={'bp-tab-btn' + (activeBreakpoint === 'tablet' ? ' active' : '') + (hasTabletOverride ? ' has-override' : '')}
-            onClick={() => setActiveBreakpoint('tablet')}
-            title="平板端 (≤768px) 样式定制"
+            onClick={() => requestDevice('tablet')}
+            title="平板端 (≤768px) 样式定制。点此画布宽度同步变为 768px，所见即所得"
           >
             📱 平板 (768px)
             {hasTabletOverride && <span className="bp-dot" title="已有平板端定制覆盖" />}
           </button>
           <button
             className={'bp-tab-btn' + (activeBreakpoint === 'mobile' ? ' active' : '') + (hasMobileOverride ? ' has-override' : '')}
-            onClick={() => setActiveBreakpoint('mobile')}
-            title="手机端 (≤480px) 样式定制"
+            onClick={() => requestDevice('mobile')}
+            title="手机端 (≤480px) 样式定制。点此画布宽度同步变为 375px，所见即所得"
           >
-            📱 手机 (375px)
+            📲 手机 (375px)
             {hasMobileOverride && <span className="bp-dot" title="已有手机端定制覆盖" />}
           </button>
+        </div>
+        <div className="inspector-bp-tip">
+          设备切换会同步改变画布宽度 —— 也可直接点画布顶部的设备条（未选中元素时同样可用）
         </div>
       </div>
 
@@ -643,17 +689,22 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
 
       {/* 0. 文案内容（针对文本元素）——置顶最上方第一位，直接输入 */}
       {TEXT_TAGS.has(elementType) && (
-        <div className="field" style={{ marginBottom: 10 }}>
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
-            文案内容
-          </label>
-          <textarea
-            className="inspector-text-textarea"
-            value={selected.text ?? ''}
-            placeholder="在此直接输入文本内容（画布也将同步更新）…"
-            rows={2}
-            onChange={(e) => setText(elementId, e.target.value)}
-          />
+        <div className="prop-row" data-cat="文案" style={{ marginBottom: 10 }}>
+          <div className="prop-row-header">
+            <span>
+              文案内容
+              <HelpButton title="文案内容" content="直接在此输入文本内容，画布上也会实时同步更新；双击画布文字也可原地编辑。" />
+            </span>
+          </div>
+          <div className="prop-row-body" style={{ marginTop: 4 }}>
+            <textarea
+              className="inspector-text-textarea"
+              value={selected.text ?? ''}
+              placeholder="在此直接输入文本内容（画布也将同步更新）…"
+              rows={2}
+              onChange={(e) => setText(elementId, e.target.value)}
+            />
+          </div>
         </div>
       )}
 
@@ -673,7 +724,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
             content={'管理元素的命名与匹配机制：\n\n· 类名 Class：给元素命名，同名元素批量共享样式。\n· 关系选择器：无需起名，根据在父容器中的相对位置自动生成规则（如 .hero > h1）。\n· ID：页面内唯一的元素标识。'}
           />
         </div>
-        {secOpen.identity && (
+        <Collapse open={secOpen.identity}>
           <div className="inspector-sec-body">
             <ClassChipsRow elementId={elementId} element={selected} />
             <RelationalSelectorRow elementId={elementId} element={selected} />
@@ -691,27 +742,32 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
               />
             ))}
           </div>
-        )}
+        </Collapse>
       </div>
 
-      {/* 2. 布局助手折叠区（Flex & Grid） */}
+      {/* 2. 快捷助手折叠区（Flex & Grid + 文字渐变 + 未来更多） */}
       <div className="inspector-sec">
         <div
           className="inspector-sec-head"
           onClick={() => setSecOpen((p) => ({ ...p, layout: !p.layout }))}
-          title="点击展开或收起布局助手"
+          title="点击展开或收起快捷助手"
         >
           <span>
             <span className="sec-caret">{secOpen.layout ? '▾' : '▸'}</span>
-            布局助手 (Flex &amp; Grid)
+            快捷助手
           </span>
-          <span className="prop-scope">排版容器</span>
+          <span className="prop-scope">排版 / 渐变</span>
         </div>
-        {secOpen.layout && (
+        <Collapse open={secOpen.layout}>
           <div className="inspector-sec-body">
-            <FlexHelper elementId={elementId} elementType={elementType} />
+            <QuickHelper
+              elementId={elementId}
+              elementType={elementType}
+              showInCss={showHelperInCss}
+              onShowInCssChange={changeShowHelperInCss}
+            />
           </div>
-        )}
+        </Collapse>
       </div>
 
       {/* 3. 伪类状态区 */}
@@ -741,61 +797,8 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
             }
           />
         </div>
-        {secOpen.pseudo && (
+        <Collapse open={secOpen.pseudo}>
           <div className="inspector-sec-body">
-            {/* 快捷过渡动画控制条 */}
-            <div className="pseudo-transition-bar">
-              <div className="pseudo-trans-header">
-                <span className="pseudo-trans-title">⚡ 平滑过渡动画 (Transition)</span>
-                <span className="pseudo-trans-status">
-                  {selected.style.transition ? `已开启: ${selected.style.transition}` : '未开启 (悬停时瞬间突变)'}
-                </span>
-              </div>
-              <div className="pseudo-trans-presets">
-                <button
-                  className={'btn-mini' + (selected.style.transition?.includes('0.3s') ? ' active' : '')}
-                  onClick={() => {
-                    updateStyle(elementId, { transition: 'all 0.3s ease' });
-                    addVisibleProp(elementId, 'transition');
-                  }}
-                  title="所有样式 0.3 秒平滑过渡 (最自然舒适)"
-                >
-                  ⚡ 0.3s 舒适 (推荐)
-                </button>
-                <button
-                  className={'btn-mini' + (selected.style.transition?.includes('0.15s') ? ' active' : '')}
-                  onClick={() => {
-                    updateStyle(elementId, { transition: 'all 0.15s ease' });
-                    addVisibleProp(elementId, 'transition');
-                  }}
-                  title="所有样式 0.15 秒快速过渡 (轻盈灵敏)"
-                >
-                  ⚡ 0.15s 快闪
-                </button>
-                <button
-                  className={'btn-mini' + (selected.style.transition?.includes('0.5s') ? ' active' : '')}
-                  onClick={() => {
-                    updateStyle(elementId, { transition: 'all 0.5s cubic-bezier(0.4, 0, 0.2, 1)' });
-                    addVisibleProp(elementId, 'transition');
-                  }}
-                  title="所有样式 0.5 秒柔和过渡"
-                >
-                  ⚡ 0.5s 柔和
-                </button>
-                {selected.style.transition && (
-                  <button
-                    className="btn-mini btn-danger"
-                    onClick={() => {
-                      updateStyle(elementId, { transition: undefined });
-                    }}
-                    title="关闭过渡动画"
-                  >
-                    关闭
-                  </button>
-                )}
-              </div>
-            </div>
-
             <div className="pseudo-tabs">
               {PSEUDO_CLASSES.map((pc) => {
                 const count = Object.keys(pseudoStyles[pc] ?? {}).length;
@@ -834,6 +837,36 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
                       <div className="pseudo-hint">
                         正在编辑 <code>:{activePseudo}</code> 状态下的样式覆盖（仅在此状态下生效）
                       </div>
+                      {!hasSelector && (
+                        <div className="pseudo-need-selector">
+                          <span>⚠️</span>
+                          <div>
+                            这个元素还没有<b>类名 / 关系选择器 / ID</b>。伪类样式需要挂在一个"名字"上，
+                            没有名字的话<b>导出的网页里不会生效</b>（画布上能看到，导出后失效）。
+                            <div className="pn-btn">
+                              <button
+                                className="btn-mini"
+                                onClick={() => setSecOpen((p) => ({ ...p, identity: true }))}
+                              >去上面「选择器与标识」起个名字</button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      <PseudoFxPanel
+                        pseudo={activePseudo}
+                        currentStyle={currentStyle}
+                        baseStyle={selected.style as Record<string, string | undefined>}
+                        onApplyPreset={(patch) => {
+                          beginStyleEdit();
+                          updatePseudoStyle(activePseudo, patch);
+                          endStyleEdit();
+                        }}
+                        onClearAll={() => removePseudoStyle(activePseudo)}
+                        onPatch={(patch) => updatePseudoStyle(activePseudo, patch)}
+                        onPatchBase={(patch) => updateStyle(elementId, patch as any)}
+                        onDragStart={() => beginStyleEdit()}
+                        onDragEnd={() => endStyleEdit()}
+                      />
                       <AddPropertyMenu
                         type={elementType}
                         elementStyle={currentStyle as any}
@@ -892,7 +925,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
                           removePseudoStyle(activePseudo, key);
                         };
                         return (
-                          <div key={key} className="prop-row">
+                          <div key={key} className="prop-row" data-cat={item.category}>
                             <div className="prop-row-header">
                               <span>{item.label}</span>
                               <button className="prop-remove" onClick={onRm} title="删除此属性">×</button>
@@ -967,7 +1000,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
               )}
             </div>
           </div>
-        )}
+        </Collapse>
       </div>
 
       {/* 4. CSS 样式属性折叠区 */}
@@ -987,7 +1020,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
             content={'点击「+ 添加属性」按需添加颜色、字体、边框、阴影等。\n· 点击右侧「?」可查看各属性详细用法，点击「×」可随时移除。'}
           />
         </div>
-        {secOpen.css && (
+        <Collapse open={secOpen.css}>
           <div className="inspector-sec-body">
             <AddPropertyMenu
               type={elementType}
@@ -1014,7 +1047,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
               ))}
             </div>
           </div>
-        )}
+        </Collapse>
       </div>
 
       {/* ——— 操作区 ——— */}
@@ -1066,7 +1099,7 @@ function MultiClassNameRow(props: { ids: string[] }) {
   };
 
   return (
-    <div className="prop-row" style={{ marginTop: 8 }}>
+    <div className="prop-row" data-cat="标识" style={{ marginTop: 8 }}>
       <div className="prop-row-header">
         <span>
           批量类名
@@ -1126,7 +1159,7 @@ function MultiRelSelectorRow(props: { ids: string[] }) {
   };
 
   return (
-    <div className="prop-row" style={{ marginTop: 4 }}>
+    <div className="prop-row" data-cat="标识" style={{ marginTop: 4 }}>
       <div className="prop-row-header">
         <span>
           批量关系选择器
@@ -1249,7 +1282,7 @@ function ClassChipsRow(props: { elementId: string; element: SceneElement }) {
   };
 
   return (
-    <div className="prop-row">
+    <div className="prop-row" data-cat="标识">
       <div className="prop-row-header">
         <span>
           类名 Class
@@ -1305,7 +1338,7 @@ function RelationalSelectorRow(props: { elementId: string; element: SceneElement
   };
 
   return (
-    <div className="prop-row" style={{ marginTop: 2 }}>
+    <div className="prop-row" data-cat="标识" style={{ marginTop: 2 }}>
       <div className="prop-row-header">
         <span>
           关系选择器
@@ -1463,6 +1496,8 @@ function PropertyRow(props: {
   return (
     <div
       className={'prop-row' + (highlight ? ' highlight' : '') + (!app.applicable ? ' is-inapplicable' : '')}
+      // 分类配色：CSS 用 data-cat 给每类属性一条不同颜色的左边线，密集列表也能一眼分清
+      data-cat={schemaItem.category}
       // React 合成 onFocus 会冒泡：任何子输入框聚焦都会视为开始编辑
       onFocus={onEdited}
     >
@@ -1560,11 +1595,16 @@ function PropertyRow(props: {
           </select>
         )}
         {schemaItem.input === 'color' && (
-          <ColorPicker
-            elementId={elementId}
-            styleKey={schemaItem.key as 'backgroundColor' | 'color' | 'borderColor'}
-            fallback={schemaItem.placeholder}
-          />
+          schemaItem.key === 'backgroundColor' ? (
+            // 背景色：纯色 / 渐变 双模式（渐变走 PowerPoint 风格可视化编辑器）
+            <BackgroundInput elementId={elementId} fallback={schemaItem.placeholder} />
+          ) : (
+            <ColorPicker
+              elementId={elementId}
+              styleKey={schemaItem.key as 'backgroundColor' | 'color' | 'borderColor'}
+              fallback={schemaItem.placeholder}
+            />
+          )
         )}
         {schemaItem.input === 'box4' && schemaItem.sides && (
           <Box4Input elementId={elementId} sides={schemaItem.sides} fallback={schemaItem.placeholder} unit={schemaItem.unit} />
@@ -1595,6 +1635,28 @@ function PropertyRow(props: {
         )}
         {schemaItem.input === 'lineHeight' && (
           <LineHeightInput elementId={elementId} />
+        )}
+        {/* 数值型属性：常用值一键预设胶囊（点一下就套用，不用手动敲） */}
+        {schemaItem.input === 'number' && (NUMBER_PRESETS[schemaItem.key]?.length ?? 0) > 0 && (
+          <div className="prop-presets">
+            {NUMBER_PRESETS[schemaItem.key].map((raw) => {
+              const value = presetValue(schemaItem, raw);
+              return (
+                <button
+                  key={raw}
+                  className={'prop-preset-chip' + (String(storeValue) === value ? ' active' : '')}
+                  title={`套用 ${value}`}
+                  onClick={() => {
+                    beginStyleEdit();
+                    updateStyle(elementId, { [schemaItem.key]: value } as any);
+                    endStyleEdit();
+                  }}
+                >
+                  {isBareNumber(raw) ? raw + (schemaItem.unit ?? '') : raw}
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>
@@ -1667,7 +1729,7 @@ function AttrRow(props: {
   };
 
   return (
-    <div className="prop-row">
+    <div className="prop-row" data-cat="属性">
       <div className="prop-row-header">
         <span>{label}{helpBtn}</span>
       </div>
@@ -1728,7 +1790,7 @@ function ImgPickerRow(props: { elementId: string }) {
   const isAbsOrFileProto = /^[a-zA-Z]:[\\/]/.test(currentSrc) || currentSrc.startsWith('\\\\') || currentSrc.startsWith('file://');
 
   return (
-    <div className="prop-row">
+    <div className="prop-row" data-cat="多媒体">
       <div className="prop-row-header">
         <span>
           图片路径 (src)

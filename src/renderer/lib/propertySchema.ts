@@ -686,6 +686,42 @@ export const ATTRS_SCHEMA: AttrSchema[] = [
 // ============ 默认显示的属性（留空：按需添加，保持面板干脆精简） ============
 export const DEFAULT_VISIBLE_PROPS: string[] = [];
 
+// ============ 数值型属性的常用预设（一键套用，减少手敲） ============
+// 值为裸数字时按 schema.unit 自动补单位；含单位/关键字的（100%、auto）原样使用。
+export const NUMBER_PRESETS: Record<string, string[]> = {
+  // 尺寸
+  width: ['100%', 'auto', '240', '320', '480', '640', '960'],
+  height: ['auto', '40', '80', '120', '200', '320'],
+  minWidth: ['60', '120', '200', '320'],
+  maxWidth: ['480', '720', '960', '1200'],
+  minHeight: ['40', '60', '80', '120', '240'],
+  maxHeight: ['200', '320', '480', '640'],
+  // 间距
+  gap: ['4', '8', '12', '16', '24', '32', '48'],
+  // 文字
+  fontSize: ['12', '14', '16', '18', '20', '24', '32', '40', '48', '64'],
+  letterSpacing: ['-1', '0', '0.5', '1', '2', '4'],
+  // 定位
+  top: ['auto', '0', '8', '16', '24', '48'],
+  right: ['auto', '0', '8', '16', '24', '48'],
+  bottom: ['auto', '0', '8', '16', '24', '48'],
+  left: ['auto', '0', '8', '16', '24', '48'],
+  zIndex: ['0', '1', '10', '100', '1000'],
+  // 弹性分配
+  flexGrow: ['0', '1', '2'],
+  flexShrink: ['0', '1']
+};
+
+/** 预设值 → 实际写入的 CSS 值（裸数字补 schema.unit） */
+export function presetValue(item: PropertySchema, raw: string): string {
+  if (!isBareNumber(raw)) return raw;
+  return raw + (item.unit ?? '');
+}
+
+export function isBareNumber(v: string): boolean {
+  return /^[+-]?(\d+\.?\d*|\.\d+)$/.test(v);
+}
+
 // ============ 取 schema 项 ============
 export function getSchemaItem(key: string): PropertySchema | undefined {
   return SCHEMA.find((s) => s.key === key);

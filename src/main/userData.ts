@@ -18,6 +18,10 @@ import {
 //   注意：所有扩展（内置种子 + 用户安装）均统一在 data/extensions/，exe 旁不再保留扩展目录。
 
 export function dataRoot(): string {
+  // 测试隔离：E2E / CI 可通过 BC_DATA_DIR 指向临时目录，绝不污染用户的真实 data/。
+  // 仅在显式设置该环境变量时生效，正常使用（双击 exe / pnpm dev）完全不受影响。
+  const override = process.env['BC_DATA_DIR'];
+  if (override && override.trim()) return override.trim();
   const base = app.isPackaged
     ? (process.env['PORTABLE_EXECUTABLE_DIR'] || dirname(process.execPath))
     : app.getAppPath();

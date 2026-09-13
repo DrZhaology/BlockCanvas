@@ -4,8 +4,9 @@
 //   → 改宽高 → 撤销/重做 → 复制/删除 → 全程监控 console 报错（白屏类 bug 直接 FAIL）
 // 运行：pnpm test:e2e  （先 pnpm build 再用 electron . 启动，不依赖 dev server）
 import { createRequire } from 'module';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, cpSync } from 'fs';
 import { resolve } from 'path';
+import { tmpdir } from 'os';
 
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
@@ -45,9 +46,36 @@ async function waitUntil(fn, timeout = 8000, msg = 'condition') {
 const doc = (win, sel) => win.locator(sel);
 const elHas = (win, sel, text) => doc(win, sel).filter({ hasText: text });
 
+async function ensurePropSection(win) {
+  if (await doc(win, '.add-prop-trigger').count()) return;
+  const head = doc(win, '.inspector-sec-head:has-text("CSS 样式属性")');
+  if (await head.count()) { await head.first().click(); await new Promise((r) => setTimeout(r, 450)); }
+}
+
+/** 确保「快捷助手」折叠区已展开（v0.4.1 起默认折叠） */
+async function ensureQuickHelper(win) {
+  if (await doc(win, '.quick-helper').count()) return;
+  const head = doc(win, '.inspector-sec-head:has-text("快捷助手")');
+  if (await head.count()) { await head.first().click(); await new Promise((r) => setTimeout(r, 450)); }
+}
+
 async function main() {
   log('=== BlockCanvas E2E 启动 ===');
-  const app = await electron.launch({ args: ['.'], cwd: ROOT, executablePath: electronPath, env: { ...process.env, BC_EXPORT_PATH: EXPORT_CHECK } });
+  // 数据隔离：把 data/ 指向临时目录，保证 E2E 从「全新空工程」开始，且绝不污染用户真实数据
+  const DATA_DIR = resolve(tmpdir(), 'bc-e2e-data');
+  rmSync(DATA_DIR, { recursive: true, force: true });
+  mkdirSync(DATA_DIR, { recursive: true });
+  // 内置扩展（插件 / 模板资源包）从源码 extensions/ 拷入隔离目录，保证模板类用例有数据可测
+  const SRC_EXT = resolve(ROOT, 'extensions');
+  if (existsSync(SRC_EXT)) cpSync(SRC_EXT, resolve(DATA_DIR, 'extensions'), { recursive: true });
+
+  // --disable-gpu 等参数：CI / 无独显环境下 Electron GPU 进程会反复崩溃导致启动失败
+  const app = await electron.launch({
+    args: ['.', '--disable-gpu', '--disable-software-rasterizer', '--no-sandbox', '--disable-dev-shm-usage'],
+    cwd: ROOT,
+    executablePath: electronPath,
+    env: { ...process.env, BC_EXPORT_PATH: EXPORT_CHECK, BC_DATA_DIR: DATA_DIR }
+  });
   const win = await app.firstWindow();
 
   win.on('console', (m) => {
@@ -61,23 +89,24 @@ async function main() {
     await waitFor(win, doc(win, '.app'));
     check('S1.1 窗口标题', (await win.title()).includes('BlockCanvas'));
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
     await waitFor(win, doc(win, '.element-panel .inspector-tab:has-text("元素")'));
     await waitFor(win, doc(win, '.canvas-empty'));
-    await waitFor(win, doc(win, '.inspector .panel-title:has-text("属性")'));
+    await waitFor(win, doc(win, '.inspector .inspector-empty'));
     check('S1.2 初始三栏齐全', true);
     await shot(win, '初始界面');
 
     // ===== S2 插入 div =====
     await doc(win, '.element-btn:has-text("通用容器")').click();
     await waitUntil(async () => (await doc(win, '.canvas > div').count()) === 1, 8000, 'canvas div=1');
-    await waitFor(win, doc(win, '.inspector .panel-title:has-text("<div>")'));
+    await waitFor(win, doc(win, '.inspector .panel-title-tag:has-text("<div>")'));
     check('S2.1 插入 div 后画布出现 1 个 div', true);
     await shot(win, '插入div');
 
     // ===== S3 插入 p + 文案 =====
     await doc(win, '.element-btn:has-text("段落")').click();
     await waitUntil(async () => (await doc(win, '.canvas p').count()) === 1, 8000, 'canvas p=1');
-    await waitFor(win, doc(win, '.inspector .panel-title:has-text("<p>")'));
+    await waitFor(win, doc(win, '.inspector .panel-title-tag:has-text("<p>")'));
     const TA = doc(win, '.inspector .field textarea');
     await TA.fill('你好，自动化测试');
     await waitUntil(async () => (await doc(win, '.canvas p').textContent())?.includes('自动化测试'), 8000, 'p 文案渲染');
@@ -91,10 +120,13 @@ async function main() {
     check('S4.1 图层树显示 画布根/div/p', (await elHas(win, '.layer-row', 'p 段落').count()) === 1);
     await shot(win, '图层树');
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
+    await ensurePropSection(win);
     await waitFor(win, doc(win, '.add-prop-trigger'));
 
     // ===== S5 添加属性（trbl: margin）+ 新徽标 =====
-    await doc(win, '.add-prop-trigger').click();
+    await ensurePropSection(win);
+    await doc(win, '.add-prop-trigger').first().click();
     await waitFor(win, doc(win, '.add-prop-menu'));
     await doc(win, '.add-prop-search input').fill('margin');
     await waitFor(win, elHas(win, '.add-prop-item', '外边距'));
@@ -106,16 +138,20 @@ async function main() {
     check('S5.3 行标题是外边距', ((await hlRow.textContent()) ?? '').includes('外边距'));
     await shot(win, '新属性高亮');
 
-    await hlRow.locator('input').first().click(); // 点进输入框 = 开始编辑
+    await hlRow.locator('input[type="text"]').first().click(); // 点进输入框 = 开始编辑
     await waitUntil(async () => (await doc(win, '.prop-row.highlight').count()) === 0, 5000, '高亮取消');
     check('S5.4 聚焦后高亮消失', true);
 
     const marginRow = elHas(win, '.prop-row', '外边距');
-    await marginRow.locator('input').first().fill('10px 20px');
+    // v0.4.1：外边距/内边距改为 4 个独立数值框（上 / 右 / 下 / 左）
+    const mCells = marginRow.locator('.trbl4-input');
+    await mCells.nth(0).fill('10');
+    await win.keyboard.press('Tab');
+    await mCells.nth(3).fill('20');
     await win.keyboard.press('Tab'); // 失焦提交
     const mTop = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas p')).marginTop);
     const mLeft = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas p')).marginLeft);
-    check('S5.5 trbl 简写生效 (10px/20px)', mTop === '10px' && mLeft === '20px', `${mTop}/${mLeft}`);
+    check('S5.5 四值输入生效 (上10px/左20px)', mTop === '10px' && mLeft === '20px', `${mTop}/${mLeft}`);
     await shot(win, '外边距生效');
 
     // ===== S6 全部元素类型插入 =====
@@ -165,9 +201,15 @@ async function main() {
     // ===== S8 通过画布点选 div（点左上角避开嵌套子元素），改宽度 + 撤销/重做 =====
     await doc(win, '.canvas > div').first().click({ position: { x: 2, y: 2 } }); // 选中 div
     await doc(win, '.tab-btn:has-text("属性")').click();
-    await waitFor(win, doc(win, '.inspector .panel-title:has-text("<div>")'));
+    await ensurePropSection(win);
+    await waitFor(win, doc(win, '.inspector .panel-title-tag:has-text("<div>")'));
+    // 宽度是「数字 + 单位」两段式输入：默认单位是 %（默认宽度 100%），先切成 px 再填数字
+    const widthRow = doc(win, '.prop-row', { hasText: '宽度' }).first();
+    await widthRow.locator('.unit-select').selectOption('px');
+    await new Promise((r) => setTimeout(r, 250));
+    // 单位切换本身也是一次可撤销的编辑 → baseW 必须在切换之后取
     const baseW = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div')).width);
-    const widthInput = doc(win, '.prop-row input[type="text"]').first();
+    const widthInput = widthRow.locator('.num-unit-num').first();
     await widthInput.fill('300');
     await win.keyboard.press('Tab');
     await new Promise((r) => setTimeout(r, 300)); // 等 React 异步提交渲染
@@ -187,8 +229,11 @@ async function main() {
     // ===== S9 添加 select 属性 (display) =====
     await doc(win, '.canvas > div').first().click({ position: { x: 2, y: 2 } }); // 重新选中 div
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
+    await ensurePropSection(win);
     await waitFor(win, doc(win, '.add-prop-trigger'));
-    await doc(win, '.add-prop-trigger').click();
+    await ensurePropSection(win);
+    await doc(win, '.add-prop-trigger').first().click();
     await waitFor(win, doc(win, '.add-prop-menu'));
     await doc(win, '.add-prop-search input').fill('display');
     await waitFor(win, elHas(win, '.add-prop-item', '显示模式'));
@@ -198,7 +243,8 @@ async function main() {
     const disp = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div')).display);
     check('S9.1 display:flex 生效', disp === 'flex', disp);
     // 修复回归：加完属性后（搜索词已清空）按钮必须仍可点
-    await doc(win, '.add-prop-trigger').click();
+    await ensurePropSection(win);
+    await doc(win, '.add-prop-trigger').first().click();
     const menuBack = await doc(win, '.add-prop-menu').isVisible();
     check('S9.2 添加后按钮未被残留搜索词禁用', menuBack, '菜单重新打开');
     await win.keyboard.press('Escape'); // 关闭菜单（顺带清空选择）
@@ -207,8 +253,11 @@ async function main() {
     // ===== S10 添加 color 属性 (文字颜色) + 删除 =====
     await doc(win, '.canvas > div').first().click({ position: { x: 2, y: 2 } }); // Escape 后重新选中 div
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
+    await ensurePropSection(win);
     await waitFor(win, doc(win, '.add-prop-trigger'));
-    await doc(win, '.add-prop-trigger').click();
+    await ensurePropSection(win);
+    await doc(win, '.add-prop-trigger').first().click();
     await waitFor(win, doc(win, '.add-prop-menu'));
     await doc(win, '.add-prop-search input').fill('文字颜色');
     await waitFor(win, elHas(win, '.add-prop-item', '文字颜色'));
@@ -242,6 +291,7 @@ async function main() {
     await waitUntil(async () => (await doc(win, '.canvas p').count()) === 1, 5000, 'p 撤销恢复');
     check('S11.2 撤销恢复 p', true);
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
 
     // ===== S12 复制 / 原地副本 =====
     await doc(win, '.canvas > div').first().click({ position: { x: 2, y: 2 } }); // 画布点选 div
@@ -254,6 +304,7 @@ async function main() {
     check('S12.2 撤销副本', true);
     await shot(win, '复制撤销');
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
 
     // ===== S13 最终健康检查 =====
     const boundary = await doc(win, '.error-boundary').count();
@@ -289,7 +340,7 @@ async function main() {
     const divRow15 = elHas(win, '.layer-row', 'div 容器').first();
     await divRow15.click({ position: { x: 30, y: 8 } });
     await doc(win, '.layer-row.selected button[title="隐藏"]').click(); // 隐藏 div
-    await waitUntil(async () => (await doc(win, '.canvas *').count()) === 0, 5000, '画布清空(div隐藏)');
+    await waitUntil(async () => (await doc(win, '.canvas [data-bc-id]').count()) === 0, 5000, '画布清空(div隐藏)');
     check('S15.1 隐藏 div 后画布无元素、图层树仍在', (await doc(win, '.layer-tree .layer-row').count()) > 0);
     const headerBefore15 = await doc(win, '.canvas > div > header').count(); // div 隐藏时 = 0
     // 往隐藏的 div 插入页眉 → 应自动解除隐藏并画布可见
@@ -329,6 +380,7 @@ async function main() {
     await doc(win, '.tab-btn:has-text("图层")').click();
     await elHas(win, '.layer-row', 'div 容器').first().click({ position: { x: 30, y: 8 } });
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
     // 顶层 div 无类无 id（4-F 版2 行内样式策略）→ 从画布元素 style 读真实值
     const inlineW17 = () => win.evaluate(() => document.querySelector('.canvas > [data-bc-id]')?.style.width ?? '');
     const numRow17 = doc(win, '.prop-row .num-unit-row').first();
@@ -373,11 +425,32 @@ async function main() {
     check('S18.1 hr 有可见边框颜色', !!hr18 && hr18.borderTopColor !== 'rgba(0, 0, 0, 0)', hr18?.borderTopColor);
     // DPR=1.5 时 Chrome 会把 1px 边框取整成 0.666667px —— 只要 > 0 即可见
     check('S18.2 hr 上边框可见(>0)', !!hr18 && parseFloat(hr18.borderTopWidth) > 0, hr18?.borderTopWidth);
-    check('S18.3 hr 上下 12px 外边距', hr18?.marginTop === '12px', hr18?.marginTop);
+    // v0.4.1：外边距是 4 个独立数值框，这里实测「给 hr 加 12px 上下外边距」是否真的生效
+    await ensurePropSection(win);
+    await doc(win, '.add-prop-trigger').first().click();
+    await waitFor(win, doc(win, '.add-prop-menu'));
+    await doc(win, '.add-prop-search input').fill('margin');
+    await waitFor(win, elHas(win, '.add-prop-item', '外边距'));
+    await elHas(win, '.add-prop-item', '外边距').first().click();
+    await new Promise((r) => setTimeout(r, 450));
+    const hrCells18 = elHas(win, '.prop-row', '外边距').locator('.trbl4-input');
+    await hrCells18.nth(0).fill('12');
+    await win.keyboard.press('Tab');
+    await new Promise((r) => setTimeout(r, 250));
+    await hrCells18.nth(2).fill('12');
+    await win.keyboard.press('Tab');
+    await new Promise((r) => setTimeout(r, 300));
+    const hrMargin18 = await win.evaluate(() => {
+      const hr = document.querySelector('.canvas hr');
+      if (!hr) return null;
+      const cs = getComputedStyle(hr);
+      return { top: cs.marginTop, bottom: cs.marginBottom };
+    });
+    check('S18.3 hr 上下外边距 12px 生效', hrMargin18?.top === '12px' && hrMargin18?.bottom === '12px', JSON.stringify(hrMargin18));
     check('S18.4 hr 在 flex 容器里不塌缩(宽度>0)', !!hr18 && parseFloat(hr18.width) > 0, hr18?.width);
     await shot(win, '分割线可见');
 
-    // ===== S19 嵌套 div 默认 8px 内边距（内外 div 之间有间距）=====
+    // ===== S19 容器不携带编辑器强加的内边距（画布 = 导出，所见即所得）=====
     const pad19 = await win.evaluate(() => {
       const outer = document.querySelector('.canvas > div');
       const inner = document.querySelector('.canvas > div > div:last-of-type'); // div2（S16 插入的）
@@ -385,32 +458,36 @@ async function main() {
       const csI = inner ? getComputedStyle(inner) : null;
       return { outerPad: csO?.paddingTop, innerPad: csI?.paddingTop };
     });
-    check('S19.1 外层容器默认 padding 8px', pad19.outerPad === '8px', pad19.outerPad);
-    check('S19.2 内层容器默认 padding 8px', pad19.innerPad === '8px', pad19.innerPad);
+    check('S19.1 外层容器无编辑器强加的内边距', pad19.outerPad === '0px', pad19.outerPad);
+    check('S19.2 内层容器无编辑器强加的内边距', pad19.innerPad === '0px', pad19.innerPad);
     await shot(win, '嵌套div默认间距');
 
-    // ===== S20 布局助手（Flex 中文封装）=====
-    // 取消选中 → 插入全新顶层 div（自动选中）→ 布局助手区出现在属性面板
-    const cancelSel = doc(win, '.toolbar .btn-ghost:has-text("取消选中")');
+    // ===== S20 快捷助手（原「布局助手」，v0.4.1 扩容：布局 + 文字渐变）=====
+    // 取消选中 → 插入全新顶层 div（自动选中）→ 快捷助手区出现在属性面板
+    const cancelSel = doc(win, '.toolbar .tb-btn-ghost:has-text("取消选中")');
     if (await cancelSel.count()) await cancelSel.click();
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.element-btn:has-text("通用容器")').click();
     await new Promise((r) => setTimeout(r, 300));
-    check('S20.1 容器选中后出现布局助手', await doc(win, '.flex-helper .seg-btn').count() === 2);
+    await ensureQuickHelper(win);
+    check('S20.1 容器选中后出现快捷助手', await doc(win, '.quick-helper .seg-btn').count() === 3, String(await doc(win, '.quick-helper .seg-btn').count()));
     const flexDiv20 = doc(win, '.canvas > div').nth(1); // 第二个顶层 div = 新插入的
+    // 切到弹性 Flex
+    await elHas(win, '.quick-helper .seg-btn', '弹性 Flex').click();
+    await new Promise((r) => setTimeout(r, 350));
     // 竖排
-    await elHas(win, '.seg-btn', '竖排排列').click();
+    await elHas(win, '.quick-helper .flex-mini-btn', '竖排').click();
     await new Promise((r) => setTimeout(r, 300));
     let cs20 = await flexDiv20.evaluate((el) => {
       const cs = getComputedStyle(el);
       return { display: cs.display, flexDirection: cs.flexDirection };
     });
-    check('S20.2 竖排排列 → flex + column', cs20.display === 'flex' && cs20.flexDirection === 'column', JSON.stringify(cs20));
+    check('S20.2 竖排 → flex + column', cs20.display === 'flex' && cs20.flexDirection === 'column', JSON.stringify(cs20));
     // 横排
-    await elHas(win, '.seg-btn', '横排排列').click();
+    await elHas(win, '.quick-helper .flex-mini-btn', '横排').click();
     await new Promise((r) => setTimeout(r, 300));
     cs20 = await flexDiv20.evaluate((el) => getComputedStyle(el).flexDirection);
-    check('S20.3 横排排列 → row', cs20 === 'row', cs20);
+    check('S20.3 横排 → row', cs20 === 'row', cs20);
     // 主轴对齐（居中）
     await doc(win, '.flex-helper-row:has-text("主轴对齐") select').selectOption('center');
     await new Promise((r) => setTimeout(r, 300));
@@ -420,18 +497,20 @@ async function main() {
     await new Promise((r) => setTimeout(r, 300));
     check('S20.5 交叉轴对齐垂直居中', (await flexDiv20.evaluate((el) => getComputedStyle(el).alignItems)) === 'center');
     // 子元素间距 12px
-    await doc(win, '.flex-helper-row:has-text("子元素间距") .num-unit-num').fill('12');
-    await doc(win, '.flex-helper-row:has-text("子元素间距") .num-unit-num').press('Enter');
+    await doc(win, '.flex-helper-row:has-text("元素间距") .num-unit-num').fill('12');
+    await doc(win, '.flex-helper-row:has-text("元素间距") .num-unit-num').press('Enter');
     await new Promise((r) => setTimeout(r, 300));
-    check('S20.6 子元素间距 12px', (await flexDiv20.evaluate((el) => getComputedStyle(el).gap)) === '12px');
+    check('S20.6 元素间距 12px', (await flexDiv20.evaluate((el) => getComputedStyle(el).gap)) === '12px');
     await shot(win, '布局助手flex横排');
-    // 插入段落（自动选中）→ 叶子元素显示"选中父容器"入口
+    // 插入段落（自动选中）→ 叶子元素显示"选中父级"入口
     await doc(win, '.element-btn:has-text("段落")').click();
-    await new Promise((r) => setTimeout(r, 300));
-    check('S20.7 叶子元素显示父容器入口', await doc(win, '.flex-helper-hint .btn-mini:has-text("选中父容器设置布局")').count() === 1);
-    await doc(win, '.flex-helper-hint .btn-mini:has-text("选中父容器设置布局")').click();
-    await new Promise((r) => setTimeout(r, 300));
-    check('S20.8 选中父容器后回到容器布局助手', (await doc(win, '.inspector .panel-title').textContent()).includes('<div>') && (await doc(win, '.flex-helper .seg-btn').count()) === 2);
+    await new Promise((r) => setTimeout(r, 350));
+    await ensureQuickHelper(win);
+    check('S20.7 叶子元素显示父容器入口', await doc(win, '.quick-helper .btn-mini:has-text("选中父级")').count() === 1);
+    await doc(win, '.quick-helper .btn-mini:has-text("选中父级")').first().click();
+    await new Promise((r) => setTimeout(r, 350));
+    await ensureQuickHelper(win);
+    check('S20.8 选中父容器后回到容器快捷助手', (await doc(win, '.inspector .panel-title-tag').textContent()).includes('<div>') && (await doc(win, '.quick-helper .seg-btn').count()) === 3);
     // 退出弹性布局 → 恢复块级并清空对齐/间距
     await doc(win, '.flex-exit-btn').click();
     await new Promise((r) => setTimeout(r, 300));
@@ -501,7 +580,7 @@ async function main() {
         rows: document.querySelectorAll('.layer-row.selected:not(.root-row)').length,
         firstSolid: getComputedStyle(els[0]).outlineStyle === 'solid',
         secondSolid: getComputedStyle(els[1]).outlineStyle === 'solid',
-        title: document.querySelector('.inspector .panel-title')?.textContent ?? ''
+        title: document.querySelector('.inspector .panel-title-header')?.textContent ?? ''
       };
     });
     check('S21.6 完整框住 → 只有 divA 选中', marqSel21.firstSolid && !marqSel21.secondSolid && (marqSel21.rows === 0 || marqSel21.rows === 1), `first=${marqSel21.firstSolid} second=${marqSel21.secondSolid} title=${marqSel21.title}`);
@@ -529,7 +608,7 @@ async function main() {
       return {
         first: getComputedStyle(els[0]).outlineStyle === 'solid',
         second: getComputedStyle(els[1]).outlineStyle === 'solid',
-        title: document.querySelector('.inspector .panel-title')?.textContent ?? ''
+        title: document.querySelector('.inspector .panel-title-header')?.textContent ?? ''
       };
     });
     check('S21.10 Ctrl+点击已选元素可取消 → 只剩 divB', !single21.first && single21.second && single21.title.includes('<div>'), JSON.stringify(single21));
@@ -559,7 +638,8 @@ async function main() {
     // S22.2 定位模式 = absolute → 画布 computed 必须就是 absolute（旧版被强制 relative，导出才生效 → 画布≠浏览器）
     await doc(win, '.canvas > [data-bc-id]').first().click();
     await new Promise((r) => setTimeout(r, 200));
-    await doc(win, '.add-prop-trigger').click();
+    await ensurePropSection(win);
+    await doc(win, '.add-prop-trigger').first().click();
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.add-prop-search input').fill('定位模式');
     await new Promise((r) => setTimeout(r, 200));
@@ -589,7 +669,7 @@ async function main() {
     });
     check('S23.1 自适应画布铺满编辑区（横向）', Math.abs(wAuto - wWrap) < 2, `${wAuto} vs ${wWrap}`);
     // S23.2 手机预设 375px → 画布收窄到 375
-    const sel23 = await doc(win, '.canvas-width-select');
+    const sel23 = await doc(win, '.tb-width-select');
     await sel23.selectOption('375px');
     await new Promise((r) => setTimeout(r, 250));
     const w375 = await win.evaluate(() => document.querySelector('.canvas').getBoundingClientRect().width);
@@ -828,6 +908,7 @@ async function main() {
     await doc(win, '.layer-row:has-text("div 容器")').nth(2).click({ position: { x: 30, y: 8 } });
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
     await new Promise((r) => setTimeout(r, 200));
     const idInput27 = doc(win, '.prop-row:has-text("ID?") input');
     await idInput27.fill('c-sec');
@@ -849,6 +930,7 @@ async function main() {
     await doc(win, '.layer-row:has-text("div 容器")').nth(0).click({ position: { x: 30, y: 8 } }); // divA
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.cls-chip-input').fill('dup');
     await doc(win, '.cls-chip-input').evaluate((el) => el.blur());
@@ -860,6 +942,7 @@ async function main() {
     await doc(win, '.layer-row:has-text("div 容器")').nth(1).click({ position: { x: 30, y: 8 } }); // divD（divA 内）
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.cls-chip-input').fill('dup');
     await doc(win, '.cls-chip-input').evaluate((el) => el.blur());
@@ -878,6 +961,7 @@ async function main() {
     await doc(win, '.layer-row:has-text("div 容器")').nth(1).click({ position: { x: 30, y: 8 } }); // divD（divA 内部）
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
     await new Promise((r) => setTimeout(r, 200));
     // divD 默认就带「背景色」行，直接改色即可（无需走添加属性菜单）
     const bgRow27 = doc(win, '.prop-row:has-text("背景色 Background") input').first();
@@ -975,6 +1059,7 @@ async function main() {
     await dupCard30.locator('button:has-text("定位")').click();
     await new Promise((r) => setTimeout(r, 300));
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
     await new Promise((r) => setTimeout(r, 200));
     const bgRow30 = doc(win, '.prop-row:has-text("背景色 Background") input').first();
     await bgRow30.fill('rgb(0, 170, 0)');
@@ -1016,6 +1101,7 @@ async function main() {
     await doc(win, '.layer-row:has-text("div 容器")').nth(1).click({ position: { x: 30, y: 8 } }); // divD（divA 内）
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.tab-btn:has-text("属性")').click();
+    await ensurePropSection(win);
     await new Promise((r) => setTimeout(r, 200));
     const idRow30 = doc(win, '.prop-row:has-text("ID?") input');
     await idRow30.fill('c-sec');
@@ -1097,7 +1183,7 @@ async function main() {
     // ===== S33（新版）：画布左右拖手 + 面板宽/高拖手 =====
     // 当前状态：底部布局、元素页签、属性面板在右。
     // 画布拖手：底部布局下画布基本铺满编辑区，向右拖右缘手柄 → 画布变固定 px + 工具栏读数实时出现。
-    await doc(win, '.canvas-width-select').selectOption('auto');
+    await doc(win, '.tb-width-select').selectOption('auto');
     await new Promise((r) => setTimeout(r, 250));
     const before33 = await win.evaluate(() => ({
       canvasW: Math.round(document.querySelector('.canvas').getBoundingClientRect().width),
@@ -1115,11 +1201,11 @@ async function main() {
     const after33 = await win.evaluate(() => ({
       inlineW: document.querySelector('.canvas').style.width || '',
       readout: document.querySelector('.canvas-width-readout')?.textContent ?? '',
-      selectVal: document.querySelector('.canvas-width-select')?.value ?? ''
+      selectVal: document.querySelector('.tb-width-select')?.value ?? ''
     }));
     check('S33.1 画布右拖手 → 固定 px 宽 + 工具栏读数', after33.inlineW.endsWith('px') && after33.readout.endsWith('px') && parseInt(after33.inlineW) > before33.canvasW, JSON.stringify({ before33, after33 }));
     // S33.2 切回自适应 → 恢复铺满（无行内宽）
-    await doc(win, '.canvas-width-select').selectOption('auto');
+    await doc(win, '.tb-width-select').selectOption('auto');
     await new Promise((r) => setTimeout(r, 250));
     const back33 = await win.evaluate(() => ({
       w: Math.round(document.querySelector('.canvas').getBoundingClientRect().width),

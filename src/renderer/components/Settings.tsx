@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { useScene } from '@store/sceneStore';
 import { useToolbar, isVisibleOnBar } from '@store/toolbarStore';
 import { HelpButton } from './HelpButton';
+import { Icon, type IconName } from './Icon';
+import { Collapse } from './Collapse';
+import { TIPS_KEY } from './CanvasOverlays';
 import type { DataPathsInfo, StorageStatsInfo } from '../global';
 
 function formatBytes(bytes: number): string {
@@ -166,6 +169,16 @@ export function Settings(props: Props) {
     try { localStorage.setItem('bc-elem-label-mode', m); } catch {}
   };
 
+  // 画布左上角技巧提示开关（画布浮层通过 bc:canvas-tips-changed 事件实时响应）
+  const [canvasTips, setCanvasTips] = useState<boolean>(() => {
+    try { return localStorage.getItem(TIPS_KEY) !== '0'; } catch { return true; }
+  });
+  const toggleCanvasTips = (v: boolean) => {
+    setCanvasTips(v);
+    try { localStorage.setItem(TIPS_KEY, v ? '1' : '0'); } catch {}
+    window.dispatchEvent(new CustomEvent('bc:canvas-tips-changed'));
+  };
+
   // 深色模式状态
   const [darkMode, setDarkMode] = useState<'auto' | 'dark' | 'light'>(() => {
     try {
@@ -223,13 +236,13 @@ export function Settings(props: Props) {
 
   const qc = scene.quickCss ?? {};
 
-  const NAV_ITEMS: Array<{ id: SettingsSection; label: string; icon: string; desc: string }> = [
-    { id: 'personalization', label: '个性化与外观', icon: '🎨', desc: '深浅主题、白边重置、同类高亮' },
-    { id: 'editor', label: '编辑器与画布', icon: '🛠️', desc: '布局模式、画布默认宽度、继承机制' },
-    { id: 'storage', label: '存储与自动备份', icon: '💾', desc: '备份周期、快照数量、便携 data/ 目录' },
-    { id: 'toolbar', label: '工具栏管理', icon: '🔧', desc: '按钮显隐与排列管理' },
-    { id: 'extensions', label: '扩展与插件中心', icon: '🧩', desc: '管理、启停、导入插件与模板资源包' },
-    { id: 'about', label: '关于与系统', icon: 'ℹ️', desc: '版本号、开源协议与技术栈' }
+  const NAV_ITEMS: Array<{ id: SettingsSection; label: string; icon: string; desc: string; svg: IconName }> = [
+    { id: 'personalization', label: '个性化与外观', icon: '🎨', svg: 'palette', desc: '深浅主题、白边重置、同类高亮' },
+    { id: 'editor', label: '编辑器与画布', icon: '🛠️', svg: 'sliders', desc: '布局模式、画布默认宽度、继承机制' },
+    { id: 'storage', label: '存储与自动备份', icon: '💾', svg: 'database', desc: '备份周期、快照数量、便携 data/ 目录' },
+    { id: 'toolbar', label: '工具栏管理', icon: '🔧', svg: 'tool', desc: '按钮显隐与排列管理' },
+    { id: 'extensions', label: '扩展与插件中心', icon: '🧩', svg: 'puzzle', desc: '管理、启停、导入插件与模板资源包' },
+    { id: 'about', label: '关于与系统', icon: 'ℹ️', svg: 'info', desc: '版本号、开源协议与技术栈' }
   ];
 
   return (
@@ -280,7 +293,7 @@ export function Settings(props: Props) {
             <>
               <div className="fluent-group-title">主题与界面色彩</div>
               <div className="fluent-card">
-                <div className="fluent-card-icon">🌙</div>
+                <div className="fluent-card-icon"><Icon name="moon" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">深浅颜色模式 (Theme Mode)</div>
                   <div className="fluent-card-desc">自动跟随 Windows 操作系统明暗，或手动指定浅色/深色主题。</div>
@@ -299,7 +312,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">⬚</div>
+                <div className="fluent-card-icon"><Icon name="outline" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">画布同类元素彩色轮廓描边 (Outlines)</div>
                   <div className="fluent-card-desc">为相同类名与选择器的元素赋予专属配色描边，直观一眼看清区块归属。</div>
@@ -310,6 +323,24 @@ export function Settings(props: Props) {
                       type="checkbox"
                       checked={outlines}
                       onChange={(e) => toggleOutlines(e.target.checked)}
+                    />
+                    <span className="fluent-slider" />
+                  </label>
+                </div>
+              </div>
+
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="sparkle" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">画布左上角技巧提示 (Tips)</div>
+                  <div className="fluent-card-desc">在画布左上角每 30 秒轮播一条编辑器使用小技巧（共 40 条）。熟悉软件后可以关掉，让画布更干净。</div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <label className="fluent-switch">
+                    <input
+                      type="checkbox"
+                      checked={canvasTips}
+                      onChange={(e) => toggleCanvasTips(e.target.checked)}
                     />
                     <span className="fluent-slider" />
                   </label>
@@ -405,9 +436,27 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="sparkle" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">画布左上角技巧提示 (Tips)</div>
+                  <div className="fluent-card-desc">在画布左上角每 30 秒轮播一条编辑器使用小技巧（共 60+ 条）。熟悉软件后可以关掉，让画布更干净。</div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <label className="fluent-switch">
+                    <input
+                      type="checkbox"
+                      checked={canvasTips}
+                      onChange={(e) => toggleCanvasTips(e.target.checked)}
+                    />
+                    <span className="fluent-slider" />
+                  </label>
+                </div>
+              </div>
+
               <div className="fluent-group-title">插入与构建习惯</div>
               <div className="fluent-card">
-                <div className="fluent-card-icon">⚡</div>
+                <div className="fluent-card-icon"><Icon name="bolt" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">同级样式智能继承 (Auto Inherit)</div>
                   <div className="fluent-card-desc">在已有子元素的容器内插入新元素时，自动套用同级已有的选择器与样式。</div>
@@ -459,7 +508,7 @@ export function Settings(props: Props) {
 
               {/* 卡片 1：一键清理运行缓存 */}
               <div className="fluent-card">
-                <div className="fluent-card-icon">🧹</div>
+                <div className="fluent-card-icon"><Icon name="broom" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">运行临时缓存 (Chromium Cache)</div>
                   <div className="fluent-card-desc">
@@ -482,7 +531,7 @@ export function Settings(props: Props) {
 
               {/* 卡片 2：启动时自动清理缓存 */}
               <div className="fluent-card">
-                <div className="fluent-card-icon">⚡</div>
+                <div className="fluent-card-icon"><Icon name="bolt" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">启动时自动清理临时缓存 (Auto Clean Cache)</div>
                   <div className="fluent-card-desc">开启后每次启动程序会自动清空渲染与编译缓存，保持轻盈无冗余。</div>
@@ -586,7 +635,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">⏱️</div>
+                <div className="fluent-card-icon"><Icon name="clock" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">自动备份时间间隔 (Auto Backup Interval)</div>
                   <div className="fluent-card-desc">系统在后台自动为你创建备份快照的频率周期。</div>
@@ -804,15 +853,15 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
       <div className="fluent-group-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>扩展管理动作</span>
         <div style={{ display: 'flex', gap: 6 }}>
-          <button className="btn-secondary btn-mini" onClick={props.onOpenDir}>📂 打开扩展文件夹</button>
-          <button className="btn-secondary btn-mini" onClick={rescan}>🔄 重新扫描</button>
+          <button className="btn-secondary btn-mini" onClick={props.onOpenDir}><Icon name="external" size={14} /> 打开扩展文件夹</button>
+          <button className="btn-secondary btn-mini" onClick={rescan}><Icon name="refresh" size={14} /> 重新扫描</button>
         </div>
       </div>
 
       <div className="fluent-card fluent-ext-toolbar-card">
         <div className="fluent-ext-btn-grid">
           <button className="fluent-ext-action-btn" onClick={() => run('导入模板包', () => window.bc.importExtensionFolder('resources'))}>
-            <span className="action-icon">📥</span>
+            <span className="action-icon"><Icon name="importFolder" /></span>
             <div className="action-texts">
               <span className="action-title">导入模板包文件夹</span>
               <span className="action-sub">包含 manifest.json 的目录</span>
@@ -820,7 +869,7 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
           </button>
 
           <button className="fluent-ext-action-btn" onClick={() => run('导入模板包 ZIP', () => window.bc.importExtensionZip('resources'))}>
-            <span className="action-icon">📦</span>
+            <span className="action-icon"><Icon name="importZip" /></span>
             <div className="action-texts">
               <span className="action-title">导入模板包 ZIP</span>
               <span className="action-sub">解包导入模板资源</span>
@@ -828,7 +877,7 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
           </button>
 
           <button className="fluent-ext-action-btn" onClick={() => run('导入插件', () => window.bc.importExtensionFolder('plugins'))}>
-            <span className="action-icon">🔌</span>
+            <span className="action-icon"><Icon name="plug" /></span>
             <div className="action-texts">
               <span className="action-title">导入插件文件夹</span>
               <span className="action-sub">包含入口代码的插件目录</span>
@@ -836,7 +885,7 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
           </button>
 
           <button className="fluent-ext-action-btn" onClick={() => run('导入插件 ZIP', () => window.bc.importExtensionZip('plugins'))}>
-            <span className="action-icon">📦</span>
+            <span className="action-icon"><Icon name="importZip" /></span>
             <div className="action-texts">
               <span className="action-title">导入插件 ZIP</span>
               <span className="action-sub">自动安装并加载插件</span>
@@ -844,7 +893,7 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
           </button>
 
           <button className="fluent-ext-action-btn" onClick={() => setCreating(!creating)}>
-            <span className="action-icon">➕</span>
+            <span className="action-icon"><Icon name="plus" /></span>
             <div className="action-texts">
               <span className="action-title">{creating ? '取消骨架生成' : '新建模板包结构'}</span>
               <span className="action-sub">在 data/extensions 快速生成骨架</span>
@@ -908,14 +957,16 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
           </div>
 
           {expanded[r.id] && (
-            <div className="fluent-ext-sublist">
-              {r.templates.map((t) => (
-                <div key={t.id} className="fluent-ext-subitem">
-                  <span className="fluent-ext-subname">📄 {t.name}</span>
-                  <span className="fluent-ext-subdesc">{t.description || ''}</span>
-                </div>
-              ))}
-            </div>
+            <Collapse open={!!expanded[r.id]}>
+              <div className="fluent-ext-sublist">
+                {r.templates.map((t) => (
+                  <div key={t.id} className="fluent-ext-subitem">
+                    <span className="fluent-ext-subname">📄 {t.name}</span>
+                    <span className="fluent-ext-subdesc">{t.description || ''}</span>
+                  </div>
+                ))}
+              </div>
+            </Collapse>
           )}
         </div>
       ))}
@@ -925,7 +976,7 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
       {scan?.plugins.map((p) => (
         <div key={p.id} className={"fluent-ext-card" + (!p.enabled ? " is-disabled" : "")}>
           <div className="fluent-ext-main">
-            <span className="fluent-ext-icon">🔌</span>
+            <span className="fluent-ext-icon"><Icon name="plug" /></span>
             <div className="fluent-ext-text">
               <div className="fluent-ext-name-row">
                 <span className="fluent-ext-name">{p.name}</span>

@@ -22,6 +22,15 @@ export function ProjectsCenter(props: {
 
   // 查看某个项目专属的快照抽屉
   const [selectedProjectForBackups, setSelectedProjectForBackups] = useState<ProjectFileInfo | null>(null);
+  // 快照抽屉：关闭时先播出场动画再卸载（过去是瞬间消失，很突兀）
+  const [drawerClosing, setDrawerClosing] = useState(false);
+  const closeDrawer = () => {
+    setDrawerClosing(true);
+    window.setTimeout(() => {
+      setDrawerClosing(false);
+      setSelectedProjectForBackups(null);
+    }, 240);
+  };
   const [projectBackups, setProjectBackups] = useState<ProjectFileInfo[]>([]);
   const [backupsLoading, setBackupsLoading] = useState(false);
 
@@ -253,13 +262,13 @@ export function ProjectsCenter(props: {
 
       {/* 某个项目专属的历史快照抽屉面板 */}
       {selectedProjectForBackups && (
-        <div className="pc-drawer-mask" onClick={() => setSelectedProjectForBackups(null)}>
+        <div className={'pc-drawer-mask' + (drawerClosing ? ' is-closing' : '')} onClick={closeDrawer}>
           <div className="pc-drawer" onClick={(e) => e.stopPropagation()}>
             <div className="pc-drawer-header">
               <div className="pc-drawer-title">
                 <span>⏱️「{selectedProjectForBackups.name}」的专属快照</span>
               </div>
-              <button className="cp-close" onClick={() => setSelectedProjectForBackups(null)}>×</button>
+              <button className="cp-close" onClick={closeDrawer}>×</button>
             </div>
 
             <div className="pc-drawer-hint">
