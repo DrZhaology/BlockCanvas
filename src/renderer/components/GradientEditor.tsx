@@ -58,71 +58,44 @@ export function GradientEditor(props: Props) {
 
   // —— 角度方向盘拖拽 ——
   const dialRef = useRef<HTMLDivElement>(null);
-  const needleRef = useRef<HTMLDivElement>(null);
-  const knobRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
-  const centerRef = useRef<{ cx: number; cy: number }>({ cx: 0, cy: 0 });
+  // 拖动期间用 rAF 节流：指针事件远多于屏幕刷新率，逐帧提交可避免重绘闪烁与卡顿
   const rafRef = useRef(0);
   const pendingAngle = useRef<number | null>(null);
   const specRef = useRef(spec);
   specRef.current = spec;
 
-  const updateDialVisual = (deg: number) => {
-    if (needleRef.current) {
-      needleRef.current.style.transform = `rotate(${deg}deg)`;
-    }
-    if (knobRef.current) {
-      const r = ((deg - 90) * Math.PI) / 180;
-      const x = 44 + Math.cos(r) * 30;
-      const y = 44 + Math.sin(r) * 30;
-      knobRef.current.style.left = `${x}px`;
-      knobRef.current.style.top = `${y}px`;
-    }
-  };
-
   const angleFromEvent = (clientX: number, clientY: number): number => {
-    const { cx, cy } = centerRef.current;
-    if (!cx && !cy) return spec.angle;
+    const el = dialRef.current;
+    if (!el) return spec.angle;
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
     // CSS 渐变角度：0deg 指向上，顺时针增大
     const rad = Math.atan2(clientX - cx, cy - clientY);
     let deg = (rad * 180) / Math.PI;
     deg = ((deg % 360) + 360) % 360;
     return Math.round(deg);
   };
-
   const flushAngle = () => {
     rafRef.current = 0;
     if (pendingAngle.current === null) return;
     const deg = pendingAngle.current;
     pendingAngle.current = null;
-    const next = { ...specRef.current, angle: deg };
-    specRef.current = next;
-    push(next);
+    push({ ...specRef.current, angle: deg });
   };
-
   const onDialDown = (e: React.PointerEvent) => {
     e.preventDefault();
     draggingRef.current = true;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    const el = dialRef.current;
-    if (el) {
-      const r = el.getBoundingClientRect();
-      centerRef.current = { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
-    }
-    const deg = angleFromEvent(e.clientX, e.clientY);
-    updateDialVisual(deg);
-    pendingAngle.current = deg;
+    pendingAngle.current = angleFromEvent(e.clientX, e.clientY);
     if (!rafRef.current) rafRef.current = window.requestAnimationFrame(flushAngle);
   };
-
   const onDialMove = (e: React.PointerEvent) => {
     if (!draggingRef.current) return;
-    const deg = angleFromEvent(e.clientX, e.clientY);
-    updateDialVisual(deg);
-    pendingAngle.current = deg;
+    pendingAngle.current = angleFromEvent(e.clientX, e.clientY);
     if (!rafRef.current) rafRef.current = window.requestAnimationFrame(flushAngle);
   };
-
   const onDialUp = (e: React.PointerEvent) => {
     if (!draggingRef.current) return;
     draggingRef.current = false;
@@ -226,8 +199,8 @@ export function GradientEditor(props: Props) {
             title="按住拖动调整渐变方向"
           >
             <div className="grad-dial-ring" />
-            <div ref={needleRef} className="grad-dial-needle" style={{ transform: `rotate(${spec.angle}deg)` }} />
-            <div ref={knobRef} className="grad-dial-knob" style={{ left: hx, top: hy }} />
+            <div className="grad-dial-needle" style={{ transform: `rotate(${spec.angle}deg)` }} />
+            <div className="grad-dial-knob" style={{ left: hx, top: hy }} />
             <span className="grad-dial-center" />
           </div>
           <div className="grad-angle-presets">

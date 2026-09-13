@@ -130,7 +130,6 @@ function Trbl4Cell(props: {
     <div className="trbl4-cell">
       <span className="trbl4-label">{label}</span>
       <div className="trbl4-input-wrap">
-        <span className={'trbl4-spacer' + (hasUnit ? '' : ' is-hidden')}>{unit}</span>
         <input
           type="text"
           className="trbl4-input"

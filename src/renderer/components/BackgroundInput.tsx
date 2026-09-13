@@ -67,11 +67,11 @@ export function BackgroundInput(props: { elementId: string; fallback?: string })
           value={bgImage}
           scope="background"
           onChange={(css) => {
+            beginStyleEdit();
             draftRef.current = css;
             updateStyleTransient(elementId, { backgroundImage: css } as any);
           }}
           onCommit={() => {
-            beginStyleEdit();
             updateStyle(elementId, { backgroundImage: draftRef.current } as any);
             endStyleEdit();
           }}

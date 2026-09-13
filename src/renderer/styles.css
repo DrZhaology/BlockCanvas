@@ -3599,54 +3599,22 @@ body.bc-resizing-col, body.bc-resizing-col * { cursor: col-resize; user-select: 
 .cp-backdrop {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(1px);
-  z-index: 999;
+  background: rgba(0,0,0,0.3);
+  z-index: 200;
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: popFadeIn 0.15s ease;
 }
 .cp-modal {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   width: 320px;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.3);
   overflow: hidden;
-  animation: popFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.cp-hex-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.cp-native-color {
-  width: 36px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  cursor: pointer;
-  background: transparent;
-}
-.cp-hex-input {
-  flex: 1;
-  height: 28px;
-  padding: 0 8px;
-  font-family: 'Consolas', monospace;
-  font-size: 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--panel-soft);
-  color: var(--text);
-}
-.cp-hex-input:focus {
-  border-color: var(--accent);
-  outline: none;
 }
 .cp-modal-header {
   display: flex;
@@ -5743,53 +5711,34 @@ html[data-bc-dark] .fluent-storage-orphan-alert {
   position: relative;
   display: flex;
   align-items: center;
+}
+.trbl4-input {
+  width: 100%;
   height: 26px;
+  padding: 0 18px 0 6px;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: center;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--panel-soft);
-  padding: 0 4px;
+  color: var(--text);
   box-sizing: border-box;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.trbl4-input-wrap:focus-within {
+.trbl4-input:focus {
+  outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
   background: var(--bg-panel);
 }
-.trbl4-spacer {
-  visibility: hidden;
-  font-size: 9.5px;
-  user-select: none;
-  pointer-events: none;
-  min-width: 14px;
-  text-align: left;
-}
-.trbl4-input {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  border: none;
-  background: transparent;
-  outline: none;
-  box-shadow: none;
-  padding: 0;
-  font-size: 11.5px;
-  font-family: 'Consolas', monospace, sans-serif;
-  text-align: center;
-  color: var(--text);
-}
-.trbl4-input:focus {
-  outline: none;
-}
 .trbl4-unit {
-  font-size: 9.5px;
+  position: absolute;
+  right: 5px;
+  font-size: 10px;
   color: var(--text-muted);
-  user-select: none;
   pointer-events: none;
-  min-width: 14px;
-  text-align: right;
 }
-.trbl4-spacer.is-hidden,
 .trbl4-unit.is-hidden { display: none; }
 
 /* ---------- 背景输入（纯色 / 渐变 切换） ---------- */
@@ -6633,304 +6582,3 @@ html[data-bc-dark] .device-bar {
   min-width: 0;
 }
 .inspector-sec-body { width: 100%; }
-
-/* ==========================================================================
-   v0.4.2 优化批次：数值对齐 / 属性分类配色 / 面板呼吸感 / 动效性能
-   ========================================================================== */
-
-/* ---------- 1. 四值输入：左右微间距 ---------- */
-.trbl4-grid { gap: 6px; }
-
-/* ---------- 2. 属性行分类配色：每个分类拥有专属全包围微彩色边框 + 强左边线 + 背景微调，彻底分清各属性 ---------- */
-.prop-row {
-  border-width: 1px;
-  border-style: solid;
-  border-color: var(--border);
-  border-left-width: 3.5px;
-  border-radius: 6px;
-  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
-}
-.prop-row:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-}
-
-.prop-row[data-cat="盒模型"] {
-  border-color: #bfdbfe;
-  border-left-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.025);
-}
-.prop-row[data-cat="颜色"] {
-  border-color: #fbcfe8;
-  border-left-color: #ec4899;
-  background: rgba(236, 72, 153, 0.025);
-}
-.prop-row[data-cat="字体与排版"] {
-  border-color: #ddd6fe;
-  border-left-color: #8b5cf6;
-  background: rgba(139, 92, 246, 0.025);
-}
-.prop-row[data-cat="边框与阴影"] {
-  border-color: #fde68a;
-  border-left-color: #f59e0b;
-  background: rgba(245, 158, 11, 0.025);
-}
-.prop-row[data-cat="列表"] {
-  border-color: #99f6e4;
-  border-left-color: #14b8a6;
-  background: rgba(20, 184, 166, 0.025);
-}
-.prop-row[data-cat="多媒体"] {
-  border-color: #a5f3fc;
-  border-left-color: #06b6d4;
-  background: rgba(6, 182, 212, 0.025);
-}
-.prop-row[data-cat="定位"] {
-  border-color: #fecaca;
-  border-left-color: #ef4444;
-  background: rgba(239, 68, 68, 0.025);
-}
-.prop-row[data-cat="Flex & Grid 布局"] {
-  border-color: #bbf7d0;
-  border-left-color: #22c55e;
-  background: rgba(34, 197, 94, 0.025);
-}
-.prop-row[data-cat="标识"] {
-  border-color: #c7d2fe;
-  border-left-color: #6366f1;
-  background: rgba(99, 102, 241, 0.025);
-}
-.prop-row[data-cat="属性"] {
-  border-color: #cbd5e1;
-  border-left-color: #64748b;
-  background: rgba(100, 116, 139, 0.025);
-}
-.prop-row[data-cat="文案"] {
-  border-color: #a7f3d0;
-  border-left-color: #10b981;
-  background: rgba(16, 185, 129, 0.025);
-}
-.prop-row[data-cat="其他"] {
-  border-color: #e2e8f0;
-  border-left-color: #94a3b8;
-  background: rgba(148, 163, 184, 0.025);
-}
-
-/* 深色模式适配 */
-html[data-bc-dark] .prop-row[data-cat="盒模型"] { border-color: #1e3a8a; border-left-color: #60a5fa; background: rgba(96, 165, 250, 0.04); }
-html[data-bc-dark] .prop-row[data-cat="颜色"] { border-color: #831843; border-left-color: #f472b6; background: rgba(244, 114, 182, 0.04); }
-html[data-bc-dark] .prop-row[data-cat="字体与排版"] { border-color: #4c1d95; border-left-color: #a78bfa; background: rgba(167, 139, 250, 0.04); }
-html[data-bc-dark] .prop-row[data-cat="边框与阴影"] { border-color: #78350f; border-left-color: #fbbf24; background: rgba(251, 191, 36, 0.04); }
-html[data-bc-dark] .prop-row[data-cat="列表"] { border-color: #134e4a; border-left-color: #2dd4bf; background: rgba(45, 212, 191, 0.04); }
-html[data-bc-dark] .prop-row[data-cat="多媒体"] { border-color: #164e63; border-left-color: #22d3ee; background: rgba(34, 211, 238, 0.04); }
-html[data-bc-dark] .prop-row[data-cat="定位"] { border-color: #7f1d1d; border-left-color: #f87171; background: rgba(248, 113, 113, 0.04); }
-html[data-bc-dark] .prop-row[data-cat="Flex & Grid 布局"] { border-color: #14532d; border-left-color: #4ade80; background: rgba(74, 222, 128, 0.04); }
-html[data-bc-dark] .prop-row[data-cat="标识"] { border-color: #312e81; border-left-color: #818cf8; background: rgba(129, 140, 248, 0.04); }
-html[data-bc-dark] .prop-row[data-cat="属性"] { border-color: #334155; border-left-color: #94a3b8; background: rgba(148, 163, 184, 0.04); }
-html[data-bc-dark] .prop-row[data-cat="文案"] { border-color: #064e3b; border-left-color: #34d399; background: rgba(52, 211, 153, 0.04); }
-html[data-bc-dark] .prop-row[data-cat="其他"] { border-color: #334155; border-left-color: #94a3b8; background: rgba(148, 163, 184, 0.04); }
-.prop-row.highlight { border-color: var(--accent); border-left-color: var(--accent); }
-
-/* 属性行「预设胶囊」：点一下即可套用常用数值 */
-.prop-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
-}
-.prop-preset-chip {
-  height: 22px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  background: var(--bg-panel);
-  color: var(--text-muted);
-  font-family: inherit;
-  font-size: 11px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.prop-preset-chip:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--hover-accent);
-  transform: translateY(-1px);
-}
-.prop-preset-chip.active {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-}
-
-/* ---------- 3. 动效微调滑块与各类可视化滑块：宽松两行布局（标签+数值 / 通栏宽滑杆），彻底消除挤压与重叠 ---------- */
-.vis-control-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas:
-    "label num"
-    "slider slider";
-  gap: 4px 6px;
-  align-items: center;
-  margin-bottom: 6px;
-}
-.vis-control-row .vis-label {
-  grid-area: label;
-  font-size: 11px;
-  color: var(--text-muted);
-  width: auto;
-  white-space: nowrap;
-}
-.vis-control-row .vis-num {
-  grid-area: num;
-  font-size: 11px;
-  font-family: 'Consolas', monospace;
-  color: var(--accent);
-  width: auto;
-  text-align: right;
-  font-weight: 600;
-}
-.vis-control-row input[type="range"] {
-  grid-area: slider;
-  width: 100%;
-  height: 18px;
-  margin: 0;
-  cursor: pointer;
-  accent-color: var(--accent);
-}
-.vis-control-row-full {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--border);
-  margin-top: 4px;
-}
-
-.fx-slider-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas:
-    "label val"
-    "range range";
-  gap: 3px 8px;
-  align-items: center;
-}
-.fx-slider-label { grid-area: label; }
-.fx-slider-val { grid-area: val; }
-.fx-slider-row input[type="range"] { grid-area: range; width: 100%; height: 18px; }
-
-/* 渐变编辑器：色标行在窄面板下自动换行，避免滑块被压成一点点 */
-.grad-stop {
-  flex-wrap: wrap;
-}
-.grad-stop .color-text-input { flex: 0 0 84px; width: 84px; }
-.grad-stop-range { flex: 1 1 90px; min-width: 90px; }
-.grad-angle-presets { grid-template-columns: repeat(4, minmax(46px, 1fr)); }
-
-/* ---------- 4. 画布浮层：去掉 backdrop-filter（滚动时最费性能的元凶），改用不透明底色 ---------- */
-.canvas-tips {
-  background: var(--bg-panel);
-  backdrop-filter: none;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-}
-html[data-bc-dark] .canvas-tips { background: var(--bg-panel); }
-.device-bar {
-  background: var(--bg-panel);
-  backdrop-filter: none;
-}
-html[data-bc-dark] .device-bar { background: var(--bg-panel); }
-
-/* ---------- 5. Collapse 收尾后解除 transform：避免成为 fixed 子元素的包含块（调色盘遮罩错位） ---------- */
-.collapse.is-settled {
-  transform: none;
-}
-
-/* ---------- 6. 角度方向盘：拖动时走 GPU 合成，避免重绘闪烁 ---------- */
-.grad-dial { will-change: transform; contain: paint; }
-.grad-dial-needle,
-.grad-dial-knob { will-change: transform, left, top; }
-.grad-preview { contain: paint; }
-
-/* ---------- 7. 视图切换动画（编辑器 ↔ 全部项目 ↔ 设置） ---------- */
-.view-switch {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  animation: viewFadeIn 0.26s cubic-bezier(0.16, 1, 0.3, 1);
-}
-@keyframes viewFadeIn {
-  from { opacity: 0; transform: translateY(8px) scale(0.995); }
-  to { opacity: 1; transform: none; }
-}
-.view-switch.is-leaving {
-  animation: viewFadeOut 0.18s cubic-bezier(0.4, 0, 1, 1) forwards;
-  pointer-events: none;
-}
-@keyframes viewFadeOut {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: translateY(-6px) scale(0.995); }
-}
-
-/* 右侧面板页签切换：内容淡入，不再是硬切 */
-.tab-body > * {
-  animation: tabBodyIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-}
-@keyframes tabBodyIn {
-  from { opacity: 0; transform: translateX(6px); }
-  to { opacity: 1; transform: none; }
-}
-
-/* ---------- 8. 类名 / ID 问题提醒：脉冲放大 + 光晕，强烈但不过分 ---------- */
-.issue-btn.has-issue {
-  animation: issuePulse 1.5s ease-in-out infinite;
-}
-@keyframes issuePulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55);
-    border-color: #ef4444;
-    transform: scale(1);
-  }
-  50% {
-    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.16);
-    border-color: #dc2626;
-    transform: scale(1.08);
-  }
-}
-.issue-badge {
-  animation: issueBadgePop 1.5s ease-in-out infinite;
-}
-@keyframes issueBadgePop {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.18); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .issue-btn.has-issue, .issue-badge { animation: none; }
-}
-
-/* ---------- 9. 伪类区：没有选择器时的醒目提示 ---------- */
-.pseudo-need-selector {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  padding: 8px 10px;
-  margin-bottom: 8px;
-  border: 1px solid #fca5a5;
-  border-left: 3px solid #ef4444;
-  border-radius: 6px;
-  background: #fef2f2;
-  color: #991b1b;
-  font-size: 11.5px;
-  line-height: 1.55;
-}
-html[data-bc-dark] .pseudo-need-selector {
-  background: #3b1414;
-  border-color: #7f1d1d;
-  border-left-color: #ef4444;
-  color: #fca5a5;
-}
-.pseudo-need-selector b { color: inherit; }
-.pseudo-need-selector .pn-btn {
-  margin-top: 6px;
-}

@@ -689,22 +689,17 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
 
       {/* 0. 文案内容（针对文本元素）——置顶最上方第一位，直接输入 */}
       {TEXT_TAGS.has(elementType) && (
-        <div className="prop-row" data-cat="文案" style={{ marginBottom: 10 }}>
-          <div className="prop-row-header">
-            <span>
-              文案内容
-              <HelpButton title="文案内容" content="直接在此输入文本内容，画布上也会实时同步更新；双击画布文字也可原地编辑。" />
-            </span>
-          </div>
-          <div className="prop-row-body" style={{ marginTop: 4 }}>
-            <textarea
-              className="inspector-text-textarea"
-              value={selected.text ?? ''}
-              placeholder="在此直接输入文本内容（画布也将同步更新）…"
-              rows={2}
-              onChange={(e) => setText(elementId, e.target.value)}
-            />
-          </div>
+        <div className="field" style={{ marginBottom: 10 }}>
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
+            文案内容
+          </label>
+          <textarea
+            className="inspector-text-textarea"
+            value={selected.text ?? ''}
+            placeholder="在此直接输入文本内容（画布也将同步更新）…"
+            rows={2}
+            onChange={(e) => setText(elementId, e.target.value)}
+          />
         </div>
       )}
 
@@ -925,7 +920,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
                           removePseudoStyle(activePseudo, key);
                         };
                         return (
-                          <div key={key} className="prop-row" data-cat={item.category}>
+                          <div key={key} className="prop-row">
                             <div className="prop-row-header">
                               <span>{item.label}</span>
                               <button className="prop-remove" onClick={onRm} title="删除此属性">×</button>
@@ -1099,7 +1094,7 @@ function MultiClassNameRow(props: { ids: string[] }) {
   };
 
   return (
-    <div className="prop-row" data-cat="标识" style={{ marginTop: 8 }}>
+    <div className="prop-row" style={{ marginTop: 8 }}>
       <div className="prop-row-header">
         <span>
           批量类名
@@ -1159,7 +1154,7 @@ function MultiRelSelectorRow(props: { ids: string[] }) {
   };
 
   return (
-    <div className="prop-row" data-cat="标识" style={{ marginTop: 4 }}>
+    <div className="prop-row" style={{ marginTop: 4 }}>
       <div className="prop-row-header">
         <span>
           批量关系选择器
@@ -1282,7 +1277,7 @@ function ClassChipsRow(props: { elementId: string; element: SceneElement }) {
   };
 
   return (
-    <div className="prop-row" data-cat="标识">
+    <div className="prop-row">
       <div className="prop-row-header">
         <span>
           类名 Class
@@ -1338,7 +1333,7 @@ function RelationalSelectorRow(props: { elementId: string; element: SceneElement
   };
 
   return (
-    <div className="prop-row" data-cat="标识" style={{ marginTop: 2 }}>
+    <div className="prop-row" style={{ marginTop: 2 }}>
       <div className="prop-row-header">
         <span>
           关系选择器
@@ -1729,7 +1724,7 @@ function AttrRow(props: {
   };
 
   return (
-    <div className="prop-row" data-cat="属性">
+    <div className="prop-row">
       <div className="prop-row-header">
         <span>{label}{helpBtn}</span>
       </div>
@@ -1790,7 +1785,7 @@ function ImgPickerRow(props: { elementId: string }) {
   const isAbsOrFileProto = /^[a-zA-Z]:[\\/]/.test(currentSrc) || currentSrc.startsWith('\\\\') || currentSrc.startsWith('file://');
 
   return (
-    <div className="prop-row" data-cat="多媒体">
+    <div className="prop-row">
       <div className="prop-row-header">
         <span>
           图片路径 (src)

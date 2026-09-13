@@ -430,11 +430,11 @@ export function QuickHelper(props: Props) {
                     value={textGradCss}
                     scope="text"
                     onChange={(css) => {
+                      beginStyleEdit();
                       gradDraftRef.current = css;
                       applyTextGradient(css, true);
                     }}
                     onCommit={() => {
-                      beginStyleEdit();
                       applyTextGradient(gradDraftRef.current || textGradCss);
                       endStyleEdit();
                     }}

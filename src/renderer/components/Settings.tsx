@@ -436,24 +436,6 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
-              <div className="fluent-card">
-                <div className="fluent-card-icon"><Icon name="sparkle" /></div>
-                <div className="fluent-card-info">
-                  <div className="fluent-card-title">画布左上角技巧提示 (Tips)</div>
-                  <div className="fluent-card-desc">在画布左上角每 30 秒轮播一条编辑器使用小技巧（共 60+ 条）。熟悉软件后可以关掉，让画布更干净。</div>
-                </div>
-                <div className="fluent-card-ctrl">
-                  <label className="fluent-switch">
-                    <input
-                      type="checkbox"
-                      checked={canvasTips}
-                      onChange={(e) => toggleCanvasTips(e.target.checked)}
-                    />
-                    <span className="fluent-slider" />
-                  </label>
-                </div>
-              </div>
-
               <div className="fluent-group-title">插入与构建习惯</div>
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="bolt" /></div>
