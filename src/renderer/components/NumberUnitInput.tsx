@@ -1,17 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
 import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { CSS_UNITS, UNIT_LABELS } from '@lib/propertySchema';
-import { StepDrag } from '@comp/StepDrag';
-import { dragSteps } from '@lib/drag';
+import { useWheelAdjust } from '@lib/wheelAdjust';
 
 // BlockCanvas · 数值输入（数字框 + 单位下拉）
-// - 数字框只输入数字（可负、可小数、可空 = 清除）
-// - 单位用右侧下拉选择，改动即提交；? 帮助里有每个单位的详细讲解
-// - auto（允许时）：数字框禁用，直接显示 "auto"
-// - 自定义：输入复杂值如 calc(100% - 20px)，透传原文
-// - 编辑中（focus 内）不做 store→输入框的反向同步，
-//   避免"px 删不掉"循环：旧实现每次击键都 applyUnit 写回 store，
-//   再被 useEffect 同步回输入框，导致单位和 px 始终删不掉
+//
+// 交互（v0.4.0 定稿）：**去掉 ↑↓ 小按钮**，改为滚轮调值：
+//  · 点一下输入框 → 正常聚焦、正常打字；
+//  · 聚焦状态下滚动滚轮 → 上滚增大 / 下滚减小；按住 Shift 步进 ×10；
+//  · 停止滚动约 0.26s 自动提交（一次聚焦 = 一条撤销记录）。
+//  · auto / custom（复杂值）时自动禁用滚轮调值，避免误改。
+//
+// 其余约定：
+//  - 数字框只输入数字（可负、可小数、可空 = 清除）；单位用右侧下拉选择
+//  - 编辑中（focus 内）不做 store→输入框的反向同步，避免"px 删不掉"循环
 
 interface Props {
   elementId: string;
@@ -95,41 +97,34 @@ export function NumberUnitInput(props: Props) {
   };
 
   const isAuto = u === 'auto';
+  const dragDisabled = isAuto || u === 'custom';
 
-  // ↑↓ 拖拽微调（灵敏度同画布缩放）。在数字与单位之间加一个 ↑↓ 按钮：
-  // 按住左右拖动调数值；纯单击 +1。auto/custom（复杂值）时禁用。
-  const stepBase = useRef(0);
-  const dragValRef = useRef<string | null>(null);
-  const stepStart = () => {
-    beginStyleEdit();
-    stepBase.current = parseFloat(num) || 0;
-  };
-  const stepDrag = (dx: number) => {
-    const n = stepBase.current + dragSteps(dx);
-    const s = String(Math.round(n));
-    dragValRef.current = s;
-    setNum(s);
-    updateStyleTransient(elementId, { [schemaKey]: compose(s, u) } as any);
-  };
-  const stepCommit = () => {
-    const finalNum = dragValRef.current ?? num;
-    dragValRef.current = null;
-    commit(compose(finalNum, u));
-    endStyleEdit();
-  };
-  const stepClick = () => {
-    const cur = parseFloat(num);
-    if (Number.isNaN(cur)) return;
-    beginStyleEdit();
-    const s = String(Math.round(cur + 1));
-    setNum(s);
-    commit(compose(s, u));
-    endStyleEdit();
-  };
+  // —— 滚轮调数值（替代原 ↑↓ 按钮，也替代早先的长按拖动）——
+  const numRef = useRef(num);
+  numRef.current = num;
+  const wheel = useWheelAdjust({
+    disabled: dragDisabled,
+    getBase: () => parseFloat(numRef.current) || 0,
+    // 值里本来就有小数（如 1.5 / 0.75）时按两位小数步进，否则走整数
+    precision: /\./.test(numRef.current) ? 2 : 0,
+    onStart: () => { editingRef.current = true; beginStyleEdit(); },
+    onPreview: (v) => {
+      const s = String(v);
+      setNum(s);
+      if (isPseudo) updatePseudoStyle(elementId, pseudo!, { [schemaKey]: compose(s, u) });
+      else updateStyleTransient(elementId, { [schemaKey]: compose(s, u) } as any);
+    },
+    onCommit: (v) => {
+      const s = String(v);
+      setNum(s);
+      commit(compose(s, u));
+    }
+  });
 
   return (
     <div className="num-unit-row">
       <input
+        ref={wheel.ref}
         type="text"
         className="num-unit-num"
         value={num}
@@ -137,7 +132,9 @@ export function NumberUnitInput(props: Props) {
         // 单位选 auto 时数值无意义（值就是 auto），禁用数字框避免用户输入被忽略而困惑；
         // 想改回来直接切右侧单位下拉即可。
         disabled={isAuto}
-        title={isAuto ? '当前单位为 auto（自动计算），数值由浏览器决定；想指定具体数值请切换右侧单位' : undefined}
+        title={dragDisabled
+          ? (isAuto ? '当前单位为 auto（自动计算）；想指定具体数值请切换右侧单位' : '当前为自定义值，请直接在框内输入')
+          : '点一下进入输入状态：滚动滚轮调数值（上滚增大 / 下滚减小），按住 Shift 一次调 10'}
         onFocus={() => {
           editingRef.current = true;
           beginStyleEdit();
@@ -151,19 +148,11 @@ export function NumberUnitInput(props: Props) {
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
         }}
         onBlur={() => {
+          wheel.finish(); // 把可能还没提交的滚轮调节收尾
           editingRef.current = false;
-          commit(compose(num, u));
+          commit(compose(numRef.current, u));
           endStyleEdit();
         }}
-      />
-      <StepDrag
-        className="num-unit-step"
-        title="按住后左右拖动微调（灵敏度同画布缩放）；单击 +1"
-        disabled={isAuto || u === 'custom'}
-        onDragStart={stepStart}
-        onAdjust={stepDrag}
-        onDragEnd={stepCommit}
-        onStep={stepClick}
       />
       <select
         className="unit-select"

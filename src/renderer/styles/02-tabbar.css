@@ -1,0 +1,187 @@
+/* ==========================================================================
+   BlockCanvas · 02-tabbar.css —— 项目多标签栏（Windows 11 记事本风格）
+   （由单文件 styles.css 拆分而来；分片顺序 = 级联顺序，勿调整 import 顺序。
+     新增样式：优先写进语义对应的分片末尾；跨轮追加统一进 14-v04x-append.css。）
+   ========================================================================== */
+/* =========================================================
+   Windows 11 记事本风格项目标签栏 (ProjectTabBar)
+   ========================================================= */
+.project-tab-bar {
+  height: 38px;
+  background: var(--panel-tint);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  gap: 8px;
+  flex-shrink: 0;
+  user-select: none;
+}
+.tab-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.tab-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 6px 0 8px;
+  border-radius: 6px 6px 0 0;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 220px;
+  min-width: 120px;
+  position: relative;
+  transition: all 0.12s ease;
+  margin-bottom: -1px;
+}
+.tab-item:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.tab-item.active {
+  background: var(--bg-panel);
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 600;
+  border-bottom: 1px solid var(--bg-panel);
+  box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.02);
+}
+.tab-rename-btn-front {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.55;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+.tab-rename-btn-front:hover {
+  opacity: 1;
+  background: var(--chip-hover);
+  transform: scale(1.1);
+}
+.tab-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tab-rename-input {
+  flex: 1;
+  min-width: 60px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font-size: 11.5px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+}
+
+/* VS Code 标准指示槽：已保存常驻显示叉；未保存显示圆点(hover变叉) */
+.tab-indicator-slot {
+  width: 18px;
+  height: 18px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+/* 已保存：常驻直接显示关闭叉 */
+.tab-close-btn {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+  position: absolute;
+  transition: all 0.12s ease;
+}
+.tab-item:hover .tab-close-btn {
+  opacity: 0.9;
+}
+.tab-close-btn:hover {
+  background: #fee2e2;
+  color: #ef4444;
+  opacity: 1;
+}
+html[data-bc-dark] .tab-close-btn:hover {
+  background: #7f1d1d;
+  color: #fca5a5;
+}
+/* 未保存 (is-dirty)：默认展示实心小圆点，隐藏关闭叉 */
+.tab-dirty-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: none;
+  position: absolute;
+}
+.tab-item.is-dirty .tab-dirty-dot {
+  display: block;
+}
+.tab-item.is-dirty .tab-close-btn {
+  display: none;
+}
+/* 未保存时 hover 该标签：圆点隐藏，关闭叉浮现 */
+.tab-item.is-dirty:hover .tab-dirty-dot {
+  display: none;
+}
+.tab-item.is-dirty:hover .tab-close-btn {
+  display: inline-flex;
+  opacity: 0.8;
+}
+
+.tab-add-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 3px;
+  flex-shrink: 0;
+}
+.tab-add-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+

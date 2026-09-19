@@ -1,0 +1,100 @@
+/* ==========================================================================
+   BlockCanvas · 统一动画体系（v0.4.4）
+   --------------------------------------------------------------------------
+   全程序唯一动画定义处：时长 / 缓动 token + 全部 @keyframes + 无障碍兜底。
+   styles.css 与组件只写 `animation: <name> var(--dur-*) var(--ease-*)` 引用，
+   不再自带 keyframes —— 改节奏只改这一个文件。
+
+   节奏约定（人眼实测不闪不拖）：
+     微交互入场   --dur-fast      0.16s   小元素出现（归位按钮、徽标）
+     浮层进场     --dur-pop       0.18s   下拉 / 弹窗 / 气泡
+     浮层退场     --dur-pop-exit  0.13s   退场永远比进场短（走比来快）
+     抽屉滑入     --dur-drawer    0.24s   快照抽屉等侧滑面板
+     页面级过渡   --dur-view      0.28s   View Transitions（整页 / 页签切换）
+     缓动：进场用 ease-out 系（快出缓停），退场用 ease-in 系（缓入快走）
+   ========================================================================== */
+
+:root {
+  --ease-standard: cubic-bezier(0.16, 1, 0.3, 1); /* 进场：减速滑入 */
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);        /* 退场：加速离场 */
+  --dur-fast: 0.16s;
+  --dur-pop: 0.18s;
+  --dur-pop-exit: 0.13s;
+  --dur-drawer: 0.24s;
+  --dur-view: 0.28s;
+}
+
+/* ---------- 浮层（内容卡片） ---------- */
+@keyframes bcPopIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes bcPopOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(4px) scale(0.985); }
+}
+
+/* ---------- 遮罩 ---------- */
+@keyframes bcMaskIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes bcMaskOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* ---------- 顶部提示条（toast，从上往下落） ---------- */
+@keyframes bcToastIn {
+  from { opacity: 0; transform: translate(-50%, -10px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* ---------- 侧滑抽屉 ---------- */
+@keyframes bcDrawerIn {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ---------- 小内容轮换（页签/技巧条换内容：淡入 + 向内收缩） ----------
+   注意：不要用向下 translateY 入场 —— 内容向下位移 4px 会让 overflow:auto
+   的容器瞬时底部溢出，滚动条闪现又消失（右侧面板切换闪烁的元凶）；
+   scale 向内收缩永远不会溢出。 */
+@keyframes bcSwapIn {
+  from { opacity: 0; transform: scale(0.99); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ---------- View Transitions（整页 / 页签内容切换） ---------- */
+@keyframes bcViewIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes bcViewOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes bcContentIn {
+  from { opacity: 0; transform: scale(0.99); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ---------- 定位脉冲（类名总览「定位」圈元素）：只播 2 次就停，不无限闪 ---------- */
+@keyframes bcRevealPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 138, 0, 0.9), 0 0 0 0 rgba(255, 138, 0, 0.5); }
+  55%  { box-shadow: 0 0 0 5px rgba(255, 138, 0, 0.5), 0 0 0 14px rgba(255, 138, 0, 0.12); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 138, 0, 0), 0 0 0 24px rgba(255, 138, 0, 0); }
+}
+
+/* ---------- 无障碍：系统开启「减少动态效果」时全部动画瞬时完成 ----------
+   实现：所有动画引用统一走 --dur-* token，这里把 token 归零即可全局瞬时完成，
+   无需任何强制优先级（遵守项目「零 !important」铁律）。 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0.01ms;
+    --dur-pop: 0.01ms;
+    --dur-pop-exit: 0.01ms;
+    --dur-drawer: 0.01ms;
+    --dur-view: 0.01ms;
+  }
+}

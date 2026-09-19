@@ -5,7 +5,8 @@ import { NumberUnitInput } from './NumberUnitInput';
 import { HelpButton } from './HelpButton';
 import { GradientEditor } from './GradientEditor';
 import { Collapse } from './Collapse';
-import { useState, useRef } from 'react';
+import { useRef } from 'react';
+import { usePersistedBool } from '@lib/usePersisted';
 import {
   isGradient,
   GRADIENT_PRESETS,
@@ -89,8 +90,9 @@ export function QuickHelper(props: Props) {
   const selectElement = useScene((s) => s.selectElement);
   const activeBreakpoint = useScene((s) => s.activeBreakpoint);
 
-  const [layoutOpen, setLayoutOpen] = useState(true);
-  const [gradOpen, setGradOpen] = useState(true);
+  // 折叠状态全部记住：下次打开还是用户熟悉的样子
+  const [layoutOpen, setLayoutOpen] = usePersistedBool('qh-layout-open', true);
+  const [gradOpen, setGradOpen] = usePersistedBool('qh-textgrad-open', true);
   const gradDraftRef = useRef('');
 
   const node = findNode(scene.root, elementId);
@@ -415,17 +417,7 @@ export function QuickHelper(props: Props) {
                       title="移除文字渐变，恢复普通文字颜色"
                     >关闭文字渐变</button>
                   </div>
-                  <div className="text-grad-quick">
-                    {TEXT_GRADIENT_QUICK.map((p) => (
-                      <button
-                        key={p.name}
-                        className={'text-grad-chip' + (textGradCss === p.css ? ' active' : '')}
-                        style={{ backgroundImage: p.css }}
-                        title={`套用「${p.name}」文字渐变`}
-                        onClick={() => { beginStyleEdit(); applyTextGradient(p.css); endStyleEdit(); }}
-                      ><span>{p.name}</span></button>
-                    ))}
-                  </div>
+                  {/* 已开启时不再重复列一遍配色胶囊（下方渐变编辑器里已有完整配色画廊） */}
                   <GradientEditor
                     value={textGradCss}
                     scope="text"

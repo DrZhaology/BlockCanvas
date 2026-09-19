@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net, shell, nativeTheme, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net, shell, nativeTheme, session, type MenuItemConstructorOptions } from 'electron';
 import { join, basename, dirname, relative } from 'node:path';
 import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -119,6 +119,13 @@ function buildMenu(win: BrowserWindow): Menu {
 }
 
 async function createWindow() {
+  // 字体库需要 Local Font Access API（window.queryLocalFonts）：
+  // 默认权限策略会拒绝 'local-fonts'，这里显式放行（只读字体族名，无文件访问）。
+  // （Electron 33 的类型定义尚未收录 'local-fonts'，用字符串比较。）
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback((permission as string) === 'local-fonts');
+  });
+
   const iconPath = join(app.getAppPath(), 'build', 'icon.png');
   const win = new BrowserWindow({
     width: 1280,

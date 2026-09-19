@@ -1,0 +1,1193 @@
+/* ==========================================================================
+   BlockCanvas · 14-v04x-append.css —— v0.4.0 第六轮 + v0.4.3/v0.4.4 追加轮（动画统一 / 工具栏自由池 / 停靠管理）
+   （由单文件 styles.css 拆分而来；分片顺序 = 级联顺序，勿调整 import 顺序。
+     新增样式：优先写进语义对应的分片末尾；跨轮追加统一进 14-v04x-append.css。）
+   ========================================================================== */
+/* ==========================================================================
+   v0.4.0 第六轮：工具栏两行 + 常驻小技巧轮播 + 动画体系统一
+   ========================================================================== */
+
+/* ---------- 小技巧常驻轮播条 ---------- */
+/* 放在第二行右侧，占满剩余宽度：文字常驻可见，每隔 15 秒自动换一条 */
+.tips-ticker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+}
+.tt-icon { flex: 0 0 auto; font-size: 12px; opacity: 0.85; }
+.tt-text {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+}
+.tt-text:hover { color: var(--text); }
+.tt-text b { color: var(--accent); font-weight: 600; }
+.tt-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+.tt-btn {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.14s ease, background 0.14s ease, border-color 0.14s ease;
+}
+.tt-btn:hover { color: var(--text); background: var(--hover); border-color: var(--border); }
+
+
+/* ---------- 统一动画体系 ----------
+   约定（新增浮层一律照此办理，不要再各自写一套）：
+     .bc-mask        全屏遮罩，淡入
+     .bc-pop         居中弹层，缩放淡入
+     父级加 .is-closing → 两者各自播淡出/缩出动画
+   用法：<div className="bc-mask is-closing?"> + <div className="bc-pop">
+   —— 这样"任意浮层都有进出场"不需要逐个写 keyframes。 */
+.bc-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 940;
+  background: rgba(0, 0, 0, 0.5);
+  animation: bcMaskIn var(--dur-pop) ease both;
+}
+.bc-mask.is-closing { animation: bcMaskOut var(--dur-pop-exit) ease both; }
+.bc-pop {
+  /* 用 inset:0 + margin:auto 居中，而不是 translate(-50%,-50%)：
+     bcModalIn/bcModalOut 的关键帧里写死了 transform，会覆盖掉居中用的 translate，
+     动画结束后元素就"跑偏"了。margin:auto 不依赖 transform，和动画互不干扰。 */
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  transform: none; /* 清掉旧规则里 translate(-50%,-50%) 的残留，交给 margin:auto 居中 */
+  width: min(560px, calc(100vw - 40px));
+  height: fit-content;
+  z-index: 941;
+  max-height: min(78vh, 640px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+}
+.bc-mask.is-closing + .bc-pop,
+.bc-pop.is-closing { animation: bcPopOut var(--dur-pop-exit) var(--ease-exit) both; }
+
+/* 关系选择器推荐层沿用统一动画（旧规则保留尺寸，动画由 .bc-pop 提供） */
+.cls-infer-pop.bc-pop { width: min(560px, calc(100vw - 40px)); padding: 14px 16px; }
+
+/* ---------- 滑块统一自适应 ----------
+   之前不少滑块因为父容器没给 min-width:0 / 没写 flex:1 而缩成一小截。
+   这里统一兜底：只要是面板里的 range，就吃掉剩余宽度。 */
+/* 只覆盖右侧面板（调色盘里的滑杆有自己的一套样式，不在这里动） */
+.panel input[type="range"],
+.inspector input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+/* 工具栏「⋯ 更多」下拉、导出后的提示条：补上入场动画（以前是瞬间出现） */
+.tb-more-pop {
+  transform-origin: top right;
+  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+}
+.export-tips { animation: bcToastIn var(--dur-pop) var(--ease-standard) both; }
+
+/* 滑块所在的行容器：必须允许收缩，否则会把滑块挤没 */
+.vis-control-row,
+.fx-slider-row,
+.cp-slider,
+.be-row,
+.grad-stop,
+.prop-row-body {
+  min-width: 0;
+}
+.be-width-range { flex: 1 1 auto; min-width: 60px; }
+
+/* ==========================================================================
+   v0.4.4 工具栏 · 全按钮自由池
+   主区（可滚动流水线，所有"操作类"按钮）｜右侧固定区（设备/缩放/体检/设置等"手边"块）
+   停靠与排序在「设置 → 工具栏管理」里自由调整；「⋯更多」收纳停靠为 more 的按钮。
+   ========================================================================== */
+
+/* —— 主区：可横向滚动（细滚动条 + 吸附对齐按钮） —— */
+.toolbar .tb-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 3px 2px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(127, 127, 127, 0.4) transparent;
+}
+.toolbar .tb-main::-webkit-scrollbar { height: 5px; }
+.toolbar .tb-main::-webkit-scrollbar-track { background: transparent; }
+.toolbar .tb-main::-webkit-scrollbar-thumb {
+  background: rgba(127, 127, 127, 0.38);
+  border-radius: 999px;
+}
+.toolbar .tb-main::-webkit-scrollbar-thumb:hover { background: rgba(127, 127, 127, 0.62); }
+.toolbar .tb-main > * {
+  scroll-snap-align: center;
+  flex-shrink: 0;
+}
+
+/* —— 右侧固定区：常驻手边工具，不滚动 —— */
+.toolbar .tb-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+/* 设备切换分段：无外框、无阴影 —— 纯胶囊高亮，不再"框中框" */
+.toolbar .tb-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.toolbar .tb-device .tb-bp-seg {
+  padding: 0;
+  background: transparent;
+  border: none;
+  gap: 2px;
+}
+.toolbar .tb-device .tb-bp-btn {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  border-radius: 5px;
+}
+.toolbar .tb-device .tb-bp-btn.active {
+  background: var(--seg-active);
+  border-color: transparent;
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: none;
+}
+.toolbar .tb-device .tb-bp-width {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* —— 缩放块（归位按钮只在偏离 100% 时出现，带入场动画） —— */
+.toolbar .tb-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.toolbar .tb-zoom-reset {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 13px;
+  border-radius: 4px;
+  animation: bcPopIn var(--dur-fast) var(--ease-standard);
+}
+
+/* —— 导出前体检按钮（徽标挂按钮外角；不再无限脉冲闪烁） —— */
+.toolbar .tb-health-btn {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.toolbar .tb-health-btn:hover { background: var(--hover); color: var(--text); }
+.toolbar .tb-health-btn.has-issue {
+  color: #e67e22;
+  border-color: #e67e22;
+}
+.toolbar .tb-health-btn.has-issue:hover { background: var(--issue-bg); color: #e67e22; }
+.toolbar .tb-health-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #e67e22;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  animation: bcPopIn var(--dur-fast) var(--ease-standard);
+}
+
+/* 「⋯ 更多」按钮收窄为纯图标 */
+.toolbar .tb-more-btn { padding: 0 8px; letter-spacing: 1px; font-weight: 700; }
+/* 插件按钮的前导图标 */
+.toolbar .tb-icon { margin-right: 2px; }
+
+/* ==========================================================================
+   v0.4.3 项目标签栏：宽度自适应 + 细滚动条 + 右侧小技巧条
+   ========================================================================== */
+
+/* 标签宽度自适应：标签少时平分剩余空间（上限 220px），多时压缩到下限再出滚动条 */
+.tab-strip {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(127, 127, 127, 0.4) transparent;
+}
+.tab-strip::-webkit-scrollbar { height: 5px; }
+.tab-strip::-webkit-scrollbar-track { background: transparent; }
+.tab-strip::-webkit-scrollbar-thumb { background: rgba(127, 127, 127, 0.38); border-radius: 999px; }
+.tab-strip::-webkit-scrollbar-thumb:hover { background: rgba(127, 127, 127, 0.62); }
+.tab-item {
+  flex: 1 1 auto;
+  min-width: 96px;
+  max-width: 220px;
+}
+/* 标签很多、滚动条出现后：不再强行平分，保持自然宽度便于滚动浏览 */
+.tab-strip.has-overflow .tab-item { flex: 0 0 auto; }
+
+/* —— 小技巧条（标签栏右侧常驻） ——
+   v0.4.4 修正：文字**默认完整显示**——宽随内容（max-width: max-content），
+   去掉旧 320px 硬上限，长文字不再被截成"…"；
+   只有标签真的放不下（.tabs-overflow，strip 出现滚动条）时才允许收缩省略。 */
+.tabbar-tips {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: max-content;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  overflow: hidden;
+}
+.tabbar-tips .tt-icon { font-size: 11px; flex: 0 0 auto; }
+.tabbar-tips .tt-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  cursor: pointer;
+  animation: bcSwapIn var(--dur-pop) var(--ease-standard);
+}
+/* 标签页多到出现滚动条时，技巧条才开始"挤一挤"（允许收缩省略） */
+.project-tab-bar.tabs-overflow .tabbar-tips {
+  flex: 0 1 auto;
+}
+.tabbar-tips .tt-text:hover { color: var(--text); }
+.tabbar-tips .tt-text b, .tabbar-tips .tt-text kbd { color: var(--accent); font-weight: 600; }
+.tabbar-tips .tt-text kbd {
+  display: inline-block;
+  padding: 0 3px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  background: var(--bg-panel);
+  font-family: Consolas, monospace;
+  font-size: 10px;
+}
+.tabbar-tips .tt-btn {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.tabbar-tips .tt-btn:hover { background: var(--chip-hover); color: var(--danger); }
+
+/* ==========================================================================
+   v0.4.3 行内元素选中框修复
+   display:inline 的元素跨行时，outline 会围着每个行盒各画一框（像选了多个）。
+   改为：行内选中元素不再自画 outline，由 Canvas 在上层画一个「合并外框」
+   （getBoundingClientRect 的并集矩形，fixed 定位，缩放/滚动天然正确）。
+   ========================================================================== */
+.canvas-inline-sel {
+  position: fixed;
+  z-index: 88;
+  pointer-events: none;
+  outline: 2px solid #1e88e5;
+  outline-offset: 0;
+  box-shadow: inset 0 0 0 1.5px #ffffff;
+  border-radius: 2px;
+}
+
+/* ==========================================================================
+   v0.4.3 设置页 · 工具栏管理重写（真实样式预览 + 拖拽排序 + 独立开关）
+   ========================================================================== */
+.tbman-preview {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(127, 127, 127, 0.4) transparent;
+}
+.tbman-preview::-webkit-scrollbar { height: 5px; }
+.tbman-preview::-webkit-scrollbar-thumb { background: rgba(127, 127, 127, 0.38); border-radius: 999px; }
+.tbman-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: grab;
+  user-select: none;
+  transition: box-shadow 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
+}
+.tbman-chip:hover { border-color: var(--accent); color: var(--accent); }
+.tbman-chip.is-dragging { opacity: 0.35; cursor: grabbing; }
+.tbman-chip.is-drop-before { box-shadow: -3px 0 0 0 var(--accent); }
+.tbman-chip .tbman-chip-grip {
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: -1px;
+  opacity: 0.7;
+}
+.tbman-chip.is-primary { background: var(--accent); border-color: var(--accent-hover); color: #fff; font-weight: 600; }
+.tbman-empty {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  padding: 6px 2px;
+}
+.tbman-list { display: flex; flex-direction: column; gap: 2px; }
+.tbman-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.tbman-row:hover { background: var(--hover); }
+.tbman-row.is-dragging { opacity: 0.4; }
+.tbman-row.is-drop-before { box-shadow: 0 -3px 0 0 var(--accent); }
+.tbman-row.is-drop-after { box-shadow: 0 3px 0 0 var(--accent); }
+.tbman-grip {
+  flex: 0 0 auto;
+  width: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: -1.5px;
+  cursor: grab;
+  text-align: center;
+  user-select: none;
+}
+.tbman-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tbman-tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.tbman-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 12px 0 6px;
+}
+.tbman-group-title small { font-weight: 400; color: var(--text-muted); font-size: 10.5px; }
+
+/* ==========================================================================
+   v0.4.3 属性面板布局修复
+   ① 动效滑块改两行式：标签+数值一行，滑块独占一整行（不再被挤成一小截）
+   ② 各类行容器统一 min-width:0 / 换行兜底，杜绝错位与文字重叠
+   ========================================================================== */
+.fx-slider-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'label val' 'range range';
+  row-gap: 2px;
+  align-items: center;
+  column-gap: 6px;
+}
+.fx-slider-label { grid-area: label; }
+.fx-slider-val { grid-area: val; }
+.fx-slider-row input[type="range"] { grid-area: range; }
+
+/* 面板标题徽标：窄面板下允许换行，不再互相重叠 */
+.panel-title-badges { flex-wrap: wrap; row-gap: 3px; }
+
+/* 数值输入行：数字框吃满剩余宽度、单位下拉不被压扁 */
+.num-unit-row { min-width: 0; }
+.num-unit-num { min-width: 0; flex: 1 1 24px; }
+.unit-select { flex: 0 0 auto; min-width: 52px; }
+
+/* 面板里的文本输入类控件统一可收缩，杜绝把行撑破 */
+.inspector input[type="text"],
+.inspector input[type="number"],
+.inspector select,
+.inspector textarea {
+  min-width: 0;
+}
+
+/* ==========================================================================
+   v0.4.4 工具栏管理：停靠三段开关 + 预览区分段
+   ========================================================================== */
+.tbman-dock {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--panel-tint);
+}
+.tbman-dock-btn {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.tbman-dock-btn:hover { background: var(--hover); color: var(--text); }
+.tbman-dock-btn.active {
+  background: var(--bg-panel);
+  border-color: var(--border);
+  color: var(--accent);
+  font-weight: 600;
+}
+.tbman-preview-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  margin: 2px 4px;
+  flex: 0 0 auto;
+}
+.tbman-chip.is-right {
+  background: var(--panel-tint);
+  border-style: dashed;
+}
+
+/* ==========================================================================
+   v0.4.4 渐变编辑器布局修复
+   ① 角度预设改 4 列 × 2 行，「反向」独占一行全宽 —— 不再文字溢出
+   ② 色标行：色块收窄、位置值加宽，滑块吃满剩余宽度
+   ========================================================================== */
+.grad-dial-row {
+  align-items: flex-start;
+}
+.grad-angle-presets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.grad-angle-btn {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+}
+.grad-angle-btn.grad-angle-swap {
+  grid-column: 1 / -1;
+  height: 26px;
+}
+/* 色标行（flex 布局，细则见下节） */
+.grad-stop .grad-stop-pos { text-align: right; }
+.grad-stop-range { min-width: 0; }
+
+/* ==========================================================================
+   v0.4.4 设置页分区切换动画 + 渐变面板整体焕新
+   ========================================================================== */
+
+/* 设置页分区切换：key 重挂载 + 轻量上浮淡入（不再瞬变） */
+.fluent-cards-container {
+  animation: bcSwapIn var(--dur-view) var(--ease-standard);
+}
+
+/* —— 渐变面板焕新：去"卡片套卡片"，视觉分层更干净 —— */
+/* 背景颜色行内嵌渐变编辑器时，外层 prop-row 的彩色边线与内层卡片叠加显得旧；
+   这里把渐变编辑器改为无框分层：阴影代替描边、留白代替包框 */
+.grad-editor {
+  padding: 10px;
+  border: none;
+  border-radius: 10px;
+  background: var(--panel-soft);
+  box-shadow: inset 0 0 0 1px var(--border);
+  gap: 10px;
+}
+/* 预览条：加高、大圆角、内部高光，更像"成品渐变条" */
+.grad-preview {
+  height: 64px;
+  border-radius: 9px;
+  border: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+.grad-preview-tag {
+  backdrop-filter: blur(3px);
+  background: rgba(0, 0, 0, 0.28);
+  color: #fff;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 10px;
+}
+/* 色标行：悬停提亮 + 滑块加粗可拖 */
+/* —— v0.4.4 渐变色标行修复 + 微调 ——
+   ColorField 渲染 input + 色块两个兄弟元素，色标行必须用 flex：
+   [输入框(可伸缩)] [色块24] [位置滑块(flex1)] [百分比38] [×20] */
+.grad-stop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  transition: background 0.14s ease;
+}
+.grad-stop:hover { background: var(--hover); }
+.grad-stop .color-text-input {
+  flex: 0 1 88px;
+  width: auto;
+  min-width: 0;
+}
+.grad-stop .color-swatch-btn { flex: 0 0 24px; }
+.grad-stop-range { flex: 1 1 120px; min-width: 60px; }
+.grad-stop-pos { flex: 0 0 38px; }
+.grad-stop-del { flex: 0 0 20px; }
+/* 类型切换 / 线型胶囊：active 与背景对比更清楚 */
+.grad-seg-btn.active {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+
+
+
+/* ==========================================================================
+   v0.4.4 字体库（FontPickerModal）：全屏遮罩 + 中央面板
+   本机字体（queryLocalFonts）+ 常见字体目录（商用预标注）+ 字体链回退
+   ========================================================================== */
+
+/* 属性面板入口行：预设下拉 + 字体库按钮 */
+.font-row { display: flex; align-items: center; gap: 6px; width: 100%; }
+.font-row .font-preset-select { flex: 1 1 auto; min-width: 0; width: auto; }
+.font-row .font-lib-btn { flex: 0 0 auto; }
+
+/* —— 弹窗外框（复用 .bc-mask / .bc-pop 动画体系） —— */
+.fp-mask { z-index: 950; padding: 24px; }
+.fp-modal {
+  width: 980px;
+  max-width: calc(100vw - 48px);
+  height: 680px;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* —— 头部 / 工具行 —— */
+.fp-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.fp-title { font-size: 14.5px; font-weight: 700; }
+.fp-sub { flex: 1; font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-close {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+.fp-close:hover { background: var(--chip-hover); color: var(--danger); }
+
+.fp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.fp-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+.fp-search:focus { outline: none; border-color: var(--accent); }
+.fp-filter-chip {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fp-filter-chip:hover { border-color: var(--accent); color: var(--accent); }
+.fp-filter-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.fp-loading { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+
+/* —— 主体：左预览 + 右列表 —— */
+.fp-body { flex: 1; display: flex; min-height: 0; }
+
+.fp-preview-pane {
+  flex: 0 0 296px;
+  width: 296px;
+  border-right: 1px solid var(--border);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.fp-preview-main {
+  min-height: 96px;
+  display: flex;
+  align-items: center;
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.3;
+  word-break: break-all;
+  color: var(--text);
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+.fp-preview-sub { font-size: 12.5px; color: var(--text-muted); padding: 0 2px; }
+.fp-chain-title { font-size: 11px; font-weight: 700; color: var(--text); margin-top: 6px; }
+.fp-chain { display: flex; flex-direction: column; gap: 4px; }
+.fp-chain-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.fp-chain-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-panel);
+}
+.fp-chain-order { flex: 0 0 40px; font-size: 10px; font-weight: 700; color: var(--accent); }
+.fp-chain-name { flex: 1; min-width: 0; font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fp-chain-lic { flex: 0 0 auto; font-size: 11px; }
+.fp-chain-lic[data-lic='free'] { color: #15803d; }
+.fp-chain-lic[data-lic='restricted'] { color: #b45309; }
+.fp-chain-lic[data-lic='generic'] { color: #64748b; }
+.fp-chain-lic[data-lic='unknown'] { color: #94a3b8; }
+.fp-chain-btn {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.fp-chain-btn:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.fp-chain-btn:disabled { opacity: 0.3; cursor: default; }
+.fp-chain-del:hover { background: var(--danger-tint); color: var(--danger); }
+
+.fp-preview-foot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding-top: 8px; }
+.fp-hint { font-size: 10.5px; color: var(--text-muted); line-height: 1.55; }
+.fp-hint code {
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  background: var(--bg-panel);
+  font-family: Consolas, monospace;
+  font-size: 10px;
+}
+.fp-apply { height: 34px; font-size: 12.5px; }
+.fp-apply:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* —— 右侧字体列表 —— */
+.fp-list { flex: 1; min-width: 0; overflow-y: auto; padding: 4px 12px 12px; scrollbar-gutter: stable; }
+.fp-group { margin-bottom: 6px; }
+.fp-group-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 4px 6px;
+  background: var(--bg-panel);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.fp-group-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fp-group-empty { font-size: 11px; color: var(--text-muted); padding: 6px; }
+
+.fp-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+.fp-item:hover { background: var(--hover); }
+.fp-item.selected { background: var(--hover-accent); border-color: var(--accent); }
+.fp-item-preview {
+  flex: 0 0 190px;
+  font-size: 15px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fp-item-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fp-item-name { font-size: 11.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fp-item-zh { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fp-item-check { flex: 0 0 auto; color: var(--accent); font-weight: 700; }
+.fp-item-del {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.fp-item-del:hover { background: var(--danger-tint); color: var(--danger); }
+
+/* 商用徽标 */
+.fp-badge {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.fp-badge.lic-free { color: #15803d; border-color: #86efac; background: #f0fdf4; }
+.fp-badge.lic-restricted { color: #b45309; border-color: #fcd34d; background: #fffbeb; }
+.fp-badge.lic-generic { color: #475569; border-color: #cbd5e1; background: #f8fafc; }
+.fp-badge.lic-unknown { color: #64748b; border-color: #cbd5e1; background: transparent; }
+html[data-bc-dark] .fp-badge.lic-free { color: #4ade80; border-color: #166534; background: #052e16; }
+html[data-bc-dark] .fp-badge.lic-restricted { color: #fbbf24; border-color: #92400e; background: #451a03; }
+html[data-bc-dark] .fp-badge.lic-generic { color: #cbd5e1; border-color: #475569; background: #1e293b; }
+html[data-bc-dark] .fp-badge.lic-unknown { color: #94a3b8; border-color: #475569; background: transparent; }
+
+/* —— 自定义字体登记 —— */
+.fp-custom-add { padding: 10px 4px 4px; }
+.fp-custom-btn {
+  width: 100%;
+  height: 32px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.fp-custom-btn:hover { border-color: var(--accent); color: var(--accent); }
+.fp-custom-form { display: flex; gap: 6px; }
+.fp-custom-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+}
+.fp-custom-input:focus { outline: none; border-color: var(--accent); }
+
+/* —— v0.4.5 字体链：拖拽排序（替代 ↑↓ 按钮） —— */
+.fp-chain-item { cursor: grab; }
+.fp-chain-item.is-dragging { opacity: 0.4; cursor: grabbing; }
+.fp-chain-item.is-drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
+.fp-chain-item.is-drop-after { box-shadow: 0 2px 0 0 var(--accent); }
+.fp-chain-grip {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: -1px;
+  cursor: grab;
+  user-select: none;
+  opacity: 0.7;
+}
+
+
+/* ==========================================================================
+   v0.4.5 色标行：两行卡片式（上行=拖柄+颜色，下行=位置滑块+百分比）
+   窄面板不再截断颜色输入；颜色与位置明确分开；⠿ 拖动调整色标顺序。
+   ========================================================================== */
+.grad-stop {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-panel);
+  transition: border-color 0.14s ease;
+}
+.grad-stop:hover { border-color: var(--accent); }
+.grad-stop.is-dragging { opacity: 0.4; }
+.grad-stop.is-drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
+.grad-stop.is-drop-after { box-shadow: 0 2px 0 0 var(--accent); }
+
+.grad-stop-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.grad-stop-grip {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: -1px;
+  cursor: grab;
+  user-select: none;
+  opacity: 0.7;
+}
+.grad-stop .color-text-input { flex: 1 1 auto; width: auto; min-width: 0; }
+.grad-stop .color-swatch-btn { flex: 0 0 24px; width: 24px; height: 24px; }
+.grad-stop-del { flex: 0 0 20px; }
+
+.grad-stop-bottom { display: flex; align-items: center; gap: 6px; padding-left: 22px; min-width: 0; }
+.grad-stop-pos-label { flex: 0 0 auto; font-size: 10.5px; color: var(--text-muted); }
+.grad-stop-range { flex: 1 1 auto; min-width: 0; }
+.grad-stop-pos {
+  flex: 0 0 38px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* ==========================================================================
+   v0.4.5 变量系统易用化（方案 A+B）
+   ① ColorField 旁「var」快捷引用菜单（Portal，含全部颜色变量）
+   ② 调色盘变量区改大色板网格 + 顺手新建变量
+   ③ 变量面板：大预览块 + 引用可点击展开定位 + 按钮文字化
+   ========================================================================== */
+
+/* —— ColorField 的 var 快捷按钮与菜单 —— */
+.color-var-btn {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-family: Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.color-var-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--hover-accent); }
+
+.cp-varmenu-mask { position: fixed; inset: 0; z-index: 960; }
+.cp-varmenu {
+  position: fixed;
+  z-index: 961;
+  width: 236px;
+  max-height: 330px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+}
+.cp-varmenu-title { font-size: 11px; font-weight: 700; color: var(--text); padding: 4px 6px 6px; }
+.cp-varmenu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.cp-varmenu-item:hover { background: var(--hover); }
+.cp-varmenu-item.active { background: var(--hover-accent); }
+.cp-varmenu-swatch { flex: 0 0 18px; width: 18px; height: 18px; border-radius: 4px; border: 1px solid rgba(0,0,0,0.12); }
+.cp-varmenu-name { flex: 1; min-width: 0; font-size: 11.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-varmenu-val { font-size: 10px; color: var(--text-muted); font-family: Consolas, monospace; }
+.cp-varmenu-foot { font-size: 10px; color: var(--text-muted); padding: 6px 6px 2px; border-top: 1px dashed var(--border); margin-top: 4px; }
+
+/* —— 调色盘变量区：大色板网格 + 新建 —— */
+.cp-token-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.cp-token {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  cursor: pointer;
+}
+.cp-token:hover { border-color: var(--accent); background: var(--hover-accent); }
+.cp-token-swatch { width: 100%; height: 26px; border-radius: 5px; border: 1px solid rgba(0, 0, 0, 0.1); }
+.cp-token-name {
+  max-width: 100%;
+  font-size: 10px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cp-token.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.cp-token-add {
+  color: var(--text-muted);
+  font-size: 11px;
+  border-style: dashed;
+  justify-content: center;
+  min-height: 52px;
+}
+.cp-token-add:hover { color: var(--accent); }
+.cp-token-new { display: flex; gap: 6px; margin-top: 6px; }
+.cp-token-new-input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+}
+.cp-token-new-input:focus { outline: none; }
+
+/* —— 变量面板：预览块 + 可点击引用 + 文字化按钮 —— */
+.token-preview-swatch {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.token-preview-glyph {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--text-muted);
+  font-size: 15px;
+}
+.token-usage {
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--hover-accent);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.token-usage:hover { background: var(--accent); color: #fff; }
+.token-usage.none { color: var(--text-muted); background: transparent; border-color: var(--border); cursor: default; }
+.token-usage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+.token-usage-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text);
+}
+.token-usage-item:hover { background: var(--hover); color: var(--accent); }
+.token-usage-tag { font-family: Consolas, monospace; color: var(--accent); flex: 0 0 auto; }
+.token-usage-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.token-usage-text.muted { color: var(--text-muted); }
+.token-copy { white-space: nowrap; }
+
+/* —— v0.4.5 变量行按钮：复制按钮显示完整文字（原来 22px 图标尺寸塞文字溢出） —— */
+.token-copy {
+  width: auto;
+  padding: 0 9px;
+  gap: 3px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.token-del { width: 26px; }

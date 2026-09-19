@@ -1,0 +1,226 @@
+/* ==========================================================================
+   BlockCanvas · 06-element-panel.css —— 元素面板分组 / 面板拖手 / 扩展弹窗 / 模板按钮
+   （由单文件 styles.css 拆分而来；分片顺序 = 级联顺序，勿调整 import 顺序。
+     新增样式：优先写进语义对应的分片末尾；跨轮追加统一进 14-v04x-append.css。）
+   ========================================================================== */
+/* Element panel 分组 */
+.element-group {
+  margin-bottom: 12px;
+}
+.group-title {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 4px 0 6px;
+  padding-left: 2px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+/* Right pane 与 tab */
+.right-pane-wrap {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+.right-pane-wrap .right-pane {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.tab-bar {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--muted-bg);
+}
+.tab-btn {
+  flex: 1;
+  height: 32px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+.tab-btn:hover { color: var(--text); background: var(--tab-hover); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.tab-body { flex: 1; min-height: 0; overflow-y: auto; }
+.tab-body .panel { border-left: none; }
+
+/* 面板拖手（4-F 版2 / #7b）：底部面板上缘、右侧面板左缘、左侧面板右缘，可拖改宽高，最小约默认 70% */
+.panel-resizer {
+  position: relative;
+  z-index: 30;
+  touch-action: none;
+}
+.workspace .panel-resizer.is-disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+  opacity: 0;
+}
+/* 竖向拖手（贴在 right 面板左缘，贯穿右上两格）。
+   边框由面板自身提供（right-pane border-left），拖手本身不再画线，避免双重外边框 */
+.right-pane-wrap .panel-resizer-vertical {
+  flex: 0 0 6px;
+  cursor: col-resize;
+}
+.right-pane-wrap .panel-resizer-vertical:hover { background: var(--accent); opacity: 0.85; }
+/* 横向拖手（贴在画布区下缘，仅在 bottom 布局出现）。边框由下方面板 border-top 提供 */
+.canvas-area .panel-resizer-horizontal {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  cursor: ns-resize;
+}
+.canvas-area .panel-resizer-horizontal:hover,
+.canvas-area .panel-resizer-horizontal.bc-active { background: var(--accent); opacity: 0.85; }
+/* 左侧布局：元素面板右缘的竖向拖手（紧跟元素面板，画布在其右） */
+.elem-pane-wrap .panel-resizer-left {
+  flex: 0 0 6px;
+  cursor: col-resize;
+}
+.elem-pane-wrap .panel-resizer-left:hover { background: var(--accent); opacity: 0.85; }
+.panel-resizer-handle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+/* 拖手活动时整窗禁用文本选择，且光标按拖拽方向整体固定：
+   - 竖向拖拽（改高）→ 全部 ns-resize
+   - 横向拖拽（改宽）→ 全部 col-resize
+   避免拖拽过程中光标在子元素上闪变成另一种方向 */
+body.bc-resizing-ns, body.bc-resizing-ns * { cursor: ns-resize; user-select: none; }
+body.bc-resizing-col, body.bc-resizing-col * { cursor: col-resize; user-select: none; }
+
+/* 画布左右拖手：整条边都可抓握（与面板手柄同逻辑）。不做任何可见的蓝线/蓝框，
+   仅保留左右拖拽光标；悬停时给一道很淡的蓝色便于发现抓握区（与面板 hover 一致）。 */
+.canvas-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: col-resize;
+  z-index: 25;
+  touch-action: none;
+}
+.canvas-resize-handle:hover { background: rgba(30, 136, 229, 0.16); }
+.canvas-resize-handle-l { left: -5px; }
+.canvas-resize-handle-r { right: -5px; }
+
+/* 画布宽度只读（#6）：拖画布边缘时在上方「画布」旁实时显示当前宽度 */
+.toolbar .canvas-width-readout {
+  font-size: 11px;
+  color: var(--accent);
+  font-family: 'Consolas', monospace;
+  background: var(--seg-active);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* 扩展管理弹窗 */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal-card {
+  width: 520px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-canvas);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-title { font-weight: 600; font-size: 14px; }
+.modal-close {
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 4px;
+}
+.modal-close:hover { color: var(--text); }
+.modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--muted-bg);
+}
+.ext-item {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  background: var(--bg-panel);
+}
+.ext-item-name { font-size: 13px; font-weight: 600; }
+.ext-item-sub { font-weight: 400; color: var(--text-muted); font-size: 12px; margin-left: 4px; }
+.ext-item-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.ext-item-badge {
+  float: right;
+  font-size: 11px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 0 8px;
+}
+.ext-item-badge-warn { color: #b7791f; border-color: #b7791f; }
+
+/* 模板按钮（元素面板・模板页签） */
+.template-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  cursor: pointer;
+  font-family: inherit;
+}
+.template-btn:hover { border-color: var(--accent); background: var(--hover-accent); }
+.template-btn:disabled { opacity: 0.6; cursor: wait; }
+.template-name { display: block; font-size: 13px; font-weight: 600; color: var(--text); }
+.template-desc { display: block; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.group-sub { font-weight: 400; color: var(--text-muted); font-size: 11px; margin-left: 6px; }
+
+/* 模板库（4-F）：左栏内嵌 + 资源包大板块折叠 + 缩略图自适应列数 */
+/* 切到模板页时不再改变面板宽/高：面板尺寸与元素页完全一致（由统一拖手控制），
+   模板内容在相同面板内滚动，避免“进入模板突然变宽/变高”的跳动。 */
+

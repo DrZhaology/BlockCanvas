@@ -30,7 +30,8 @@ export type InputType =
   | 'textShadow'
   | 'transition'
   | 'opacity'
-  | 'lineHeight';
+  | 'lineHeight'
+  | 'border';
 
 /** 一条属性定义 */
 export interface PropertySchema {
@@ -133,7 +134,7 @@ export const SCHEMA: PropertySchema[] = [
     help: { title: '最大高度 max-height', content: '高度上限：超出部分配合 overflow 可实现内部滚动。' }
   },
   {
-    key: 'padding', label: '内边距 (padding)', category: '盒模型', input: 'trbl', unit: 'px', hideUnit: true, scope: '子',
+    key: 'padding', label: '内边距 (padding)', category: '盒模型', input: 'trbl', unit: 'px', scope: '子',
     sides: [
       { key: 'paddingTop', label: '上' },
       { key: 'paddingRight', label: '右' },
@@ -152,7 +153,7 @@ export const SCHEMA: PropertySchema[] = [
     }
   },
   {
-    key: 'margin', label: '外边距 (margin)', category: '盒模型', input: 'trbl', unit: 'px', hideUnit: true, scope: '子',
+    key: 'margin', label: '外边距 (margin)', category: '盒模型', input: 'trbl', unit: 'px', scope: '子',
     sides: [
       { key: 'marginTop', label: '上' },
       { key: 'marginRight', label: '右' },
@@ -198,6 +199,31 @@ export const SCHEMA: PropertySchema[] = [
     key: 'opacity', label: '不透明度 (opacity)', category: '颜色', input: 'opacity', scope: '子',
     placeholder: '1 / 0.8 / 0.5 / 0',
     help: { title: '不透明度 opacity', content: '0~1 之间的小数，0 为完全透明，1 为完全不透明。' }
+  },
+  {
+    key: 'backgroundSize', label: '背景尺寸 (background-size)', category: '颜色', input: 'select', scope: '子',
+    options: ['cover', 'contain', 'auto', '100% 100%'],
+    optionLabels: {
+      cover: '裁剪铺满 (cover · 保持比例填满，最常用)',
+      contain: '完整显示 (contain · 保持比例留白)',
+      auto: '原始大小 (auto)',
+      '100% 100%': '拉伸铺满 (100% 100% · 会变形)'
+    },
+    help: { title: '背景尺寸 background-size', content: '背景图（或渐变底纹）在元素内如何缩放。cover 最常用，保证铺满且不变形。' }
+  },
+  {
+    key: 'backgroundPosition', label: '背景位置 (background-position)', category: '颜色', input: 'select', scope: '子',
+    options: ['center', 'top', 'bottom', 'left', 'right', 'left top', 'right bottom'],
+    optionLabels: {
+      center: '居中 (center)',
+      top: '靠顶 (top)',
+      bottom: '靠底 (bottom)',
+      left: '靠左 (left)',
+      right: '靠右 (right)',
+      'left top': '左上角 (left top)',
+      'right bottom': '右下角 (right bottom)'
+    },
+    help: { title: '背景位置 background-position', content: '背景图的对齐位置。配合 cover 时可以决定"裁掉哪一部分"。' }
   },
 
   // —— 字体与排版 ——
@@ -307,31 +333,17 @@ export const SCHEMA: PropertySchema[] = [
 
   // —— 边框与阴影 ——
   {
-    key: 'border', label: '快速边框 (border 简写)', category: '边框与阴影', input: 'text', scope: '子',
-    placeholder: '例：1px solid #e2e8f0',
-    help: { title: '边框简写 border', content: '一次性设置：粗细 线型 颜色，例如 1px solid #cbd5e1。' }
-  },
-  {
-    key: 'borderWidth', label: '边框粗细 (border-width)', category: '边框与阴影', input: 'box4', unit: 'px', scope: '子',
-    sides: [
-      { key: 'borderTopWidth', label: '上' },
-      { key: 'borderRightWidth', label: '右' },
-      { key: 'borderBottomWidth', label: '下' },
-      { key: 'borderLeftWidth', label: '左' }
-    ],
-    placeholder: '1px',
-    help: { title: '边框粗细 border-width', content: '上下左右四条边框的厚度，需配合边框样式与颜色生效。' }
-  },
-  {
-    key: 'borderStyle', label: '边框线型 (border-style)', category: '边框与阴影', input: 'select', scope: '子',
-    options: ['none', 'solid', 'dashed', 'dotted', 'double'],
-    optionLabels: { none: '无边框 (none)', solid: '实线 (solid)', dashed: '虚线 (dashed)', dotted: '点线 (dotted)', double: '双实线 (double)' },
-    help: { title: '边框线型 border-style', content: '边框的样式形状：实线、虚线、点线或无。' }
-  },
-  {
-    key: 'borderColor', label: '边框颜色 (border-color)', category: '边框与阴影', input: 'color', scope: '子',
-    placeholder: '#cbd5e1 / #ccc',
-    help: { title: '边框颜色 border-color', content: '边框线条的颜色。' }
+    key: 'border', label: '边框 (border)', category: '边框与阴影', input: 'border', scope: '子',
+    placeholder: '1px solid #e2e8f0',
+    help: {
+      title: '边框 border（可视化）',
+      content:
+        '可视化设置边框：线型 / 粗细 / 颜色 / 四条边单独开关，上方实时预览。\n\n' +
+        '· 只想留一条底边框：把「上 / 右 / 左」三个按钮点掉即可\n' +
+        '· 老项目里写的 border: 1px solid #ccc 简写会被自动识别，\n' +
+        '  一旦在面板里改动，就会自动改成更规范的四边写法（导出代码依然干净）\n' +
+        '· 圆角请用下面单独的「圆角弧度」条目'
+    }
   },
   {
     key: 'borderRadius', label: '圆角弧度 (border-radius)', category: '边框与阴影', input: 'trbl', unit: 'px', scope: '子',
@@ -359,6 +371,34 @@ export const SCHEMA: PropertySchema[] = [
     placeholder: '例：1px 1px 2px rgba(0,0,0,0.3)',
     excludeTypes: ['img', 'input', 'hr', 'textarea'],
     help: { title: '文字阴影 text-shadow', content: '专属于文本的阴影效果。' }
+  },
+  {
+    key: 'backdropFilter', label: '背景模糊 (backdrop-filter)', category: '边框与阴影', input: 'text', scope: '子',
+    placeholder: '例：blur(12px) / blur(8px) saturate(1.4)',
+    help: {
+      title: '背景模糊 backdrop-filter',
+      content:
+        '让元素「身后的内容」变模糊 —— 做毛玻璃卡片的关键属性。\n\n' +
+        '· blur(12px) —— 模糊 12 像素\n' +
+        '· blur(8px) saturate(1.4) —— 模糊并提高饱和度，更有果冻感\n' +
+        '· brightness(1.1) —— 顺手提亮\n\n' +
+        '注意：元素自身的背景色一定要带透明度（如 rgba(255,255,255,0.18)），\n' +
+        '否则不透明的底色会把模糊效果完全挡住。\n' +
+        '可以直接用「快捷助手 → 效果预设 → 毛玻璃」一键套好。'
+    }
+  },
+  {
+    key: 'filter', label: '滤镜 (filter)', category: '边框与阴影', input: 'text', scope: '子',
+    placeholder: '例：brightness(1.08) / grayscale(1)',
+    help: {
+      title: '滤镜 filter',
+      content:
+        '对元素自身整体着色/处理（包含它的文字与边框）：\n' +
+        '· brightness(0.9) 压暗 / brightness(1.1) 提亮\n' +
+        '· grayscale(1) 灰度 / sepia(1) 怀旧\n' +
+        '· blur(3px) 整体模糊 / drop-shadow(0 6px 10px rgba(0,0,0,.2)) 投影\n\n' +
+        '悬停时配合「交互状态」用，可以做"变暗/变亮"的按钮反馈。'
+    }
   },
 
   // —— 列表 ——
@@ -686,21 +726,23 @@ export const ATTRS_SCHEMA: AttrSchema[] = [
 // ============ 默认显示的属性（留空：按需添加，保持面板干脆精简） ============
 export const DEFAULT_VISIBLE_PROPS: string[] = [];
 
-// ============ 数值型属性的常用预设（一键套用，减少手敲） ============
-// 值为裸数字时按 schema.unit 自动补单位；含单位/关键字的（100%、auto）原样使用。
+// ============ 属性常用值预设（一键套用，减少手敲） ============
+// 值为裸数字时按 schema.unit 自动补单位；含单位/关键字的（100%、auto、cover…）原样使用。
+// 数值型与文本型属性都可以用（Inspector 会渲染成一排「胶囊」）。
 export const NUMBER_PRESETS: Record<string, string[]> = {
   // 尺寸
-  width: ['100%', 'auto', '240', '320', '480', '640', '960'],
-  height: ['auto', '40', '80', '120', '200', '320'],
+  width: ['100%', 'auto', '160', '240', '320', '480', '640', '960'],
+  height: ['auto', '32', '40', '56', '80', '120', '200', '320'],
   minWidth: ['60', '120', '200', '320'],
-  maxWidth: ['480', '720', '960', '1200'],
+  maxWidth: ['320', '480', '720', '960', '1200'],
   minHeight: ['40', '60', '80', '120', '240'],
   maxHeight: ['200', '320', '480', '640'],
+  aspectRatio: ['1 / 1', '4 / 3', '3 / 2', '16 / 9', '21 / 9'],
   // 间距
-  gap: ['4', '8', '12', '16', '24', '32', '48'],
+  gap: ['0', '4', '8', '12', '16', '24', '32', '48'],
   // 文字
-  fontSize: ['12', '14', '16', '18', '20', '24', '32', '40', '48', '64'],
-  letterSpacing: ['-1', '0', '0.5', '1', '2', '4'],
+  fontSize: ['12', '13', '14', '16', '18', '20', '24', '28', '32', '40', '48', '64'],
+  letterSpacing: ['-1', '-0.5', '0', '0.5', '1', '2', '4'],
   // 定位
   top: ['auto', '0', '8', '16', '24', '48'],
   right: ['auto', '0', '8', '16', '24', '48'],
@@ -709,7 +751,15 @@ export const NUMBER_PRESETS: Record<string, string[]> = {
   zIndex: ['0', '1', '10', '100', '1000'],
   // 弹性分配
   flexGrow: ['0', '1', '2'],
-  flexShrink: ['0', '1']
+  flexShrink: ['0', '1'],
+  // —— 文本型属性的常用值（同样是「一点就好」） ——
+  border: ['none', '1px solid #e2e8f0', '1px solid #cbd5e1', '2px solid #1e88e5', '1px dashed #cbd5e1'],
+  outline: ['none', '2px solid #1e88e5', '2px dashed #f59e0b'],
+  gridTemplateColumns: ['repeat(2, 1fr)', 'repeat(3, 1fr)', 'repeat(4, 1fr)', '240px 1fr', 'repeat(auto-fill, minmax(220px, 1fr))'],
+  gridTemplateRows: ['auto', 'auto 1fr', '80px 1fr'],
+  gridColumn: ['span 2', 'span 3', '1 / -1'],
+  backdropFilter: ['none', 'blur(6px)', 'blur(12px)', 'blur(16px) saturate(1.4)'],
+  filter: ['none', 'brightness(0.92)', 'brightness(1.08)', 'grayscale(1)', 'sepia(0.6)', 'blur(3px)']
 };
 
 /** 预设值 → 实际写入的 CSS 值（裸数字补 schema.unit） */
@@ -809,11 +859,21 @@ export function isApplicable(schemaItem: PropertySchema, type: ElementType, styl
 
 // ============ 判断 ElementStyle 当前是否"已添加"该属性 ============
 export function hasStyleValue(style: Record<string, string | undefined>, schemaItem: PropertySchema): boolean {
+  // 边框是"一组属性"共同表达的，任意一条存在就算已添加
+  if (schemaItem.input === 'border') {
+    return BORDER_KEYS.some((k) => isPresent(style[k]));
+  }
   if ((schemaItem.input === 'box4' || schemaItem.input === 'trbl') && schemaItem.sides) {
     return schemaItem.sides.some((s) => isPresent(style[s.key]));
   }
   return isPresent(style[schemaItem.key]);
 }
+
+/** 边框涉及的全部样式字段（简写 + 四边粗细 + 线型 + 颜色） */
+const BORDER_KEYS = [
+  'border', 'borderStyle', 'borderColor',
+  'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'
+];
 
 function isPresent(v: string | undefined): boolean {
   return v != null;
@@ -822,9 +882,11 @@ function isPresent(v: string | undefined): boolean {
 // ============ 删除一条属性：从 style 清空 ============
 export function clearStyleKeys(style: Record<string, string | undefined>, schemaItem: PropertySchema): Record<string, string | undefined> {
   const newStyle = { ...style };
-  const keys = (schemaItem.input === 'box4' || schemaItem.input === 'trbl') && schemaItem.sides
-    ? schemaItem.sides.map((s) => s.key)
-    : [schemaItem.key];
+  const keys = schemaItem.input === 'border'
+    ? BORDER_KEYS
+    : (schemaItem.input === 'box4' || schemaItem.input === 'trbl') && schemaItem.sides
+      ? schemaItem.sides.map((s) => s.key)
+      : [schemaItem.key];
   for (const k of keys) newStyle[k] = undefined;
   return newStyle;
 }

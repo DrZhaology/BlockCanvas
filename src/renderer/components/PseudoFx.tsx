@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import {
   parseTransform,
   buildTransform,
@@ -86,11 +87,30 @@ interface Props {
 export function PseudoFxPanel(props: Props) {
   const { pseudo, currentStyle, baseStyle, onApplyPreset, onClearAll, onPatch, onPatchBase, onDragStart, onDragEnd } = props;
   const presets = PSEUDO_PRESETS[pseudo];
+  // 清空按钮两段式确认：第一下只进入"待确认"态（3 秒内再点才真清），
+  // 防止手滑一下把整个伪类的覆盖全删了。
+  const [armClear, setArmClear] = useState(false);
+  const armTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(armTimer.current), []);
+  const requestClear = () => {
+    if (armClear) {
+      window.clearTimeout(armTimer.current);
+      setArmClear(false);
+      onClearAll();
+      return;
+    }
+    setArmClear(true);
+    window.clearTimeout(armTimer.current);
+    armTimer.current = window.setTimeout(() => setArmClear(false), 3000);
+  };
 
   const tf = parseTransform(currentStyle.transform);
   const sh = parseShadow(currentStyle.boxShadow);
   const radius = parseRadius(currentStyle.borderRadius);
-  const duration = parseDuration(baseStyle.transition ?? currentStyle.transition);
+  // 时长显示诚实化：只有真正设置了 transition 才显示对应秒数，否则显示 0（=无过渡，瞬间跳变）。
+  // 过去未设置时也显示 0.30s，用户以为过渡已开启，实际上什么都没写。
+  // （套用预制动效时会自动补 0.3s ease 过渡，见 Inspector 的 onApplyPreset。）
+  const duration = parseDuration(baseStyle.transition ?? currentStyle.transition, 0);
   const easing = transitionEasing(baseStyle.transition ?? currentStyle.transition);
 
   const hasTransform = Boolean(currentStyle.transform);
@@ -128,8 +148,13 @@ export function PseudoFxPanel(props: Props) {
             }
           />
           {Object.keys(currentStyle).length > 0 && (
-            <button className="btn-mini btn-danger" style={{ marginLeft: 'auto' }} onClick={onClearAll} title={`清空 :${pseudo} 的全部样式覆盖`}>
-              清空
+            <button
+              className={'btn-mini ' + (armClear ? 'btn-danger' : '')}
+              style={{ marginLeft: 'auto', opacity: armClear ? 1 : undefined }}
+              onClick={requestClear}
+              title={armClear ? '再点一次确认清空！' : `清空 :${pseudo} 的全部样式覆盖（需二次确认）`}
+            >
+              {armClear ? '确认清空？' : '清空'}
             </button>
           )}
         </div>

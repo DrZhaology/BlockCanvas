@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useScene } from '@store/sceneStore';
 import { exportHTML } from '@lib/exporter';
 import type { ProjectFileInfo } from '../global';
+import { usePersistedBool } from '@lib/usePersisted';
 
 // BlockCanvas · 网页与项目管理中枢 (Web & Project Center)
 // - 负责 HTML 网页导出 + 自动双写同名 .bcproj 工程文件（HTML 逆向成本高，双写防丢）
@@ -25,8 +26,9 @@ export function WebManager(props: {
   // 导出表单项
   const [projectName, setProjectName] = useState('我的网页');
   const [fileName, setFileName] = useState('index.html');
-  const [dualSave, setDualSave] = useState(true); // 导出 HTML 同时自动保存 .bcproj
-  const [autoPreview, setAutoPreview] = useState(false);
+  // 导出偏好：记住上次的选择，不用每次都重新勾
+  const [dualSave, setDualSave] = usePersistedBool('export-dual-save', true); // 导出 HTML 同时自动保存 .bcproj
+  const [autoPreview, setAutoPreview] = usePersistedBool('export-auto-preview', false);
 
   const refreshLists = async () => {
     setLoading(true);

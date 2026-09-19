@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Toolbar } from '@comp/Toolbar';
 import { ElementPanel } from '@comp/ElementPanel';
 import { Canvas } from '@comp/Canvas';
@@ -14,7 +14,9 @@ import { ShortcutsModal } from '@comp/ShortcutsModal';
 import { useScene, findNode } from '@store/sceneStore';
 import { useTabStore } from '@store/tabStore';
 import { refreshPlugins } from '@lib/pluginHost';
+import { withViewTransition } from '@lib/viewTransition';
 import { DEVICE_LIST, widthToBreakpoint, type DeviceId } from '@lib/device';
+import { tokensToRootCss } from '@lib/designTokens';
 
 // BlockCanvas · 主界面
 // - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
@@ -33,13 +35,16 @@ const LEFT_WIDTH_DEFAULT = 230;
 const LEFT_WIDTH_MIN = 160;
 const BOTTOM_HEIGHT_DEFAULT = 250;
 const BOTTOM_HEIGHT_MIN = 175;
-const RIGHT_WIDTH_DEFAULT = 384;
-const RIGHT_WIDTH_MIN = 300;
+const RIGHT_WIDTH_DEFAULT = 416;
+const RIGHT_WIDTH_MIN = 340;
 
 export type AppView = 'editor' | 'projects' | 'settings';
 
 export default function App() {
-  const [rightTab, setRightTab] = usePersistentState<RightTab>(RIGHT_TAB_KEY, 'inspector');
+  const [rightTab, setRightTabRaw] = usePersistentState<RightTab>(RIGHT_TAB_KEY, 'inspector');
+  // v0.4.4：页签切换不再走 View Transition —— VT 的旧帧快照会让文字"停一会儿"。
+  // 改为内容重挂载 + 轻量入场动画（见 .tab-body 的 bcSwapIn）。
+  const setRightTab = (t: RightTab) => setRightTabRaw(t);
   const [canvasWidth, setCanvasWidth] = usePersistentState<string>(CANVAS_WIDTH_KEY, 'auto');
   const [layout, setLayout] = usePersistentState<'left' | 'bottom'>(LAYOUT_KEY, 'bottom');
   const [bottomHeight, setBottomHeight] = usePersistentState<number>(BOTTOM_HEIGHT_KEY, BOTTOM_HEIGHT_DEFAULT);
@@ -47,6 +52,11 @@ export default function App() {
   const [leftWidth, setLeftWidth] = usePersistentState<number>(LEFT_WIDTH_KEY, LEFT_WIDTH_DEFAULT);
   const [zoom, setZoom] = useState(1);
   const [view, setView] = useState<AppView>('editor');
+  // 所有「整页切换」都走原生视图过渡：旧页面淡出 + 新页面淡入
+  // （不重挂载视图、不丢状态；宿主不支持或系统开了"减少动态效果"时自动降级为直接切换）
+  const switchView = useCallback((next: AppView) => {
+    withViewTransition(() => setView((cur) => (cur === next ? cur : next)));
+  }, []);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('personalization');
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -60,7 +70,18 @@ export default function App() {
   });
   const applyZoom = (fn: (z: number) => number) => setZoom(fn);
 
-  useKeyboardShortcuts(setView, () => setShowShortcuts(true));
+  // 属性面板内容越来越多，旧的 384px 默认宽度会显得很挤。
+  // 这里做一次性迁移：老用户若仍是窄面板，悄悄放宽到新的默认宽度（之后可再手动拖窄）。
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('bc-right-width-widened') === '1') return;
+      localStorage.setItem('bc-right-width-widened', '1');
+      if (rightWidth < 400) setRightWidth(RIGHT_WIDTH_DEFAULT);
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useKeyboardShortcuts(switchView, () => setShowShortcuts(true));
 
   // 0. 设备 / 断点 / 画布宽度 三合一同步
   //    - 画布宽度变化 → 自动推导当前编辑断点（电脑 / 平板 / 手机）
@@ -81,6 +102,23 @@ export default function App() {
     window.addEventListener('bc:set-device', onSetDevice);
     return () => window.removeEventListener('bc:set-device', onSetDevice);
   }, [setCanvasWidth]);
+
+  // 设计变量 → 注入文档根，让画布里的 var(--bc-*) 立刻生效（所见即所得，无需额外解析）
+  const tokens = useScene((s) => s.scene.tokens);
+  useEffect(() => {
+    let el = document.getElementById('bc-design-tokens') as HTMLStyleElement | null;
+    const css = tokensToRootCss(tokens ?? []);
+    if (!css) {
+      if (el) el.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement('style');
+      el.id = 'bc-design-tokens';
+      document.head.appendChild(el);
+    }
+    el.textContent = css;
+  }, [tokens]);
 
   // 1. 启动时像 Windows 11 记事本一样秒级恢复上次会话
   useEffect(() => {
@@ -194,13 +232,13 @@ export default function App() {
     };
     const toLeft = () => setLayout('left');
     const toBottom = () => setLayout('bottom');
-    const openProjects = () => setView('projects');
+    const openProjects = () => switchView('projects');
     const openSettings = (sec?: SettingsSection) => {
       setSettingsSection(sec || 'personalization');
-      setView('settings');
+      switchView('settings');
     };
     const openClass = () => {
-      setView('editor');
+      switchView('editor');
       setRightTab('inspector');
       window.dispatchEvent(new CustomEvent('bc:open-class'));
     };
@@ -208,7 +246,7 @@ export default function App() {
 
     const onNewTab = () => {
       useTabStore.getState().newTab();
-      setView('editor');
+      switchView('editor');
     };
 
     const onSaveProject = async () => {
@@ -241,7 +279,7 @@ export default function App() {
       const res = await window.bc.openProjectFile();
       if (res.ok && res.project?.scene) {
         useTabStore.getState().newTab(res.project.name || '已打开工程', res.project.scene, res.path);
-        setView('editor');
+        switchView('editor');
       }
     };
 
@@ -315,18 +353,18 @@ export default function App() {
       window.removeEventListener('menu:preview', onPreview);
       offs.forEach((off) => off && off());
     };
-  }, [setLayout, setView]);
+  }, [setLayout, switchView]);
 
   return (
     <div className="app">
       {view === 'projects' ? (
         <ProjectsCenter
-          onBack={() => setView('editor')}
+          onBack={() => switchView('editor')}
         />
       ) : view === 'settings' ? (
         <Settings
-          onBack={() => setView('editor')}
-          onOpenWebManager={() => setView('projects')}
+          onBack={() => switchView('editor')}
+          onOpenWebManager={() => switchView('projects')}
           initialSection={settingsSection}
           layout={layout}
           onLayoutChange={setLayout}
@@ -384,7 +422,7 @@ export default function App() {
                       onUserResize={(px) => setCanvasWidth(px + 'px')}
                     />
                   </ErrorBoundary>
-                  <CanvasOverlays canvasWidth={canvasWidth} />
+                  <CanvasOverlays />
                   {layout === 'bottom' && (
                     <div
                       className={"panel-resizer panel-resizer-horizontal" + (pocketExpanded ? " is-disabled" : "")}
@@ -416,7 +454,7 @@ export default function App() {
                         onClick={() => setRightTab('inspector')}
                       >属性</button>
                     </div>
-                    <div className="tab-body">
+                    <div className="tab-body" key={rightTab}>
                       <ErrorBoundary label="右侧面板">
                         {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
                       </ErrorBoundary>

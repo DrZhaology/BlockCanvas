@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useScene } from '@store/sceneStore';
-import { useToolbar, isVisibleOnBar } from '@store/toolbarStore';
+import { useToolbar, dockOf, getSortedItems, type ToolbarItem, type ToolbarDock } from '@store/toolbarStore';
 import { HelpButton } from './HelpButton';
 import { Icon, type IconName } from './Icon';
 import { Collapse } from './Collapse';
-import { TIPS_KEY } from './CanvasOverlays';
+import { TIPS, TIPS_KEY, setTipsEnabled } from './CanvasOverlays';
 import type { DataPathsInfo, StorageStatsInfo } from '../global';
 
 function formatBytes(bytes: number): string {
@@ -175,8 +175,7 @@ export function Settings(props: Props) {
   });
   const toggleCanvasTips = (v: boolean) => {
     setCanvasTips(v);
-    try { localStorage.setItem(TIPS_KEY, v ? '1' : '0'); } catch {}
-    window.dispatchEvent(new CustomEvent('bc:canvas-tips-changed'));
+    setTipsEnabled(v);
   };
 
   // 深色模式状态
@@ -228,11 +227,30 @@ export function Settings(props: Props) {
     window.bc.setAppConfig({ autoCleanOrphansOnStartup: v });
   };
 
-  // 工具栏设置
-  const toolbarItems = useToolbar((s) => s.items);
-  const toolbarVisible = useToolbar((s) => s.visible);
-  const setToolbarItemVisible = useToolbar((s) => s.setVisible);
+  // 工具栏管理（独立组件 ToolbarManagerSection，见文件末尾）
   const resetToolbar = useToolbar((s) => s.reset);
+
+  // 「快捷助手属性是否显示到下方 CSS 列表」—— v0.4.4 起为全局统一开关
+  // （与属性面板内的小开关是同一个，localStorage + 事件双向同步）
+  const [helperInCss, setHelperInCss] = useState<boolean>(() => {
+    try { return localStorage.getItem('bc-helper-in-css-global') !== '0'; } catch { return true; }
+  });
+  useEffect(() => {
+    const sync = () => {
+      try { setHelperInCss(localStorage.getItem('bc-helper-in-css-global') !== '0'); } catch { /* ignore */ }
+    };
+    window.addEventListener('bc:helper-in-css-changed', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('bc:helper-in-css-changed', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+  const changeHelperInCss = (v: boolean) => {
+    setHelperInCss(v);
+    try { localStorage.setItem('bc-helper-in-css-global', v ? '1' : '0'); } catch { /* ignore */ }
+    window.dispatchEvent(new CustomEvent('bc:helper-in-css-changed'));
+  };
 
   const qc = scene.quickCss ?? {};
 
@@ -240,7 +258,7 @@ export function Settings(props: Props) {
     { id: 'personalization', label: '个性化与外观', icon: '🎨', svg: 'palette', desc: '深浅主题、白边重置、同类高亮' },
     { id: 'editor', label: '编辑器与画布', icon: '🛠️', svg: 'sliders', desc: '布局模式、画布默认宽度、继承机制' },
     { id: 'storage', label: '存储与自动备份', icon: '💾', svg: 'database', desc: '备份周期、快照数量、便携 data/ 目录' },
-    { id: 'toolbar', label: '工具栏管理', icon: '🔧', svg: 'tool', desc: '按钮显隐与排列管理' },
+    { id: 'toolbar', label: '工具栏管理', icon: '🔧', svg: 'tool', desc: '每个按钮的停靠区与顺序自由编排' },
     { id: 'extensions', label: '扩展与插件中心', icon: '🧩', svg: 'puzzle', desc: '管理、启停、导入插件与模板资源包' },
     { id: 'about', label: '关于与系统', icon: 'ℹ️', svg: 'info', desc: '版本号、开源协议与技术栈' }
   ];
@@ -287,7 +305,8 @@ export function Settings(props: Props) {
           <h2 className="fluent-page-title">{NAV_ITEMS.find((n) => n.id === section)?.label}</h2>
         </div>
 
-        <div className="fluent-cards-container">
+        {/* v0.4.4：分区切换不再瞬变 —— key 变化重挂载 + 轻量入场动画（bcSwapIn） */}
+        <div className="fluent-cards-container" key={section}>
           {/* ——— 1. 个性化与外观 ——— */}
           {section === 'personalization' && (
             <>
@@ -333,7 +352,10 @@ export function Settings(props: Props) {
                 <div className="fluent-card-icon"><Icon name="sparkle" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">画布左上角技巧提示 (Tips)</div>
-                  <div className="fluent-card-desc">在画布左上角每 30 秒轮播一条编辑器使用小技巧（共 40 条）。熟悉软件后可以关掉，让画布更干净。</div>
+                  <div className="fluent-card-desc">
+                    在画布左上角每 30 秒轮播一条编辑器使用小技巧（共 <b>{TIPS.length}</b> 条）。
+                    在画布上点一下提示条可立即换下一条，点它右侧的 × 也能快速关闭。熟悉软件后可以在这里永久关掉，让画布更干净。
+                  </div>
                 </div>
                 <div className="fluent-card-ctrl">
                   <label className="fluent-switch">
@@ -437,6 +459,27 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-group-title">插入与构建习惯</div>
+              <div className="fluent-card">
+                <div className="fluent-card-icon">🧰</div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">快捷助手属性显示到下方 CSS 列表（全局）</div>
+                  <div className="fluent-card-desc">
+                    开启后，快捷助手（布局 / 文字渐变）生成的属性会同步出现在右侧面板下方的「CSS 样式属性」列表里。
+                    <b>这是全局开关，对所有元素生效</b>（不是每个元素单独记录）；关闭只是不显示，样式依然生效。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <label className="fluent-switch">
+                    <input
+                      type="checkbox"
+                      checked={helperInCss}
+                      onChange={(e) => changeHelperInCss(e.target.checked)}
+                    />
+                    <span className="fluent-slider" />
+                  </label>
+                </div>
+              </div>
+
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="bolt" /></div>
                 <div className="fluent-card-info">
@@ -702,36 +745,10 @@ export function Settings(props: Props) {
             </>
           )}
 
-          {/* ——— 4. 工具栏管理 ——— */}
-          {section === 'toolbar' && (
-            <>
-              <div className="fluent-group-title">顶部工具栏按钮显隐</div>
-              <div className="fluent-card" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <div className="fluent-card-title">自定义快捷操作按钮</div>
-                  <button className="btn-mini" onClick={resetToolbar}>恢复默认布局</button>
-                </div>
-                <div className="fluent-tb-list">
-                  {toolbarItems.filter((it) => !it.id.startsWith('plg.')).map((it) => {
-                    const isVis = isVisibleOnBar(it, toolbarVisible);
-                    return (
-                      <div key={it.id} className="fluent-tb-row">
-                        <span className="fluent-tb-name">{typeof it.label === 'function' ? it.label() : it.label}</span>
-                        <label className="fluent-switch">
-                          <input
-                            type="checkbox"
-                            checked={isVis}
-                            onChange={(e) => setToolbarItemVisible(it.id, e.target.checked)}
-                          />
-                          <span className="fluent-slider" />
-                        </label>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </>
-          )}
+          {/* ——— 4. 工具栏管理（v0.4.3 重写：真实样式预览 + 拖拽排序 + 独立开关） ——— */}
+          {section === 'toolbar' && <ToolbarManagerSection
+            resetToolbar={resetToolbar}
+          />}
 
           {/* ——— 5. 扩展与插件 (完全内嵌) ——— */}
           {section === 'extensions' && (
@@ -983,6 +1000,155 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
           </div>
         </div>
       ))}
+    </>
+  );
+}
+
+// ============ 工具栏管理（v0.4.4 · 全按钮自由池） ============
+// 预览 = 一条真实样式的工具栏（主区 + 右侧区），chips 可直接拖拽排序；
+// 列表 = 每个按钮一行（拖拽手柄 + 名称 + 停靠三段开关：主区 / 右侧 / 更多）。
+// 「更多」= 不直接显示，点工具栏右端「⋯」可用 —— 任何按钮（含编辑操作、设备切换、
+// 缩放、体检、设置）都能收进去。数据与主程序共用 toolbarStore，改完立即生效。
+
+type TbDrag = { id: string } | null;
+
+const DOCK_LABEL: Record<ToolbarDock, string> = { main: '主区', right: '右侧', more: '更多' };
+const DOCK_HINT: Record<ToolbarDock, string> = {
+  main: '显示在工具栏主区（可滚动）',
+  right: '固定在工具栏右端',
+  more: '收进「⋯更多」，不占工具栏位置'
+};
+
+function ToolbarManagerSection(props: { resetToolbar: () => void }) {
+  const { resetToolbar } = props;
+  const items = useToolbar((s) => s.items);
+  const docks = useToolbar((s) => s.docks);
+  const userOrder = useToolbar((s) => s.order);
+  const setOrder = useToolbar((s) => s.setOrder);
+  const setDock = useToolbar((s) => s.setDock);
+
+  // 全局顺序（用户排序优先，其余按注册 order 兜底）
+  const ordered = getSortedItems(items, userOrder);
+  const mainRows = ordered.filter((it) => dockOf(it, docks) === 'main');
+  const rightRows = ordered.filter((it) => dockOf(it, docks) === 'right');
+
+  // —— 拖拽状态（列表行与预览 chips 共用同一套逻辑）——
+  const [drag, setDrag] = useState<TbDrag>(null);
+  const [dropAt, setDropAt] = useState<{ id: string; before: boolean } | null>(null);
+
+  const commitReorder = (targetId: string, before: boolean) => {
+    if (!drag || drag.id === targetId) return;
+    const seq = ordered.map((it) => it.id);
+    const from = seq.indexOf(drag.id);
+    if (from < 0) return;
+    seq.splice(from, 1);
+    const to = seq.indexOf(targetId);
+    if (to < 0) return;
+    seq.splice(before ? to : to + 1, 0, drag.id);
+    setOrder(seq);
+  };
+
+  const endDrag = () => { setDrag(null); setDropAt(null); };
+
+  const rowDragProps = (id: string) => ({
+    draggable: true,
+    onDragStart: () => setDrag({ id }),
+    onDragEnd: endDrag,
+    onDragOver: (e: React.DragEvent) => {
+      e.preventDefault();
+      if (!drag || drag.id === id) return;
+      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const before = e.clientX < r.left + r.width / 2;
+      setDropAt({ id, before });
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (dropAt?.id === id) setDropAt(null);
+      e.preventDefault();
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      if (dropAt) commitReorder(dropAt.id, dropAt.before);
+      endDrag();
+    }
+  });
+
+  const chipClass = (id: string) =>
+    'tbman-chip' + (drag?.id === id ? ' is-dragging' : '') + (dropAt?.id === id && dropAt.before ? ' is-drop-before' : '');
+
+  const rowCls = (id: string) =>
+    'tbman-row' + (drag?.id === id ? ' is-dragging' : '') +
+    (dropAt?.id === id ? (dropAt.before ? ' is-drop-before' : ' is-drop-after') : '');
+
+  const nameOf = (it: ToolbarItem) => (typeof it.label === 'function' ? it.label() : (it.label ?? it.id));
+
+  const renderRow = (it: ToolbarItem) => {
+    const cur = dockOf(it, docks);
+    return (
+      <div
+        key={it.id}
+        className={rowCls(it.id)}
+        {...rowDragProps(it.id)}
+        title="按住拖动可调整按钮的顺序（跨停靠区有效）"
+      >
+        <span className="tbman-grip">⠿</span>
+        <span className="tbman-name">{nameOf(it)}</span>
+        {it.id.startsWith('plg.') && <span className="tbman-tag">插件</span>}
+        <div className="tbman-dock" role="group" aria-label="停靠区">
+          {(['main', 'right', 'more'] as ToolbarDock[]).map((d) => (
+            <button
+              key={d}
+              className={'tbman-dock-btn' + (cur === d ? ' active' : '')}
+              onClick={() => setDock(it.id, d)}
+              title={DOCK_HINT[d]}
+            >{DOCK_LABEL[d]}</button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      <div className="fluent-group-title">工具栏预览（可直接拖动调整顺序）</div>
+      <div className="fluent-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+        <div className="tbman-preview">
+          {mainRows.length === 0 && <span className="tbman-empty">主区没有按钮 —— 到下方把停靠切到「主区」</span>}
+          {mainRows.map((it) => (
+            <span key={it.id} className={chipClass(it.id)} {...rowDragProps(it.id)}>
+              <span className="tbman-chip-grip">⠿</span>
+              {nameOf(it)}
+            </span>
+          ))}
+          <span className="tbman-preview-sep" />
+          {rightRows.map((it) => (
+            <span key={it.id} className={chipClass(it.id) + ' is-right'} {...rowDragProps(it.id)}>
+              <span className="tbman-chip-grip">⠿</span>
+              {nameOf(it)}
+            </span>
+          ))}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            左段 = 主区（放不下自动滚动），右段 = 固定在右端；停靠切「更多」的按钮收进工具栏右端「⋯」。
+          </span>
+          <button
+            className="btn-mini"
+            onClick={() => { resetToolbar(); }}
+            title="清除排序与停靠记忆，恢复出厂布局"
+          >恢复默认布局</button>
+        </div>
+      </div>
+
+      <div className="tbman-group-title">
+        <span>全部按钮</span>
+        <small>{ordered.length} 个 · 含插件注册的按钮</small>
+      </div>
+      <div className="fluent-card" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+        <div className="tbman-list">
+          {ordered.length === 0 && <span className="tbman-empty">尚未注册（回到编辑器后自动出现）</span>}
+          {ordered.map(renderRow)}
+        </div>
+      </div>
     </>
   );
 }

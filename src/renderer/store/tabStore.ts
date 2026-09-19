@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { SceneGraph } from '@lib/types';
+import { DEFAULT_TOKENS } from '@lib/designTokens';
 import { useScene } from './sceneStore';
 
 // BlockCanvas · Windows Notepad 风格多工程标签页状态机 (TabStore)
@@ -24,7 +25,10 @@ export function createEmptyScene(): SceneGraph {
       style: { width: '100%', minHeight: '600px', backgroundColor: '#ffffff' }
     },
     selectedId: null,
-    selectedIds: []
+    selectedIds: [],
+    // 新项目预置一套设计变量：让「主色改一处全站变」开箱可用，
+    // 不需要用户先去面板里手动添加（不想要可以在变量面板清空）
+    tokens: DEFAULT_TOKENS.map((t) => ({ ...t }))
   };
 }
 

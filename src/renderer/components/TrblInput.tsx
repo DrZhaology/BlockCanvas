@@ -1,10 +1,18 @@
 import { useState, useEffect, useRef } from 'react';
 import { useScene, findNode } from '@store/sceneStore';
 import { CSS_UNITS, UNIT_LABELS } from '@lib/propertySchema';
+import { useWheelAdjust } from '@lib/wheelAdjust';
+import { usePersistedBool } from '@lib/usePersisted';
 
 // BlockCanvas · 四值输入（上 / 右 / 下 / 左 分开填写）
 // 设计动机：过去是一个"简写输入框"（要用户自己记住 `8px 4px 8px 4px` 的 CSS 简写顺序），
 // 新手看不懂也容易写错。现在改为 4 个独立数值框，各自带单位，一眼看清、逐个填。
+//
+// v0.4.0 改动：
+//  · **单位可以改了**：右上角保留单位下拉（原来被隐藏，导致内外边距没法换单位）；
+//  · 每个数值框都支持「长按拖动调值」（和 NumberUnitInput 同一套交互）；
+//  · 去掉一排"常用值胶囊"（用户反馈多余），保持面板清爽。
+//
 //   - 仍支持任意 CSS 值：auto / 50% / calc(100% - 20px) 直接写进框里
 //   - 「四边同步」开关：勾上后改一个，其余三个自动跟随（做四周等距留白时更快）
 //   - 落库仍写 4 个 longhand 字段，导出时由 simplifyStyle 自动合并成简写 → 代码依旧干净
@@ -17,12 +25,10 @@ interface Props {
   fallback?: string;
   /** 数值缺单位时自动补全（如 'px'），见 schema.unit */
   unit?: string;
-  /** 隐藏「单位」下拉：单位直接写在输入框右侧（如 10px、1rem），裸数字按 unit 补 */
-  hideUnit?: boolean;
 }
 
 export function TrblInput(props: Props) {
-  const { elementId, sides, fallback, unit, hideUnit } = props;
+  const { elementId, sides, fallback, unit } = props;
   const scene = useScene((s) => s.scene);
   const beginStyleEdit = useScene((s) => s.beginStyleEdit);
   const endStyleEdit = useScene((s) => s.endStyleEdit);
@@ -30,7 +36,8 @@ export function TrblInput(props: Props) {
   const updateStyle = useScene((s) => s.updateStyle);
 
   const [u, setU] = useState(unit ?? 'px');
-  const [sync, setSync] = useState(false);
+  // 「四边同步」是操作习惯，记住它 —— 上次勾着，下次打开还勾着
+  const [sync, setSync] = usePersistedBool('trbl-sync', false);
 
   const node = findNode(scene.root, elementId);
   const style = (node?.style ?? {}) as Record<string, string | undefined>;
@@ -72,18 +79,16 @@ export function TrblInput(props: Props) {
             <input type="checkbox" checked={sync} onChange={(e) => setSync(e.target.checked)} />
             四边同步
           </label>
-          {!hideUnit && (
-            <select
-              className="unit-select trbl4-unit-select"
-              value={u}
-              onChange={(e) => changeUnit(e.target.value)}
-              title="没有写单位的数字自动补这个单位"
-            >
-              {CSS_UNITS.map((un) => (
-                <option key={un} value={un} title={UNIT_LABELS[un]}>{un}</option>
-              ))}
-            </select>
-          )}
+          <select
+            className="unit-select trbl4-unit-select"
+            value={u}
+            onChange={(e) => changeUnit(e.target.value)}
+            title="数值单位：没有写单位的数字自动补这个单位；改选会同时换算已有数值"
+          >
+            {CSS_UNITS.map((un) => (
+              <option key={un} value={un} title={UNIT_LABELS[un]}>{un}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -94,7 +99,7 @@ export function TrblInput(props: Props) {
             label={s.label}
             value={style[s.key] ?? ''}
             unit={u}
-            elementId={elementId}
+            sync={sync}
             onBegin={beginStyleEdit}
             onEnd={endStyleEdit}
             onChange={(raw) => write(s.key, raw, true)}
@@ -110,13 +115,13 @@ function Trbl4Cell(props: {
   label: string;
   value: string;
   unit: string;
-  elementId: string;
+  sync: boolean;
   onBegin: () => void;
   onEnd: () => void;
   onChange: (raw: string) => void;
   onCommit: (raw: string) => void;
 }) {
-  const { label, value, unit } = props;
+  const { label, value, unit, sync } = props;
   const [draft, setDraft] = useState(value);
   const editingRef = useRef(false);
 
@@ -124,18 +129,33 @@ function Trbl4Cell(props: {
     if (!editingRef.current) setDraft(value);
   }, [value]);
 
-  const { num, hasUnit } = splitVal(value, unit);
+  const { num } = splitVal(value, unit);
+
+  // 滚轮调值：聚焦后滚动滚轮即增减（Shift ×10），停手 0.26s 自动提交
+  const wheel = useWheelAdjust({
+    getBase: () => parseFloat(splitVal(value, unit).num) || 0,
+    precision: /\./.test(splitVal(value, unit).num) ? 2 : 0,
+    onStart: () => { editingRef.current = true; props.onBegin(); },
+    onPreview: (v) => { props.onChange(String(v)); },
+    onCommit: (v) => {
+      props.onCommit(String(v));
+      props.onEnd();
+      editingRef.current = false;
+    }
+  });
 
   return (
     <div className="trbl4-cell">
       <span className="trbl4-label">{label}</span>
       <div className="trbl4-input-wrap">
         <input
+          ref={wheel.ref}
           type="text"
           className="trbl4-input"
           value={editingRef.current ? draft : (num || '')}
           placeholder="0"
           spellCheck={false}
+          title={`点一下进入输入状态：滚动滚轮调数值（上滚增大 / 下滚减小），按住 Shift 一次调 10${sync ? '（四边同步开启中）' : ''}`}
           onFocus={() => { editingRef.current = true; setDraft(num || ''); props.onBegin(); }}
           onChange={(e) => {
             const raw = e.target.value;
@@ -143,22 +163,24 @@ function Trbl4Cell(props: {
             props.onChange(raw);
           }}
           onBlur={() => {
-            editingRef.current = false;
-            props.onCommit(draft);
+            wheel.finish(); // 收尾可能未提交的滚轮调节（它会调 onCommit/onEnd）
+            if (editingRef.current) {
+              editingRef.current = false;
+              props.onCommit(draft);
+              props.onEnd();
+            }
             setDraft('');
-            props.onEnd();
           }}
           onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
         />
-        <span className={'trbl4-unit' + (hasUnit ? '' : ' is-hidden')}>{unit}</span>
       </div>
     </div>
   );
 }
 
 // ============ 数值 / 单位拆分 ============
-// 16px + 单位 px → 显示 "16" 并展示 px 后缀
-// auto / 50% / calc(...) 等 → 原样显示且不展示后缀
+// 16px + 单位 px → 显示 "16"
+// auto / 50% / calc(...) 等 → 原样显示
 function splitVal(v: string, unit: string): { num: string; hasUnit: boolean } {
   if (!v) return { num: '', hasUnit: true };
   const m = v.match(/^([+-]?(?:\d+\.?\d*|\.\d+))\s*([a-z%]*)$/i);

@@ -155,6 +155,12 @@ export function ElementPanel() {
 
   const rescan = () => window.bc.scanExtensions().then((r) => setScan(r));
 
+  /** 插入元素：统一通知右侧属性面板滚动到新元素（面板顶部就是它的属性） */
+  const insertElement = (type: ElementType) => {
+    addElement(type, selectedId);
+    window.dispatchEvent(new CustomEvent('bc:element-added', { detail: type }));
+  };
+
   useEffect(() => {
     rescan();
     // 监听插件注册新元素
@@ -187,6 +193,7 @@ export function ElementPanel() {
         return;
       }
       insertTemplate(res.template, selectedId);
+      window.dispatchEvent(new CustomEvent('bc:element-added', { detail: 'template' }));
     } finally {
       setBusy(false);
     }
@@ -253,7 +260,7 @@ export function ElementPanel() {
                       <button
                         key={it.type}
                         className={"element-btn" + (showTag ? " has-tag" : "")}
-                        onClick={() => addElement(it.type, selectedId)}
+                        onClick={() => insertElement(it.type)}
                         onMouseEnter={(e) => {
                           clearHoverTimer();
                           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -284,7 +291,7 @@ export function ElementPanel() {
                       <button
                         key={it.type}
                         className="element-btn has-tag"
-                        onClick={() => addElement(it.type as ElementType, selectedId)}
+                        onClick={() => insertElement(it.type as ElementType)}
                         onMouseEnter={(e) => {
                           clearHoverTimer();
                           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();

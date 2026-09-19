@@ -101,7 +101,7 @@ export function exportHTML(scene: SceneGraph): ExportResult {
   const ctx: StyleClassSet = createStyleClassSet();
   for (const c of scene.root.children) collectStyleClasses(c, ctx);
 
-  const styleBlock = buildStyleBlock(ctx, scene.globalCss, scene.quickCss);
+  const styleBlock = buildStyleBlock(ctx, scene.globalCss, scene.quickCss, scene.tokens);
   // 基础重置默认【不】添加（用户可在「页面」页签按需勾选）：
   // ① 去白边：html,body 默认 8px 边距 ② 标题/段落默认间距：h1~h6、p、列表等 UA 外边距
   // （真实网站都有 CSS Reset；还原网站排版时勾上第二项即可对齐原站观感）

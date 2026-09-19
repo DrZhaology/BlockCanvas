@@ -234,4 +234,7 @@ export interface SceneGraph {
     resetMargin?: string; // '1' = 导出时加 html,body 边距重置（去掉浏览器默认 8px 白边）；缺省 = 不加
     resetHeadingMargin?: string; // '1' = 重置标题/段落/列表等的浏览器默认外边距（等价于网站的 CSS Reset）；缺省 = 不加
   };
+  // 设计变量 / Token（v0.4.0）：项目级统一定义，元素样式里写 var(--bc-xxx) 引用。
+  // 导出时在 <style> 最前面生成 :root{...}，脱离本软件同样生效；改一处全站跟着变。
+  tokens?: import('./designTokens').TokenEntry[];
 }

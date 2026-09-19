@@ -75,11 +75,14 @@ export function buildShadow(p: ShadowParts): string {
   return `${p.inset ? 'inset ' : ''}${round(p.x)}px ${round(p.y)}px ${round(p.blur)}px${p.spread ? ' ' + round(p.spread) + 'px' : ''} ${p.color}`;
 }
 
-/** 从 transition 里取第一个时长（秒） */
-export function parseDuration(t: string | undefined): number {
-  if (!t) return 0.3;
+/** 从 transition 里取第一个时长（秒）。
+ *  fallback：transition 未设置时的展示值。
+ *  ⚠ 语义修正（v0.4.3）：过去未设置时兜底返回 0.3，让滑块"看起来已开启 0.3s 过渡"，
+ *  实际上根本没写 transition —— hover/active 全是瞬间跳变。现在由调用方显式给定。 */
+export function parseDuration(t: string | undefined, fallback: number = 0.3): number {
+  if (!t) return fallback;
   const m = t.match(/([\d.]+)\s*(ms|s)\b/);
-  if (!m) return 0.3;
+  if (!m) return fallback;
   const v = parseFloat(m[1]);
   return m[2] === 'ms' ? v / 1000 : v;
 }

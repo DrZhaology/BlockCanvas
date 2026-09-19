@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTabStore, type ProjectTab } from '@store/tabStore';
 import { useScene } from '@store/sceneStore';
+import { TipsTicker } from './TipsTicker';
 
 // BlockCanvas · Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
 // 遵循《设计语言规范》与 VS Code 标准交互：
@@ -8,6 +9,8 @@ import { useScene } from '@store/sceneStore';
 // - 【VS Code 一模一样的圆点与叉逻辑】：
 //     * 未保存 (isDirty)：默认展示圆点 ●，鼠标悬停 (hover) 时圆点变为关闭叉 ×（点击关闭前提示保存）；
 //     * 已保存 (!isDirty)：始终直接展示关闭叉 ×，随时可点击关闭，无需等待 hover。
+// - v0.4.3：标签宽度自适应（少→平分变宽，多→压缩+滚动）；「＋新建」移出滚动区；
+//   右侧常驻「小技巧」轮播条（只留 × 关闭，双击换一条）。
 
 export function ProjectTabBar() {
   const tabs = useTabStore((s) => s.tabs);
@@ -19,6 +22,19 @@ export function ProjectTabBar() {
   // 双击/点击铅笔重命名状态
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+
+  // 标签条是否已经放不下（出现横向滚动）——放不下时标签不再强行平分宽度
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [overflow, setOverflow] = useState(false);
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const update = () => setOverflow(el.scrollWidth > el.clientWidth + 1);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tabs]);
 
   const startRename = (e: React.MouseEvent, tab: ProjectTab) => {
     e.stopPropagation();
@@ -46,8 +62,8 @@ export function ProjectTabBar() {
   };
 
   return (
-    <div className="project-tab-bar">
-      <div className="tab-strip">
+    <div className={"project-tab-bar" + (overflow ? " tabs-overflow" : "")}>
+      <div className={"tab-strip" + (overflow ? " has-overflow" : "")} ref={stripRef}>
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           const isEditing = editingId === tab.id;
@@ -101,15 +117,19 @@ export function ProjectTabBar() {
             </div>
           );
         })}
-
-        <button
-          className="tab-add-btn"
-          onClick={() => newTab()}
-          title="新建空白项目工程 (Ctrl+N)"
-        >
-          ＋
-        </button>
       </div>
+
+      {/* ＋ 新建：不随标签滚动，常驻可见 */}
+      <button
+        className="tab-add-btn"
+        onClick={() => newTab()}
+        title="新建空白项目工程 (Ctrl+N)"
+      >
+        ＋
+      </button>
+
+      {/* 小技巧轮播条：标签再多也常驻右端（自身允许收窄省略，绝不把标签挤没） */}
+      <TipsTicker variant="tabbar" />
     </div>
   );
 }

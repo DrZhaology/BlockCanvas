@@ -1,0 +1,132 @@
+/* ==========================================================================
+   BlockCanvas · 01-foundation.css —— :root 设计变量 / 全局 reset / 错误边界 / 输入法光标 / 光标形状
+   （由单文件 styles.css 拆分而来；分片顺序 = 级联顺序，勿调整 import 顺序。
+     新增样式：优先写进语义对应的分片末尾；跨轮追加统一进 14-v04x-append.css。）
+   ========================================================================== */
+:root {
+  --bg: #f3f3f3;
+  --bg-panel: #ffffff;
+  --bg-canvas: #ffffff;
+  --border: #e5e5e5;
+  --text: #1f1f1f;
+  --text-muted: #707070;
+  --accent: #1e88e5;
+  --accent-hover: #1976d2;
+  --danger: #c62828;
+  --select: #1e88e5;
+
+  /* 主题化的浅色表面/着色（深色插件统一覆盖这些变量即可，无需逐条改程序） */
+  --hover: #f0f0f0;            /* 中性 hover 底色 */
+  --hover-accent: #f0f7ff;     /* 带主色的 hover / 选中底色 */
+  --focus-accent: #e1f0ff;     /* 更强的选中/按下底色 */
+  --accent-strong-bg: #dbeeff; /* 高强调的选中底 */
+  --chip-hover: #eee;          /* 轻 hover / 关闭钮 */
+  --tab-hover: #f5f5f5;        /* 页签 hover */
+  --muted-bg: #fbfbfb;         /* 略偏灰的面板底 */
+  --muted-bg-2: #fdfdfd;
+  --panel-soft: #fbfcfd;       /* 次级面板/搜索条底 */
+  --panel-cloud: #fafbfc;      /* 板块容器底 */
+  --panel-tint: #f7f9fc;
+  --panel-tint-2: #eef1f5;
+  --row-hover: #f5f9ff;        /* 行 hover */
+  --row-active: #e3f2fd;       /* 行选中 */
+  --row-action: #d0e3f7;       /* 行内按钮 hover */
+  --seg-active: #f0f6fe;       /* 分段/选区激活 */
+  --line-soft: #f0f0f0;        /* 细分隔线 */
+  --thumb: #e0e0e0;            /* 滚动条 */
+  --thumb-hover: #e8e8e8;
+  --stripe: #ececec;           /* 画布外斜纹 */
+  --stripe2: #f1f1f1;          /* 模板预览斜纹 */
+  --warn-bg: #fff8e1;
+  --ok-bg: #eaf6ee;
+  --err-bg: #fdecea;
+  --danger-tint: #f8d7da;
+  --conflict-bg: #fffaf2;
+  --amber-bg: #fdeeda;
+  --issue-bg: #fff8f2;
+  --err-boundary-bg: #fff7f6;
+  --err-boundary-msg-bg: #fff0ee;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; padding: 0; }
+
+/* 错误边界：渲染出错时显示可读报错，而不是白屏 */
+.error-boundary {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--err-boundary-bg);
+  padding: 32px;
+  overflow: auto;
+}
+.error-boundary-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--danger);
+}
+.error-boundary-msg {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  color: #8f3a37;
+  background: var(--err-boundary-msg-bg);
+  border: 1px solid #f3c8c4;
+  border-radius: 6px;
+  padding: 10px 14px;
+  max-width: 90%;
+  max-height: 200px;
+  overflow: auto;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.error-boundary-actions {
+  display: flex;
+  gap: 10px;
+}
+.error-boundary-actions button {
+  font-size: 13px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  cursor: pointer;
+}
+.error-boundary-actions button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+body {
+  font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* 确保所有输入框在 Electron 下光标和打字 100% 正常，永不被父级继承禁用 */
+/* 输入类控件始终可输入、可选中（.app 前缀保证足够特异性；拖拽态规则排在其后，可正常覆盖） */
+.app input,
+.app textarea,
+.app select,
+.app [contenteditable='true'],
+.app [contenteditable=''],
+.app [contenteditable] {
+  -webkit-user-select: text;
+  user-select: text;
+  pointer-events: auto;
+}
+
+/* 光标形状：:where() 让 :not() 链不贡献特异性，各处可按需覆盖 */
+.app input:where(:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"])),
+.app textarea {
+  cursor: text;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+

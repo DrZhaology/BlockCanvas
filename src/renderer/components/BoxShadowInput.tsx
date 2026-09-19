@@ -3,9 +3,16 @@ import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { ColorField } from './ColorPicker';
 
 // BlockCanvas · 盒子阴影可视化组件 (BoxShadowInput)
-// - 胶囊预设：浅浮雕、立体悬浮、发光光晕、深色弥散等一键设置
-// - 分项控制：X/Y 偏移、模糊、扩散、颜色、内阴影
-// - 支持默认状态和伪类状态（如 :hover / :active）
+//
+// v0.4.0 重写，修掉了一批真 BUG：
+//  1. **颜色解析错乱**：旧实现用 /[a-z]+/ 抓颜色，`0 4px 12px rgba(...)` 里会先匹配到 "px"，
+//     于是颜色变成 "px"，生成 `0px 4px 12px px` 这种非法值 → 画布上阴影直接失效。
+//     现在只认 rgb()/rgba()/hsl()/#hex/命名色，并且先把颜色从数字串里剔除再解析数值。
+//  2. **松手提交旧值**：滑杆拖动过程中用闭包里的旧 state 提交，最后一步经常丢。
+//     现在统一用 ref 记录最新值，松手时提交 ref。
+//  3. **多层阴影被吃掉**：只编辑第一层，其余层原样保留。
+//
+// 另加：顶部实时预览（所见即所得）、常用预设、内阴影开关、颜色走统一调色盘。
 
 interface Props {
   elementId: string;
@@ -19,48 +26,79 @@ interface ParsedShadow {
   spread: number;
   color: string;
   inset: boolean;
+  has: boolean;
 }
 
+/** 拆分多层阴影（只按顶层逗号切，括号内的逗号不动） */
+function splitShadows(v: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = '';
+  for (const ch of v) {
+    if (ch === '(') depth += 1;
+    if (ch === ')') depth = Math.max(0, depth - 1);
+    if (ch === ',' && depth === 0) { out.push(cur.trim()); cur = ''; continue; }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out.filter(Boolean);
+}
+
+const NAMED = 'transparent|currentcolor|black|white|gray|grey|red|green|blue|yellow|orange|purple|pink|brown|cyan|magenta|lime|silver|gold|navy|teal|olive|maroon';
+
 function parseBoxShadow(val: string): ParsedShadow {
-  const res: ParsedShadow = { x: 0, y: 4, blur: 12, spread: 0, color: 'rgba(0,0,0,0.15)', inset: false };
+  const res: ParsedShadow = { x: 0, y: 4, blur: 12, spread: 0, color: 'rgba(0, 0, 0, 0.15)', inset: false, has: false };
   if (!val || typeof val !== 'string') return res;
+  const first = splitShadows(val)[0];
+  if (!first) return res;
+  res.has = true;
+  res.inset = /\binset\b/i.test(first);
 
-  const isInset = /\binset\b/i.test(val);
-  res.inset = isInset;
-
-  const clean = val.replace(/\binset\b/ig, '').trim();
-
-  // 匹配颜色部分 (rgba / rgb / #hex / hsl)
-  let color = 'rgba(0,0,0,0.15)';
-  const colorMatch = /(rgba?\([^)]+\)|#[0-9a-f]{3,8}|[a-z]+)/i.exec(clean);
+  // 颜色：只认合法颜色写法（绝不能把 "px" 当成颜色）
+  const colorMatch = /(rgba?\([^)]*\)|hsla?\([^)]*\)|#[0-9a-fA-F]{3,8})/.exec(first);
   if (colorMatch) {
-    color = colorMatch[1];
+    res.color = colorMatch[1];
+  } else {
+    const named = new RegExp(`(?:^|[\\s,])(${NAMED})(?:$|[\\s,])`, 'i').exec(first);
+    if (named) res.color = named[1];
   }
-  res.color = color;
 
-  // 提取数字部分
-  const numStr = clean.replace(/(rgba?\([^)]+\)|#[0-9a-f]{3,8})/ig, '').trim();
-  const nums = numStr.split(/\s+/).map((t) => parseFloat(t)).filter((n) => !Number.isNaN(n));
-
+  // 数值：先把颜色和 inset 剔除，剩下的数字按 顺序 = x / y / blur / spread
+  const stripped = first
+    .replace(/\binset\b/ig, ' ')
+    .replace(/rgba?\([^)]*\)|hsla?\([^)]*\)|#[0-9a-fA-F]{3,8}/g, ' ')
+    .replace(new RegExp(`\\b(${NAMED})\\b`, 'ig'), ' ');
+  const nums = stripped.split(/[\s,]+/).map((t) => parseFloat(t)).filter((n) => !Number.isNaN(n));
   if (nums.length >= 2) {
-    res.x = nums[0] || 0;
-    res.y = nums[1] || 0;
-    res.blur = nums[2] !== undefined ? nums[2] : 0;
-    res.spread = nums[3] !== undefined ? nums[3] : 0;
+    res.x = nums[0];
+    res.y = nums[1];
+    res.blur = nums.length >= 3 ? nums[2] : 0;
+    res.spread = nums.length >= 4 ? nums[3] : 0;
   }
-
   return res;
 }
 
-function composeBoxShadow(p: ParsedShadow): string {
-  if (p.x === 0 && p.y === 0 && p.blur === 0 && p.spread === 0) return '';
+/** 由分项拼回 box-shadow（保留用户原有的其余阴影层） */
+function composeBoxShadow(p: ParsedShadow, rest: string[]): string {
+  const allZero = p.x === 0 && p.y === 0 && p.blur === 0 && p.spread === 0;
+  if (allZero && !p.has) return '';
   const parts: string[] = [];
   if (p.inset) parts.push('inset');
   parts.push(`${p.x}px`, `${p.y}px`, `${p.blur}px`);
   if (p.spread !== 0) parts.push(`${p.spread}px`);
-  parts.push(p.color || 'rgba(0,0,0,0.15)');
-  return parts.join(' ');
+  parts.push(p.color || 'rgba(0, 0, 0, 0.15)');
+  const all = [parts.join(' '), ...rest].filter(Boolean).join(', ');
+  return allZero && !p.inset ? '' : all;
 }
+
+const PRESETS: Array<{ label: string; css: string; hint: string }> = [
+  { label: '☁️ 浅浮雕', css: '0 2px 8px rgba(0, 0, 0, 0.08)', hint: '轻微浮起，适合大区块' },
+  { label: '📦 立体悬浮', css: '0 10px 25px rgba(0, 0, 0, 0.15)', hint: '卡片 hover / 弹层常用' },
+  { label: '🪶 轻柔贴地', css: '0 1px 3px rgba(0, 0, 0, 0.1)', hint: '几乎察觉不到的细腻投影' },
+  { label: '💡 蓝色光晕', css: '0 0 16px rgba(30, 136, 229, 0.4)', hint: '聚焦 / 选中态的发光' },
+  { label: '🏮 弥散深影', css: '0 20px 40px rgba(0, 0, 0, 0.25)', hint: '模态框、抽屉的大范围投影' },
+  { label: '🕳 内凹', css: 'inset 0 3px 8px rgba(0, 0, 0, 0.2)', hint: '像被按进表面的凹陷感' }
+];
 
 export function BoxShadowInput({ elementId, pseudo }: Props) {
   const scene = useScene((s) => s.scene);
@@ -89,198 +127,140 @@ export function BoxShadowInput({ elementId, pseudo }: Props) {
   const [inset, setInset] = useState(parsed.inset);
 
   const editingRef = useRef(false);
+  // 多层阴影的其余层（只编辑第一层，其余原样保留）
+  const restRef = useRef<string[]>(splitShadows(currentStr).slice(1));
 
   useEffect(() => {
-    if (!editingRef.current) {
-      const p = parseBoxShadow(currentStr);
-      setX(p.x);
-      setY(p.y);
-      setBlur(p.blur);
-      setSpread(p.spread);
-      setColor(p.color);
-      setInset(p.inset);
-    }
+    if (editingRef.current) return;
+    const p = parseBoxShadow(currentStr);
+    setX(p.x); setY(p.y); setBlur(p.blur); setSpread(p.spread);
+    setColor(p.color); setInset(p.inset);
+    restRef.current = splitShadows(currentStr).slice(1);
   }, [currentStr]);
+
+  // 最新值镜像：松手提交时用它，避免"提交到旧值"
+  const live = useRef({ x, y, blur, spread, color, inset });
+  live.current = { x, y, blur, spread, color, inset };
 
   const commitValue = (valStr: string) => {
     if (isPseudo) {
-      updatePseudoStyle(elementId, pseudo!, { boxShadow: valStr || undefined as any });
+      updatePseudoStyle(elementId, pseudo!, { boxShadow: (valStr || undefined) as any });
     } else {
       updateStyle(elementId, { boxShadow: valStr || undefined });
     }
   };
 
+  const write = (transient: boolean) => {
+    const css = composeBoxShadow({ ...live.current, has: true }, restRef.current);
+    if (isPseudo) commitValue(css);
+    else if (transient) updateStyleTransient(elementId, { boxShadow: css || undefined });
+    else commitValue(css);
+  };
+
   const apply = (next: Partial<ParsedShadow>, commit = false) => {
-    const full: ParsedShadow = {
-      x: next.x ?? x,
-      y: next.y ?? y,
-      blur: next.blur ?? blur,
-      spread: next.spread ?? spread,
-      color: next.color ?? color,
-      inset: next.inset ?? inset
-    };
     if (next.x !== undefined) setX(next.x);
     if (next.y !== undefined) setY(next.y);
     if (next.blur !== undefined) setBlur(next.blur);
     if (next.spread !== undefined) setSpread(next.spread);
     if (next.color !== undefined) setColor(next.color);
     if (next.inset !== undefined) setInset(next.inset);
-
-    const comp = composeBoxShadow(full);
-    if (commit) {
-      commitValue(comp);
-      endStyleEdit();
-    } else {
-      if (isPseudo) {
-        commitValue(comp);
-      } else {
-        updateStyleTransient(elementId, { boxShadow: comp || undefined });
-      }
-    }
+    live.current = { ...live.current, ...next };
+    if (commit) { write(false); endStyleEdit(); } else { write(true); }
   };
 
-  const applyPreset = (rawStr: string) => {
+  const applyPreset = (css: string) => {
     beginStyleEdit();
-    commitValue(rawStr);
+    const p = parseBoxShadow(css);
+    restRef.current = splitShadows(css).slice(1);
+    setX(p.x); setY(p.y); setBlur(p.blur); setSpread(p.spread); setColor(p.color); setInset(p.inset);
+    live.current = { x: p.x, y: p.y, blur: p.blur, spread: p.spread, color: p.color, inset: p.inset };
+    commitValue(css);
     endStyleEdit();
   };
 
+  const previewCss = composeBoxShadow({ ...live.current, has: true }, restRef.current) || 'none';
+
+  const slider = (
+    label: string,
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    onSet: (n: number) => void,
+    unit = 'px'
+  ) => (
+    <div className="vis-control-row">
+      <span className="vis-label">{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onPointerDown={() => { editingRef.current = true; beginStyleEdit(); }}
+        onChange={(e) => onSet(parseFloat(e.target.value) || 0)}
+        onPointerUp={() => { editingRef.current = false; apply({}, true); }}
+      />
+      <span className="vis-num">{value}{unit}</span>
+    </div>
+  );
+
   return (
     <div className="vis-shadow-wrap">
-      {/* 常用胶囊预设 */}
+      {/* 实时预览：一眼看到阴影到底长什么样 */}
+      <div className="bs-preview-wrap">
+        <div className="bs-preview" style={{ boxShadow: previewCss }}>阴影预览</div>
+      </div>
+
+      {/* 常用预设 */}
       <div className="vis-preset-row">
-        <button
-          className={'btn-mini' + (currentStr.includes('2px 8px') ? ' active' : '')}
-          onClick={() => applyPreset('0 2px 8px rgba(0, 0, 0, 0.08)')}
-          title="轻微浅浮雕阴影"
-        >
-          ☁️ 浅浮雕
-        </button>
-        <button
-          className={'btn-mini' + (currentStr.includes('10px 25px') ? ' active' : '')}
-          onClick={() => applyPreset('0 10px 25px rgba(0, 0, 0, 0.15)')}
-          title="立体悬浮阴影 (卡片 hover 常用)"
-        >
-          📦 立体悬浮
-        </button>
-        <button
-          className={'btn-mini' + (currentStr.includes('30, 136, 229') ? ' active' : '')}
-          onClick={() => applyPreset('0 0 16px rgba(30, 136, 229, 0.4)')}
-          title="蓝色品牌光晕效果"
-        >
-          💡 蓝色光晕
-        </button>
-        <button
-          className={'btn-mini' + (currentStr.includes('20px 40px') ? ' active' : '')}
-          onClick={() => applyPreset('0 20px 40px rgba(0, 0, 0, 0.25)')}
-          title="大范围弥散深色阴影"
-        >
-          🏮 弥散深影
-        </button>
-        {currentStr && (
+        {PRESETS.map((p) => (
           <button
-            className="btn-mini btn-danger"
-            onClick={() => applyPreset('')}
-            title="清除阴影"
-          >
+            key={p.label}
+            className={'btn-mini' + (currentStr === p.css ? ' active' : '')}
+            onClick={() => applyPreset(p.css)}
+            title={p.hint}
+          >{p.label}</button>
+        ))}
+        {currentStr && (
+          <button className="btn-mini btn-danger" onClick={() => applyPreset('')} title="清除阴影">
             🚫 无阴影
           </button>
         )}
       </div>
 
-      {/* 分项滑块与数字调节 */}
+      {/* 分项微调 */}
       <div className="vis-controls-grid">
-        {/* Y 轴垂直偏移 */}
-        <div className="vis-control-row">
-          <span className="vis-label">垂直偏移 Y</span>
-          <input
-            type="range"
-            min={-30}
-            max={40}
-            step={1}
-            value={y}
-            onMouseDown={() => { editingRef.current = true; beginStyleEdit(); }}
-            onChange={(e) => apply({ y: parseFloat(e.target.value) || 0 })}
-            onMouseUp={() => { editingRef.current = false; apply({ y }, true); }}
-          />
-          <span className="vis-num">{y}px</span>
-        </div>
+        {slider('垂直偏移 Y', y, -40, 60, 1, (n) => apply({ y: n }))}
+        {slider('水平偏移 X', x, -40, 40, 1, (n) => apply({ x: n }))}
+        {slider('模糊大小', blur, 0, 80, 1, (n) => apply({ blur: n }))}
+        {slider('扩散范围', spread, -20, 40, 1, (n) => apply({ spread: n }))}
 
-        {/* X 轴水平偏移 */}
-        <div className="vis-control-row">
-          <span className="vis-label">水平偏移 X</span>
-          <input
-            type="range"
-            min={-30}
-            max={30}
-            step={1}
-            value={x}
-            onMouseDown={() => { editingRef.current = true; beginStyleEdit(); }}
-            onChange={(e) => apply({ x: parseFloat(e.target.value) || 0 })}
-            onMouseUp={() => { editingRef.current = false; apply({ x }, true); }}
-          />
-          <span className="vis-num">{x}px</span>
-        </div>
-
-        {/* 模糊半径 */}
-        <div className="vis-control-row">
-          <span className="vis-label">模糊大小 (Blur)</span>
-          <input
-            type="range"
-            min={0}
-            max={60}
-            step={1}
-            value={blur}
-            onMouseDown={() => { editingRef.current = true; beginStyleEdit(); }}
-            onChange={(e) => apply({ blur: parseFloat(e.target.value) || 0 })}
-            onMouseUp={() => { editingRef.current = false; apply({ blur }, true); }}
-          />
-          <span className="vis-num">{blur}px</span>
-        </div>
-
-        {/* 扩散大小 */}
-        <div className="vis-control-row">
-          <span className="vis-label">扩散范围 (Spread)</span>
-          <input
-            type="range"
-            min={-15}
-            max={30}
-            step={1}
-            value={spread}
-            onMouseDown={() => { editingRef.current = true; beginStyleEdit(); }}
-            onChange={(e) => apply({ spread: parseFloat(e.target.value) || 0 })}
-            onMouseUp={() => { editingRef.current = false; apply({ spread }, true); }}
-          />
-          <span className="vis-num">{spread}px</span>
-        </div>
-
-        {/* 阴影颜色与内阴影开关 */}
         <div className="vis-control-row-full">
           <div className="vis-shadow-color-wrap">
             <span className="vis-label">阴影颜色</span>
             <ColorField
               value={color}
               fallback="rgba(0,0,0,0.15)"
-              onInputFocus={() => { beginStyleEdit(); }}
-              onChange={(c) => apply({ color: c })}
-              onInputBlur={(c) => apply({ color: c }, true)}
-              onModalOpen={() => { beginStyleEdit(); }}
-              onModalClose={(c) => apply({ color: c }, true)}
+              onInputFocus={() => { editingRef.current = true; beginStyleEdit(); }}
+              onChange={(c) => { setColor(c); live.current.color = c; write(true); }}
+              onInputBlur={(c) => { setColor(c); live.current.color = c; write(false); editingRef.current = false; endStyleEdit(); }}
+              onModalOpen={() => { editingRef.current = true; beginStyleEdit(); }}
+              onModalClose={(c) => { setColor(c); live.current.color = c; write(false); editingRef.current = false; endStyleEdit(); }}
             />
           </div>
-          <label className="vis-check-label" title="开启内阴影 (inset)">
+          <label className="vis-check-label" title="内阴影：阴影画在元素内部">
             <input
               type="checkbox"
               checked={inset}
-              onChange={(e) => {
-                beginStyleEdit();
-                apply({ inset: e.target.checked }, true);
-              }}
+              onChange={(e) => { beginStyleEdit(); apply({ inset: e.target.checked }, true); }}
             />
-            内阴影 (inset)
+            内阴影
           </label>
         </div>
       </div>
     </div>
   );
 }
+
+export default BoxShadowInput;

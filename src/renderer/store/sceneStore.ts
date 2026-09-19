@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { SceneElement, SceneGraph, ElementType, ElementStyle, Breakpoint } from '@lib/types';
 import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS } from '@lib/types';
 import { SCHEMA } from '@lib/propertySchema';
+import type { TokenEntry } from '@lib/designTokens';
 
 // 把 schema 转成 key→item 映射，便于 removeVisibleProp 知道一条属性对应的 style 字段
 const SCHEMA_LOOKUP = new Map<string, (typeof SCHEMA)[number]>();
@@ -17,6 +18,13 @@ function uuid(): string {
 const genId = uuid;
 
 // ============ 节点工厂 ============
+// 需要默认内边距的块级容器（div 及同类容器）：
+// 新插入自带 8px padding —— 嵌套/堆叠不会完全叠在一起看不出层次，
+// 且写入 visibleProps 让右侧「CSS 样式属性」把"内边距"行列出来（可改可清）。
+const PADDED_CONTAINER_TYPES: ReadonlySet<ElementType> = new Set([
+  'div', 'section', 'header', 'nav', 'footer', 'main', 'article', 'aside'
+]);
+
 export function createElement(type: ElementType, overrides: Partial<SceneElement> = {}): SceneElement {
   return {
     id: uuid(),
@@ -25,6 +33,7 @@ export function createElement(type: ElementType, overrides: Partial<SceneElement
     style: defaultStyleFor(type),
     text: defaultTextFor(type),
     attrs: defaultAttrsFor(type),
+    ...(PADDED_CONTAINER_TYPES.has(type) ? { visibleProps: ['padding'] } : {}),
     ...overrides
   };
 }
@@ -53,9 +62,18 @@ function defaultStyleFor(type: ElementType): ElementStyle {
     case 'main':
     case 'article':
     case 'aside':
+      // v0.4.4：块级容器默认 8px 内边距（createElement 会同步写 visibleProps）。
+      // ⚠ 必须写 4 个 longhand，不能写 `padding: '8px'` 简写 ——
+      // 四值输入（TrblInput）读的是 paddingTop/... 4 个字段，写简写会显示 0,0,0,0，
+      // 且用户编辑 longhand 时残留的简写会在 simplifyStyle 输出里反过来覆盖它（改不动）。
+      // 4 边都有值 → 导出时 simplifyStyle 自动合并回 `padding: 8px` 简写，代码依旧干净。
       return {
         width: '100%',
         minHeight: '80px',
+        paddingTop: '8px',
+        paddingRight: '8px',
+        paddingBottom: '8px',
+        paddingLeft: '8px',
         backgroundColor: '#eaf2ff'
       };
     case 'h1':
@@ -394,6 +412,8 @@ export interface SceneStore {
   setGlobalCss: (text: string) => void;
   // 页面快速设置（4-D）：合并更新 body/a 可视化项，导出顺序：自动样式 → 快速设置 → 高级 CSS
   setQuickCss: (patch: Record<string, string | undefined>) => void;
+  // 设计变量（v0.4.0）：整份替换 tokens 列表（增 / 删 / 改名 / 改值都走这里，算一步撤销）
+  setTokens: (tokens: TokenEntry[]) => void;
   // 显式标记"已添加"的 CSS schema key（用户从"+ 添加属性"加入后即记入，
   // 即使值被清空也保留，避免 user 编辑值时属性行消失）
   addVisibleProp: (id: string, key: string) => void;
@@ -1109,6 +1129,20 @@ export const useScene = create<SceneStore>((set) => ({
       const push = !st.styleEditPending;
       return {
         scene: { ...st.scene, quickCss: { ...(st.scene.quickCss ?? {}), ...patch } },
+        history: push ? pushPast(st.history, st.scene) : st.history
+      };
+    });
+  },
+
+  // 设计变量（v0.4.0）：整份替换。调用方（变量面板）负责保证列表完整，
+  // 这里只管写回并入栈 —— 因此一次「加 / 删 / 改名」在撤销栈里都是一步。
+  setTokens: (tokens) => {
+    set((st) => {
+      // 与 setQuickCss 一致：若调用方已用 beginStyleEdit 开了一次会话，就不重复压栈，
+      // 这样「变量改名 + 连带改所有引用」在撤销栈里仍然只有一步。
+      const push = !st.styleEditPending;
+      return {
+        scene: { ...st.scene, tokens },
         history: push ? pushPast(st.history, st.scene) : st.history
       };
     });
