@@ -7,6 +7,7 @@ import { Inspector } from '@comp/Inspector';
 import { LayerTree } from '@comp/LayerTree';
 import { ErrorBoundary } from '@comp/ErrorBoundary';
 import { ProjectsCenter } from '@comp/ProjectsCenter';
+import { UpdateCenter } from '@comp/UpdateCenter';
 import { Settings, type SettingsSection } from '@comp/Settings';
 import { ProjectTabBar } from '@comp/ProjectTabBar';
 import { AboutModal } from '@comp/About';
@@ -38,7 +39,7 @@ const BOTTOM_HEIGHT_MIN = 175;
 const RIGHT_WIDTH_DEFAULT = 416;
 const RIGHT_WIDTH_MIN = 340;
 
-export type AppView = 'editor' | 'projects' | 'settings';
+export type AppView = 'editor' | 'projects' | 'settings' | 'update';
 
 export default function App() {
   const [rightTab, setRightTabRaw] = usePersistentState<RightTab>(RIGHT_TAB_KEY, 'inspector');
@@ -60,7 +61,6 @@ export default function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('personalization');
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [_updating, setUpdating] = useState(false);
   const [pocketExpanded, setPocketExpanded] = useState(() => {
     try {
       return localStorage.getItem('bc-elem-tab') === 'templates' && localStorage.getItem('bc-pocket-expanded') === 'true';
@@ -167,7 +167,7 @@ export default function App() {
     return () => window.removeEventListener('bc:plugins-changed', onPluginsChanged);
   }, []);
 
-  // 4. 启动延迟检测更新（5秒后静默检查，有更新则弹窗）
+  // 4. 启动延迟检测更新（5秒后静默检查，有更新则打开软件内更新中心页面）
   useEffect(() => {
     const checkAndNotify = async () => {
       try {
@@ -178,51 +178,18 @@ export default function App() {
       } catch {}
 
       try {
-        const result = await window.bc.checkUpdate();
-        if (!result.ok || !result.hasUpdate) return;
-        // 弹窗通知
-        setTimeout(() => {
-          const confirmed = confirm(
-            `发现新版本 ${result.latestVersion}！\n\n当前版本：${result.localVersion}\n${result.releaseName ? '版本说明：' + result.releaseName + '\n' : ''}是否立即下载并更新？`
-          );
-          if (confirmed && result.downloadUrl) {
-            handleApplyUpdate(result.downloadUrl);
-          }
-        }, 500);
+        const result = (await window.bc.checkUpdate()) as unknown as { ok: boolean; hasUpdate: boolean };
+        // v0.4.1：不再弹窗 —— 发现新版本直接切到软件内「更新中心」页面展示详情
+        if (result.ok && result.hasUpdate) switchView('update');
       } catch {}
     };
     const timer = window.setTimeout(checkAndNotify, 5000);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [switchView]);
 
-  const handleApplyUpdate = async (assetUrl: string) => {
-    setUpdating(true);
-    try {
-      const res = await window.bc.applyUpdate(assetUrl);
-      if (!res.ok) alert('更新失败：' + (res.error || '未知错误'));
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const checkAndUpdateManually = async () => {
-    try {
-      const result = await window.bc.checkUpdate();
-      if (!result.ok) { alert('检测更新失败：' + (result.error || '未知错误')); return; }
-      if (!result.hasUpdate) {
-        alert(`当前已是最新版本 ${result.localVersion}，无需更新。`);
-        return;
-      }
-      const confirmed = confirm(
-        `发现新版本 ${result.latestVersion}！\n\n当前版本：${result.localVersion}\n${result.releaseName ? '版本说明：' + result.releaseName + '\n' : ''}是否立即下载并更新？`
-      );
-      if (confirmed && result.downloadUrl) {
-        handleApplyUpdate(result.downloadUrl);
-      }
-    } catch (e: any) {
-      alert('检测更新失败：' + (e.message || '未知错误'));
-    }
-  };
+  // v0.4.1：更新相关 UI 全部收敛到软件内「更新中心」页面（UpdateCenter），
+  // 旧的 confirm 弹窗流程已删除。菜单"检查更新" = 跳转到该页面。
+  const openUpdateCenter = useCallback(() => switchView('update'), [switchView]);
 
   // 4. 菜单 & 事件路由监听
   useEffect(() => {
@@ -307,7 +274,7 @@ export default function App() {
     window.addEventListener('menu:settings', () => openSettings());
     window.addEventListener('menu:class-manager', openClass);
     window.addEventListener('menu:about', openAbout);
-    window.addEventListener('menu:check-update', () => checkAndUpdateManually());
+    window.addEventListener('menu:check-update', openUpdateCenter);
     window.addEventListener('menu:new-tab', onNewTab);
     window.addEventListener('menu:save-project', onSaveProject);
     window.addEventListener('menu:save-project-as', onSaveProjectAs);
@@ -323,7 +290,7 @@ export default function App() {
       window.bc.onMenu('menu:settings', () => openSettings()),
       window.bc.onMenu('menu:class-manager', openClass),
       window.bc.onMenu('menu:about', openAbout),
-      window.bc.onMenu('menu:check-update', () => checkAndUpdateManually()),
+      window.bc.onMenu('menu:check-update', openUpdateCenter),
       window.bc.onMenu('menu:new-tab', onNewTab),
       window.bc.onMenu('menu:save-project', onSaveProject),
       window.bc.onMenu('menu:save-project-as', onSaveProjectAs),
@@ -344,7 +311,7 @@ export default function App() {
       window.removeEventListener('menu:settings', () => openSettings());
       window.removeEventListener('menu:class-manager', openClass);
       window.removeEventListener('menu:about', openAbout);
-      window.removeEventListener('menu:check-update', () => checkAndUpdateManually());
+      window.removeEventListener('menu:check-update', openUpdateCenter);
       window.removeEventListener('menu:new-tab', onNewTab);
       window.removeEventListener('menu:save-project', onSaveProject);
       window.removeEventListener('menu:save-project-as', onSaveProjectAs);
@@ -353,11 +320,13 @@ export default function App() {
       window.removeEventListener('menu:preview', onPreview);
       offs.forEach((off) => off && off());
     };
-  }, [setLayout, switchView]);
+  }, [setLayout, switchView, openUpdateCenter]);
 
   return (
     <div className="app">
-      {view === 'projects' ? (
+      {view === 'update' ? (
+        <UpdateCenter onBack={() => switchView('editor')} />
+      ) : view === 'projects' ? (
         <ProjectsCenter
           onBack={() => switchView('editor')}
         />
@@ -365,6 +334,7 @@ export default function App() {
         <Settings
           onBack={() => switchView('editor')}
           onOpenWebManager={() => switchView('projects')}
+          onOpenUpdateCenter={openUpdateCenter}
           initialSection={settingsSection}
           layout={layout}
           onLayoutChange={setLayout}

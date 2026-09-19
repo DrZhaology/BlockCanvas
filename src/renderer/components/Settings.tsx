@@ -33,10 +33,12 @@ interface Props {
   onLayoutChange: (l: 'left' | 'bottom') => void;
   canvasWidth: string;
   onCanvasWidthChange: (w: string) => void;
+  /** 打开软件内更新中心页（v0.4.1：更新不再走弹窗） */
+  onOpenUpdateCenter?: () => void;
 }
 
 export function Settings(props: Props) {
-  const { onBack, onOpenWebManager, layout, onLayoutChange, canvasWidth, onCanvasWidthChange, initialSection } = props;
+  const { onBack, onOpenWebManager, layout, onLayoutChange, canvasWidth, onCanvasWidthChange, initialSection, onOpenUpdateCenter } = props;
   const [section, setSection] = useState<SettingsSection>(initialSection || 'personalization');
   const [paths, setPaths] = useState<DataPathsInfo | null>(null);
   const [storageStats, setStorageStats] = useState<StorageStatsInfo | null>(null);
@@ -86,61 +88,6 @@ export function Settings(props: Props) {
       alert('清理失败: ' + (e.message || '未知错误'));
     }
   };
-
-  const handleCheckUpdate = async () => {
-    const btn = document.getElementById('btn-check-update') as HTMLButtonElement | null;
-    const resultCard = document.getElementById('update-result-card');
-    const resultTitle = document.getElementById('update-result-title');
-    const resultDesc = document.getElementById('update-result-desc');
-    if (btn) btn.disabled = true;
-    if (btn) btn.textContent = '检测中…';
-    try {
-      const result = await window.bc.checkUpdate();
-      if (!result.ok) {
-        if (resultCard) resultCard.style.display = '';
-        if (resultTitle) resultTitle.textContent = result.isDev ? '开发调试模式' : '检测失败';
-        if (resultDesc) {
-          resultDesc.innerHTML = result.isDev
-            ? `<span style="color:var(--text-muted)">当前处于源码调试环境 (pnpm dev)，在线检测更新仅在正式构建打包后的绿色版中生效。</span>`
-            : `<span style="color:#c62828">${result.error || '无法连接到更新服务器'}</span><br/>请确认网络通畅且已关闭 Watt Toolkit。`;
-        }
-        return;
-      }
-      if (resultCard) resultCard.style.display = '';
-      if (result.hasUpdate) {
-        if (resultTitle) resultTitle.textContent = `发现新版本 ${result.latestVersion}`;
-        if (resultDesc) resultDesc.innerHTML =
-          `当前版本：<b>${result.localVersion}</b><br/>最新版本：<b style="color:var(--accent)">${result.latestVersion}</b>` +
-          (result.releaseName ? `<br/>${result.releaseName}` : '') +
-          `<br/><br/><button class="btn-primary btn-mini" onclick="window._applyUpdate('${result.downloadUrl}')">立即下载并更新</button>`;
-      } else {
-        if (resultTitle) resultTitle.textContent = '已是最新版本';
-        if (resultDesc) resultDesc.textContent = `当前版本 ${result.localVersion}，无需更新。`;
-      }
-    } catch (e: any) {
-      if (resultCard) resultCard.style.display = '';
-      if (resultTitle) resultTitle.textContent = '检测失败';
-      if (resultDesc) resultDesc.textContent = e.message || '未知错误';
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '立即检测'; }
-    }
-  };
-
-  // 全局挂接下载更新按钮的点击事件
-  useEffect(() => {
-    (window as any)._applyUpdate = async (url: string) => {
-      const confirmed = confirm('即将下载并更新程序，更新期间程序会重启。是否继续？');
-      if (!confirmed) return;
-      const btn = document.getElementById('btn-check-update') as HTMLButtonElement | null;
-      if (btn) { btn.disabled = true; btn.textContent = '更新中…'; }
-      try {
-        const res = await window.bc.applyUpdate(url);
-        if (!res.ok) alert('更新失败：' + (res.error || '未知错误'));
-      } finally {
-        if (btn) { btn.disabled = false; btn.textContent = '立即检测'; }
-      }
-    };
-  }, []);
 
   // 场景与全局设置
   const scene = useScene((s) => s.scene);
@@ -724,22 +671,17 @@ export function Settings(props: Props) {
               <div className="fluent-card">
                 <div className="fluent-card-icon">🔄</div>
                 <div className="fluent-card-info">
-                  <div className="fluent-card-title">检测更新</div>
+                  <div className="fluent-card-title">更新中心</div>
                   <div className="fluent-card-desc">
-                    连接 GitHub Releases API 检查最新版本。下载通过 gh-proxy 镜像完成。
+                    连接 GitHub Releases（含预发布版）检查最新版本；下载走 gh-proxy 镜像加速，
+                    自动替换程序文件并完整保留 data/ 数据。
                     <br /><span style={{ color: '#c62828', fontWeight: 600 }}>注意：请确保后台关闭 Watt Toolkit（原 Clash Verge），否则镜像无法使用。</span>
                   </div>
                 </div>
                 <div className="fluent-card-ctrl">
-                  <button className="btn-primary btn-mini" id="btn-check-update" onClick={handleCheckUpdate}>
-                    立即检测
+                  <button className="btn-primary btn-mini" onClick={() => onOpenUpdateCenter?.()}>
+                    打开更新中心
                   </button>
-                </div>
-              </div>
-              <div className="fluent-card" id="update-result-card" style={{ display: 'none' }}>
-                <div className="fluent-card-info" id="update-result-info">
-                  <div className="fluent-card-title" id="update-result-title"></div>
-                  <div className="fluent-card-desc" id="update-result-desc"></div>
                 </div>
               </div>
             </>

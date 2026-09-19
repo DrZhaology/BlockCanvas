@@ -52,12 +52,42 @@ export function ProjectTabBar() {
 
   const handleClose = (e: React.MouseEvent, tab: ProjectTab) => {
     e.stopPropagation();
-    if (tab.isDirty && tab.filePath) {
-      if (confirm(`项目「${tab.name}」有未保存的修改，是否在关闭前保存？`)) {
+
+    // —— v0.4.1 修复：未保存标签关闭保护（模仿记事本）——
+    // 过去的 BUG：新建标签页写了内容、从未 Ctrl+S 时，点 × 会被【无提示直接关闭】，
+    // 且该标签同时从会话恢复（data/session.json）里移除 —— 项目就这么丢了。
+    //
+    // 现在的策略：
+    //  · 干净标签（无任何修改）→ 直接关，无感；
+    //  · 改过 + 已有文件 → 提示"保存后关闭"（确定=保存并关；取消=保持打开）；
+    //  · 改过 + 从未保存过 → 明确警告"关闭后无法找回"（确定=放弃；取消=留着）。
+    // 关闭整个软件时的会话恢复特性不受影响：没被 × 关掉的标签（含未保存草稿）仍走
+    // data/session.json 原地恢复，下次打开还是一样的界面。
+    if (tab.isDirty) {
+      if (tab.filePath) {
+        const saveFirst = confirm(
+          `项目「${tab.name}」有未保存的修改。\n\n` +
+            `确定 = 保存并关闭\n取消 = 保持打开（不关闭）`
+        );
+        if (!saveFirst) return;
         const curScene = useScene.getState().scene;
-        window.bc.saveProject({ name: tab.name, scene: curScene }, false, tab.filePath);
+        window.bc.saveProject({ name: tab.name, scene: curScene }, false, tab.filePath).then(() => {
+          useTabStore.getState().setTabSaved(tab.id, tab.filePath!, tab.name);
+          closeTab(tab.id);
+        });
+        return;
       }
+      const abandon = confirm(
+        `「${tab.name}」还没有保存过（Ctrl+S 可保存为 .bcproj 工程文件）。\n\n` +
+          `直接关闭后，这个项目将从标签列表移除且无法找回。\n` +
+          `（提示：不点 ×、直接退出软件的话，未保存草稿仍会在下次打开时恢复）\n\n` +
+          `确定要直接关闭吗？`
+      );
+      if (!abandon) return;
+      closeTab(tab.id);
+      return;
     }
+
     closeTab(tab.id);
   };
 

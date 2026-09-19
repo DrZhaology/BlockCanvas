@@ -7,7 +7,7 @@ import {
   dataRoot, initDataDirectories, readAppConfig, writeAppConfig, listProjects,
   listProjectBackups, saveProjectSnapshotFile, deleteProjectBackupFolder,
   readSession, writeSession, getStorageStats, clearAppCache, clearOrphanBackups,
-  getLocalVersion, fetchLatestRelease, compareVersion, findMatchingAsset, applyUpdate
+  getLocalVersion, fetchReleases, compareVersion, findMatchingAsset, applyUpdate
 } from './userData';
 
 // 启动最优先：初始化纯便携数据区 data/，隔离系统盘
@@ -173,33 +173,49 @@ ipcMain.handle('data:clear-orphan-backups', () => clearOrphanBackups());
 ipcMain.handle('update:get-version', () => getLocalVersion());
 
 ipcMain.handle('update:check', async () => {
-  if (!app.isPackaged) {
-    return {
-      ok: false,
-      isDev: true,
-      hasUpdate: false,
-      error: '当前处于源码开发调试模式 (pnpm dev)，检测与安装更新仅在正式构建打包后的版本中可用。'
-    };
-  }
   const localVer = getLocalVersion();
-  const release = await fetchLatestRelease();
-  if (!release) return { ok: false, error: '无法连接到更新服务器' };
-  const cmp = compareVersion(localVer, release.version);
+  const releases = await fetchReleases(10);
+  if (!releases || releases.length === 0) return { ok: false, error: '无法连接到更新服务器（请检查网络，并确保已关闭 Watt Toolkit / Clash 等后台代理）' };
+
+  const latest = releases[0];
+  const hasUpdate = compareVersion(localVer, latest.version) < 0;
+  // 当前平台的匹配资产（null = 这一版没有当前平台的构建，可检测不可更新）
+  const latestAsset = findMatchingAsset(latest.assets);
   return {
     ok: true,
+    isDev: !app.isPackaged,
     localVersion: localVer,
-    latestVersion: release.version,
-    releaseName: release.name,
-    publishedAt: release.publishedAt,
-    hasUpdate: cmp < 0,
-    downloadUrl: findMatchingAsset(release.assets),
-    assets: release.assets
+    hasUpdate,
+    platform: process.platform,
+    releases: releases.map((r) => ({
+      tag: r.tag,
+      version: r.version,
+      name: r.name,
+      publishedAt: r.publishedAt,
+      prerelease: !!r.prerelease,
+      body: r.body || '',
+      assets: r.assets
+    })),
+    latest: {
+      version: latest.version,
+      name: latest.name,
+      tag: latest.tag,
+      publishedAt: latest.publishedAt,
+      prerelease: !!latest.prerelease,
+      asset: latestAsset
+    }
   };
 });
 
-ipcMain.handle('update:apply', async (_evt, assetUrl: string, onProgress?: (msg: string) => void) => {
+ipcMain.handle('update:apply', async (evt, assetUrl: string) => {
   if (!assetUrl) return { ok: false, error: '未找到下载地址' };
-  return await applyUpdate(assetUrl, onProgress);
+  if (!app.isPackaged) {
+    return { ok: false, error: '当前处于源码开发模式（pnpm dev），没有可替换的安装目录。自动更新仅对打包后的便携版生效。' };
+  }
+  // 进度推送到发起更新的窗口（渲染层在更新页面里展示）
+  return await applyUpdate(assetUrl, (msg, pct) => {
+    try { evt.sender.send('update:progress', { msg, pct }); } catch { /* 窗口可能已关闭 */ }
+  });
 });
 
 ipcMain.handle('data:open-path', async (_evt, target: string) => {

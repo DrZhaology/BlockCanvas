@@ -1191,3 +1191,140 @@ html[data-bc-dark] .fp-badge.lic-unknown { color: #94a3b8; border-color: #475569
   white-space: nowrap;
 }
 .token-del { width: 26px; }
+
+
+/* ==========================================================================
+   v0.4.1 更新中心（软件内页面，替代弹窗流程）
+   ========================================================================== */
+.update-page {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  animation: bcSwapIn var(--dur-view) var(--ease-standard);
+  overflow: hidden;
+}
+.update-topbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.update-brand { display: flex; align-items: center; gap: 8px; }
+.update-brand-logo { font-size: 18px; }
+.update-brand-text { font-size: 14px; font-weight: 700; color: var(--text); }
+
+.update-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scrollbar-gutter: stable;
+}
+.update-card {
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-panel);
+}
+.update-card-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.update-current-label { font-size: 11px; color: var(--text-muted); }
+.update-current-ver { font-size: 24px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.update-mirror-tip {
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--amber-bg, #fff8e6);
+  border: 1px solid #f0c36d;
+}
+html[data-bc-dark] .update-mirror-tip { color: var(--text-muted); }
+.update-status { font-size: 12px; color: var(--text-muted); padding: 4px 2px; }
+.update-error { color: var(--danger); }
+
+.update-found-title { font-size: 15px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.update-found-sub { font-size: 11.5px; color: var(--text-muted); margin: 4px 0 10px; }
+.update-prerelease-badge {
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--amber-bg, #fff8e6);
+  border: 1px solid #f0c36d;
+  color: #b45309;
+  font-weight: 600;
+}
+.update-asset { font-size: 12px; color: var(--text); margin-bottom: 10px; line-height: 1.6; }
+.update-asset.warn { color: #b45309; }
+.update-install-btn { height: 36px; font-size: 13px; }
+
+.update-progress { margin-top: 8px; }
+.update-progress-msg { font-size: 12px; color: var(--text); margin-bottom: 6px; }
+.update-progress-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--panel-tint);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.update-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+.update-progress.done { color: #15803d; font-weight: 600; }
+.update-apply-error { margin-top: 8px; font-size: 12px; color: var(--danger); }
+
+.update-list-title { font-size: 13px; font-weight: 700; color: var(--text); margin-top: 8px; }
+.update-list { display: flex; flex-direction: column; gap: 10px; }
+.update-release {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-panel);
+}
+.update-release-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.update-release-head b { font-size: 13px; color: var(--text); }
+.update-release-tag {
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+.update-release-date { font-size: 10.5px; color: var(--text-muted); margin-left: auto; }
+.update-release-notes {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--panel-soft);
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.update-release-assets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.update-release-asset {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.update-release-noasset { font-size: 10.5px; color: var(--text-muted); }
