@@ -22,10 +22,13 @@ dev-run.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+# electron-vite dev 启动时生成的临时配置副本
+electron.vite.config.*.mjs
 
 # ---- e2e 生成物（保留 *.mjs 测试脚本，剔除自动生成的截图/检查文件/报告）----
 tests/e2e/shots/
 tests/e2e/shots-mc/
+tests/e2e/shots-v041/
 tests/e2e/*.html
 tests/e2e/report*.txt
 tests/e2e/last-run.log

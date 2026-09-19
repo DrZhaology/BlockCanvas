@@ -3,6 +3,7 @@ import { useScene, findNode } from '@store/sceneStore';
 import type { ElementType } from '@lib/types';
 import { exportHTML } from '@lib/exporter';
 import { HelpButton } from './HelpButton';
+import { Collapse } from './Collapse';
 import { getPluginElements } from '@lib/pluginHost';
 
 // BlockCanvas · 元素面板
@@ -154,6 +155,12 @@ export function ElementPanel() {
 
   const rescan = () => window.bc.scanExtensions().then((r) => setScan(r));
 
+  /** 插入元素：统一通知右侧属性面板滚动到新元素（面板顶部就是它的属性） */
+  const insertElement = (type: ElementType) => {
+    addElement(type, selectedId);
+    window.dispatchEvent(new CustomEvent('bc:element-added', { detail: type }));
+  };
+
   useEffect(() => {
     rescan();
     // 监听插件注册新元素
@@ -186,6 +193,7 @@ export function ElementPanel() {
         return;
       }
       insertTemplate(res.template, selectedId);
+      window.dispatchEvent(new CustomEvent('bc:element-added', { detail: 'template' }));
     } finally {
       setBusy(false);
     }
@@ -252,7 +260,7 @@ export function ElementPanel() {
                       <button
                         key={it.type}
                         className={"element-btn" + (showTag ? " has-tag" : "")}
-                        onClick={() => addElement(it.type, selectedId)}
+                        onClick={() => insertElement(it.type)}
                         onMouseEnter={(e) => {
                           clearHoverTimer();
                           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -283,7 +291,7 @@ export function ElementPanel() {
                       <button
                         key={it.type}
                         className="element-btn has-tag"
-                        onClick={() => addElement(it.type as ElementType, selectedId)}
+                        onClick={() => insertElement(it.type as ElementType)}
                         onMouseEnter={(e) => {
                           clearHoverTimer();
                           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -465,7 +473,7 @@ function TemplateLibrary(props: {
               </span>
             </div>
             {r.error && <div className="hint" style={{ color: '#c0392b' }}>加载失败：{r.error}</div>}
-            {!resCollapsed && (
+            <Collapse open={!resCollapsed}>
               <div className="tpl-group-inner">
                 {cats.length > 1 ? (
                   // 多分类：内部再按分类折叠展示
@@ -482,7 +490,7 @@ function TemplateLibrary(props: {
                           <span className="tpl-sub-cat-badge">{cat.name}</span>
                           <span className="tpl-group-meta">{cat.templates.length} 个模板</span>
                         </div>
-                        {!catCollapsed && (
+                        <Collapse open={!catCollapsed}>
                           <div className="tpl-grid">
                             {cat.templates.map((t) => (
                               <TemplateCard
@@ -495,7 +503,7 @@ function TemplateLibrary(props: {
                               />
                             ))}
                           </div>
-                        )}
+                        </Collapse>
                       </div>
                     );
                   })
@@ -515,7 +523,7 @@ function TemplateLibrary(props: {
                   </div>
                 )}
               </div>
-            )}
+            </Collapse>
           </div>
         );
       })}
@@ -617,7 +625,7 @@ function TemplateCard(props: {
     if (!doc) return;
     // 禁掉 iframe 内滚动（滚动条在做缩略图时很难看）：宽/高都按内容量出后再裁
     const style = doc.createElement('style');
-    style.textContent = 'html, body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; }';
+    style.textContent = 'html body { margin: 0; padding: 0; overflow: hidden; }';
     doc.head.appendChild(style);
     // 宽度取实际内容宽（用 template root 自带宽度作为基准，scrollWidth 充触防止超宽元素溢出），
     // 高度同样从真实内容量（封顶防长页面撑高卡片）
@@ -741,7 +749,7 @@ function TemplatePreviewOverlay(props: {
     if (!doc) return;
     // 禁掉 iframe 内滚动（由外层卡片统一滚动）
     const style = doc.createElement('style');
-    style.textContent = 'html, body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; }';
+    style.textContent = 'html body { margin: 0; padding: 0; overflow: hidden; }';
     doc.head.appendChild(style);
     const w = Math.min(Math.max(doc.documentElement.scrollWidth, THUMB_FALLBACK_W), THUMB_MAX_W);
     const h = doc.body.scrollHeight;

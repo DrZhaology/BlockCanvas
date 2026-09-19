@@ -1,0 +1,97 @@
+/* ==========================================================================
+   BlockCanvas · 03-toolbar.css —— 通用折叠动画 Collapse + 工具栏基础按钮语言
+   （由单文件 styles.css 拆分而来；分片顺序 = 级联顺序，勿调整 import 顺序。
+     新增样式：优先写进语义对应的分片末尾；跨轮追加统一进 14-v04x-append.css。）
+   ========================================================================== */
+/* ============ 通用展开/收起动画（统一 0.3s） ============
+   过去折叠区靠条件渲染，展开突兀、收起无动画。改为 grid-template-rows
+   0fr↔1fr + 透明度/位移，高度自适应且无需测量。 */
+.collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  /* minmax(0,1fr)：防止网格项按内容最小宽度撑破容器（属性面板横向溢出的元凶） */
+  grid-template-columns: minmax(0, 1fr);
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    grid-template-rows 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.collapse.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+.collapse > .collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+/* 动画结束后放开裁切，避免下拉菜单/气泡被 overflow:hidden 剪掉 */
+.collapse.is-settled > .collapse-inner {
+  overflow: visible;
+}
+@media (prefers-reduced-motion: reduce) {
+  .collapse { transition-duration: 0.01ms; }
+}
+
+/* Toolbar（单行式：左固定操作 + 中滚动区 + 右设备/视口/缩放系统区）
+   布局细则见文件末尾「v0.4.3 工具栏单行式重构」分组 */
+.toolbar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: 0;
+}
+.toolbar .spacer { flex: 1; }
+.toolbar button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-sizing: border-box;
+}
+.toolbar button:hover:not(:disabled) { background: var(--hover); }
+.toolbar button:disabled { color: #aaa; cursor: not-allowed; }
+.toolbar .btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent-hover);
+  font-weight: 600;
+  width: auto;
+  margin: 0;
+}
+.toolbar .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.toolbar .btn-secondary {
+  width: auto;
+  margin: 0;
+  background: var(--bg-panel);
+  border-color: var(--border);
+  color: var(--text);
+}
+.toolbar .btn-secondary:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--hover-accent);
+}
+

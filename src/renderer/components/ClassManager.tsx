@@ -14,6 +14,11 @@ import type { SceneElement } from '@lib/types';
 
 type GroupKind = 'class' | 'id' | 'rel';
 
+/** 定位：选中元素 + 让画布自动滚动到它并高亮圈出（画布浮层监听此事件） */
+export function revealOnCanvas(id: string) {
+  window.dispatchEvent(new CustomEvent('bc:reveal-element', { detail: id }));
+}
+
 type ClsGroup = {
   name: string;
   kind: GroupKind;
@@ -134,7 +139,7 @@ export function ClassManager() {
               <MiniPreview cssText={g.sampleCss} />
             </div>
             <div className="cls-card-actions">
-              <button className="btn-mini" onClick={() => g.firstId && selectElement(g.firstId)} title="在画布选中该组第一个元素，到右侧属性面板改样式（全部同步）">定位</button>
+              <button className="btn-mini" onClick={() => { if (g.firstId) { selectElement(g.firstId); revealOnCanvas(g.firstId); } }} title="在画布上自动滚动到该元素并高亮圈出（同类元素中定位第一个）">定位</button>
               {g.conflicted && (
                 <button
                   className="btn-mini"
@@ -225,7 +230,7 @@ function QuickNameRow(props: { id: string; type: string; onNamed: (name: string)
   };
   return (
     <div className="cls-quick-row">
-      <button className="cls-unnamed-item" onClick={() => selectElement(id)} title="点此在画布选中它">&lt;{type}&gt;</button>
+      <button className="cls-unnamed-item" onClick={() => { selectElement(id); revealOnCanvas(id); }} title="点此在画布上定位并选中它">&lt;{type}&gt;</button>
       <input
         className="cls-quick-input"
         placeholder="输入类名，回车确认"

@@ -87,8 +87,20 @@ const SEARCH_ALIASES: Record<string, string[]> = {
 
 export function AddPropertyMenu(props: Props) {
   const [open, setOpen] = useState(false);
+  // 关闭时先播出场动画再卸载（0.18s）
+  const [closing, setClosing] = useState(false);
+  const closeTimer = useRef(0);
   const [search, setSearch] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
+
+  const closeMenu = () => {
+    setClosing(true);
+    window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => {
+      setClosing(false);
+      setOpen(false);
+    }, 180);
+  };
 
   // 打开菜单：清空搜索并聚焦搜索框
   useEffect(() => {
@@ -102,11 +114,13 @@ export function AddPropertyMenu(props: Props) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') closeMenu();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
+
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
   const q = search.trim().toLowerCase();
 
@@ -140,7 +154,7 @@ export function AddPropertyMenu(props: Props) {
   const addAndClose = (key: string) => {
     props.onAdd(key);
     setSearch('');
-    setOpen(false);
+    closeMenu();
   };
 
   const renderItem = (s: PropertySchema) => {
@@ -181,8 +195,8 @@ export function AddPropertyMenu(props: Props) {
       </button>
       {open && (
         <>
-          <div className="add-prop-backdrop" onClick={() => setOpen(false)} />
-          <div className="add-prop-menu">
+          <div className="add-prop-backdrop" onClick={closeMenu} />
+          <div className={'add-prop-menu' + (closing ? ' is-closing' : '')}>
             <div className="add-prop-search">
               <input
                 ref={searchRef}

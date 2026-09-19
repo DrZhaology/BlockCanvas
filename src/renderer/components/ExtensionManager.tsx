@@ -313,7 +313,7 @@ function TemplatePreviewThumb(props: { resId: string; tpl: { id: string; name: s
     const doc = f?.contentDocument;
     if (!doc) return;
     const st = doc.createElement('style');
-    st.textContent = 'html, body { overflow: hidden !important; }';
+    st.textContent = 'html body { overflow: hidden; }';
     doc.head.appendChild(st);
     setContentW(Math.min(Math.max(doc.documentElement.scrollWidth, 1280), 2560));
     setContentH(Math.min(doc.body.scrollHeight, 200));

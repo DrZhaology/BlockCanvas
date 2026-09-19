@@ -71,20 +71,34 @@ declare global {
       getAppConfig: () => Promise<Record<string, any>>;
       setAppConfig: (patch: Record<string, unknown>) => Promise<Record<string, any>>;
 
-      // 自动更新
+      // 自动更新（v0.4.1：软件内更新页面）
       checkUpdate: () => Promise<{
         ok: boolean;
         isDev?: boolean;
         error?: string;
         localVersion?: string;
-        latestVersion?: string;
-        releaseName?: string;
-        publishedAt?: string;
         hasUpdate: boolean;
-        downloadUrl?: string;
-        assets?: { name: string; browser_download_url: string; size: number }[];
+        platform?: string;
+        releases?: Array<{
+          tag: string;
+          version: string;
+          name: string;
+          publishedAt: string;
+          prerelease: boolean;
+          body?: string;
+          assets: { name: string; browser_download_url: string; size: number }[];
+        }>;
+        latest?: {
+          version: string;
+          name: string;
+          tag: string;
+          publishedAt: string;
+          prerelease: boolean;
+          asset: { url: string; name: string; size: number } | null;
+        };
       }>;
       applyUpdate: (assetUrl: string) => Promise<{ ok: boolean; error?: string }>;
+      onUpdateProgress: (cb: (p: { msg: string; pct?: number }) => void) => () => void;
       getLocalVersion: () => Promise<string>;
 
       // 扩展与插件

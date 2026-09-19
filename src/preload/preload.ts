@@ -61,6 +61,12 @@ contextBridge.exposeInMainWorld('bc', {
     ipcRenderer.invoke('update:apply', assetUrl),
   getLocalVersion: () =>
     ipcRenderer.invoke('update:get-version'),
+  /** 更新进度推送（下载百分比 / 阶段消息），返回取消监听的函数 */
+  onUpdateProgress: (cb: (p: { msg: string; pct?: number }) => void) => {
+    const h = (_e: unknown, p: { msg: string; pct?: number }) => cb(p);
+    ipcRenderer.on('update:progress', h);
+    return () => { ipcRenderer.removeListener('update:progress', h); };
+  },
 
   // 扩展与插件系统
   scanExtensions: () =>

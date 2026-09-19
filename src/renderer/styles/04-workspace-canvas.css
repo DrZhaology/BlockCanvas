@@ -1,0 +1,304 @@
+/* ==========================================================================
+   BlockCanvas · 04-workspace-canvas.css —— 工作区三栏布局 / 元素面板外壳 / 画布 / 拖框选中 / 提示条
+   （由单文件 styles.css 拆分而来；分片顺序 = 级联顺序，勿调整 import 顺序。
+     新增样式：优先写进语义对应的分片末尾；跨轮追加统一进 14-v04x-append.css。）
+   ========================================================================== */
+/* Workspace —— 布局双模式（4-F 版2）：
+   left  : 左=元素/模板，中=画布，右=属性（原版）
+   bottom: 上=画布+右属性，下=元素/模板（默认，画布最大）
+   grid-template-areas 在两种模式下重排三个区域，DOM 顺序不用动 */
+.workspace {
+  flex: 1;
+  display: grid;
+  grid-template-areas: 'elem canvas right';
+  grid-template-columns: var(--bc-left-width, 230px) 1fr var(--bc-right-width, 320px);
+  grid-template-rows: 1fr;
+  min-height: 0;
+  transition: grid-template-rows 0.22s cubic-bezier(0.16, 1, 0.3, 1), grid-template-columns 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.workspace[data-layout='bottom'] {
+  /* 右下角归属性面板：右列贯穿上下行，左上画布、左下元素面板 */
+  grid-template-areas:
+    'canvas right'
+    'elem   right';
+  grid-template-columns: 1fr var(--bc-right-width, 320px);
+  grid-template-rows: minmax(0, 1fr) var(--bc-bottom-height, 250px);
+}
+/* 左侧布局：元素面板可拖宽，画布编辑区保留最小 100px，保证左右两栏永不重叠 */
+.workspace:not([data-layout='bottom']) {
+  grid-template-columns: var(--bc-left-width, 230px) minmax(100px, 1fr) var(--bc-right-width, 320px);
+}
+.elem-pane-wrap { grid-area: elem; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+.elem-pane-wrap > .element-panel { flex: 1; min-width: 0; min-height: 0; height: auto; }
+.element-panel { grid-area: elem; }
+/* 4-F 新版 DOM：画布区域外再包 .canvas-area、右侧面板外再包 .right-pane-wrap，
+   它们才是 grid 的直接子元素（承载各自方向的拖手） */
+.canvas-area { grid-area: canvas; }
+.right-pane-wrap { grid-area: right; }
+
+/* Panels */
+.panel {
+  background: var(--bg-panel);
+  padding: 10px;
+  overflow-y: auto;
+  height: 100%;
+}
+.element-panel { border-right: 1px solid var(--border); }
+.inspector { border-left: 1px solid var(--border); }
+.panel-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
+/* Element palette */
+.element-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.element-btn {
+  height: 36px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+.element-btn:hover { border-color: var(--accent); background: var(--hover-accent); }
+.element-btn:active { background: var(--focus-accent); }
+
+/* Canvas */
+/* .canvas-area = grid 的 canvas 槽位（4-F 新版外层），横向切割线（bottom 模式底部拖手）贴它下缘 */
+.canvas-area {
+  position: relative;
+  /* 至少保留 100px 编辑区，配合左侧布局的 minmax(100px,1fr)，确保左右两栏永不重叠 */
+  min-width: 100px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  padding: 24px;
+  overflow: auto; /* 画布外的灰色斜纹区可滚 */
+  background:
+    repeating-linear-gradient(45deg, var(--stripe) 0 8px, transparent 8px 16px);
+}
+.canvas {
+  /* 设备边框 / 视口遮罩 / 拖拽手柄都以画布为定位基准。
+     之前没写这条，它们全都锚到了 .canvas-wrap 上，边框位置因此整体错位。 */
+  position: relative;
+  /* 宽度 = 编辑区实际宽度（所见 = 当前窗口里的真实渲染宽度），
+     预设断点（手机/平板/桌面）由 Canvas 组件按 canvasWidth prop 覆盖 */
+  width: 100%;
+  min-height: 600px;
+  /* 高度自适应内容：元素多了画布就长，不会出现画布固定但内容溢出 */
+  height: max-content;
+  background: var(--bg-canvas);
+  box-shadow: 0 1px 6px rgba(0,0,0,0.15);
+  border-radius: 4px;
+  /* 不写死内边距：页面留白交给元素自己的 margin/padding 与「页面」页签设置，
+     画布 = 导出（导出端有 html,body 重置）逐 px 一致 */
+  flex-shrink: 0;
+  /* 拖框选框的定位基准 */
+  position: relative;
+}
+
+/* 手机真机视口沉浸式模拟外框 (375px 移动端专属) */
+/* （已废弃）旧的「手机外框」做法是把 .canvas 本身变成一台手机 —— 画布会随内容
+   越长越长，手机就被拉成一根细条。现改为固定高度的 .canvas-device 边框，见下。 */
+
+/* Inspector 响应式断点切换栏 */
+.inspector-bp-bar {
+  padding: 6px 0 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.inspector-bp-tabs {
+  display: flex;
+  background: var(--panel-tint);
+  padding: 3px;
+  border-radius: 6px;
+  gap: 3px;
+}
+.bp-tab-btn {
+  flex: 1;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+}
+.bp-tab-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.bp-tab-btn.active {
+  background: var(--bg-panel);
+  border-color: var(--border);
+  color: var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.bp-dot {
+  width: 5px;
+  height: 5px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+.bp-tab-btn.has-override:not(.active) .bp-dot {
+  background: #f59e0b;
+}
+
+/* 响应式提示与移动端快捷操作栏 */
+.inspector-bp-banner {
+  padding: 8px 10px;
+  background: #f0f7ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+html[data-bc-dark] .inspector-bp-banner {
+  background: #1e293b;
+  border-color: #334155;
+}
+.inspector-bp-banner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #1e40af;
+}
+html[data-bc-dark] .inspector-bp-banner-head {
+  color: #93c5fd;
+}
+.inspector-bp-banner-head .bp-clear-btn {
+  color: #2563eb;
+  border-color: #93c5fd;
+  font-size: 10.5px;
+  height: 22px;
+  padding: 0 6px;
+}
+.inspector-bp-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.inspector-bp-actions .bp-quick-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  height: 24px;
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text);
+}
+/* .btn-mini:hover 是"实心主色"悬停，这里必须显式给出背景 + 文字色，
+   否则会出现白底白字（三断点快捷操作栏「在此设备隐藏 / 一键切竖排 / 撑满全宽」） */
+.inspector-bp-actions .bp-quick-btn:hover:not(:disabled) {
+  background: var(--hover-accent);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.inspector-bp-actions .bp-quick-btn.active {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #dc2626;
+}
+.inspector-bp-actions .bp-quick-btn.active:hover:not(:disabled) {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #b91c1c;
+}
+.inspector-bp-banner-head .bp-clear-btn:hover:not(:disabled) {
+  background: var(--hover-accent);
+  color: #1d4ed8;
+  border-color: #93c5fd;
+}
+.prop-bp-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  margin-left: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.prop-bp-badge:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* 拖框选中：Windows 桌面式框选矩形（fixed 覆盖层，可延伸到画布外条纹区） */
+.marquee-box {
+  position: fixed;
+  border: 1px solid #1e88e5;
+  background: rgba(30, 136, 229, 0.12);
+  pointer-events: none;
+  z-index: 90;
+  box-shadow: 0 0 0 9999px rgba(30, 136, 229, 0.02);
+}
+/* 框选进行中：全窗口十字光标 */
+body.bc-marqueeing, body.bc-marqueeing * {
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.canvas-empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 60px 20px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+/* 选中元素时的操作提示条（Alt+点击 选中父级） */
+.canvas-hint {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  max-width: 240px;
+}
+
+/* CanvasNode 观感：不在此强加任何样式（画布 = 浏览器 = 导出）。
+   img/input/button 等默认外观由 defaultStyleFor 提供（会随导出写进 style），
+   编辑器 CSS 只保留结构选择器用不到的全局重置。 */
+

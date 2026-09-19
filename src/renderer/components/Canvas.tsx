@@ -92,7 +92,6 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     return parts.join('\n');
   }, [styleSet, activeBreakpoint]);
 
-  const isMobileView = canvasWidth === '375px' || activeBreakpoint === 'mobile';
   const toggleSelect = useScene((s) => s.toggleSelect);
   const selectMany = useScene((s) => s.selectMany);
 
@@ -116,6 +115,44 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const p = findParent(root, id);
     if (p && p.id !== root.id) select(p.id);
   };
+
+  // —— 行内元素选中框修复 ——
+  // display:inline 的元素（span/a/strong…）跨行时，CSS outline 会围着**每个行盒**各画一个框，
+  // 看起来像"选中了多个"。这里为行内选中元素改画「合并外框」：
+  // getBoundingClientRect 天然返回所有片段的并集矩形（fixed 定位，缩放/滚动坐标天然正确），
+  // 由上层 .canvas-inline-sel 画一个完整大框；元素自身的 outline 在 CanvasNode 里停用。
+  const [inlineSel, setInlineSel] = useState<Array<{ key: string; x: number; y: number; w: number; h: number }>>([]);
+  useEffect(() => {
+    if (selectedIds.length === 0) { setInlineSel([]); return; }
+    let alive = true;
+    const measure = () => {
+      if (!alive) return;
+      const out: Array<{ key: string; x: number; y: number; w: number; h: number }> = [];
+      for (const id of selectedIds) {
+        const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(id)}"]`);
+        if (!el) continue;
+        try {
+          if (getComputedStyle(el).display !== 'inline') continue;
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) continue;
+          out.push({ key: id, x: r.left, y: r.top, w: r.width, h: r.height });
+        } catch { /* ignore */ }
+      }
+      setInlineSel(out);
+    };
+    measure();
+    // 类名样式（display 可能来自自动类规则）落地后再量一次
+    const raf = requestAnimationFrame(measure);
+    const onScrollOrResize = () => measure();
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
+  }, [selectedIds, root, zoom, canvasWidth]);
 
   const endMarquee = () => {
     window.removeEventListener('pointermove', onWindowMove);
@@ -249,15 +286,16 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       )}
       <div
         ref={canvasRef}
-        className={"canvas" + (isMobileView ? " is-mobile-frame" : "")}
+        className="canvas"
         style={{
           ...(canvasWidth === 'auto' ? undefined : { width: canvasWidth }),
           transform: zoom === 1 ? undefined : `scale(${zoom})`,
-          transformOrigin: 'left top'
+          transformOrigin: 'left top',
+          // 拖拽调宽时关掉过渡（否则 1:1 跟手会变成"追不上"）
+          ...(wDrag ? { transition: 'none' } : undefined)
         }}
         onWheel={onCanvasWheel}
       >
-        {isMobileView && <div className="canvas-mobile-island" title="iPhone 手机真机视口模拟" />}
         {root.children.map((c) => (
           <CanvasNode key={c.id} node={c} depth={0} selectedIds={selectedIds} onSelect={select} onSelectParent={selectParent} onToggleSelect={toggleSelect} />
         ))}
@@ -281,6 +319,14 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           style={{ position: 'fixed', left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h, zIndex: 90 }}
         />
       )}
+      {/* 行内选中元素的合并外框（见上方注释；fixed 定位 + client 坐标） */}
+      {inlineSel.map((r) => (
+        <div
+          key={r.key}
+          className="canvas-inline-sel"
+          style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
+        />
+      ))}
     </div>
   );
 }
@@ -307,6 +353,26 @@ const CanvasNode = React.memo(function CanvasNode(props: {
   const [editingText, setEditingText] = useState(false);
   const [inlineDraft, setInlineDraft] = useState(node.text ?? '');
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 选中态测量：display:inline 的元素跨行时 outline 会按行盒拆成多个框。
+  // 行内选中元素不再自画 outline（由 Canvas 的 .canvas-inline-sel 合并外框负责）。
+  // 用 data-bc-id 查 DOM（不用 ref——动态 Tag 的 ref 联合类型 TS 处理不了）。
+  const [isInlineFrag, setIsInlineFrag] = useState(false);
+  useEffect(() => {
+    if (!isSelected) { setIsInlineFrag(false); return; }
+    let alive = true;
+    const check = () => {
+      if (!alive) return;
+      try {
+        const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(node.id)}"]`);
+        if (!el) return;
+        setIsInlineFrag(getComputedStyle(el).display === 'inline');
+      } catch { /* ignore */ }
+    };
+    check();
+    const raf = requestAnimationFrame(check); // 自动类规则落地后复查
+    return () => { alive = false; cancelAnimationFrame(raf); };
+  }, [isSelected, node.id, node.style, node.attrs, node.type]);
 
   useEffect(() => {
     if (!editingText) setInlineDraft(node.text ?? '');
@@ -352,11 +418,22 @@ const CanvasNode = React.memo(function CanvasNode(props: {
   if ((CONTAINER_TAGS.has(node.type) || node.type === 'hr') && !node.style.width) {
     baseStyle.minWidth = '60px';
   }
-  if (isSelected) {
-    // 方案1：双层高亮边框（内白 + 外亮蓝），向内 -2px 偏移，绝不向外扩张改变视觉大小
+  if (isSelected && !isInlineFrag) {
+    // 选中高亮：外圈亮蓝描边，向内 -2px 偏移，绝不向外扩张改变视觉尺寸
+    // （行内跨行元素除外——它们由 Canvas 层的合并外框负责，见 isInlineFrag）
     baseStyle.outline = '2px solid #1e88e5';
     baseStyle.outlineOffset = '-2px';
-    baseStyle.boxShadow = 'inset 0 0 0 1.5px #ffffff';
+    // 内圈白细线：**追加**在用户自己的 box-shadow 之前，绝不覆盖用户的阴影。
+    // （旧实现直接 baseStyle.boxShadow = 'inset ...' —— 内联样式优先级高于类名规则，
+    //   结果元素一被选中，它自己的盒子阴影就"消失"了。）
+    const ownShadow = (
+      (baseStyle.boxShadow as string | undefined)
+      ?? ((getEffectiveStyle(node, activeBreakpoint) as Record<string, string | undefined>).boxShadow)
+      ?? ''
+    ).trim();
+    baseStyle.boxShadow = ownShadow
+      ? `inset 0 0 0 1.5px #ffffff, ${ownShadow}`
+      : 'inset 0 0 0 1.5px #ffffff';
   }
 
   const commonProps = {

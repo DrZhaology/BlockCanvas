@@ -13,6 +13,7 @@
 //   - 画布渲染与 HTML 导出使用同一套逻辑 → 画布 = 浏览器 = 导出
 
 import type { SceneElement, SceneGraph } from '@lib/types';
+import { tokensToCss } from '@lib/designTokens';
 
 // style 中这些 key 不是 CSS 属性（img src/alt 等元素属性，不进样式类）
 const NON_CSS_STYLE_KEYS = new Set(['src', 'alt']);
@@ -334,13 +335,23 @@ export function quickCssToCss(q: SceneGraph['quickCss'] | undefined): string {
 // 生成 <style> 块：① 自动规则 ② 快速设置 ③ 用户全局 CSS（放最后 → 用户可覆盖）
 // 规则直接写 .类名 / #id（不做 :where）：自动块在最前面，用户全局 CSS 在最后，
 // 同特异性选择器后来者胜 → 用户永远能覆盖自动样式（即"所见即所得、可覆盖"）
-export function buildStyleBlock(ctx: StyleClassSet, globalCss?: string, quickCss?: SceneGraph['quickCss']): string {
+export function buildStyleBlock(
+  ctx: StyleClassSet,
+  globalCss?: string,
+  quickCss?: SceneGraph['quickCss'],
+  tokens?: SceneGraph['tokens']
+): string {
   const autoRules = ctx.order.map((sel) => `${sel} { ${ctx.rules.get(sel)} }`);
   const rulesBlock = autoRules.length > 0 ? autoRules.join('\n') : '';
   const userCss = (globalCss ?? '').trim();
   const quickBlock = quickCssToCss(quickCss);
-  if (!rulesBlock && !userCss && !quickBlock) return '';
+  const tokenBlock = tokensToCss(tokens ?? []);
+  if (!rulesBlock && !userCss && !quickBlock && !tokenBlock) return '';
   const parts: string[] = [];
+  // 变量必须最先定义：后面的规则（含自动样式、快速设置、用户 CSS）才能引用 var(--bc-*)
+  if (tokenBlock) {
+    parts.push('/* ==== 设计变量（改这里，所有引用 var(--bc-*) 的地方会一起变） ==== */\n' + tokenBlock);
+  }
   if (rulesBlock) {
     parts.push('/* ==== 自动生成的样式（放最前面；你写的全局 CSS 放最后，同权重规则后写者胜，可以覆盖这里） ==== */\n' + rulesBlock);
   }

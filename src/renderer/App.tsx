@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Toolbar } from '@comp/Toolbar';
 import { ElementPanel } from '@comp/ElementPanel';
 import { Canvas } from '@comp/Canvas';
+import { CanvasOverlays } from '@comp/CanvasOverlays';
 import { Inspector } from '@comp/Inspector';
 import { LayerTree } from '@comp/LayerTree';
 import { ErrorBoundary } from '@comp/ErrorBoundary';
 import { ProjectsCenter } from '@comp/ProjectsCenter';
+import { UpdateCenter } from '@comp/UpdateCenter';
 import { Settings, type SettingsSection } from '@comp/Settings';
 import { ProjectTabBar } from '@comp/ProjectTabBar';
 import { AboutModal } from '@comp/About';
@@ -13,6 +15,9 @@ import { ShortcutsModal } from '@comp/ShortcutsModal';
 import { useScene, findNode } from '@store/sceneStore';
 import { useTabStore } from '@store/tabStore';
 import { refreshPlugins } from '@lib/pluginHost';
+import { withViewTransition } from '@lib/viewTransition';
+import { DEVICE_LIST, widthToBreakpoint, type DeviceId } from '@lib/device';
+import { tokensToRootCss } from '@lib/designTokens';
 
 // BlockCanvas · 主界面
 // - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
@@ -31,13 +36,16 @@ const LEFT_WIDTH_DEFAULT = 230;
 const LEFT_WIDTH_MIN = 160;
 const BOTTOM_HEIGHT_DEFAULT = 250;
 const BOTTOM_HEIGHT_MIN = 175;
-const RIGHT_WIDTH_DEFAULT = 320;
-const RIGHT_WIDTH_MIN = 224;
+const RIGHT_WIDTH_DEFAULT = 416;
+const RIGHT_WIDTH_MIN = 340;
 
-export type AppView = 'editor' | 'projects' | 'settings';
+export type AppView = 'editor' | 'projects' | 'settings' | 'update';
 
 export default function App() {
-  const [rightTab, setRightTab] = usePersistentState<RightTab>(RIGHT_TAB_KEY, 'inspector');
+  const [rightTab, setRightTabRaw] = usePersistentState<RightTab>(RIGHT_TAB_KEY, 'inspector');
+  // v0.4.4：页签切换不再走 View Transition —— VT 的旧帧快照会让文字"停一会儿"。
+  // 改为内容重挂载 + 轻量入场动画（见 .tab-body 的 bcSwapIn）。
+  const setRightTab = (t: RightTab) => setRightTabRaw(t);
   const [canvasWidth, setCanvasWidth] = usePersistentState<string>(CANVAS_WIDTH_KEY, 'auto');
   const [layout, setLayout] = usePersistentState<'left' | 'bottom'>(LAYOUT_KEY, 'bottom');
   const [bottomHeight, setBottomHeight] = usePersistentState<number>(BOTTOM_HEIGHT_KEY, BOTTOM_HEIGHT_DEFAULT);
@@ -45,10 +53,14 @@ export default function App() {
   const [leftWidth, setLeftWidth] = usePersistentState<number>(LEFT_WIDTH_KEY, LEFT_WIDTH_DEFAULT);
   const [zoom, setZoom] = useState(1);
   const [view, setView] = useState<AppView>('editor');
+  // 所有「整页切换」都走原生视图过渡：旧页面淡出 + 新页面淡入
+  // （不重挂载视图、不丢状态；宿主不支持或系统开了"减少动态效果"时自动降级为直接切换）
+  const switchView = useCallback((next: AppView) => {
+    withViewTransition(() => setView((cur) => (cur === next ? cur : next)));
+  }, []);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('personalization');
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [_updating, setUpdating] = useState(false);
   const [pocketExpanded, setPocketExpanded] = useState(() => {
     try {
       return localStorage.getItem('bc-elem-tab') === 'templates' && localStorage.getItem('bc-pocket-expanded') === 'true';
@@ -58,7 +70,55 @@ export default function App() {
   });
   const applyZoom = (fn: (z: number) => number) => setZoom(fn);
 
-  useKeyboardShortcuts(setView, () => setShowShortcuts(true));
+  // 属性面板内容越来越多，旧的 384px 默认宽度会显得很挤。
+  // 这里做一次性迁移：老用户若仍是窄面板，悄悄放宽到新的默认宽度（之后可再手动拖窄）。
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('bc-right-width-widened') === '1') return;
+      localStorage.setItem('bc-right-width-widened', '1');
+      if (rightWidth < 400) setRightWidth(RIGHT_WIDTH_DEFAULT);
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useKeyboardShortcuts(switchView, () => setShowShortcuts(true));
+
+  // 0. 设备 / 断点 / 画布宽度 三合一同步
+  //    - 画布宽度变化 → 自动推导当前编辑断点（电脑 / 平板 / 手机）
+  //    - 任意地方广播 bc:set-device → 反推标准画布宽度
+  useEffect(() => {
+    const bp = widthToBreakpoint(canvasWidth);
+    if (useScene.getState().activeBreakpoint !== bp) {
+      useScene.getState().setActiveBreakpoint(bp);
+    }
+  }, [canvasWidth]);
+
+  useEffect(() => {
+    const onSetDevice = (e: Event) => {
+      const d = (e as CustomEvent).detail as DeviceId;
+      const target = DEVICE_LIST.find((x) => x.id === d);
+      if (target) setCanvasWidth(target.width);
+    };
+    window.addEventListener('bc:set-device', onSetDevice);
+    return () => window.removeEventListener('bc:set-device', onSetDevice);
+  }, [setCanvasWidth]);
+
+  // 设计变量 → 注入文档根，让画布里的 var(--bc-*) 立刻生效（所见即所得，无需额外解析）
+  const tokens = useScene((s) => s.scene.tokens);
+  useEffect(() => {
+    let el = document.getElementById('bc-design-tokens') as HTMLStyleElement | null;
+    const css = tokensToRootCss(tokens ?? []);
+    if (!css) {
+      if (el) el.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement('style');
+      el.id = 'bc-design-tokens';
+      document.head.appendChild(el);
+    }
+    el.textContent = css;
+  }, [tokens]);
 
   // 1. 启动时像 Windows 11 记事本一样秒级恢复上次会话
   useEffect(() => {
@@ -107,7 +167,7 @@ export default function App() {
     return () => window.removeEventListener('bc:plugins-changed', onPluginsChanged);
   }, []);
 
-  // 4. 启动延迟检测更新（5秒后静默检查，有更新则弹窗）
+  // 4. 启动延迟检测更新（5秒后静默检查，有更新则打开软件内更新中心页面）
   useEffect(() => {
     const checkAndNotify = async () => {
       try {
@@ -118,51 +178,18 @@ export default function App() {
       } catch {}
 
       try {
-        const result = await window.bc.checkUpdate();
-        if (!result.ok || !result.hasUpdate) return;
-        // 弹窗通知
-        setTimeout(() => {
-          const confirmed = confirm(
-            `发现新版本 ${result.latestVersion}！\n\n当前版本：${result.localVersion}\n${result.releaseName ? '版本说明：' + result.releaseName + '\n' : ''}是否立即下载并更新？`
-          );
-          if (confirmed && result.downloadUrl) {
-            handleApplyUpdate(result.downloadUrl);
-          }
-        }, 500);
+        const result = (await window.bc.checkUpdate()) as unknown as { ok: boolean; hasUpdate: boolean };
+        // v0.4.1：不再弹窗 —— 发现新版本直接切到软件内「更新中心」页面展示详情
+        if (result.ok && result.hasUpdate) switchView('update');
       } catch {}
     };
     const timer = window.setTimeout(checkAndNotify, 5000);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [switchView]);
 
-  const handleApplyUpdate = async (assetUrl: string) => {
-    setUpdating(true);
-    try {
-      const res = await window.bc.applyUpdate(assetUrl);
-      if (!res.ok) alert('更新失败：' + (res.error || '未知错误'));
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const checkAndUpdateManually = async () => {
-    try {
-      const result = await window.bc.checkUpdate();
-      if (!result.ok) { alert('检测更新失败：' + (result.error || '未知错误')); return; }
-      if (!result.hasUpdate) {
-        alert(`当前已是最新版本 ${result.localVersion}，无需更新。`);
-        return;
-      }
-      const confirmed = confirm(
-        `发现新版本 ${result.latestVersion}！\n\n当前版本：${result.localVersion}\n${result.releaseName ? '版本说明：' + result.releaseName + '\n' : ''}是否立即下载并更新？`
-      );
-      if (confirmed && result.downloadUrl) {
-        handleApplyUpdate(result.downloadUrl);
-      }
-    } catch (e: any) {
-      alert('检测更新失败：' + (e.message || '未知错误'));
-    }
-  };
+  // v0.4.1：更新相关 UI 全部收敛到软件内「更新中心」页面（UpdateCenter），
+  // 旧的 confirm 弹窗流程已删除。菜单"检查更新" = 跳转到该页面。
+  const openUpdateCenter = useCallback(() => switchView('update'), [switchView]);
 
   // 4. 菜单 & 事件路由监听
   useEffect(() => {
@@ -172,13 +199,13 @@ export default function App() {
     };
     const toLeft = () => setLayout('left');
     const toBottom = () => setLayout('bottom');
-    const openProjects = () => setView('projects');
+    const openProjects = () => switchView('projects');
     const openSettings = (sec?: SettingsSection) => {
       setSettingsSection(sec || 'personalization');
-      setView('settings');
+      switchView('settings');
     };
     const openClass = () => {
-      setView('editor');
+      switchView('editor');
       setRightTab('inspector');
       window.dispatchEvent(new CustomEvent('bc:open-class'));
     };
@@ -186,7 +213,7 @@ export default function App() {
 
     const onNewTab = () => {
       useTabStore.getState().newTab();
-      setView('editor');
+      switchView('editor');
     };
 
     const onSaveProject = async () => {
@@ -219,7 +246,7 @@ export default function App() {
       const res = await window.bc.openProjectFile();
       if (res.ok && res.project?.scene) {
         useTabStore.getState().newTab(res.project.name || '已打开工程', res.project.scene, res.path);
-        setView('editor');
+        switchView('editor');
       }
     };
 
@@ -247,7 +274,7 @@ export default function App() {
     window.addEventListener('menu:settings', () => openSettings());
     window.addEventListener('menu:class-manager', openClass);
     window.addEventListener('menu:about', openAbout);
-    window.addEventListener('menu:check-update', () => checkAndUpdateManually());
+    window.addEventListener('menu:check-update', openUpdateCenter);
     window.addEventListener('menu:new-tab', onNewTab);
     window.addEventListener('menu:save-project', onSaveProject);
     window.addEventListener('menu:save-project-as', onSaveProjectAs);
@@ -263,7 +290,7 @@ export default function App() {
       window.bc.onMenu('menu:settings', () => openSettings()),
       window.bc.onMenu('menu:class-manager', openClass),
       window.bc.onMenu('menu:about', openAbout),
-      window.bc.onMenu('menu:check-update', () => checkAndUpdateManually()),
+      window.bc.onMenu('menu:check-update', openUpdateCenter),
       window.bc.onMenu('menu:new-tab', onNewTab),
       window.bc.onMenu('menu:save-project', onSaveProject),
       window.bc.onMenu('menu:save-project-as', onSaveProjectAs),
@@ -284,7 +311,7 @@ export default function App() {
       window.removeEventListener('menu:settings', () => openSettings());
       window.removeEventListener('menu:class-manager', openClass);
       window.removeEventListener('menu:about', openAbout);
-      window.removeEventListener('menu:check-update', () => checkAndUpdateManually());
+      window.removeEventListener('menu:check-update', openUpdateCenter);
       window.removeEventListener('menu:new-tab', onNewTab);
       window.removeEventListener('menu:save-project', onSaveProject);
       window.removeEventListener('menu:save-project-as', onSaveProjectAs);
@@ -293,18 +320,21 @@ export default function App() {
       window.removeEventListener('menu:preview', onPreview);
       offs.forEach((off) => off && off());
     };
-  }, [setLayout, setView]);
+  }, [setLayout, switchView, openUpdateCenter]);
 
   return (
     <div className="app">
-      {view === 'projects' ? (
+      {view === 'update' ? (
+        <UpdateCenter onBack={() => switchView('editor')} />
+      ) : view === 'projects' ? (
         <ProjectsCenter
-          onBack={() => setView('editor')}
+          onBack={() => switchView('editor')}
         />
       ) : view === 'settings' ? (
         <Settings
-          onBack={() => setView('editor')}
-          onOpenWebManager={() => setView('projects')}
+          onBack={() => switchView('editor')}
+          onOpenWebManager={() => switchView('projects')}
+          onOpenUpdateCenter={openUpdateCenter}
           initialSection={settingsSection}
           layout={layout}
           onLayoutChange={setLayout}
@@ -362,6 +392,7 @@ export default function App() {
                       onUserResize={(px) => setCanvasWidth(px + 'px')}
                     />
                   </ErrorBoundary>
+                  <CanvasOverlays />
                   {layout === 'bottom' && (
                     <div
                       className={"panel-resizer panel-resizer-horizontal" + (pocketExpanded ? " is-disabled" : "")}
@@ -393,7 +424,7 @@ export default function App() {
                         onClick={() => setRightTab('inspector')}
                       >属性</button>
                     </div>
-                    <div className="tab-body">
+                    <div className="tab-body" key={rightTab}>
                       <ErrorBoundary label="右侧面板">
                         {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
                       </ErrorBoundary>
