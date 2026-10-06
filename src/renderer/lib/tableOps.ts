@@ -125,14 +125,22 @@ export function locateCell(table: SceneElement, cellId: string, alreadyNormalize
 }
 
 export type TableOp =
-  | { kind: 'insertRow'; refRowId: string; side: 'before' | 'after' }
+  /** count 默认 1：轨道拖动能一次插多个 */
+  | { kind: 'insertRow'; refRowId: string; side: 'before' | 'after'; count?: number }
   | { kind: 'deleteRow'; rowId: string }
   /** refCellId 为空时用 index 兜底（空表格没有任何单元格也能插列） */
-  | { kind: 'insertCol'; refCellId: string; side: 'before' | 'after'; index?: number }
+  | { kind: 'insertCol'; refCellId: string; side: 'before' | 'after'; index?: number; count?: number }
   | { kind: 'deleteCol'; refCellId: string; index?: number }
   | { kind: 'mergeRight'; cellId: string }
   | { kind: 'mergeDown'; cellId: string }
+  /** 鼠标框选一个矩形 → 一次合并成左上角那格 */
+  | { kind: 'mergeRange'; cellId: string; width: number; height: number }
   | { kind: 'unmerge'; cellId: string }
+  /** 批量：选区里所有单元格统一成 th / td */
+  | { kind: 'setRangeType'; cellIds: string[]; type: 'th' | 'td' }
+  /** 批量删除（选区覆盖到的行 / 列） */
+  | { kind: 'deleteRows'; rowIds: string[] }
+  | { kind: 'deleteCols'; indexes: number[] }
   | { kind: 'toggleHeaderRow'; rowId: string }
   | { kind: 'addHeaderRow' }
   | { kind: 'removeHeaderRow' }
@@ -143,6 +151,8 @@ export type TableOp =
   | { kind: 'setCellType'; cellId: string; type: 'th' | 'td' };
 
 const intAttr = (v: string | undefined) => Math.max(1, Number(v) || 1);
+/** 轨道拖动一次最多插多少个（防止手一抖插出 200 行） */
+const clampCount = (v: number | undefined) => Math.min(30, Math.max(1, Math.round(v ?? 1)));
 
 /** 执行一个结构操作，返回新的 table 子树（id 全部保留） */
 export function applyTableOp(table: SceneElement, op: TableOp): SceneElement {
@@ -155,8 +165,10 @@ export function applyTableOp(table: SceneElement, op: TableOp): SceneElement {
       const sec = sectionOf(next, op.refRowId) ?? parts.tbody;
       const idx = sec.children.findIndex((r) => r.id === op.refRowId);
       const isHead = sec.type === 'thead';
-      const newRow = makeRow(isHead, Math.max(1, (sec.children[idx]?.children.length) || cols));
-      sec.children.splice(op.side === 'before' ? Math.max(0, idx) : idx + 1, 0, newRow);
+      const n = clampCount(op.count);
+      const at = op.side === 'before' ? Math.max(0, idx) : idx + 1;
+      const width = Math.max(1, (sec.children[idx]?.children.length) || cols);
+      for (let k = 0; k < n; k++) sec.children.splice(at + k, 0, makeRow(isHead, width));
       return next;
     }
 
@@ -172,19 +184,45 @@ export function applyTableOp(table: SceneElement, op: TableOp): SceneElement {
       return next;
     }
 
+    case 'deleteRows': {
+      const ids = new Set(op.rowIds);
+      // 至少要留一行数据行，避免把表格删空
+      const survivors = parts.rows.filter((r) => !ids.has(r.id));
+      if (survivors.length === 0) return next;
+      for (const sec of next.children) {
+        if (sec.type !== 'thead' && sec.type !== 'tbody' && sec.type !== 'tfoot') continue;
+        sec.children = sec.children.filter((r) => !ids.has(r.id));
+        if (sec.children.length === 0) {
+          if (sec.type === 'tbody') sec.children = [makeRow(false, cols)];
+          else next.children = next.children.filter((c) => c.id !== sec.id);
+        }
+      }
+      // 过滤时可能已经改了 next.children（thead/tfoot 被摘掉）→ 用最新引用再兜一次
+      for (const sec of [...next.children]) {
+        if ((sec.type === 'thead' || sec.type === 'tbody' || sec.type === 'tfoot') && sec.children.length === 0) {
+          if (sec.type === 'tbody') sec.children = [makeRow(false, cols)];
+          else next.children = next.children.filter((c) => c.id !== sec.id);
+        }
+      }
+      return next;
+    }
+
     case 'insertCol': {
       const loc = op.refCellId ? locateCell(next, op.refCellId, true) : null;
       const base = loc ? loc.cellIndex : Math.max(0, op.index ?? 0);
       const at = op.side === 'before' ? base : base + 1;
+      const n = clampCount(op.count);
       for (const row of parts.rows) {
         const inSection = sectionOf(next, row.id);
         const target = inSection?.children.find((r) => r.id === row.id);
         if (!target) continue;
         const isHead = target.children.some((c) => c.type === 'th');
-        const cell = createElement(isHead ? 'th' : 'td');
-        cell.style = {};
-        cell.text = isHead ? '表头' : '单元格';
-        target.children.splice(Math.min(at, target.children.length), 0, cell);
+        for (let k = 0; k < n; k++) {
+          const cell = createElement(isHead ? 'th' : 'td');
+          cell.style = {};
+          cell.text = isHead ? '表头' : '单元格';
+          target.children.splice(Math.min(at + k, target.children.length), 0, cell);
+        }
       }
       return next;
     }
@@ -198,6 +236,20 @@ export function applyTableOp(table: SceneElement, op: TableOp): SceneElement {
         if (!target) continue;
         if (target.children.length <= 1) continue; // 至少留一列
         target.children.splice(Math.min(target0, target.children.length - 1), 1);
+      }
+      return next;
+    }
+
+    case 'deleteCols': {
+      const targets = [...new Set(op.indexes)].sort((a, b) => b - a); // 从右往左删，索引不位移
+      for (const row of parts.rows) {
+        const sec = sectionOf(next, row.id);
+        const target = sec?.children.find((r) => r.id === row.id);
+        if (!target) continue;
+        for (const ci of targets) {
+          if (target.children.length <= 1) break; // 至少留一列
+          if (ci >= 0 && ci < target.children.length) target.children.splice(ci, 1);
+        }
       }
       return next;
     }
@@ -234,6 +286,55 @@ export function applyTableOp(table: SceneElement, op: TableOp): SceneElement {
       return next;
     }
 
+    case 'mergeRange': {
+      const loc = locateCell(next, op.cellId, true);
+      if (!loc) return next;
+      const w = Math.max(1, op.width);
+      const h = Math.max(1, op.height);
+      if (w === 1 && h === 1) return next;
+      // 先把矩形里的单元格全部核对一遍：只要有"已经跨行/跨列"的（会破坏索引对齐），
+      // 就整体放弃 —— 宁可不动，也不能产出一张错乱的表。
+      for (let r = loc.rowIndex; r < loc.rowIndex + h; r++) {
+        const row = parts.rows[r];
+        if (!row) return next;
+        for (let c = loc.cellIndex; c < loc.cellIndex + w; c++) {
+          const cell = row.children[c];
+          if (!cell) return next;
+          if (cell.id === op.cellId) continue;
+          if (intAttr(cell.attrs?.colspan) > 1 || intAttr(cell.attrs?.rowspan) > 1) return next;
+        }
+      }
+      const anchor = parts.rows[loc.rowIndex].children[loc.cellIndex];
+      // 从右下往左上移除，索引才不会位移
+      for (let r = loc.rowIndex + h - 1; r >= loc.rowIndex; r--) {
+        const row = parts.rows[r];
+        for (let c = loc.cellIndex + w - 1; c >= loc.cellIndex; c--) {
+          if (r === loc.rowIndex && c === loc.cellIndex) continue;
+          row.children.splice(c, 1);
+        }
+      }
+      anchor.attrs = { ...(anchor.attrs ?? {}), colspan: String(w), rowspan: String(h) };
+      return next;
+    }
+
+    case 'setRangeType': {
+      const ids = new Set(op.cellIds);
+      for (const row of parts.rows) {
+        for (const cell of row.children) {
+          if (!isCell(cell) || !ids.has(cell.id)) continue;
+          cell.type = op.type;
+          if (op.type === 'th') {
+            cell.attrs = { ...(cell.attrs ?? {}), scope: cell.attrs?.scope ?? 'col' };
+          } else if (cell.attrs) {
+            const a = { ...cell.attrs };
+            delete a.scope;
+            cell.attrs = Object.keys(a).length > 0 ? a : undefined;
+          }
+        }
+      }
+      return next;
+    }
+
     case 'unmerge': {
       const loc = locateCell(next, op.cellId, true);
       if (!loc) return next;
@@ -257,16 +358,21 @@ export function applyTableOp(table: SceneElement, op: TableOp): SceneElement {
         cell.text = '';
         secRow.children.splice(i + k, 0, cell);
       }
-      // 下方各行补 rs-1 个空格（插在同一列位置）
+      // 下方各行补 cs 个空格。
+      // ⚠ 是 cs 而不是 cs-1：合并时，锚点所在行只少了 cs-1 个（锚点自己留着），
+      //   但下面每一行被覆盖的 cs 个格子是**整行全被删掉**的（含锚点正下方那格），
+      //   这里少补一个就会让那一行永久少一列（历史 bug：合并 2×2 再拆分，第二行掉一列）。
       for (let r = 1; r < rs; r++) {
         const target = rows[loc.rowIndex + r];
         if (!target) break;
         const secT = sectionOf(next, target.id)?.children.find((x) => x.id === target.id);
         if (!secT) continue;
-        const cell = createElement(isHead ? 'th' : 'td');
-        cell.style = {};
-        cell.text = '';
-        secT.children.splice(Math.min(i, secT.children.length), 0, cell);
+        for (let k = 0; k < cs; k++) {
+          const cell = createElement(isHead ? 'th' : 'td');
+          cell.style = {};
+          cell.text = '';
+          secT.children.splice(Math.min(i + k, secT.children.length), 0, cell);
+        }
       }
       return next;
     }

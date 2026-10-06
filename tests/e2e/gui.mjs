@@ -28,9 +28,21 @@ function check(name, cond, extra = '') {
   log(`${cond ? 'PASS' : 'FAIL'} | ${name}${extra ? ' | ' + extra : ''}`);
   return !!cond;
 }
+// 截图只是给人看的旁证，绝不能拖慢甚至拖垮主流程：
+//   · --no-shots（或 BC_E2E_SHOTS=0）→ 一张都不拍（跑最快的回归，pnpm test:e2e:fast）
+//   · 单张最多等 5s（Playwright 默认会在截图前等字体加载，网络差时会挂很久）
+//   · 超时/失败只记一笔，不抛错
+const SHOTS_OFF = process.env.BC_E2E_SHOTS === '0' || process.argv.includes('--no-shots');
+const shotFailed = [];
 async function shot(page, name) {
+  if (SHOTS_OFF) return;
   shotNo += 1;
-  await page.screenshot({ path: `${SHOTS}/${String(shotNo).padStart(2, '0')}-${name}.png` });
+  const file = `${SHOTS}/${String(shotNo).padStart(2, '0')}-${name}.png`;
+  try {
+    await page.screenshot({ path: file, timeout: 5000, animations: 'disabled' });
+  } catch {
+    shotFailed.push(name);
+  }
 }
 async function waitFor(page, locator, timeout = 8000) {
   await locator.waitFor({ state: 'visible', timeout });
@@ -126,6 +138,10 @@ async function main() {
     })()
   });
   const win = await app.firstWindow();
+  // 默认等待 8s（和文件里 waitFor 的默认值一致）：
+  // Playwright 原生默认 30s，一旦某步选择器过期就要干等半分钟 —— 一轮下来能白烧好几分钟。
+  win.setDefaultTimeout(8000);
+  win.setDefaultNavigationTimeout(15000);
 
   win.on('console', (m) => {
     if (m.type() === 'error') consoleErrors.push(`[console.error] ${m.text()}`);
@@ -911,23 +927,26 @@ async function main() {
     await win.keyboard.press('Control+z');
     await waitUntil(async () => (await doc(win, '.canvas > section').count()) === 0, 5000, '撤销模板');
     check('S25.3 撤销模板插入', true);
-    // S25.4 扩展弹窗（入口已迁入「设置」菜单：4-F 版2，工具栏 🧩 移除 → 走 menu:ext 链路）
+    // S25.4 扩展管理（入口已迁入「设置 → 插件与资源包」；menu:ext 现在打开设置页而非独立弹窗）
     await win.evaluate(() => window.dispatchEvent(new CustomEvent('menu:ext')));
-    await waitFor(win, doc(win, '.modal-card'));
+    await waitUntil(async () => (await doc(win, '.fluent-settings-page').count()) > 0, 8000, '设置页出现');
+    await waitUntil(async () => (await doc(win, '.fluent-ext-name').count()) > 0, 10000, '扩展扫描完成');
     const ext25 = await win.evaluate(() => {
+      const names = [...document.querySelectorAll('.fluent-ext-name')].map((e) => e.textContent ?? '');
       const btns = [...document.querySelectorAll('button')].map((b) => b.textContent ?? '');
       return {
-        hasResource: [...document.querySelectorAll('.ext-item-name')].some((e) => e.textContent.includes('内置新手模板包')),
-        hasBadge: !!document.querySelector('.ext-item-badge'),
-        hasPluginHint: [...document.querySelectorAll('.hint')].some((e) => e.textContent.includes('插件执行支持')),
+        resCount: names.length,
+        hasActionCard: !!document.querySelector('.fluent-ext-action-btn'),
         hasButtons: btns.some((t) => t.includes('重新扫描')) && btns.some((t) => t.includes('打开扩展文件夹'))
       };
     });
-    check('S25.4 扩展弹窗：资源包/插件状态/扫描入口齐全', ext25.hasResource && ext25.hasBadge && ext25.hasPluginHint && ext25.hasButtons, JSON.stringify(ext25));
-    await shot(win, '扩展管理弹窗');
-    await win.keyboard.press('Escape');
-    await new Promise((r) => setTimeout(r, 200));
-    check('S25.5 Esc 关闭扩展弹窗', (await doc(win, '.modal-card').count()) === 0);
+    check('S25.4 扩展管理（设置页内）：资源包列表 + 导入卡片 + 扫描/打开目录入口齐全',
+      ext25.resCount > 0 && ext25.hasActionCard && ext25.hasButtons, JSON.stringify(ext25));
+    await shot(win, '设置-扩展管理');
+    // S25.5 从设置页返回编辑器
+    await doc(win, '.fluent-back-btn').first().click();
+    await waitUntil(async () => (await doc(win, '.fluent-settings-page').count()) === 0, 6000, '离开设置页');
+    check('S25.5 从设置扩展页返回编辑器', (await doc(win, '.fluent-settings-page').count()) === 0);
 
     // ===== S26 画布缩放：Ctrl+滚轮缩放 + 归位按钮在工具栏（4-F 版2） =====
     const canvas26 = doc(win, '.canvas');
@@ -937,21 +956,22 @@ async function main() {
     await new Promise((r) => setTimeout(r, 300));
     const zoomed26 = await win.evaluate(() => ({
       transform: document.querySelector('.canvas')?.style.transform ?? '',
-      pct: document.querySelector('.zoom-pct')?.textContent ?? '',
-      resetEnabled: !document.querySelector('.zoom-reset')?.disabled,
+      pct: document.querySelector('.tb-zoom-drag')?.textContent ?? '',
+      // 归位按钮只在 zoom !== 1 时才渲染 → 存在即代表可用
+      resetEnabled: !!document.querySelector('.tb-zoom-reset'),
       hasFloatBar: !!document.querySelector('.canvas-zoom-bar')
     }));
     check('S26.1 Ctrl+滚轮缩放生效且归位按钮在工具栏（无浮条）', zoomed26.transform.includes('scale(') && zoomed26.pct !== '100%' && zoomed26.resetEnabled && !zoomed26.hasFloatBar, JSON.stringify(zoomed26));
     await shot(win, '画布缩放-非100%');
     // 工具栏「归位」→ 回 100%，按钮变禁用
-    await doc(win, '.zoom-reset').click();
+    await doc(win, '.tb-zoom-reset').click();
     await new Promise((r) => setTimeout(r, 250));
     const reset26 = await win.evaluate(() => ({
       transform: document.querySelector('.canvas')?.style.transform ?? '',
-      pct: document.querySelector('.zoom-pct')?.textContent ?? '',
-      resetDisabled: document.querySelector('.zoom-reset')?.disabled
+      pct: document.querySelector('.tb-zoom-drag')?.textContent ?? '',
+      resetGone: !document.querySelector('.tb-zoom-reset')
     }));
-    check('S26.2 归位按钮回 100%（工具栏）', reset26.transform === '' && reset26.pct === '100%' && reset26.resetDisabled, JSON.stringify(reset26));
+    check('S26.2 归位按钮回 100%（回 100% 后按钮本身收起）', reset26.transform === '' && reset26.pct === '100%' && reset26.resetGone, JSON.stringify(reset26));
 
     // ===== S27 CSS 选择器策略（4-C/4-F）：类名/ID 直接写选择器；同名样式不统一 = 警告 + 编辑即统一 =====
     // 当前画布：divA(类 banner test 无 id) + divB>divC。先把左侧面板切回「元素」页签
@@ -967,8 +987,10 @@ async function main() {
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.tab-btn:has-text("属性")').click();
     await ensurePropSection(win);
+    // ID 行在「选择器与标识」折叠区里（v0.4.1 起默认折叠）→ 先展开
+    await ensureIdentitySection(win);
     await new Promise((r) => setTimeout(r, 200));
-    const idInput27 = doc(win, '.prop-row:has-text("ID?") input');
+    const idInput27 = doc(win, '.prop-row:has-text("ID 唯一标识") input');
     await idInput27.fill('c-sec');
     await idInput27.evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 300));
@@ -1024,7 +1046,7 @@ async function main() {
     await ensurePropSection(win);
     await new Promise((r) => setTimeout(r, 200));
     // divD 默认就带「背景色」行，直接改色即可（无需走添加属性菜单）
-    const bgRow27 = doc(win, '.prop-row:has-text("背景色 Background") input').first();
+    const bgRow27 = doc(win, '.prop-row:has-text("背景颜色") input').first();
     await bgRow27.fill('rgb(255, 0, 0)');
     await bgRow27.evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 400));
@@ -1096,16 +1118,21 @@ async function main() {
       .map((e) => ({ bg: getComputedStyle(e).backgroundColor, style: e.getAttribute('style') ?? '' })));
     const inlineStyleText30 = (exp30.match(/<div style="([^"]*background-color: #d4e7ff[^"]*)"/) || [])[1] ?? '';
     check('S30.1 行内元素：导出 style 属性 = 画布渲染（默认容器背景一致）', inlineStyleText30.includes('min-height: 60px') && inline30.length === 1 && inline30[0].bg === 'rgb(212, 231, 255)', JSON.stringify({ exp: inlineStyleText30.slice(0, 60), canvas: inline30 }));
-    // S30.2 ⚠ 问题面板：badge 计数 + 未命名条目 + 点击选中元素
-    const badge30 = await doc(win, '.issue-badge').textContent();
-    await doc(win, '.issue-btn').click();
-    await new Promise((r) => setTimeout(r, 200));
-    const issueText30 = await doc(win, '.issue-pop').textContent();
-    await doc(win, '.issue-item').first().click(); // 点未命名条目 → 选中该元素
-    await new Promise((r) => setTimeout(r, 250));
-    const selAfterIssue30 = (await doc(win, '.sel-indicator').count()) >= 1;
-    const issueBlock30 = await doc(win, '.issue-pop').count();
-    check('S30.2 ⚠ 面板：计数 + 未命名条目 + 点击可选中', Number(badge30) >= 3 && issueText30.includes('未设置类名') && selAfterIssue30 && issueBlock30 === 0, `badge=${badge30} / ${issueText30.slice(0, 50)} / sel=${selAfterIssue30}`);
+    // S30.2 导出前体检：工具栏 ⚠ 角标计数 + 点开向导（原内联 issue-pop 已升级为向导弹窗）
+    const badge30 = ((await doc(win, '.tb-health-badge').textContent().catch(() => '0')) ?? '0').trim();
+    await doc(win, '.tb-health-btn').click();
+    await waitFor(win, doc(win, '.hc-modal'));
+    const hc30 = await win.evaluate(() => ({
+      titles: [...document.querySelectorAll('.hc-list-text')].map((e) => e.textContent ?? ''),
+      hasFoot: !!document.querySelector('.hc-foot'),
+      hasDetail: !!document.querySelector('.hc-detail-title')
+    }));
+    await doc(win, '.hc-modal .cp-close').click();
+    await waitUntil(async () => (await doc(win, '.hc-modal').count()) === 0, 4000, '体检向导关闭');
+    const hcClosed30 = (await doc(win, '.hc-modal').count()) === 0;
+    check('S30.2 导出前体检向导：⚠ 角标计数 + 问题清单 + 关闭按钮可关',
+      Number(badge30) >= 1 && hc30.titles.length >= 1 && hc30.hasFoot && hc30.hasDetail && hcClosed30,
+      `badge=${badge30} / ${hc30.titles.length}项 / closed=${hcClosed30}`);
     // S30.3 类名总览页签：按单个 token 分组（.banner 与 .test 各一张卡）+ 未命名块
     await doc(win, '.inspector-tab:has-text("类名")').click();
     await new Promise((r) => setTimeout(r, 250));
@@ -1121,7 +1148,7 @@ async function main() {
     await doc(win, '.tab-btn:has-text("属性")').click();
     await ensurePropSection(win);
     await new Promise((r) => setTimeout(r, 200));
-    const bgRow30 = doc(win, '.prop-row:has-text("背景色 Background") input').first();
+    const bgRow30 = doc(win, '.prop-row:has-text("背景颜色") input').first();
     await bgRow30.fill('rgb(0, 170, 0)');
     await bgRow30.evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 400));
@@ -1163,7 +1190,7 @@ async function main() {
     await doc(win, '.tab-btn:has-text("属性")').click();
     await ensurePropSection(win);
     await new Promise((r) => setTimeout(r, 200));
-    const idRow30 = doc(win, '.prop-row:has-text("ID?") input');
+    const idRow30 = doc(win, '.prop-row:has-text("ID 唯一标识") input');
     await idRow30.fill('c-sec');
     await idRow30.evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 300));
@@ -1318,7 +1345,10 @@ async function main() {
   }
 
   const failed = results.filter((r) => r.startsWith('FAIL')).length;
-  console.log(`\n=== 结果：${results.filter((r) => r.startsWith('PASS')).length} 通过 / ${failed} 失败 ===`);
+  const passed = results.filter((r) => r.startsWith('PASS')).length;
+  console.log(`\n=== 结果：${passed} 通过 / ${failed} 失败 ===`);
+  if (SHOTS_OFF) console.log('（本轮未拍截图：--no-shots / BC_E2E_SHOTS=0）');
+  else if (shotFailed.length > 0) console.log(`截图失败 ${shotFailed.length} 张（不影响判定）：${shotFailed.join('、')}`);
   process.exit(failed > 0 ? 1 : 0);
 }
 

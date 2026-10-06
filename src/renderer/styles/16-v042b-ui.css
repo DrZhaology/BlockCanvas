@@ -375,86 +375,197 @@
   overflow: hidden;
 }
 .tbl-panel-title { font-size: 12px; font-weight: 700; color: var(--text); }
-.tbl-grid-wrap { flex: 1; min-height: 0; overflow: auto; padding: 4px; }
+.tbl-stage-head { display: flex; align-items: center; gap: 6px; }
+.tbl-stage-head .tbl-panel-title { flex: 0 0 auto; }
+.tbl-stage-tip { font-size: 11px; color: var(--text-muted); line-height: 1.6; }
+.tbl-stage-tip b { color: var(--accent); }
+
+/* —— 结构网格：CSS Grid（每两列之间留一条 8px 的"插入轨"） —— */
+.tbl-grid-wrap { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 6px; }
 .tbl-grid {
-  border-collapse: separate;
-  border-spacing: 0;
+  display: grid;
   min-width: 100%;
   font-size: 12px;
   color: var(--text);
 }
-.tbl-grid th,
-.tbl-grid td {
-  border: 1px solid var(--border);
-  padding: 0;
-  vertical-align: middle;
+.tbl-grid.is-dragging { cursor: grabbing; }
+.tbl-grid.is-dragging .tbl-cell,
+.tbl-grid.is-dragging .tbl-rail { cursor: grabbing; }
+
+/* 所有格子统一用 inset 阴影画 1px 线：相邻格子不会叠成 2px，也方便整体换色 */
+.tbl-gcell {
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-panel);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
-.tbl-grid-corner,
-.tbl-grid-colhead,
-.tbl-grid-rowhead {
-  width: 30px;
-  height: 26px;
+.tbl-gcorner,
+.tbl-colhead,
+.tbl-rowhead {
+  display: grid;
+  place-items: center;
   background: var(--panel-tint);
   color: var(--text-muted);
   font-size: 10.5px;
   font-weight: 700;
   cursor: pointer;
   user-select: none;
-  text-align: center;
 }
-.tbl-grid-colhead:hover,
-.tbl-grid-rowhead:hover { background: var(--hover-accent); color: var(--accent); }
-.tbl-grid-colhead.active,
-.tbl-grid-rowhead.active { background: var(--accent); color: #fff; }
-.tbl-grid tbody tr.is-head .tbl-cell { background: var(--panel-soft); font-weight: 600; }
+.tbl-colhead:hover,
+.tbl-rowhead:hover { background: var(--hover-accent); color: var(--accent); }
+.tbl-colhead.active,
+.tbl-rowhead.active { background: var(--accent); color: #fff; }
+
 .tbl-cell {
   position: relative;
-  min-width: 64px;
-  height: 30px;
+  display: flex;
+  align-items: center;
   padding: 5px 9px;
-  cursor: pointer;
+  cursor: cell;
+  user-select: none;
+  touch-action: none;
   transition: background 0.12s ease, box-shadow 0.12s ease;
 }
+.tbl-cell.is-th { background: var(--panel-soft); font-weight: 600; }
 .tbl-cell:hover { background: var(--row-hover); }
-.tbl-cell.active {
-  background: var(--row-active);
-  box-shadow: inset 0 0 0 2px var(--accent);
-}
+.tbl-cell.picked { background: var(--row-active); }
+.tbl-cell.active { box-shadow: inset 0 0 0 2px var(--accent); }
 .tbl-cell-text {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 220px;
+  max-width: 100%;
 }
 .tbl-cell-badge {
   position: absolute;
   right: 2px;
-  bottom: 1px;
+  bottom: 0;
   font-size: 9px;
+  line-height: 1;
   color: var(--accent);
-  opacity: 0.9;
 }
-.tbl-grid-rowops {
-  width: 56px;
-  border: none;
-  padding: 0 2px;
-  white-space: nowrap;
+
+/* —— 插入轨：那条 8px 的缝 —— */
+.tbl-rail {
+  position: relative;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
 }
-.tbl-mini {
-  width: 22px;
-  height: 20px;
-  margin: 0 1px;
-  border: 1px solid var(--border);
+.tbl-rail::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
   border-radius: 4px;
-  background: var(--bg-panel);
-  color: var(--text-muted);
+  background: transparent;
+  transition: background 0.14s ease;
+}
+.tbl-rail:hover::before { background: var(--accent-strong-bg); }
+.tbl-rail-btn {
+  position: relative;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-family: inherit;
   font-size: 11px;
   line-height: 1;
-  cursor: pointer;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.55);
+  pointer-events: none; /* 整个轨道才是热区，这个加号只是"这里有东西"的视觉提示 */
+  transition: opacity 0.14s ease, transform 0.14s var(--ease-standard);
 }
-.tbl-mini:hover { border-color: var(--accent); color: var(--accent); }
-.tbl-mini.danger:hover { border-color: var(--danger); color: var(--danger); }
+.tbl-rail:hover .tbl-rail-btn { opacity: 1; transform: scale(1); }
+
+/* 拖动时的高亮预览：将要插入的位置整条亮起来 */
+.tbl-ghost {
+  z-index: 5;
+  pointer-events: none;
+  border-radius: 4px;
+  background: var(--accent);
+  opacity: 0.32;
+  animation: bcMaskIn var(--dur-fast) var(--ease-standard) both;
+}
+
+/* —— 选区操作条：固定在结构区顶部（不浮在格子上挡视线） —— */
+.tbl-actionbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-soft);
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+.tbl-actionbar.has-sel { border-color: var(--accent); background: var(--hover-accent); }
+.tbl-bar-label {
+  padding: 0 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: 'Consolas', monospace;
+}
+.tbl-bar-btn {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+}
+.tbl-bar-btn:hover:not(:disabled) { border-color: var(--accent); background: var(--hover-accent); color: var(--accent); }
+.tbl-bar-btn.danger:hover:not(:disabled) { border-color: var(--danger); background: #fdecea; color: var(--danger); }
+.tbl-bar-btn:disabled { opacity: 0.42; cursor: default; }
+
+/* 拖动计数气泡（fixed，跟指针） */
+.tbl-count-badge {
+  position: fixed;
+  z-index: 9999;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  box-shadow: 0 6px 18px rgba(30, 136, 229, 0.36);
+  pointer-events: none;
+  animation: bcPopIn var(--dur-fast) var(--ease-standard) both;
+}
+.tbl-count-badge b { font-size: 15px; line-height: 1; }
+.tbl-count-badge span { font-size: 9.5px; opacity: 0.82; }
+body.bc-rail-dragging { user-select: none; }
+
+/* 空表占位 */
+.tbl-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  padding: 44px 20px;
+  text-align: center;
+}
+.tbl-empty-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.tbl-empty-sub { font-size: 11.5px; color: var(--text-muted); line-height: 1.7; max-width: 320px; }
+
 .tbl-hint { font-size: 11px; color: var(--text-muted); line-height: 1.6; }
 
 /* —— 右：属性与操作 —— */
@@ -477,8 +588,9 @@
   background: var(--bg-panel);
   min-width: 0;
 }
-.tbl-card-title { font-size: 12px; font-weight: 700; color: var(--text); }
-.tbl-empty { font-size: 11.5px; color: var(--text-muted); }
+.tbl-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tbl-card-title { flex: 1 1 auto; min-width: 0; font-size: 12px; font-weight: 700; color: var(--text); }
+.tbl-empty { font-size: 11.5px; color: var(--text-muted); line-height: 1.6; }
 .tbl-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .tbl-btn {
   flex: 1 1 auto;
@@ -493,11 +605,47 @@
   font-size: 11.5px;
   white-space: nowrap;
   cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
 }
 .tbl-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--hover-accent); }
 
+/* 结构开关行（表头行 / 表尾行 / 标题） */
+.tbl-toggle-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tbl-toggle-name { flex: 0 0 auto; font-size: 11.5px; color: var(--text); }
+.tbl-toggle-count { flex: 1 1 auto; min-width: 0; font-size: 10.5px; color: var(--text-muted); }
+.tbl-mini {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.14s ease, color 0.14s ease;
+}
+.tbl-mini:hover { border-color: var(--accent); color: var(--accent); }
+.tbl-mini.danger:hover { border-color: var(--danger); color: var(--danger); }
+
 .tbl-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.tbl-field > span { font-size: 10.5px; color: var(--text-muted); }
+.tbl-field > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--text);
+}
+/* 字段名后面的"人话解释"（如 colspan 跨几列） */
+.tbl-field > span em {
+  font-style: normal;
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
 .tbl-field input,
 .tbl-field select {
   height: 28px;
@@ -513,7 +661,7 @@
 .tbl-field input[type='color'] { padding: 2px; width: 44px; }
 .tbl-field input[type='checkbox'] { width: auto; height: auto; }
 .tbl-field-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.tbl-field-row .tbl-field { flex: 1 1 90px; }
+.tbl-field-row .tbl-field { flex: 1 1 92px; }
 
 .tbl-preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
 .tbl-preset {
@@ -533,65 +681,3 @@
 .tbl-preset:hover { border-color: var(--accent); background: var(--hover-accent); transform: translateY(-1px); }
 .tbl-preset b { font-size: 12px; }
 .tbl-preset span { font-size: 10.5px; color: var(--text-muted); line-height: 1.45; }
-
-/* 元素面板「表格」分组下的一键插入模板行 */
-.elem-tpl-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
-}
-.elem-tpl-btn {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel-soft);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
-}
-.elem-tpl-btn:hover { border-color: var(--accent); background: var(--hover-accent); color: var(--accent); }
-/* 底部布局（横向卡片）下：表格分组卡片窄，模板行竖向排更好读 */
-.workspace[data-layout='bottom'] .elem-tpl-row { flex-direction: column; }
-.workspace[data-layout='bottom'] .elem-tpl-btn { flex: 0 0 auto; width: 100%; }
-
-/* 元素面板「表格」分组下的一键插入模板行 */
-.elem-tpl-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
-}
-.elem-tpl-btn {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel-soft);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
-}
-.elem-tpl-btn:hover { border-color: var(--accent); background: var(--hover-accent); color: var(--accent); }
-/* 底部布局（横向卡片）下：表格分组卡片窄，模板行竖向排更好读 */
-.workspace[data-layout='bottom'] .elem-tpl-row { flex-direction: column; }
-.workspace[data-layout='bottom'] .elem-tpl-btn { flex: 0 0 auto; width: 100%; }
