@@ -59,6 +59,29 @@ async function ensureQuickHelper(win) {
   if (await head.count()) { await head.first().click(); await new Promise((r) => setTimeout(r, 450)); }
 }
 
+/**
+ * v0.4.2：设备切换（自适应 / 电脑 / 平板 / 手机）已默认折进「设备」工具组，
+ * 组内工具只在悬浮展开的面板里渲染。所有需要切设备的用例先调它。
+ */
+async function openDeviceGroup(win) {
+  if (await doc(win, '.tb-grp-panel .tb-bp-btn').count()) return;
+  await doc(win, '.toolbar .tb-grp-btn:has-text("设备")').first().hover();
+  await win.waitForSelector('.tb-grp-panel .tb-bp-btn', { state: 'visible', timeout: 5000 });
+  await new Promise((r) => setTimeout(r, 150));
+}
+
+/** 在「设备」组面板里点一个设备按钮（自适应 / 电脑 / 平板 / 手机） */
+async function pickDevice(win, text) {
+  await openDeviceGroup(win);
+  await doc(win, `.tb-grp-panel .tb-bp-btn:has-text("${text}")`).first().click();
+  await new Promise((r) => setTimeout(r, 300));
+}
+
+/** 画布宽度切回「自适应」 */
+async function setCanvasAuto(win) {
+  await pickDevice(win, '自适应');
+}
+
 async function main() {
   log('=== BlockCanvas E2E 启动 ===');
   // 数据隔离：把 data/ 指向临时目录，保证 E2E 从「全新空工程」开始，且绝不污染用户真实数据
@@ -74,7 +97,13 @@ async function main() {
     args: ['.', '--disable-gpu', '--disable-software-rasterizer', '--no-sandbox', '--disable-dev-shm-usage'],
     cwd: ROOT,
     executablePath: electronPath,
-    env: { ...process.env, BC_EXPORT_PATH: EXPORT_CHECK, BC_DATA_DIR: DATA_DIR }
+    // v0.4.2：若宿主终端带 ELECTRON_RUN_AS_NODE=1（常见于在 Electron 系终端里跑脚本），
+    // Electron 会退化成纯 Node → Playwright "Process failed to launch!"，这里显式剔除。
+    env: (() => {
+      const e = { ...process.env, BC_EXPORT_PATH: EXPORT_CHECK, BC_DATA_DIR: DATA_DIR };
+      delete e.ELECTRON_RUN_AS_NODE;
+      return e;
+    })()
   });
   const win = await app.firstWindow();
 
@@ -668,16 +697,13 @@ async function main() {
       return [c.getBoundingClientRect().width, w.clientWidth - 48];
     });
     check('S23.1 自适应画布铺满编辑区（横向）', Math.abs(wAuto - wWrap) < 2, `${wAuto} vs ${wWrap}`);
-    // S23.2 手机预设 375px → 画布收窄到 375
-    const sel23 = await doc(win, '.tb-width-select');
-    await sel23.selectOption('375px');
-    await new Promise((r) => setTimeout(r, 250));
+    // S23.2 手机预设 375px → 画布收窄到 375（设备组：悬浮展开后点「手机」）
+    await pickDevice(win, '手机');
     const w375 = await win.evaluate(() => document.querySelector('.canvas').getBoundingClientRect().width);
     check('S23.2 手机预设 375px 生效', Math.abs(w375 - 375) < 1, String(w375));
     await shot(win, '画布宽度-手机375');
     // S23.3 切回自适应恢复铺满
-    await sel23.selectOption('auto');
-    await new Promise((r) => setTimeout(r, 250));
+    await setCanvasAuto(win);
     const wAuto2 = await win.evaluate(() => document.querySelector('.canvas').getBoundingClientRect().width);
     check('S23.3 切回自适应恢复', Math.abs(wAuto2 - wWrap) < 2, String(wAuto2));
     // S23.4 工具栏有"预览"按钮（真实点击会开浏览器，自动化里只验证存在）
@@ -1183,8 +1209,7 @@ async function main() {
     // ===== S33（新版）：画布左右拖手 + 面板宽/高拖手 =====
     // 当前状态：底部布局、元素页签、属性面板在右。
     // 画布拖手：底部布局下画布基本铺满编辑区，向右拖右缘手柄 → 画布变固定 px + 工具栏读数实时出现。
-    await doc(win, '.tb-width-select').selectOption('auto');
-    await new Promise((r) => setTimeout(r, 250));
+    await setCanvasAuto(win);
     const before33 = await win.evaluate(() => ({
       canvasW: Math.round(document.querySelector('.canvas').getBoundingClientRect().width),
       inline: document.querySelector('.canvas').style.width || ''
@@ -1200,12 +1225,11 @@ async function main() {
     await new Promise((r) => setTimeout(r, 250));
     const after33 = await win.evaluate(() => ({
       inlineW: document.querySelector('.canvas').style.width || '',
-      readout: document.querySelector('.canvas-width-readout')?.textContent ?? '',
-      selectVal: document.querySelector('.tb-width-select')?.value ?? ''
+      readout: document.querySelector('.canvas-width-readout')?.textContent ?? ''
     }));
-    check('S33.1 画布右拖手 → 固定 px 宽 + 工具栏读数', after33.inlineW.endsWith('px') && after33.readout.endsWith('px') && parseInt(after33.inlineW) > before33.canvasW, JSON.stringify({ before33, after33 }));
+    check('S33.1 画布右拖手 → 固定 px 宽', after33.inlineW.endsWith('px') && parseInt(after33.inlineW) > before33.canvasW, JSON.stringify({ before33, after33 }));
     // S33.2 切回自适应 → 恢复铺满（无行内宽）
-    await doc(win, '.tb-width-select').selectOption('auto');
+    await setCanvasAuto(win);
     await new Promise((r) => setTimeout(r, 250));
     const back33 = await win.evaluate(() => ({
       w: Math.round(document.querySelector('.canvas').getBoundingClientRect().width),

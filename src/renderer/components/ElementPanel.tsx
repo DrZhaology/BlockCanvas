@@ -378,10 +378,17 @@ function TemplateLibrary(props: {
     return () => window.removeEventListener('bc:set-pocket', onPocket);
   }, []);
 
-  const toggleCollapsed = (key: string) => {
+  // v0.4.2：展开某板块后把它的标题滚进视野（block:'nearest' —— 已完整可见时不动），
+  // 避免"内容展开在可视区外、看起来像点了没反应"的错觉。
+  const toggleCollapsed = (key: string, headerEl?: HTMLElement | null) => {
     setCollapsed((prev) => {
       const next = { ...prev, [key]: !prev[key] };
       try { localStorage.setItem('bc-tpl-collapsed', JSON.stringify(next)); } catch {}
+      if (!next[key] && headerEl) {
+        window.setTimeout(() => {
+          try { headerEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch { /* 忽略 */ }
+        }, 80);
+      }
       return next;
     });
   };
@@ -465,7 +472,7 @@ function TemplateLibrary(props: {
         return (
           <div key={r.id} className="tpl-group">
             {/* 资源包标题 */}
-            <div className="tpl-group-header" onClick={() => toggleCollapsed(r.id)} title={resCollapsed ? '展开此资源包' : '收起此资源包'}>
+            <div className="tpl-group-header" onClick={(e) => toggleCollapsed(r.id, e.currentTarget)} title={resCollapsed ? '展开此资源包' : '收起此资源包'}>
               <span className={"tpl-group-caret" + (resCollapsed ? '' : ' open')}>▸</span>
               <span className="tpl-group-name">{r.name}</span>
               <span className="tpl-group-meta">
@@ -483,7 +490,7 @@ function TemplateLibrary(props: {
                       <div key={cat.id} className="tpl-sub-group">
                         <div
                           className="tpl-sub-header"
-                          onClick={() => toggleCollapsed(`${r.id}::${cat.id}`)}
+                          onClick={(e) => toggleCollapsed(`${r.id}::${cat.id}`, e.currentTarget)}
                           title={catCollapsed ? '展开此分类' : '收起此分类'}
                         >
                           <span className={"tpl-sub-caret" + (catCollapsed ? '' : ' open')}>▸</span>

@@ -16,6 +16,7 @@ import { useScene, findNode } from '@store/sceneStore';
 import { useTabStore } from '@store/tabStore';
 import { refreshPlugins } from '@lib/pluginHost';
 import { withViewTransition } from '@lib/viewTransition';
+import { useHorizontalWheel } from '@lib/hScroll';
 import { DEVICE_LIST, widthToBreakpoint, type DeviceId } from '@lib/device';
 import { tokensToRootCss } from '@lib/designTokens';
 
@@ -42,6 +43,8 @@ const RIGHT_WIDTH_MIN = 340;
 export type AppView = 'editor' | 'projects' | 'settings' | 'update';
 
 export default function App() {
+  // v0.4.2：全局「横向滚动区直接滚轮」桥接（容器加 .bc-hscroll 即生效）
+  useHorizontalWheel();
   const [rightTab, setRightTabRaw] = usePersistentState<RightTab>(RIGHT_TAB_KEY, 'inspector');
   // v0.4.4：页签切换不再走 View Transition —— VT 的旧帧快照会让文字"停一会儿"。
   // 改为内容重挂载 + 轻量入场动画（见 .tab-body 的 bcSwapIn）。

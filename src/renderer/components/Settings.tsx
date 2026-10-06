@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useScene } from '@store/sceneStore';
-import { useToolbar, dockOf, getSortedItems, type ToolbarItem, type ToolbarDock } from '@store/toolbarStore';
+import {
+  useToolbar, dockOf, getSortedItems, groupOfItem,
+  type ToolbarItem, type ToolbarDock, type ToolbarGroupDock
+} from '@store/toolbarStore';
 import { HelpButton } from './HelpButton';
 import { Icon, type IconName } from './Icon';
 import { Collapse } from './Collapse';
@@ -966,13 +969,27 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
   const items = useToolbar((s) => s.items);
   const docks = useToolbar((s) => s.docks);
   const userOrder = useToolbar((s) => s.order);
+  const groups = useToolbar((s) => s.groups);
   const setOrder = useToolbar((s) => s.setOrder);
   const setDock = useToolbar((s) => s.setDock);
+  const addGroup = useToolbar((s) => s.addGroup);
+  const removeGroup = useToolbar((s) => s.removeGroup);
+  const renameGroup = useToolbar((s) => s.renameGroup);
+  const setGroupDock = useToolbar((s) => s.setGroupDock);
+  const addToGroup = useToolbar((s) => s.addToGroup);
+  const removeFromGroup = useToolbar((s) => s.removeFromGroup);
 
   // 全局顺序（用户排序优先，其余按注册 order 兜底）
   const ordered = getSortedItems(items, userOrder);
-  const mainRows = ordered.filter((it) => dockOf(it, docks) === 'main');
-  const rightRows = ordered.filter((it) => dockOf(it, docks) === 'right');
+  // v0.4.2：组内成员的停靠跟随「组」（组移到右侧，成员一起走）
+  const placeOf = (it: ToolbarItem): ToolbarDock => {
+    const g = groupOfItem(it.id, groups);
+    return g ? g.dock : dockOf(it, docks);
+  };
+  const mainRows = ordered.filter((it) => placeOf(it) === 'main');
+  const rightRows = ordered.filter((it) => placeOf(it) === 'right');
+  // 还没被收进任何组的按钮（供「加入按钮…」下拉选择）
+  const ungrouped = ordered.filter((it) => !groupOfItem(it.id, groups));
 
   // —— 拖拽状态（列表行与预览 chips 共用同一套逻辑）——
   const [drag, setDrag] = useState<TbDrag>(null);
@@ -1023,8 +1040,35 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
 
   const nameOf = (it: ToolbarItem) => (typeof it.label === 'function' ? it.label() : (it.label ?? it.id));
 
+  // 预览区把「组」折叠成一个组 chip（组内工具不逐条铺开）
+  const previewChips = (list: ToolbarItem[], side: 'main' | 'right') => {
+    const done = new Set<string>();
+    const out: React.ReactNode[] = [];
+    for (const it of list) {
+      const g = groupOfItem(it.id, groups);
+      if (!g) {
+        out.push(
+          <span key={it.id} className={chipClass(it.id) + (side === 'right' ? ' is-right' : '')} {...rowDragProps(it.id)}>
+            <span className="tbman-chip-grip">⠿</span>
+            {nameOf(it)}
+          </span>
+        );
+        continue;
+      }
+      if (done.has(g.id)) continue;
+      done.add(g.id);
+      out.push(
+        <span key={g.id} className="tbman-chip tbman-chip-group" title={`${g.label}：悬浮展开 ${g.itemIds.length} 个工具`}>
+          {g.icon ?? '▦'} {g.label}
+        </span>
+      );
+    }
+    return out;
+  };
+
   const renderRow = (it: ToolbarItem) => {
     const cur = dockOf(it, docks);
+    const g = groupOfItem(it.id, groups);
     return (
       <div
         key={it.id}
@@ -1035,48 +1079,103 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
         <span className="tbman-grip">⠿</span>
         <span className="tbman-name">{nameOf(it)}</span>
         {it.id.startsWith('plg.') && <span className="tbman-tag">插件</span>}
-        <div className="tbman-dock" role="group" aria-label="停靠区">
-          {(['main', 'right', 'more'] as ToolbarDock[]).map((d) => (
-            <button
-              key={d}
-              className={'tbman-dock-btn' + (cur === d ? ' active' : '')}
-              onClick={() => setDock(it.id, d)}
-              title={DOCK_HINT[d]}
-            >{DOCK_LABEL[d]}</button>
-          ))}
-        </div>
+        {g ? (
+          <>
+            <span className="tbman-tag tbman-tag-group" title={`已收进工具组「${g.label}」`}>{g.icon ?? '▦'} 组·{g.label}</span>
+            <button className="btn-mini" onClick={() => removeFromGroup(it.id)} title="移出工具组，回到自身停靠区">移出组</button>
+          </>
+        ) : (
+          <div className="tbman-dock" role="group" aria-label="停靠区">
+            {(['main', 'right', 'more'] as ToolbarDock[]).map((d) => (
+              <button
+                key={d}
+                className={'tbman-dock-btn' + (cur === d ? ' active' : '')}
+                onClick={() => setDock(it.id, d)}
+                title={DOCK_HINT[d]}
+              >{DOCK_LABEL[d]}</button>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
 
   return (
     <>
+      {/* ——— v0.4.2 二级工具组 ——— */}
+      <div className="tbman-group-title">
+        <span>工具组</span>
+        <small>把多个按钮折叠成一个组按钮，鼠标悬浮即展开里面的工具</small>
+      </div>
+      <div className="fluent-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+        {groups.length === 0 && (
+          <span className="tbman-empty">还没有工具组。点下方「+ 新建工具组」创建，再把按钮加进去。</span>
+        )}
+        {groups.map((g) => (
+          <div key={g.id} className="tbman-grp-row">
+            <span className="tbman-grp-ico">{g.icon ?? '▦'}</span>
+            <input
+              className="tbman-grp-name"
+              value={g.label}
+              spellCheck={false}
+              onChange={(e) => renameGroup(g.id, e.target.value)}
+              title="工具组名称（显示在组按钮上）"
+            />
+            <div className="tbman-dock" role="group" aria-label="工具组停靠区">
+              {(['main', 'right'] as ToolbarGroupDock[]).map((d) => (
+                <button
+                  key={d}
+                  className={'tbman-dock-btn' + (g.dock === d ? ' active' : '')}
+                  onClick={() => setGroupDock(g.id, d)}
+                  title={d === 'main' ? '工具组放在主区（可滚动）' : '工具组固定在工具栏右端'}
+                >{DOCK_LABEL[d]}</button>
+              ))}
+            </div>
+            <div className="tbman-grp-members">
+              {g.itemIds.length === 0 && <span className="tbman-empty">空组 —— 从右侧「+ 加入按钮」添加</span>}
+              {g.itemIds.map((id) => {
+                const it = items.find((x) => x.id === id);
+                return (
+                  <span key={id} className="tbman-grp-chip">
+                    {it ? nameOf(it) : id}
+                    <button className="tbman-grp-chip-x" title="移出该按钮" onClick={() => removeFromGroup(id)}>×</button>
+                  </span>
+                );
+              })}
+            </div>
+            <select
+              className="tbman-grp-add"
+              value=""
+              onChange={(e) => { if (e.target.value) addToGroup(g.id, e.target.value); }}
+              title="把一个按钮加入本组"
+            >
+              <option value="">＋ 加入按钮…</option>
+              {ungrouped.map((it) => <option key={it.id} value={it.id}>{nameOf(it)}</option>)}
+            </select>
+            <button className="btn-mini tbman-grp-del" onClick={() => removeGroup(g.id)} title="删除工具组（成员回到各自停靠区）">删除组</button>
+          </div>
+        ))}
+        <div>
+          <button className="btn-mini" onClick={() => addGroup('新工具组', 'main')} title="新建一个二级工具组">＋ 新建工具组</button>
+        </div>
+      </div>
+
       <div className="fluent-group-title">工具栏预览（可直接拖动调整顺序）</div>
       <div className="fluent-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-        <div className="tbman-preview">
+        <div className="tbman-preview bc-hscroll">
           {mainRows.length === 0 && <span className="tbman-empty">主区没有按钮 —— 到下方把停靠切到「主区」</span>}
-          {mainRows.map((it) => (
-            <span key={it.id} className={chipClass(it.id)} {...rowDragProps(it.id)}>
-              <span className="tbman-chip-grip">⠿</span>
-              {nameOf(it)}
-            </span>
-          ))}
+          {previewChips(mainRows, 'main')}
           <span className="tbman-preview-sep" />
-          {rightRows.map((it) => (
-            <span key={it.id} className={chipClass(it.id) + ' is-right'} {...rowDragProps(it.id)}>
-              <span className="tbman-chip-grip">⠿</span>
-              {nameOf(it)}
-            </span>
-          ))}
+          {previewChips(rightRows, 'right')}
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            左段 = 主区（放不下自动滚动），右段 = 固定在右端；停靠切「更多」的按钮收进工具栏右端「⋯」。
+            左段 = 主区，右段 = 固定在右端；两段都放不下时各自可横向滚动（滚轮直接左右滚）。停靠切「更多」的按钮收进工具栏右端「⋯」。
           </span>
           <button
             className="btn-mini"
             onClick={() => { resetToolbar(); }}
-            title="清除排序与停靠记忆，恢复出厂布局"
+            title="清除排序 / 停靠 / 分组记忆，恢复出厂布局"
           >恢复默认布局</button>
         </div>
       </div>

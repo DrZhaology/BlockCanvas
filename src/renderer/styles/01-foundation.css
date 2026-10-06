@@ -35,6 +35,12 @@
   --line-soft: #f0f0f0;        /* 细分隔线 */
   --thumb: #e0e0e0;            /* 滚动条 */
   --thumb-hover: #e8e8e8;
+  /* v0.4.2：全局细滚动条配色（深色插件覆盖这两个变量即可，无需改程序） */
+  --scrollbar-thumb: rgba(120, 120, 128, 0.38);
+  --scrollbar-thumb-hover: rgba(120, 120, 128, 0.62);
+  --scrollbar-track: transparent;
+  --scrollbar-size: 9px;       /* 常驻滚动条宽度（细身） */
+  --scrollbar-size-bar: 6px;   /* 工具栏横向滚动条宽度（更窄） */
   --stripe: #ececec;           /* 画布外斜纹 */
   --stripe2: #f1f1f1;          /* 模板预览斜纹 */
   --warn-bg: #fff8e1;

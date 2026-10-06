@@ -29,6 +29,7 @@ electron.vite.config.*.mjs
 tests/e2e/shots/
 tests/e2e/shots-mc/
 tests/e2e/shots-v041/
+tests/e2e/shots-v042/
 tests/e2e/*.html
 tests/e2e/report*.txt
 tests/e2e/last-run.log

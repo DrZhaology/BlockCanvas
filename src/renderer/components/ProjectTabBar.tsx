@@ -93,7 +93,7 @@ export function ProjectTabBar() {
 
   return (
     <div className={"project-tab-bar" + (overflow ? " tabs-overflow" : "")}>
-      <div className={"tab-strip" + (overflow ? " has-overflow" : "")} ref={stripRef}>
+      <div className={"tab-strip bc-hscroll" + (overflow ? " has-overflow" : "")} ref={stripRef}>
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           const isEditing = editingId === tab.id;

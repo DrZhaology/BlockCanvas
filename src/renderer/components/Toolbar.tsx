@@ -1,22 +1,29 @@
 import { useEffect, useRef, useState, useMemo, Fragment } from 'react';
+import { createPortal } from 'react-dom';
 import { useScene } from '@store/sceneStore';
 import { exportHTML, type ExportResult } from '@lib/exporter';
 import type { SceneElement } from '@lib/types';
-import { useToolbar, dockOf, getSortedItems, type ToolbarItem } from '@store/toolbarStore';
+import {
+  useToolbar, dockOf, getSortedItems,
+  type ToolbarItem, type ToolbarDock, type ToolbarGroup
+} from '@store/toolbarStore';
 import { dragSteps } from '@lib/drag';
 import { widthLabel, widthToDevice, DEVICE_LIST, requestDevice } from '@lib/device';
 import { runHealthCheck, hasBlocking } from '@lib/healthCheck';
 import { HealthWizard } from './HealthWizard';
 
-// BlockCanvas · 顶部工具栏（全按钮自由池）
+// BlockCanvas · 顶部工具栏（全按钮自由池 + 二级工具组）
 //
-// 所有按钮（编辑操作 / 输出 / 轮廓 / 设备切换 / 缩放 / 体检 / 设置 / 插件命令）
+// 所有按钮（编辑操作 / 输出 / 轮廓 / 设备切换 / 缩放 / 体检 / 插件命令）
 // 全部注册进 toolbarStore，每个按钮有三个停靠区可选（设置 → 工具栏管理 里调整）：
-//   · main  —— 主区：一条可横向滚动的流水线（细滚动条 + scroll-snap 吸附到按钮）
-//   · right —— 右侧固定区：常驻的手边工具（默认：设备切换 / 缩放 / 体检 / 设置）
+//   · main  —— 主区：一条可横向滚动的流水线（细滚动条；竖向滚轮即可左右滚）
+//   · right —— 右侧固定区：常驻的手边工具（同样可横向滚动、可放工具组）
 //   · more  —— 「⋯更多」下拉：不占工具栏位置，点开可用（= 隐藏）
-// 顺序全局共享一份，跨区拖拽有效；显隐 / 停靠 / 顺序全部持久化。
-// 插件通过 toolbarStore.addItem 注册的按钮同样参与停靠管理。
+//
+// v0.4.2 新增「二级工具组」：把若干按钮打包成一个组按钮，鼠标悬浮在组按钮上
+// 即展开组内工具（弹出面板通过 Portal 渲染到 body，不会被工具栏横向滚动区裁切）。
+// 默认出厂已把「剪切/复制/粘贴」折成「剪贴板」组、「电脑/平板/手机」折成「设备」组。
+// 顺序全局共享一份，跨区拖拽有效；显隐 / 停靠 / 顺序 / 分组全部持久化。
 
 const ZOOM_MIN = 50;   // % 最小
 const ZOOM_MAX = 200;  // % 最大
@@ -68,18 +75,11 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   const items = useToolbar((s) => s.items);
   const docks = useToolbar((s) => s.docks);
   const userOrder = useToolbar((s) => s.order);
+  const groups = useToolbar((s) => s.groups);
   const pct = Math.round(zoom * 100);
   const device = widthToDevice(canvasWidth);
-
-  // 点「⋯ 更多」之外关闭下拉
-  useEffect(() => {
-    if (!moreOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (e.target instanceof Element && !e.target.closest('.tb-more-wrap')) setMoreOpen(false);
-    };
-    window.addEventListener('mousedown', onDoc);
-    return () => window.removeEventListener('mousedown', onDoc);
-  }, [moreOpen]);
+  // 「⋯ 更多」按钮锚点（弹出面板走 Portal，不会被工具栏横向滚动区裁切）
+  const moreWrapRef = useRef<HTMLDivElement>(null);
 
   // ⚠ 角标：只统计"问题条数"，具体清单由「导出前体检」向导展示（同一套 healthCheck 逻辑）
   const issueCount = useMemo(
@@ -213,11 +213,6 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
       id: 'outline', cls: 'tb-btn-ghost tb-outline-btn', dock: 'main', label: () => '⬚ 轮廓',
       title: '显示元素轮廓：给画布所有元素加暗蓝色虚线框，方便看清 div 占位与嵌套；只是程序里的可视化辅助，导出的 HTML 不含',
       onClick: () => setOutlines((v) => !v)
-    },
-    {
-      id: 'settings-entry', cls: 'tb-btn-icon', dock: 'right', label: () => '⚙',
-      title: '偏好设置 (Ctrl+,)',
-      onClick: () => window.dispatchEvent(new CustomEvent('bc:open-settings'))
     }
   ];
 
@@ -240,8 +235,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     const orderOf: Record<string, number> = {
       'copy': 10, 'cut': 12, 'paste': 14, 'duplicate': 16, 'delete': 18,
       'preview': 30, 'export-html': 32, 'projects-center': 34,
-      'export-template': 36, 'clear-selection': 38, 'outline': 40,
-      'settings-entry': 66
+      'export-template': 36, 'clear-selection': 38, 'outline': 40
     };
     const st = useToolbar.getState();
     for (const o of OPS) {
@@ -391,11 +385,39 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     );
   };
 
-  // —— 三区分配：全局一个顺序，按 dock 分流 ——
+  // —— 分组查找表 + 三区分配 ——
   const sorted = useMemo(() => getSortedItems(items, userOrder), [items, userOrder]);
-  const mainItems = useMemo(() => sorted.filter((it) => dockOf(it, docks) === 'main'), [sorted, docks]);
-  const rightItems = useMemo(() => sorted.filter((it) => dockOf(it, docks) === 'right'), [sorted, docks]);
-  const moreItems = useMemo(() => sorted.filter((it) => dockOf(it, docks) === 'more'), [sorted, docks]);
+  const groupByItem = useMemo(() => {
+    const m = new Map<string, ToolbarGroup>();
+    for (const g of groups) for (const id of g.itemIds) m.set(id, g);
+    return m;
+  }, [groups]);
+
+  // 组内成员的最终停靠跟随「组」；独立按钮用自身 dock
+  const placementOf = (it: ToolbarItem): ToolbarDock => {
+    const g = groupByItem.get(it.id);
+    return g ? g.dock : dockOf(it, docks);
+  };
+  const visibleItems = useMemo(() => sorted.filter((it) => placementOf(it) !== 'more'), [sorted, docks, groupByItem]);
+  const mainItems = useMemo(() => visibleItems.filter((it) => placementOf(it) === 'main'), [visibleItems, docks, groupByItem]);
+  const rightItems = useMemo(() => visibleItems.filter((it) => placementOf(it) === 'right'), [visibleItems, docks, groupByItem]);
+  const moreItems = useMemo(() => sorted.filter((it) => placementOf(it) === 'more'), [sorted, docks, groupByItem]);
+
+  // 把一个停靠区的 item 序列渲染出来：组内成员折叠成一个组按钮（位置取组内第一个成员）
+  const renderArea = (list: ToolbarItem[]) => {
+    const done = new Set<string>();
+    const nodes: React.ReactNode[] = [];
+    for (const it of list) {
+      const g = groupByItem.get(it.id);
+      if (!g) { nodes.push(renderItem(it)); continue; }
+      if (done.has(g.id)) continue;
+      done.add(g.id);
+      const members = list.filter((x) => groupByItem.get(x.id)?.id === g.id);
+      if (members.length === 0) continue;
+      nodes.push(<ToolbarGroupButton key={g.id} group={g} members={members} renderItem={renderItem} />);
+    }
+    return nodes;
+  };
 
   // 选中变化 → 刷新禁用态（复制/粘贴等按钮的 disabled 是渲染时求值的）
   useScene((s) => s.scene.selectedIds.length);
@@ -412,33 +434,37 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
 
   return (
     <div className="toolbar">
-      {/* —— 主区：可滚动流水线 —— */}
-      <div className="tb-main" title="工具按钮：放不下时可左右滚动（自动对齐按钮）；在「设置 → 工具栏管理」里可自由调整">
-        {mainItems.map(renderItem)}
+      {/* —— 主区：可滚动流水线（竖向滚轮直接左右滚） —— */}
+      <div className="tb-main bc-hscroll" title="工具按钮：放不下时可左右滚动（滚轮直接左右滚，不必按 Shift）；在「设置 → 工具栏管理」里可自由调整 / 分组">
+        {renderArea(mainItems)}
       </div>
 
-      {/* —— 右侧固定区 —— */}
-      <div className="tb-right">
-        {rightItems.map(renderItem)}
+      {/* —— 右侧固定区：常驻手边工具（空间不够时同样可左右滚动） —— */}
+      <div className="tb-right bc-hscroll">
+        {renderArea(rightItems)}
 
         {/* 「⋯ 更多」：收纳停靠为 more 的按钮 */}
         {moreItems.length > 0 && (
-          <div className="tb-more-wrap">
+          <div className="tb-more-wrap" ref={moreWrapRef}>
             <button className="tb-more-btn" title={`还有 ${moreItems.length} 个按钮收在这里`} onClick={() => setMoreOpen((o) => !o)}>
               ⋯
             </button>
-            {moreOpen && (
-              <div className="tb-more-pop">
-                {moreItems.map((it) => (
-                  <button
-                    key={it.id}
-                    className="tb-more-item"
-                    title={it.title}
-                    onClick={() => { if (!it.block) it.onClick?.(); setMoreOpen(false); }}
-                  >{it.icon && <span className="tb-icon">{it.icon}</span>}{typeof it.label === 'function' ? it.label() : it.label}</button>
-                ))}
-              </div>
-            )}
+            <AnchoredPanel
+              open={moreOpen}
+              anchorRef={moreWrapRef}
+              onClose={() => setMoreOpen(false)}
+              className="tb-more-panel"
+              align="right"
+            >
+              {moreItems.map((it) => (
+                <button
+                  key={it.id}
+                  className="tb-more-item"
+                  title={it.title}
+                  onClick={() => { if (!it.block) it.onClick?.(); setMoreOpen(false); }}
+                >{it.icon && <span className="tb-icon">{it.icon}</span>}{typeof it.label === 'function' ? it.label() : it.label}</button>
+              ))}
+            </AnchoredPanel>
           </div>
         )}
       </div>
@@ -452,6 +478,130 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
         onFinish={finishHealth}
         finishLabel="继续"
       />
+    </div>
+  );
+}
+
+// ============ 通用「锚点弹出面板」 ============
+// 弹出内容 Portal 到 body 用 fixed 定位，因此不受工具栏横向滚动区 overflow 裁切；
+// 统一处理：外部点击 / Esc / 滚动 / 缩放 关闭，并在靠近屏幕底部时自动向上翻转。
+function AnchoredPanel(props: {
+  open: boolean;
+  anchorRef: React.RefObject<HTMLElement | null>;
+  onClose: () => void;
+  className?: string;
+  align?: 'left' | 'right';
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+  children: React.ReactNode;
+}) {
+  const { open, anchorRef, onClose, className, align = 'left', onMouseEnter, onMouseLeave, children } = props;
+  const [pos, setPos] = useState<{ left: number; top: number; below: boolean } | null>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    const place = () => {
+      const el = anchorRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const panelW = 360;
+      const rawLeft = align === 'right' ? r.right - panelW : r.left;
+      const left = Math.min(Math.max(8, rawLeft), Math.max(8, window.innerWidth - panelW - 8));
+      const below = r.bottom + 240 < window.innerHeight;
+      setPos({ left, top: below ? r.bottom + 6 : r.top - 6, below });
+    };
+    place();
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target;
+      if (t instanceof Element && (anchorRef.current?.contains(t) || t.closest('.tb-anchored-panel'))) return;
+      closeRef.current();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current(); };
+    const onScroll = () => closeRef.current();
+    window.addEventListener('mousedown', onDoc);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('mousedown', onDoc);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [open, anchorRef, align]);
+
+  if (!open || !pos) return null;
+  return createPortal(
+    <div
+      className={'tb-anchor-pos' + (pos.below ? '' : ' above')}
+      style={{ left: pos.left, top: pos.top }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      {/* 带上 toolbar 类名 → 复用工具栏里那套按钮语言（ghost/soft/primary/icon 与设备分段等） */}
+      <div className={'toolbar tb-anchored-panel ' + (className ?? '')}>{children}</div>
+    </div>,
+    document.body
+  );
+}
+
+// ============ 二级工具组：悬浮展开组内工具 ============
+// 组按钮本身只占一个位置；鼠标浮上去弹出组内工具（走 AnchoredPanel → Portal 到 body）。
+// 带开合延迟，避免鼠标扫过时乱闪。
+function ToolbarGroupButton(props: {
+  group: ToolbarGroup;
+  members: ToolbarItem[];
+  renderItem: (it: ToolbarItem) => React.ReactNode;
+}) {
+  const { group, members, renderItem } = props;
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const openTimer = useRef(0);
+  const closeTimer = useRef(0);
+
+  const clearTimers = () => {
+    window.clearTimeout(openTimer.current);
+    window.clearTimeout(closeTimer.current);
+  };
+  const scheduleOpen = () => {
+    clearTimers();
+    openTimer.current = window.setTimeout(() => setOpen(true), 80);
+  };
+  const scheduleClose = () => {
+    clearTimers();
+    closeTimer.current = window.setTimeout(() => setOpen(false), 220);
+  };
+
+  useEffect(() => () => clearTimers(), []);
+
+  return (
+    <div className="tb-grp" onMouseEnter={scheduleOpen} onMouseLeave={scheduleClose}>
+      <button
+        ref={btnRef}
+        className={'tb-grp-btn' + (open ? ' open' : '')}
+        title={`${group.label}：鼠标浮上来展开组内 ${members.length} 个工具`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="tb-grp-ico">{group.icon ?? '▦'}</span>
+        <span className="tb-grp-label">{group.label}</span>
+        <span className="tb-grp-caret">▾</span>
+      </button>
+      <AnchoredPanel
+        open={open}
+        anchorRef={btnRef}
+        onClose={() => setOpen(false)}
+        className="tb-grp-panel"
+        onMouseEnter={clearTimers}
+        onMouseLeave={scheduleClose}
+      >
+        <div className="tb-grp-pop-title">
+          <span className="tb-grp-ico">{group.icon ?? '▦'}</span>{group.label}
+          <span className="tb-grp-pop-count">{members.length} 个工具</span>
+        </div>
+        <div className="tb-grp-pop-body bc-hscroll">{members.map(renderItem)}</div>
+      </AnchoredPanel>
     </div>
   );
 }

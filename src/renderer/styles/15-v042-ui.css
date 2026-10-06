@@ -1,0 +1,286 @@
+/* ==========================================================================
+   BlockCanvas · 15-v042-ui.css —— v0.4.2 UI 交互收口（4 阶段收尾）
+   --------------------------------------------------------------------------
+   ① 全局细滚动条 + 滚动条不再挤动内容（消除"抽搐"）
+   ② 工具栏「左区 / 右区」都可横向滚动（滚轮直接左右滚，不必按 Shift）
+   ③ 二级工具组（悬浮展开）+ 工具栏管理里的分组编辑
+   ④ 模板库折叠板块不再被压缩：每个板块都能展开，多了整体上下滚
+
+   分片顺序 = 级联顺序，本片最后 import，用于覆盖前面分片的旧规则。
+   ========================================================================== */
+
+/* ==========================================================================
+   ① 全局细滚动条
+   --------------------------------------------------------------------------
+   ⚠ Chromium 里只要 scrollbar-width / scrollbar-color 被设成非 auto，
+   就会忽略 ::-webkit-scrollbar 自绘样式。所以先把旧分片里几处
+   `scrollbar-width: thin` 还原为 auto，统一走下面这套自绘细身滚动条。
+   ========================================================================== */
+.toolbar .tb-main,
+.tab-strip,
+.tbman-preview {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+::-webkit-scrollbar-thumb {
+  /* 透明描边 + content-box 裁切：滑块视觉只有 ~5px，四周留白，不再"厚重" */
+  background-color: var(--scrollbar-thumb);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { width: 0; height: 0; display: none; }
+
+/* 滚动条出现/消失不再把旁边内容"推一边"（抖动元凶）：
+   给主要滚动容器常驻预留滚动条槽位，出/收滚动条时内容宽度恒定，一次到位不闪。
+   低特异性 :where() —— 任何更具体的选择器都能覆盖它。 */
+:where(.panel, .tab-body, .tpl-body, .inspector, .modal-body, .cp-body,
+       .fluent-content, .fluent-sidebar, .wm-body, .wm-left-pane, .wm-right-pane,
+       .fp-body, .fp-preview-pane, .fp-list, .tpl-preview-body,
+       .tbman-list, .tpl-body, .grad-editor, .sec-body) {
+  scrollbar-gutter: stable;
+}
+
+/* ==========================================================================
+   ② 工具栏左右两区都可横向滚动
+   主区（tb-main）吃满剩余宽度；右侧区（tb-right）内容超出时才收缩并自带滚动条。
+   两区都带 .bc-hscroll —— 竖向滚轮直接转成横向滚动（见 lib/hScroll.ts）。
+   ========================================================================== */
+.toolbar .tb-main,
+.toolbar .tb-right {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.toolbar .tb-right {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 64%;
+}
+/* 工具栏里的横向滚动条再窄一档（更不抢眼） */
+.toolbar .tb-main::-webkit-scrollbar,
+.toolbar .tb-right::-webkit-scrollbar { height: var(--scrollbar-size-bar); }
+.toolbar .tb-main::-webkit-scrollbar-thumb,
+.toolbar .tb-right::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+.toolbar .tb-main::-webkit-scrollbar-thumb:hover,
+.toolbar .tb-right::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+  background-clip: content-box;
+}
+
+/* ==========================================================================
+   ③ 二级工具组
+   ========================================================================== */
+.toolbar .tb-grp {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.toolbar .tb-grp-btn {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.toolbar .tb-grp-btn:hover,
+.toolbar .tb-grp-btn.open {
+  background: var(--hover-accent);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tb-grp-ico { font-size: 13px; line-height: 1; }
+.tb-grp-caret { font-size: 9px; opacity: 0.7; transition: transform 0.18s ease; }
+.toolbar .tb-grp-btn.open .tb-grp-caret { transform: rotate(180deg); }
+
+/* —— 通用锚点面板（Portal 到 body，fixed 定位；不会被工具栏滚动区裁切） ——
+   外层 .tb-anchor-pos 负责"向上翻转"的位移，内层负责进场动画，
+   两者分离 → 动画里的 transform 不会覆盖翻转位移。 */
+.tb-anchor-pos { position: fixed; z-index: 420; }
+.tb-anchor-pos.above { transform: translateY(-100%); }
+
+.toolbar.tb-anchored-panel {
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 4px;
+  height: auto;
+  min-height: 0;
+  padding: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
+  max-width: min(92vw, 460px);
+  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+  transform-origin: top left;
+}
+.tb-anchor-pos.above .tb-anchored-panel { transform-origin: bottom left; }
+
+/* 工具组面板：标题 + 组内工具（自动换行，放不下可横向滚） */
+.tb-grp-panel { min-width: 210px; }
+.tb-grp-pop-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  padding: 0 2px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.tb-grp-pop-count {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.tb-grp-pop-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  padding-top: 6px;
+}
+.tb-grp-pop-body .tb-btn-ghost,
+.tb-grp-pop-body .tb-btn-soft,
+.tb-grp-pop-body .tb-btn-primary,
+.tb-grp-pop-body .tb-grp-nested { flex: 0 0 auto; }
+
+/* 「⋯ 更多」面板：竖向排列 */
+.tb-more-panel { min-width: 190px; }
+.toolbar .tb-more-panel .tb-more-item { border-radius: 6px; }
+
+/* —— 工具栏管理：工具组编辑行 —— */
+.tbman-grp-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+.tbman-grp-ico { font-size: 15px; line-height: 1; }
+.tbman-grp-name {
+  width: 124px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+.tbman-grp-name:focus { outline: none; border-color: var(--accent); }
+.tbman-grp-members {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.tbman-grp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 3px 2px 8px;
+  border-radius: 999px;
+  background: var(--seg-active);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text);
+}
+.tbman-grp-chip-x {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 3px;
+  border-radius: 50%;
+}
+.tbman-grp-chip-x:hover { color: var(--danger); background: var(--chip-hover); }
+.tbman-grp-add {
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  max-width: 160px;
+}
+.tbman-grp-del { color: var(--danger); }
+.tbman-chip-group {
+  background: var(--seg-active);
+  border-style: dashed;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.tbman-tag-group { color: var(--accent); border-color: var(--accent); }
+
+/* ==========================================================================
+   ④ 模板库：每个资源包 / 分类都能展开，内容多了整体上下滚
+   --------------------------------------------------------------------------
+   修法（三重保险，保证"每个板块都能展开、过多了能上下滚"）：
+     ① 滚动容器里的子项一律禁止收缩（flex:0 0 auto）——即使将来布局改动导致
+        负剩余空间，板块盒子也不会被压扁、不会出现内容溢出压住下一个标题；
+     ② 内容区显式声明 overflow-y:auto / overflow-x:hidden，始终是一个可滚容器；
+     ③ 展开板块时把标题滚入视野（ElementPanel.toggleCollapsed）——
+        避免"展开的部分在可视区外、看起来像点了没反应"的错觉。
+   ========================================================================== */
+.tpl-body > * { flex: 0 0 auto; }
+.workspace[data-layout='bottom'] .element-panel.tpl-mode .tpl-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.workspace[data-layout='bottom'] .element-panel.tpl-mode .tpl-body > * {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+/* 资源包板块本身也禁止收缩，展开动画（grid-rows 0fr↔1fr）才不会被挤变形 */
+.tpl-group,
+.tpl-sub-group { flex: 0 0 auto; }
+/* 左侧布局下 .tpl-body 由外层 .panel 承担滚动；这里保证它自身不产生
+   意外的横向溢出，纵向交给最近的可滚祖先。 */
+.workspace:not([data-layout='bottom']) .element-panel.tpl-mode .tpl-body {
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+/* ==========================================================================
+   ⑤ 动画补充：新增浮层统一走全局 token（见 animations.css）
+   ========================================================================== */
+/* 工具组按钮出现 / 组内工具逐条轻微入场，避免"瞬间铺开"的廉价感 */
+.tb-grp { animation: bcPopIn var(--dur-fast) var(--ease-standard); }
+.tb-grp-pop-body > * { animation: bcPopIn var(--dur-pop) var(--ease-standard) both; }

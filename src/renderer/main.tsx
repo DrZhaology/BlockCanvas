@@ -16,6 +16,7 @@ import './styles/11-editors.css';
 import './styles/12-toolbar-v041.css';
 import './styles/13-polish-v040.css';
 import './styles/14-v04x-append.css';
+import './styles/15-v042-ui.css'; // v0.4.2：细滚动条 / 工具栏左右滚动 / 二级工具组 / 模板板块展开
 import './animations.css'; // 统一动画体系：token + 全部 keyframes（分片里只写引用）
 
 createRoot(document.getElementById('root')!).render(
