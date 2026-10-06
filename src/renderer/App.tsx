@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Toolbar } from '@comp/Toolbar';
 import { ElementPanel } from '@comp/ElementPanel';
 import { Canvas } from '@comp/Canvas';
@@ -58,6 +58,10 @@ export default function App() {
   const [leftWidth, setLeftWidth] = usePersistentState<number>(LEFT_WIDTH_KEY, LEFT_WIDTH_DEFAULT);
   const [zoom, setZoom] = useState(1);
   const [view, setView] = useState<AppView>('editor');
+  // 全局快捷键在一个"依赖里没有 view"的 useEffect 里注册 → 闭包里的 view 永远是首次渲染的值。
+  // 用 ref 读当前视图，否则在表格编辑器 / 设置 / 项目中心里按 Del、Ctrl+A 会悄悄打到画布上。
+  const viewRef = useRef<AppView>(view);
+  useEffect(() => { viewRef.current = view; }, [view]);
   // v0.4.3 表格编辑器：记录"要编辑哪张表"，由 bc:open-table-editor 事件带入
   const [tableEditId, setTableEditId] = useState<string>('');
   // 所有「整页切换」都走原生视图过渡：旧页面淡出 + 新页面淡入
@@ -91,7 +95,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useKeyboardShortcuts(switchView, () => setShowShortcuts(true));
+  useKeyboardShortcuts(switchView, () => setShowShortcuts(true), viewRef);
 
   // 0. 设备 / 断点 / 画布宽度 三合一同步
   //    - 画布宽度变化 → 自动推导当前编辑断点（电脑 / 平板 / 手机）
@@ -530,7 +534,12 @@ function startResize(
 }
 
 // ============ 全局快捷键 + 菜单事件 ============
-function useKeyboardShortcuts(setView: (v: AppView) => void, onOpenShortcuts?: () => void) {
+function useKeyboardShortcuts(
+  setView: (v: AppView) => void,
+  onOpenShortcuts?: () => void,
+  // 当前视图（用 ref 传，不参与依赖）；非 editor 视图里禁用「对画布动手」的快捷键
+  viewRef?: { current: AppView }
+) {
   useEffect(() => {
     const triggerUndo = () => useScene.getState().undo();
     const triggerRedo = () => useScene.getState().redo();
@@ -607,13 +616,8 @@ function useKeyboardShortcuts(setView: (v: AppView) => void, onOpenShortcuts?: (
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
 
       const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); triggerUndo(); return; }
-      if (mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); triggerRedo(); return; }
-      if (mod && e.key.toLowerCase() === 'c') { e.preventDefault(); triggerCopy(); return; }
-      if (mod && e.key.toLowerCase() === 'x') { e.preventDefault(); triggerCut(); return; }
-      if (mod && e.key.toLowerCase() === 'v') { e.preventDefault(); triggerPaste(); return; }
-      if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); triggerDuplicate(); return; }
-      if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); triggerSelectAll(); return; }
+
+      // ——— 应用级快捷键：任何视图都生效（不碰画布数据）———
       if (mod && e.key === ',') { e.preventDefault(); setView('settings'); return; }
       if (mod && e.key.toLowerCase() === 'n') {
         e.preventDefault();
@@ -636,15 +640,27 @@ function useKeyboardShortcuts(setView: (v: AppView) => void, onOpenShortcuts?: (
         window.dispatchEvent(new CustomEvent('bc:export-html'));
         return;
       }
-      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); triggerDelete(); return; }
-      if (e.key === 'Escape') { e.preventDefault(); useScene.getState().selectElement(null); return; }
-
       // 快捷键速查表
       if ((e.key === '?' || (e.shiftKey && e.key === '/')) && !mod) {
         e.preventDefault();
         onOpenShortcuts?.();
         return;
       }
+
+      // ——— 以下都是"对画布动手"的快捷键：只在编辑器视图里生效 ———
+      // 表格编辑器 / 设置 / 项目中心 / 更新页各有自己的键位；在这里放行，Del、Ctrl+A
+      // 之类会打到画布上（实测：在表格编辑器里按 Del 会把之前选中的表格删掉，看起来像"随机删表"）。
+      if (viewRef && viewRef.current !== 'editor') return;
+
+      if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); triggerUndo(); return; }
+      if (mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); triggerRedo(); return; }
+      if (mod && e.key.toLowerCase() === 'c') { e.preventDefault(); triggerCopy(); return; }
+      if (mod && e.key.toLowerCase() === 'x') { e.preventDefault(); triggerCut(); return; }
+      if (mod && e.key.toLowerCase() === 'v') { e.preventDefault(); triggerPaste(); return; }
+      if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); triggerDuplicate(); return; }
+      if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); triggerSelectAll(); return; }
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); triggerDelete(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); useScene.getState().selectElement(null); return; }
 
       // 方向键微调
       const step = e.shiftKey ? 10 : 1;

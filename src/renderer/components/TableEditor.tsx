@@ -225,6 +225,40 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
     return () => window.removeEventListener('pointerup', onUp);
   }, []);
 
+  // ——— Del / Backspace：只清文案，绝不动结构 ———
+  // （以前在这里按 Del 会走全局快捷键，把"之前选中的那个元素"从画布上删掉，
+  //   看起来就像随机删表。现在全局快捷键只在编辑器视图生效，这里自己接管，
+  //   语义固定为"清空所选格子的字"，要删行列请用轨道 / 操作条。）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const st = useScene.getState();
+      const cur = findNode(st.scene.root, tableId);
+      if (!cur) return;
+      const p = readTable(normalizeTable(cur));
+      const cells = p.rows.map((r) => r.children.filter((c) => c.type === 'th' || c.type === 'td'));
+      let ids: string[] = [];
+      if (sel?.kind === 'row') ids = cells[sel.r]?.map((c) => c.id) ?? [];
+      else if (sel?.kind === 'col') ids = cells.map((row) => row[sel.c]?.id).filter(Boolean) as string[];
+      else if (rect) {
+        for (let r = rect.r0; r <= rect.r1; r++) {
+          for (let c = rect.c0; c <= rect.c1; c++) {
+            const cell = cells[r]?.[c];
+            if (cell) ids.push(cell.id);
+          }
+        }
+      }
+      if (ids.length === 0) return;
+      e.preventDefault();
+      st.replaceSubtree(tableId, applyTableOp(cur, { kind: 'clearCells', cellIds: ids }));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, rect, tableId]);
+
   if (!table || table.type !== 'table' || !parts) return null;
 
   const cellStyle: ElementStyle = anchor?.style ?? {};
@@ -274,11 +308,11 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
             <div className="tbl-panel-title">表格结构</div>
             <HelpButton
               title="怎么改表格结构"
-              content={'【插入行 / 列】\n把鼠标移到行与行、列与列之间那条缝上，会浮出一条轨道和 ＋。\n· 点一下：插入 1 行 / 1 列\n· 按住 ＋ 沿"列往右拖 / 行往下拖"：一次插入多个，气泡上会实时显示要插几个\n· 拖过头了按 Esc 取消\n\n【选中与合并】\n· 在格子上按住鼠标拖 → 框出矩形选区\n· 点行号 / 列号 → 选中整行 / 整列\n· 选中后，下面那条操作条会亮起来：合并 / 拆分 / 设为表头 / 删除行 / 删除列\n\n【跨度标记】\n合并后的格子右下角会显示 ⇥（跨几列）与 ⇩（跨几行）。'}
+              content={'【插入行 / 列】\n把鼠标移到行与行、列与列之间那条缝上，会浮出一条轨道和 ＋。\n· 点一下：插入 1 行 / 1 列\n· 按住 ＋ 沿"列往右拖 / 行往下拖"：一次插入多个，气泡上会实时显示要插几个\n· 拖过头了按 Esc 取消\n\n【选中与合并】\n· 在格子上按住鼠标拖 → 拖选出一片（矩形选区）\n· Ctrl / ⌘ + 点某一格 → 把这一格并进当前选区（选区始终是矩形，取并集）\n· Shift + 点 → 从起点拉到你点的那一格\n· 点行号 / 列号 → 选中整行 / 整列\n· 选中后，上面那条操作条会亮起来：合并 / 拆分 / 设为表头 / 删除行 / 删除列\n\n【删除】\n按 Del / Backspace = 清空选中格子的文字（只动内容，不动结构）。\n要删掉整行 / 整列，请用操作条上的「删行 / 删列」。\n\n【跨度标记】\n合并后的格子右下角会显示 ⇥（跨几列）与 ⇩（跨几行）。'}
             />
           </div>
           <div className="tbl-stage-tip">
-            缝上悬浮出 <b>＋</b>：点一下插 1 个，按住拖动可一次插多个 · 格子上按住拖动可框选
+            缝上悬浮出 <b>＋</b>：点一下插 1 个，按住拖动可一次插多个 · 格子上拖动可拖选一片，<b>Ctrl+点</b> 加选、<b>Del</b> 清空文字
           </div>
 
           {/* 选区操作条：固定位置（不浮在格子上挡住视线），没选中时按钮禁用 */}
@@ -397,10 +431,28 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                         + (isAnchor && sel?.kind === 'cell' ? ' active' : '')
                       }
                       style={{ gridColumn: `${3 + 2 * c} / span ${2 * cs - 1}`, gridRow: `${3 + 2 * r} / span ${2 * rs - 1}` }}
-                      title={`第 ${r + 1} 行 · 第 ${colLetter(c)} 列（按住可框选一片）`}
+                      title={`第 ${r + 1} 行 · 第 ${colLetter(c)} 列（按住可拖选一片；Ctrl/⌘ 点 = 并进选区）`}
                       onPointerDown={(e) => {
                         if (e.button !== 0) return;
                         e.preventDefault();
+                        // Ctrl/⌘ + 点：把这一格并进现有选区。
+                        // 选区本身始终是矩形（合并需要矩形），所以取"并集的外接矩形"，
+                        // 锚点自动落到左上角（合并后保留内容的也是那一格）。
+                        if ((e.ctrlKey || e.metaKey) && rect) {
+                          draggingRef.current = null;
+                          setSel({
+                            kind: 'cell',
+                            r: Math.min(rect.r0, r), c: Math.min(rect.c0, c),
+                            r2: Math.max(rect.r1, r), c2: Math.max(rect.c1, c)
+                          });
+                          return;
+                        }
+                        // Shift + 点：从锚点拉到你点的那一格（等价于拖到这个位置）
+                        if (e.shiftKey && rect) {
+                          draggingRef.current = null;
+                          setSel({ kind: 'cell', r: rect.r0, c: rect.c0, r2: r, c2: c });
+                          return;
+                        }
                         draggingRef.current = { r, c };
                         setSel({ kind: 'cell', r, c, r2: r, c2: c });
                       }}

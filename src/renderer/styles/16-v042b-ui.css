@@ -404,6 +404,7 @@
 .tbl-rowhead {
   display: grid;
   place-items: center;
+  cursor: pointer;
   background: var(--panel-tint);
   color: var(--text-muted);
   font-size: 10.5px;
@@ -421,7 +422,7 @@
   display: flex;
   align-items: center;
   padding: 5px 9px;
-  cursor: cell;
+  cursor: default; /* 不要 cursor:cell —— Chromium 下是十字/加号，会让人以为"点这儿会插入" */
   user-select: none;
   touch-action: none;
   transition: background 0.12s ease, box-shadow 0.12s ease;

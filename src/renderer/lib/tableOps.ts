@@ -138,6 +138,8 @@ export type TableOp =
   | { kind: 'unmerge'; cellId: string }
   /** 批量：选区里所有单元格统一成 th / td */
   | { kind: 'setRangeType'; cellIds: string[]; type: 'th' | 'td' }
+  /** 清空若干单元格的文案（Del / Backspace 用）：只动文字，不动结构 */
+  | { kind: 'clearCells'; cellIds: string[] }
   /** 批量删除（选区覆盖到的行 / 列） */
   | { kind: 'deleteRows'; rowIds: string[] }
   | { kind: 'deleteCols'; indexes: number[] }
@@ -330,6 +332,16 @@ export function applyTableOp(table: SceneElement, op: TableOp): SceneElement {
             delete a.scope;
             cell.attrs = Object.keys(a).length > 0 ? a : undefined;
           }
+        }
+      }
+      return next;
+    }
+
+    case 'clearCells': {
+      const ids = new Set(op.cellIds);
+      for (const row of parts.rows) {
+        for (const cell of row.children) {
+          if (isCell(cell) && ids.has(cell.id)) cell.text = '';
         }
       }
       return next;

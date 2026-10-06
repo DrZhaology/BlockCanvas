@@ -24,7 +24,7 @@ const READ_TABLE = `(() => {
   if (!t) return null;
   const secs = t.children.filter((c) => c.type === 'thead' || c.type === 'tbody' || c.type === 'tfoot');
   const rows = [];
-  for (const s of secs) for (const r of s.children) rows.push({ sec: s.type, cells: r.children.map((c) => ({ type: c.type, cs: c.attrs && c.attrs.colspan, rs: c.attrs && c.attrs.rowspan })) });
+  for (const s of secs) for (const r of s.children) rows.push({ sec: s.type, cells: r.children.map((c) => ({ type: c.type, cs: c.attrs && c.attrs.colspan, rs: c.attrs && c.attrs.rowspan, text: c.text ?? '' })) });
   return {
     sections: t.children.map((c) => c.type),
     rows,
@@ -174,6 +174,52 @@ async function main() {
   });
   ok('拆分后：合并可用 / 拆分禁用', btnsSplit.merge === false && btnsSplit.split === true, JSON.stringify(btnsSplit));
 
+  // ============ 10.5 光标形态：格子上不能是"十字/加号" ============
+  const cursors = await win.evaluate(() => ({
+    cell: getComputedStyle(document.querySelector('.tbl-cell')).cursor,
+    rail: getComputedStyle(document.querySelector('.tbl-rail')).cursor,
+    head: getComputedStyle(document.querySelector('.tbl-colhead')).cursor
+  }));
+  ok('格子上是普通箭头（不再是 cursor:cell 的十字/加号）', cursors.cell === 'default', cursors.cell);
+  ok('插入轨是"小手"', cursors.rail === 'pointer', cursors.rail);
+  ok('行/列表头是"小手"', cursors.head === 'pointer', cursors.head);
+
+  // ============ 10.6 Del 只清文字、不动结构（以前会走全局快捷键把画布上的元素删掉） ============
+  const beforeDel = await read();
+  const tablesBeforeDel = await win.evaluate(() => {
+    let n = 0; const w = (x) => { if (x.type === 'table') n++; for (const c of x.children) w(c); };
+    w(window.__sceneStore.getState().scene.root); return n;
+  });
+  await win.locator('[data-cell="0-0"]').click();
+  await sleep(250);
+  await win.keyboard.press('Delete');
+  await sleep(400);
+  const afterDel = await read();
+  const tablesAfterDel = await win.evaluate(() => {
+    let n = 0; const w = (x) => { if (x.type === 'table') n++; for (const c of x.children) w(c); };
+    w(window.__sceneStore.getState().scene.root); return n;
+  });
+  ok('表格编辑器里按 Del：画布元素一个没少', tablesAfterDel === tablesBeforeDel, `${tablesBeforeDel} → ${tablesAfterDel}`);
+  ok('表格编辑器里按 Del：行列结构不变', afterDel.rowCount === beforeDel.rowCount && afterDel.colCount === beforeDel.colCount,
+    `${beforeDel.rowCount}×${beforeDel.colCount} → ${afterDel.rowCount}×${afterDel.colCount}`);
+  ok('表格编辑器里按 Del：只把该格文字清空', (afterDel.rows[0].cells[0].text ?? '') === '',
+    JSON.stringify(afterDel.rows[0].cells[0]));
+
+  // ============ 10.7 Ctrl+点 加选（用户反馈"按住 Ctrl 不能多选"） ============
+  await win.locator('[data-cell="0-0"]').click();
+  await sleep(200);
+  await win.locator('[data-cell="1-1"]').click({ modifiers: ['Control'] });
+  await sleep(300);
+  const ctrlLabel = ((await win.locator('.tbl-bar-label').textContent().catch(() => '')) || '').trim();
+  ok('Ctrl+点 把格子并进选区（0,0）+（1,1）= 4 格', ctrlLabel === '4 格', ctrlLabel);
+  await win.locator('.tbl-bar-btn', { hasText: '合并' }).first().click();
+  await sleep(400);
+  t = await read();
+  const mergedCtrl = t.rows[0].cells[0];
+  ok('Ctrl+点 加选后能正常合并', mergedCtrl.cs === '2' && mergedCtrl.rs === '2', JSON.stringify(mergedCtrl));
+  await win.locator('.tbl-bar-btn', { hasText: '拆分' }).first().click();
+  await sleep(400);
+
   // ——— 只留 2 张关键截图（人眼复核用）：① 整体 ② 框选+浮动条 ———
   mkdirSync(resolve(ROOT, 'tests/e2e/shots-v042'), { recursive: true });
     await win.locator('[data-cell="0-0"]').hover();
@@ -219,6 +265,27 @@ async function main() {
   const tinfo2 = await win.evaluate(() => { let n = 0; const w = (x) => { if (x.type === 'table') n++; for (const c of x.children) w(c); }; w(window.__sceneStore.getState().scene.root); return n; });
   ok('结构模板能插入一张新表', tinfo2 === tinfo + 1, `${tinfo} → ${tinfo2}`);
   ok('插入后自动回到编辑器', (await win.locator('.toolbar').count()) === 1);
+
+  // ============ 15. 画布 Ctrl+点 多选（顺带确认没被本轮的视图收窄改动影响） ============
+  await win.locator('.element-btn', { hasText: '通用容器' }).first().click();
+  await sleep(400);
+  await win.locator('.element-btn', { hasText: '通用容器' }).first().click();
+  await sleep(400);
+  const childIds = await win.evaluate(() => window.__sceneStore.getState().scene.root.children.map((c) => c.id));
+  if (childIds.length >= 2) {
+    // 注意：Ctrl 修饰键只能走 locator.click({modifiers})；page.mouse.click 不支持 modifiers（会被静默忽略）
+    const a = win.locator(`[data-bc-id="${childIds[0]}"]`).first();
+    const b = win.locator(`[data-bc-id="${childIds[1]}"]`).first();
+    await a.click({ position: { x: 5, y: 5 } });
+    await sleep(250);
+    const selOne = await win.evaluate(() => window.__sceneStore.getState().scene.selectedIds.length);
+    await b.click({ position: { x: 5, y: 5 }, modifiers: ['Control'] });
+    await sleep(300);
+    const multi = await win.evaluate(() => window.__sceneStore.getState().scene.selectedIds.length);
+    ok('画布 Ctrl+点 能多选', selOne === 1 && multi === 2, `${selOne} → ${multi}`);
+  } else {
+    ok('画布 Ctrl+点 能多选', false, '元素不足 2 个');
+  }
 
   // ============ 关键部位截图（只留 2 张，供人眼复核） ============
   mkdirSync(resolve(ROOT, 'tests/e2e/shots-v042'), { recursive: true });
