@@ -38,6 +38,10 @@ export type ElementType =
   | 'ol'
   | 'li'
   | 'table'
+  | 'caption'
+  | 'thead'
+  | 'tbody'
+  | 'tfoot'
   | 'tr'
   | 'th'
   | 'td'
@@ -57,14 +61,14 @@ export const TEXT_ONLY_TAGS: ReadonlySet<ElementType> = new Set(['textarea']);
 // 容器型元素：可接受子元素（用于元素面板分组与"插入到此容器"判断）
 export const CONTAINER_TAGS: ReadonlySet<ElementType> = new Set([
   'div', 'section', 'header', 'nav', 'footer', 'main', 'article', 'aside',
-  'figure', 'blockquote', 'ul', 'ol', 'li', 'table', 'tr', 'th', 'td', 'form'
+  'figure', 'blockquote', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'form'
 ]);
 
 // 默认块级容器（block 显示模式）：这些元素在 HTML 规范中默认就是 block 级
 // 用于属性面板：首次添加样式时自动注入 display:block，消除行内样式显示问题
 export const BLOCK_LEVEL_TAGS: ReadonlySet<ElementType> = new Set([
   'div', 'section', 'header', 'nav', 'footer', 'main', 'article', 'aside',
-  'figure', 'blockquote', 'ul', 'ol', 'li', 'table', 'tr', 'th', 'td', 'form',
+  'figure', 'blockquote', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'form',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'hr', 'pre'
 ]);
 
@@ -72,7 +76,7 @@ export const BLOCK_LEVEL_TAGS: ReadonlySet<ElementType> = new Set([
 export const TEXT_TAGS: ReadonlySet<ElementType> = new Set([
   'h1', 'h2', 'h3', 'h4', 'p', 'span',
   'strong', 'em', 'mark', 'small', 'code', 'del', 'sup', 'sub',
-  'button', 'a', 'label', 'figcaption', 'blockquote', 'th', 'td'
+  'button', 'a', 'label', 'figcaption', 'caption', 'blockquote', 'th', 'td'
 ]);
 
 // 阶段0只动 background-color；这里预留完整字段方便阶段2直接补
@@ -163,6 +167,16 @@ export interface ElementStyle {
   cursor?: string;
   boxSizing?: string;
   textDecoration?: string;
+
+  // —— 表格专属（v0.4.3 表格编辑页：CSS 单独适配）——
+  borderCollapse?: string;   // collapse | separate
+  borderSpacing?: string;    // 如 "0px" / "2px 6px"
+  tableLayout?: string;      // auto | fixed
+  captionSide?: string;      // top | bottom
+  emptyCells?: string;       // show | hide
+  verticalAlign?: string;    // top | middle | bottom | baseline（单元格垂直对齐）
+  whiteSpace?: string;       // normal | nowrap | pre …（单元格是否折行）
+  wordBreak?: string;
 
   // —— img 属性（不是 CSS，依附 style 但不进 <style> 块）——
   src?: string;

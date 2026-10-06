@@ -443,7 +443,15 @@ const CanvasNode = React.memo(function CanvasNode(props: {
     className: selInfo.classAttr || undefined,
     id: selInfo.idAttr || undefined,
     // 同类同色（编辑器可视化）：优先类名，其次关系选择器作为分组标记，配合 bc-class-colors 注入描边色
-    'data-bc-cg': (node.attrs?.className ?? '').trim().split(/\s+/)[0] || (node.attrs?.relSelector ?? '').trim() || undefined
+    'data-bc-cg': (node.attrs?.className ?? '').trim().split(/\s+/)[0] || (node.attrs?.relSelector ?? '').trim() || undefined,
+    // 表格单元格跨度 / 表头 scope —— 与导出保持一致的所见即所得
+    ...(node.type === 'th' || node.type === 'td'
+      ? {
+          colSpan: Math.max(1, Number(node.attrs?.colspan) || 1),
+          rowSpan: Math.max(1, Number(node.attrs?.rowspan) || 1)
+        }
+      : {}),
+    ...(node.type === 'th' && node.attrs?.scope ? { scope: node.attrs.scope } : {})
   } as const;
 
   // 统一点击逻辑：Ctrl=多选切换；Alt=选中父级；否则选中自己；locked 不可选

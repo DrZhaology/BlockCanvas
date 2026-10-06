@@ -1,0 +1,597 @@
+/* ==========================================================================
+   BlockCanvas · 16-v042b-ui.css —— 第二批（更新中心重写 / 工具栏预览 / 表格页 / 布局溢出）
+   分片顺序 = 级联顺序，本片在 15 之后 import。
+   ========================================================================== */
+
+/* ==========================================================================
+   一、更新中心（v0.4.3 重写）
+   ========================================================================== */
+/* 页面进场：整页淡入 + 卡片错峰上浮（"页面加载做一点动画"） */
+.update-page { animation: bcViewIn var(--dur-view) var(--ease-standard) both; }
+.update-body > * { animation: bcPopIn var(--dur-pop) var(--ease-standard) both; }
+.update-body > *:nth-child(1) { animation-delay: 0.02s; }
+.update-body > *:nth-child(2) { animation-delay: 0.06s; }
+.update-body > *:nth-child(3) { animation-delay: 0.1s; }
+.update-body > *:nth-child(4) { animation-delay: 0.14s; }
+.update-body > *:nth-child(5) { animation-delay: 0.18s; }
+.update-body > *:nth-child(6) { animation-delay: 0.22s; }
+
+/* 顶栏右侧：当前平台 */
+.update-topbar-plat {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  white-space: nowrap;
+}
+.update-topbar-plat em { font-style: normal; color: #b45309; }
+
+/* 当前版本卡：一行里塞下"版本 / 状态 / 重新检测" */
+.update-head-card .update-card-row { flex-wrap: wrap; }
+.update-head-status { flex: 1 1 auto; min-width: 140px; }
+.update-status-inline { font-size: 12px; color: var(--text-muted); }
+.update-status-inline.ok { color: #1e88e5; font-weight: 600; }
+.update-status-inline.err { color: var(--danger); }
+
+.update-mirror-tip { line-height: 1.75; }
+.update-mirror-hit {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--seg-active);
+  color: var(--accent);
+  font-size: 10.5px;
+}
+.update-mirror-warn { color: var(--text-muted); font-size: 11px; }
+
+/* 分区标题 */
+.update-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 14px 2px 2px;
+}
+.update-section-sub { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+
+/* 可更新版本卡 */
+.update-release-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-left: 3px solid transparent;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+.update-release-card.is-latest { border-left-color: var(--accent); }
+.update-release-card:hover { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.07); }
+
+.update-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.update-badge.current { color: var(--accent); border-color: var(--accent); background: var(--seg-active); }
+.update-badge.latest { color: #fff; border-color: var(--accent); background: var(--accent); }
+.update-badge.pre { color: #b45309; border-color: #f3c98b; background: #fff8ec; }
+
+.update-release-meta { font-size: 11.5px; color: var(--text-muted); line-height: 1.6; }
+.update-asset-warn { color: #b45309; }
+.update-asset-none { font-size: 11px; color: var(--text-muted); align-self: center; }
+
+.update-notes-toggle {
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.update-notes-toggle:hover { text-decoration: underline; }
+
+.update-release-actions { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.update-install-btn { height: 34px; font-size: 12.5px; }
+.update-install-btn.is-reinstall {
+  background: var(--bg-panel);
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: none;
+}
+
+/* 历史版本（只读） */
+.update-history-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+.update-history-row {
+  display: grid;
+  grid-template-columns: 96px minmax(120px, 1fr) auto minmax(0, 1.4fr);
+  gap: 10px;
+  align-items: center;
+  padding: 9px 12px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+.update-history-row:first-child { border-top: none; }
+.update-history-row:hover { background: var(--row-hover); }
+.update-history-ver { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.update-history-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update-history-date { white-space: nowrap; }
+.update-history-assets {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+/* ==========================================================================
+   二、更新进行中的全屏遮罩（锁死编辑器）
+   ========================================================================== */
+.bc-update-blocker {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 20, 30, 0.62);
+  backdrop-filter: blur(3px);
+  animation: bcMaskIn var(--dur-pop) ease both;
+  cursor: progress;
+}
+.bc-update-blocker-card {
+  width: min(460px, 92vw);
+  padding: 26px 28px 22px;
+  border-radius: 14px;
+  background: var(--bg-panel);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+  text-align: center;
+  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+}
+.bc-update-spinner {
+  width: 42px;
+  height: 42px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: bcSpin 0.9s linear infinite;
+}
+.bc-update-blocker-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.bc-update-blocker-msg { font-size: 12.5px; color: var(--text-muted); margin-top: 6px; min-height: 18px; }
+.bc-update-blocker-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+  margin: 14px 0 12px;
+}
+.bc-update-blocker-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), #64b5f6);
+  transition: width 0.25s var(--ease-standard);
+}
+.bc-update-blocker-hint { font-size: 11px; color: var(--text-muted); line-height: 1.7; }
+.bc-update-blocker-hint b { color: var(--text); }
+
+/* ==========================================================================
+   三、设置页 · 工具栏预览（与真实工具栏一致）
+   ========================================================================== */
+.tbman-preview-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 2px 0;
+}
+.tbman-preview + .tbman-preview-label { margin-top: 6px; }
+.tbman-chip-group {
+  border-style: dashed;
+  border-color: var(--accent);
+  background: var(--seg-active);
+  color: var(--accent);
+  font-weight: 600;
+}
+.tbman-chip-count {
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 14px;
+}
+.tbman-chip.is-more {
+  opacity: 0.62;
+  background: var(--muted-bg);
+  color: var(--text-muted);
+  border-style: dotted;
+  cursor: default;
+}
+
+/* ==========================================================================
+   四、布局窄宽度溢出修复
+   --------------------------------------------------------------------------
+   ① 左侧布局：元素面板最窄（160px）时，顶部"目标提示 / 模式 / 继承"几个按钮横向溢出。
+   ② 右侧面板：分栏被压窄时，设备分段条 / 快捷助手标题行 / 四值标题行会顶出边界。
+   ③ 三栏网格：右列改为"可收缩到 240px"，窄窗口下不再整列被裁掉。
+   检测方式：比较"子元素外接矩形是否越出父盒子"，只算真实出血（主动 overflow 裁切不算）。
+   ========================================================================== */
+
+/* —— ① 左侧布局元素面板顶栏 —— */
+.workspace:not([data-layout='bottom']) .elem-top-bar {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+/* 注意：左布局顶栏是 column flex —— 主轴是「高」，宽度必须用 width:100%，
+   写 flex-basis 只会控制高度（这是第一版修不好的原因）。 */
+.workspace:not([data-layout='bottom']) .elem-target-hint {
+  display: block;
+  width: 100%;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.workspace:not([data-layout='bottom']) .elem-inherit-wrap {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+/* 按钮用 flex:1 1 auto（basis 取内容宽）—— 真放不下才换行；
+   flex:1（basis:0）会"假装放得下"把按钮压扁，文字就被切了。 */
+.workspace:not([data-layout='bottom']) .elem-mode-btn,
+.workspace:not([data-layout='bottom']) .elem-inherit-wrap .elem-inherit-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 6px;
+}
+
+/* —— ② 右侧面板窄宽度 —— */
+.inspector-bp-bar,
+.inspector-bp-tabs { min-width: 0; }
+.inspector-bp-tabs { flex-wrap: wrap; }
+.inspector-bp-tabs .bp-tab-btn { flex: 1 1 auto; min-width: 0; }
+
+.qh-block-head { flex-wrap: wrap; }
+/* 标题按钮不要 min-width:0 —— 否则会被 flex 压到内容宽度以下，把末尾的 ▸ 挤出去 */
+.qh-block-head .qh-block-toggle { flex: 1 1 auto; flex-wrap: wrap; }
+.qh-block-head .qh-block-sub { margin-left: auto; }
+
+.seg-group { flex-wrap: wrap; }
+.seg-group .seg-btn { flex: 1 1 auto; min-width: 0; }
+
+.trbl4-head-title { min-width: 0; white-space: normal; }
+.trbl4-head-hint { min-width: 0; }
+
+/* 两列小网格：窄到放不下两列时自动降为一列，而不是溢出 */
+.qh-effect-grid { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.text-grad-quick { grid-template-columns: repeat(auto-fit, minmax(58px, 1fr)); }
+
+/* 面板里所有行容器统一允许收缩（兜底，杜绝"某一行把面板撑破"） */
+.inspector-sec,
+.inspector-sec-body,
+.inspector-bp-bar,
+.quick-helper,
+.qh-block,
+.qh-block-body,
+.qh-effect-card { min-width: 0; }
+
+/* —— ③ 三栏网格：右列可收缩 —— */
+.workspace:not([data-layout='bottom']) {
+  grid-template-columns: var(--bc-left-width, 230px) minmax(100px, 1fr) minmax(240px, var(--bc-right-width, 320px));
+}
+.workspace[data-layout='bottom'] {
+  grid-template-columns: minmax(0, 1fr) minmax(240px, var(--bc-right-width, 320px));
+}
+
+/* ==========================================================================
+   五、表格编辑器（v0.4.3）
+   ========================================================================== */
+
+/* 属性面板里的入口条（只在选中表格/表格内元素时出现） */
+.tbl-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--hover-accent);
+}
+.tbl-entry-text { flex: 1 1 160px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tbl-entry-text b { font-size: 12px; color: var(--accent); }
+.tbl-entry-text span { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+
+/* —— 页面骨架 —— */
+.table-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+  animation: bcViewIn var(--dur-view) var(--ease-standard) both;
+}
+.table-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.table-meta {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-family: 'Consolas', monospace;
+  white-space: nowrap;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-soft);
+}
+.table-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(320px, 1.35fr) minmax(300px, 1fr);
+  gap: 12px;
+  padding: 12px;
+  overflow: hidden;
+}
+@media (max-width: 980px) {
+  .table-body { grid-template-columns: 1fr; overflow-y: auto; }
+}
+
+/* —— 左：结构网格 —— */
+.table-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.tbl-panel-title { font-size: 12px; font-weight: 700; color: var(--text); }
+.tbl-grid-wrap { flex: 1; min-height: 0; overflow: auto; padding: 4px; }
+.tbl-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 100%;
+  font-size: 12px;
+  color: var(--text);
+}
+.tbl-grid th,
+.tbl-grid td {
+  border: 1px solid var(--border);
+  padding: 0;
+  vertical-align: middle;
+}
+.tbl-grid-corner,
+.tbl-grid-colhead,
+.tbl-grid-rowhead {
+  width: 30px;
+  height: 26px;
+  background: var(--panel-tint);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  text-align: center;
+}
+.tbl-grid-colhead:hover,
+.tbl-grid-rowhead:hover { background: var(--hover-accent); color: var(--accent); }
+.tbl-grid-colhead.active,
+.tbl-grid-rowhead.active { background: var(--accent); color: #fff; }
+.tbl-grid tbody tr.is-head .tbl-cell { background: var(--panel-soft); font-weight: 600; }
+.tbl-cell {
+  position: relative;
+  min-width: 64px;
+  height: 30px;
+  padding: 5px 9px;
+  cursor: pointer;
+  transition: background 0.12s ease, box-shadow 0.12s ease;
+}
+.tbl-cell:hover { background: var(--row-hover); }
+.tbl-cell.active {
+  background: var(--row-active);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.tbl-cell-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+.tbl-cell-badge {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  font-size: 9px;
+  color: var(--accent);
+  opacity: 0.9;
+}
+.tbl-grid-rowops {
+  width: 56px;
+  border: none;
+  padding: 0 2px;
+  white-space: nowrap;
+}
+.tbl-mini {
+  width: 22px;
+  height: 20px;
+  margin: 0 1px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tbl-mini:hover { border-color: var(--accent); color: var(--accent); }
+.tbl-mini.danger:hover { border-color: var(--danger); color: var(--danger); }
+.tbl-hint { font-size: 11px; color: var(--text-muted); line-height: 1.6; }
+
+/* —— 右：属性与操作 —— */
+.table-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.tbl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  min-width: 0;
+}
+.tbl-card-title { font-size: 12px; font-weight: 700; color: var(--text); }
+.tbl-empty { font-size: 11.5px; color: var(--text-muted); }
+.tbl-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.tbl-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tbl-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--hover-accent); }
+
+.tbl-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tbl-field > span { font-size: 10.5px; color: var(--text-muted); }
+.tbl-field input,
+.tbl-field select {
+  height: 28px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+.tbl-field input[type='color'] { padding: 2px; width: 44px; }
+.tbl-field input[type='checkbox'] { width: auto; height: auto; }
+.tbl-field-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.tbl-field-row .tbl-field { flex: 1 1 90px; }
+
+.tbl-preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.tbl-preset {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, transform 0.14s ease;
+}
+.tbl-preset:hover { border-color: var(--accent); background: var(--hover-accent); transform: translateY(-1px); }
+.tbl-preset b { font-size: 12px; }
+.tbl-preset span { font-size: 10.5px; color: var(--text-muted); line-height: 1.45; }
+
+/* 元素面板「表格」分组下的一键插入模板行 */
+.elem-tpl-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.elem-tpl-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+}
+.elem-tpl-btn:hover { border-color: var(--accent); background: var(--hover-accent); color: var(--accent); }
+/* 底部布局（横向卡片）下：表格分组卡片窄，模板行竖向排更好读 */
+.workspace[data-layout='bottom'] .elem-tpl-row { flex-direction: column; }
+.workspace[data-layout='bottom'] .elem-tpl-btn { flex: 0 0 auto; width: 100%; }
+
+/* 元素面板「表格」分组下的一键插入模板行 */
+.elem-tpl-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.elem-tpl-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+}
+.elem-tpl-btn:hover { border-color: var(--accent); background: var(--hover-accent); color: var(--accent); }
+/* 底部布局（横向卡片）下：表格分组卡片窄，模板行竖向排更好读 */
+.workspace[data-layout='bottom'] .elem-tpl-row { flex-direction: column; }
+.workspace[data-layout='bottom'] .elem-tpl-btn { flex: 0 0 auto; width: 100%; }

@@ -480,240 +480,18 @@ function countNodes(node: any): number {
   return count;
 }
 
-// ============ 自动更新系统 ============
-
-/** 当前应用版本号，从 Electron app 内置元数据读取（最可靠，asar 内也兼容） */
-export const APP_VERSION: string = app.getVersion();
-
 /**
- * 获取当前安装版本（从 package.json 读取）
- * 作为 getLocalVersion() 的后备方案，确保任何环境下都能正确读取
- */
-export function getLocalVersion(): string {
-  // 优先用 Electron 内置方法（asar/unpacked 均兼容）
-  const v = app.getVersion();
-  if (v && v !== '0.0.0') return v;
-  // 后备：从 exe 同级 package.json 读
-  try {
-    const pkgPath = join(dirname(process.execPath), 'package.json');
-    if (existsSync(pkgPath)) {
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-      return pkg.version || '0.0.0';
-    }
-  } catch {}
-  return '0.0.0';
-}
-
-/**
- * 从 GitHub Releases API 获取发布列表（直接请求，不走镜像，镜像只用于下载文件）。
- * 含预发行版（prerelease），按 GitHub 返回顺序（最新在前）。
- * 注意：后台需关闭 Watt Toolkit（原 Clash Verge），否则会劫持 DNS 导致请求失败。
- */
-const DOWNLOAD_MIRROR = 'https://v4.gh-proxy.org/';
-
-export interface LatestReleaseInfo {
-  tag: string;
-  version: string;
-  name: string;
-  assets: ReleaseAsset[];
-  publishedAt: string;
-  prerelease?: boolean;
-  body?: string;
-}
-
-export interface ReleaseAsset {
-  name: string;
-  browser_download_url: string;
-  size: number;
-}
-
-/** 拉取发布列表（最新在前，含预发行版） */
-export async function fetchReleases(perPage = 10): Promise<LatestReleaseInfo[] | null> {
-  const repo = 'DrZhaology/BlockCanvas';
-  const url = `https://api.github.com/repos/${repo}/releases?per_page=${perPage}`;
-  try {
-    const res = await fetch(url, {
-      headers: { Accept: 'application/vnd.github.v3+json' }
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as any[];
-    if (!Array.isArray(data)) return null;
-    return data.map((release) => ({
-      tag: release.tag_name,
-      version: release.tag_name.replace(/^v/i, ''),
-      name: release.name || release.tag_name,
-      assets: (release.assets || []).map((a: any) => ({
-        name: a.name,
-        browser_download_url: a.browser_download_url,
-        size: a.size
-      })),
-      publishedAt: release.published_at,
-      prerelease: !!release.prerelease,
-      body: typeof release.body === 'string' ? release.body : ''
-    }));
-  } catch {
-    return null;
-  }
-}
-
-/** 兼容旧调用：取最新一条 */
-export async function fetchLatestRelease(): Promise<LatestReleaseInfo | null> {
-  const list = await fetchReleases(1);
-  return list && list.length > 0 ? list[0] : null;
-}
-
-/**
- * 比较两个 semver 字符串，返回 1（新版本）/ 0（相同）/ -1（旧版本）
- */
-export function compareVersion(a: string, b: string): number {
-  const pa = a.replace(/^v/i, '').split('.').map(Number);
-  const pb = b.replace(/^v/i, '').split('.').map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const x = pa[i] || 0;
-    const y = pb[i] || 0;
-    if (x > y) return 1;
-    if (x < y) return -1;
-  }
-  return 0;
-}
-
-/**
- * v0.4.1：按当前平台匹配发行版资产。
- * 只认"名称关键词"（很多资产是 zip 但平台不同，单看后缀分不出来）：
- *   win32  → win / windows / win64 / win-x64（排除 mac/linux/android/ios/arm 关键词）
- *   darwin → mac / darwin / osx / dmg
- *   linux  → linux / appimage / deb
- *   android→ android / apk
- *   ios    → ios / iphone / ipa
- * 找不到 → 返回 null（表示"该平台这一版没有对应构建"，可检测但不可更新）。
- */
-export interface MatchedAsset {
-  url: string;
-  name: string;
-  size: number;
-}
-
-export function findMatchingAsset(assets: ReleaseAsset[]): MatchedAsset | null {
-  const plat = process.platform as string;
-  const score = (name: string): number => {
-    const n = name.toLowerCase();
-    let hit = 0;
-    switch (plat as string) {
-      case 'win32':
-        if (/(^|[^a-z])(win|windows|win64|win-x64|win32)([^a-z]|$)/.test(n) || n.includes('windows')) hit += 2;
-        if (/(mac|darwin|osx|linux|android|apk|ios|iphone|ipa|arm64|arm)/.test(n)) hit -= 4;
-        if (n.includes('x64')) hit += 1;
-        if (n.includes('portable') || n.endsWith('.zip')) hit += 1;
-        break;
-      case 'darwin':
-        if (/(mac|darwin|osx|dmg)/.test(n)) hit += 2;
-        if (/(win|linux|android|apk|ios|iphone)/.test(n)) hit -= 4;
-        if (/(arm64|aarch64)/.test(n)) hit += 1;
-        break;
-      case 'linux':
-        if (/(linux|appimage|deb)/.test(n)) hit += 2;
-        if (/(win|mac|darwin|osx|android|apk|ios|iphone)/.test(n)) hit -= 4;
-        break;
-      case 'android':
-        if (/(android|apk)/.test(n)) hit += 2;
-        break;
-      case 'ios':
-        if (/(ios|iphone|ipa)/.test(n)) hit += 2;
-        break;
-    }
-    return hit;
-  };
-  let best: { asset: ReleaseAsset; hit: number } | null = null;
-  for (const asset of assets) {
-    const hit = score(asset.name);
-    if (hit > 0 && (!best || hit > best.hit)) best = { asset, hit };
-  }
-  if (!best) return null;
-  return { url: best.asset.browser_download_url, name: best.asset.name, size: best.asset.size };
-}
-
-/**
- * 下载文件（流式写盘，走 gh-proxy 镜像加速 GitHub CDN）。
- * onProgress(pct 0~100, 已下载 MB, 总 MB)
- */
-export async function downloadUpdateAsset(
-  url: string,
-  destPath: string,
-  onProgress?: (pct: number, mb: number, totalMb: number) => void
-): Promise<{ ok: boolean; error?: string }> {
-  try {
-    mkdirSync(dirname(destPath), { recursive: true });
-    const mirrorUrl = `${DOWNLOAD_MIRROR}${url}`;
-    const res = await fetch(mirrorUrl, {
-      headers: { Accept: 'application/octet-stream' }
-    });
-    if (!res.ok || !res.body) return { ok: false, error: `HTTP ${res.status}` };
-
-    const total = Number(res.headers.get('content-length') || 0);
-    const totalMb = Math.round((total / 1048576) * 10) / 10;
-    const reader = res.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let received = 0;
-    let lastPct = -1;
-    // 流式读入内存（便携版 zip 一般 < 150MB，可接受）；写入临时文件
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        chunks.push(value);
-        received += value.length;
-        if (onProgress && total > 0) {
-          const pct = Math.min(99, Math.floor((received / total) * 100));
-          if (pct !== lastPct) {
-            lastPct = pct;
-            onProgress(pct, Math.round((received / 1048576) * 10) / 10, totalMb);
-          }
-        }
-      }
-    }
-    const buffer = Buffer.concat(chunks.map((c) => Buffer.from(c)));
-    writeFileSync(destPath, buffer);
-    onProgress?.(100, Math.round((buffer.length / 1048576) * 10) / 10, totalMb);
-    return { ok: true };
-  } catch (e: any) {
-    return { ok: false, error: e.message || '下载失败' };
-  }
-}
-
-/**
- * 解压 zip 到目标目录（使用 Node.js 原生命令 7z 或 systemunzip）
- * 备用：用 child_process 调用 System32\tar（Win10+ 内置）
- */
-export async function unzipUpdate(
-  zipPath: string,
-  targetDir: string
-): Promise<{ ok: boolean; error?: string }> {
-  const { execSync } = await import('node:child_process');
-  try {
-    mkdirSync(targetDir, { recursive: true });
-    // Win10+ 内置 tar
-    execSync(`tar -xf "${zipPath}" -C "${targetDir}"`, {
-      stdio: 'pipe',
-      timeout: 60000
-    });
-    return { ok: true };
-  } catch (e: any) {
-    return { ok: false, error: e.stderr?.toString() || e.message || '解压失败' };
-  }
-}
-
-/**
- * 从 zip 内 data/extensions/ 同步内置扩展到运行时 data/extensions/
+ * 从「种子扩展目录」同步内置扩展到运行时 data/extensions/
  * 同名 id 覆盖，用户第三方扩展保留不动
  */
 function seedExtensionsFromZip(extDir: string) {
   try {
-    // zip 内路径：exe 同级的 data/extensions/
-    const zipExtDir = join(dirname(process.execPath), 'data', 'extensions');
-    if (!existsSync(zipExtDir)) return;
+    // 种子路径：exe 同级的 data/extensions/
+    const seedExtDir = join(dirname(process.execPath), 'data', 'extensions');
+    if (!existsSync(seedExtDir)) return;
 
     for (const kindDir of ['plugins', 'resources']) {
-      const srcKind = join(zipExtDir, kindDir);
+      const srcKind = join(seedExtDir, kindDir);
       const destKind = join(extDir, kindDir);
       if (!existsSync(srcKind)) continue;
       if (!existsSync(destKind)) mkdirSync(destKind, { recursive: true });
@@ -722,20 +500,13 @@ function seedExtensionsFromZip(extDir: string) {
         if (!item.isDirectory()) continue;
         const srcItem = join(srcKind, item.name);
         const destItem = join(destKind, item.name);
-        // 同名 id：覆盖；用户自装 id：跳过
-        if (existsSync(destItem)) {
-          syncDirOverwrite(srcItem, destItem, false);
-        } else {
-          syncDirOverwrite(srcItem, destItem, false);
-        }
+        syncDirOverwrite(srcItem, destItem, false);
       }
     }
   } catch {}
 }
 
-/**
- * 递归覆盖 src → dest，跳过 data/ 目录；对 extensions/ 做按 id 覆盖（保留用户第三方扩展）
- */
+/** 递归覆盖 src → dest；skipData 为 true 时跳过 data/ 目录 */
 function syncDirOverwrite(src: string, dest: string, skipData: boolean) {
   if (!existsSync(src)) return;
   if (!existsSync(dest)) mkdirSync(dest, { recursive: true });
@@ -745,10 +516,8 @@ function syncDirOverwrite(src: string, dest: string, skipData: boolean) {
     const srcPath = join(src, entry.name);
     const destPath = join(dest, entry.name);
 
-    // 跳过 data/ 目录（用户数据，永久保留）
     if (skipData && entry.name === 'data') continue;
 
-    // extensions/ 只覆盖同名子目录，不删除用户自己装的第三方扩展
     if (entry.isDirectory() && entry.name === 'extensions') {
       syncExtensionsOverwrite(srcPath, destPath);
       continue;
@@ -757,16 +526,12 @@ function syncDirOverwrite(src: string, dest: string, skipData: boolean) {
     if (entry.isDirectory()) {
       syncDirOverwrite(srcPath, destPath, skipData);
     } else if (entry.isFile()) {
-      try {
-        copyFileSync(srcPath, destPath);
-      } catch {}
+      try { copyFileSync(srcPath, destPath); } catch {}
     }
   }
 }
 
-/**
- * 覆盖 extensions/ 下的插件或资源包：只更新同名 id，不删除用户自装扩展
- */
+/** 覆盖 extensions/ 下的插件或资源包：只更新同名 id，不删除用户自装扩展 */
 function syncExtensionsOverwrite(srcExt: string, destExt: string) {
   if (!existsSync(srcExt)) return;
   if (!existsSync(destExt)) mkdirSync(destExt, { recursive: true });
@@ -779,128 +544,15 @@ function syncExtensionsOverwrite(srcExt: string, destExt: string) {
 
     for (const item of readdirSync(srcKind, { withFileTypes: true })) {
       if (!item.isDirectory()) continue;
-      const srcItem = join(srcKind, item.name);
-      const destItem = join(destKind, item.name);
-      // 同名 id：覆盖文件；用户自装 id（不在 src 中）：保留不动
-      if (existsSync(destItem)) {
-        syncDirOverwrite(srcItem, destItem, false);
-      } else {
-        syncDirOverwrite(srcItem, destItem, false);
-      }
+      syncDirOverwrite(join(srcKind, item.name), join(destKind, item.name), false);
     }
   }
 }
 
-/**
- * v0.4.1 重写：执行应用更新
- *
- * 过去的 BUG：正在运行的 Electron 无法覆盖自己的 exe / app.asar（文件被进程锁定），
- * copyFileSync 失败又被 catch {} 静默吞掉 —— 结果就是"下载成功但完全没替换"。
- *
- * 新方案（标准便携应用自更新流程）：
- *   1. 下载 zip → 解压到 <appDir>/.update/staging/（新版本完整目录）；
- *   2. 校验 staging 里有 BlockCanvas.exe（防下载损坏）；
- *   3. 生成 <appDir>/.update/apply-update.bat，由【独立 detached 进程】执行：
- *        等主进程退出 → robocopy staging→appDir（/PURGE 清理旧文件，/XD data 排除用户数据）
- *        → 删除 .update 全部临时文件 → 重新启动程序。
- *   4. 主进程直接退出，把文件锁交出去。
- *
- * data/ 兼容性（最高优先级）：
- *   · robocopy /XD data —— staging 里的 data/ 不覆盖用户数据，旧 data 不被 /PURGE 删除；
- *   · 新版本对 data/ 只做向后兼容（工程文件 .bcproj / session.json / config.json 结构只加不改）。
- */
-export async function applyUpdate(
-  assetUrl: string,
-  onProgress?: (msg: string, pct?: number) => void
-): Promise<{ ok: boolean; error?: string }> {
-  const appDir = dirname(process.execPath);
-  const updateDir = join(appDir, '.update');
-  const stagingDir = join(updateDir, 'staging');
-  const zipPath = join(updateDir, 'update.zip');
-
-  // 覆盖动作只能发生在程序退出后 —— 开发模式（源码运行）没有可替换的安装目录
-  if (!app.isPackaged) {
-    return { ok: false, error: '当前处于源码开发模式（pnpm dev），没有可替换的安装目录。请使用打包后的便携版进行更新。' };
-  }
-
-  try {
-    // 0. 清掉上一次更新可能留下的残留
-    rmSync(updateDir, { recursive: true, force: true });
-    mkdirSync(stagingDir, { recursive: true });
-
-    // 1. 下载（流式 + 进度）
-    onProgress?.('正在通过镜像下载更新包…', 0);
-    const dl = await downloadUpdateAsset(assetUrl, zipPath, (pct, mb, totalMb) => {
-      onProgress?.(`正在下载更新包… ${mb} / ${totalMb} MB`, pct);
-    });
-    if (!dl.ok) return { ok: false, error: `下载失败：${dl.error}` };
-
-    // 2. 解压
-    onProgress?.('正在解压更新包…', 100);
-    const unz = await unzipUpdate(zipPath, stagingDir);
-    if (!unz.ok) return { ok: false, error: `解压失败：${unz.error}` };
-
-    // zip 内可能有顶层目录（BlockCanvas/），也可能直接是文件 —— 找到真正含 exe 的根
-    let extractRoot = stagingDir;
-    if (existsSync(join(stagingDir, 'BlockCanvas', 'BlockCanvas.exe'))) {
-      extractRoot = join(stagingDir, 'BlockCanvas');
-    } else if (!existsSync(join(stagingDir, 'BlockCanvas.exe'))) {
-      // 再找一层：staging 下唯一目录且里面有 exe
-      const entries = readdirSync(stagingDir, { withFileTypes: true });
-      const dir = entries.find((e) => e.isDirectory() && existsSync(join(stagingDir, e.name, 'BlockCanvas.exe')));
-      if (dir) extractRoot = join(stagingDir, dir.name);
-      else return { ok: false, error: '更新包内容异常：未找到 BlockCanvas.exe（下载可能不完整）' };
-    }
-
-    // 3. 生成退出后执行的替换批处理
-    //    robocopy 要点：
-    //      /E        复制子目录（含空目录）
-    //      /PURGE    删除目标中源里没有的文件 → 清掉旧版本残留（"没有任何多余文件"）
-    //      /XD data  排除用户数据目录：不覆盖、也不被 /PURGE 删除（data 永久保留）
-    //      /R:2 /W:2 文件占用时重试 2 次
-    const batPath = join(updateDir, 'apply-update.bat');
-    const bat = [
-      '@echo off',
-      'rem BlockCanvas 自动更新脚本（由主进程生成，程序退出后由独立进程执行）',
-      'chcp 65001 >nul',
-      'title BlockCanvas Updater',
-      'rem 等主进程完全退出、释放文件锁',
-      'timeout /t 3 /nobreak >nul',
-      `robocopy "${extractRoot}" "${appDir}" /E /PURGE /XD "data" ".update" /R:2 /W:2 /NFL /NDL /NJH /NJS /NP`,
-      'rem robocopy 退出码 0-7 都是成功；8 以上才是错误',
-      `if errorlevel 8 (`,
-      `  echo 更新失败：文件替换出错。更新包保留在 .update 目录，程序未受影响。`,
-      `  pause`,
-      `  exit /b 1`,
-      `)`,
-      `rem 清理全部临时文件（zip / staging / 本脚本所在目录）`,
-      `rmdir /s /q "${updateDir}"`,
-      'rem 重新启动程序',
-      `start "" "${join(appDir, 'BlockCanvas.exe')}"`,
-      'exit /b 0',
-      `del "%~f0"`
-    ].join('\r\n');
-    writeFileSync(batPath, bat, 'utf-8');
-
-    // 4. 启动独立进程执行替换，然后本进程退出（交出文件锁）
-    onProgress?.('准备就绪，正在重启以完成更新…', 100);
-    const { spawn } = await import('node:child_process');
-    const child = spawn('cmd.exe', ['/c', batPath], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true
-    });
-    child.unref();
-
-    // 给批处理一点启动时间，然后退出主进程（文件锁随进程消失）
-    setTimeout(() => {
-      app.exit(0);
-    }, 300);
-
-    return { ok: true };
-  } catch (e: any) {
-    // 此阶段尚未触碰现有程序文件 —— 只需清理临时目录即可，无需回滚
-    try { rmSync(updateDir, { recursive: true, force: true }); } catch {}
-    return { ok: false, error: e.message || '更新失败' };
-  }
-}
+// ============ 自动更新系统 ============
+// v0.4.3 起，整套自动更新逻辑搬到了独立模块 src/main/updater.ts：
+//   · 发行版读取（多镜像回退：NexaCode → gh-proxy(v4) → GitHub 直连）
+//   · 版本列表构建（当前 + 往前 5 个只读 + 当前及往后全部可更新）
+//   · 多镜像下载（gh-proxy(v4) → NexaCode → GitHub 直连）+ zip 完整性校验
+//   · 跨平台替换（Windows robocopy / macOS·Linux rsync），始终排除 data/ 用户数据
+// 这里不再保留任何更新相关代码，避免两份实现漂移。

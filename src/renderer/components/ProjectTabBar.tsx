@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useTabStore, type ProjectTab } from '@store/tabStore';
+import { useTabStore, isEmptyProject, type ProjectTab } from '@store/tabStore';
 import { useScene } from '@store/sceneStore';
 import { TipsTicker } from './TipsTicker';
 
@@ -63,6 +63,18 @@ export function ProjectTabBar() {
     //  · 改过 + 从未保存过 → 明确警告"关闭后无法找回"（确定=放弃；取消=留着）。
     // 关闭整个软件时的会话恢复特性不受影响：没被 × 关掉的标签（含未保存草稿）仍走
     // data/session.json 原地恢复，下次打开还是一样的界面。
+    // —— v0.4.3：完全空的项目直接关 ——
+    // 新建标签默认 isDirty=true（否则连"要不要保存"都不会问），但"不小心点出来、
+    // 什么都没放"的空壳再拦一道就很烦。根容器没有子元素 + 页面 CSS / 设计变量仍是
+    // 出厂状态 = 完全空，直接关闭；只要动过任何东西，仍走下面的二次确认。
+    const liveScene = tab.id === useTabStore.getState().activeTabId
+      ? useScene.getState().scene
+      : tab.scene;
+    if (isEmptyProject(liveScene)) {
+      closeTab(tab.id);
+      return;
+    }
+
     if (tab.isDirty) {
       if (tab.filePath) {
         const saveFirst = confirm(

@@ -5,6 +5,7 @@ import { exportHTML } from '@lib/exporter';
 import { HelpButton } from './HelpButton';
 import { Collapse } from './Collapse';
 import { getPluginElements } from '@lib/pluginHost';
+import { TABLE_STRUCTURE_TEMPLATES } from '@lib/tablePresets';
 
 // BlockCanvas · 元素面板
 // 阶段1：按类别分组，点击插入选中元素的父级（或根）
@@ -308,6 +309,23 @@ export function ElementPanel() {
                     ));
                   })()}
                 </div>
+                {/* v0.4.3：表格分组追加"整张表一键插入"——表格结构（表头/表尾/行头）手插太麻烦，
+                    直接给几个带样例内容的成品模板；插入后可在属性面板进「表格编辑器」改结构。 */}
+                {g.title === '表格' && (
+                  <div className="elem-tpl-row">
+                    {TABLE_STRUCTURE_TEMPLATES.map((t) => (
+                      <button
+                        key={t.id}
+                        className="elem-tpl-btn"
+                        title={t.desc + '（插入后可在属性面板点「打开表格编辑器」继续改结构）'}
+                        onClick={() => {
+                          insertTemplate(t.build(), selectedId);
+                          window.dispatchEvent(new CustomEvent('bc:element-added', { detail: 'table' }));
+                        }}
+                      >▦ {t.name}</button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>

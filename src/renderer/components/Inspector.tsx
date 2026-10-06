@@ -25,6 +25,7 @@ import { QuickHelper, HELPER_MANAGED_KEYS } from './QuickHelper';
 import { PseudoFxPanel } from './PseudoFx';
 import { BackgroundInput } from './BackgroundInput';
 import { Collapse } from './Collapse';
+import { findTableAncestor } from '@lib/tableOps';
 import { ClassManager } from './ClassManager';
 import { TokenPanel } from './TokenPanel';
 import { classColor, isValidClassToken } from '@lib/classColor';
@@ -431,6 +432,9 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   const clearBreakpointOverride = useScene((s) => s.clearBreakpointOverride);
   const elementId = selected.id;
   const elementType = selected.type;
+  // v0.4.3：选中项是不是表格（或表格里的单元格/行）—— 是则给出「打开表格编辑器」入口
+  // （用 getState 取根：本组件由父级随 scene 变化重渲染，无需再订阅一次）
+  const tableOwner = findTableAncestor(useScene.getState().scene.root, elementId);
   // 是否已有可挂 CSS 规则的"名字"（类名 / 关系选择器 / ID）—— 没有名字则伪类导出后不生效
   const hasSelector = Boolean(
     (selected.attrs?.relSelector ?? '').trim() ||
@@ -827,6 +831,22 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
             rows={2}
             onChange={(e) => setText(elementId, e.target.value)}
           />
+        </div>
+      )}
+
+      {/* 0.5 表格元素：直达专用表格编辑器（v0.4.3）
+              —— 表格的结构（加行/列、合并拆分、表头表尾）在通用属性面板里做不了，
+              所以给一张表一个显眼的入口，直接进「表格编辑器」页面。 */}
+      {tableOwner && (
+        <div className="tbl-entry">
+          <div className="tbl-entry-text">
+            <b>▦ 这是表格元素</b>
+            <span>加行/列、合并拆分单元格、表头表尾与整套样式，都在表格编辑器里一气呵成。</span>
+          </div>
+          <button
+            className="btn-primary btn-mini"
+            onClick={() => window.dispatchEvent(new CustomEvent('bc:open-table-editor', { detail: tableOwner.id }))}
+          >打开表格编辑器</button>
         </div>
       )}
 

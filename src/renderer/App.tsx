@@ -9,11 +9,13 @@ import { ErrorBoundary } from '@comp/ErrorBoundary';
 import { ProjectsCenter } from '@comp/ProjectsCenter';
 import { UpdateCenter } from '@comp/UpdateCenter';
 import { Settings, type SettingsSection } from '@comp/Settings';
+import { TableEditor } from '@comp/TableEditor';
 import { ProjectTabBar } from '@comp/ProjectTabBar';
 import { AboutModal } from '@comp/About';
 import { ShortcutsModal } from '@comp/ShortcutsModal';
 import { useScene, findNode } from '@store/sceneStore';
 import { useTabStore } from '@store/tabStore';
+import { useUpdateBusy } from '@store/updateStore';
 import { refreshPlugins } from '@lib/pluginHost';
 import { withViewTransition } from '@lib/viewTransition';
 import { useHorizontalWheel } from '@lib/hScroll';
@@ -40,7 +42,7 @@ const BOTTOM_HEIGHT_MIN = 175;
 const RIGHT_WIDTH_DEFAULT = 416;
 const RIGHT_WIDTH_MIN = 340;
 
-export type AppView = 'editor' | 'projects' | 'settings' | 'update';
+export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table';
 
 export default function App() {
   // v0.4.2：全局「横向滚动区直接滚轮」桥接（容器加 .bc-hscroll 即生效）
@@ -56,9 +58,14 @@ export default function App() {
   const [leftWidth, setLeftWidth] = usePersistentState<number>(LEFT_WIDTH_KEY, LEFT_WIDTH_DEFAULT);
   const [zoom, setZoom] = useState(1);
   const [view, setView] = useState<AppView>('editor');
+  // v0.4.3 表格编辑器：记录"要编辑哪张表"，由 bc:open-table-editor 事件带入
+  const [tableEditId, setTableEditId] = useState<string>('');
   // 所有「整页切换」都走原生视图过渡：旧页面淡出 + 新页面淡入
   // （不重挂载视图、不丢状态；宿主不支持或系统开了"减少动态效果"时自动降级为直接切换）
   const switchView = useCallback((next: AppView) => {
+    // v0.4.3：更新进行中锁死视图切换 —— 更新要替换程序文件，
+    // 这期间绝不能再去动工程数据（全屏遮罩会兜底拦住鼠标操作）。
+    if (useUpdateBusy.getState().busy) return;
     withViewTransition(() => setView((cur) => (cur === next ? cur : next)));
   }, []);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('personalization');
@@ -196,6 +203,8 @@ export default function App() {
 
   // 4. 菜单 & 事件路由监听
   useEffect(() => {
+    // 更新进行中：所有会改动工程数据的菜单动作一律无效
+    const blocked = () => useUpdateBusy.getState().busy;
     const onSetLayout = (e: Event) => {
       const v = (e as CustomEvent).detail;
       if (v === 'left' || v === 'bottom') setLayout(v);
@@ -215,11 +224,13 @@ export default function App() {
     const openAbout = () => setShowAbout(true);
 
     const onNewTab = () => {
+      if (blocked()) return;
       useTabStore.getState().newTab();
       switchView('editor');
     };
 
     const onSaveProject = async () => {
+      if (blocked()) return;
       const tabs = useTabStore.getState().tabs;
       const activeId = useTabStore.getState().activeTabId;
       const curTab = tabs.find((t) => t.id === activeId);
@@ -236,6 +247,7 @@ export default function App() {
     };
 
     const onSaveProjectAs = async () => {
+      if (blocked()) return;
       const tabs = useTabStore.getState().tabs;
       const activeId = useTabStore.getState().activeTabId;
       const curTab = tabs.find((t) => t.id === activeId);
@@ -246,6 +258,7 @@ export default function App() {
     };
 
     const onOpenProject = async () => {
+      if (blocked()) return;
       const res = await window.bc.openProjectFile();
       if (res.ok && res.project?.scene) {
         useTabStore.getState().newTab(res.project.name || '已打开工程', res.project.scene, res.path);
@@ -278,6 +291,14 @@ export default function App() {
     window.addEventListener('menu:class-manager', openClass);
     window.addEventListener('menu:about', openAbout);
     window.addEventListener('menu:check-update', openUpdateCenter);
+    const onOpenTable = (e: Event) => {
+      if (blocked()) return;
+      const id = (e as CustomEvent).detail as string;
+      if (!id) return;
+      setTableEditId(id);
+      switchView('table');
+    };
+    window.addEventListener('bc:open-table-editor', onOpenTable);
     window.addEventListener('menu:new-tab', onNewTab);
     window.addEventListener('menu:save-project', onSaveProject);
     window.addEventListener('menu:save-project-as', onSaveProjectAs);
@@ -315,6 +336,7 @@ export default function App() {
       window.removeEventListener('menu:class-manager', openClass);
       window.removeEventListener('menu:about', openAbout);
       window.removeEventListener('menu:check-update', openUpdateCenter);
+      window.removeEventListener('bc:open-table-editor', onOpenTable);
       window.removeEventListener('menu:new-tab', onNewTab);
       window.removeEventListener('menu:save-project', onSaveProject);
       window.removeEventListener('menu:save-project-as', onSaveProjectAs);
@@ -327,7 +349,9 @@ export default function App() {
 
   return (
     <div className="app">
-      {view === 'update' ? (
+      {view === 'table' && tableEditId ? (
+        <TableEditor tableId={tableEditId} onBack={() => switchView('editor')} />
+      ) : view === 'update' ? (
         <UpdateCenter onBack={() => switchView('editor')} />
       ) : view === 'projects' ? (
         <ProjectsCenter
@@ -441,6 +465,33 @@ export default function App() {
       )}
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
       <ShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      <UpdateBusyOverlay />
+    </div>
+  );
+}
+
+// ============ 更新进行中的全屏遮罩（v0.4.3） ============
+// 更新要替换程序本体，这期间必须锁死编辑器：盖一层 z-index 最高的浮层，
+// 进度条 + 提示常驻，拦截全部鼠标事件；配合 switchView / 快捷键 / 菜单的守卫。
+function UpdateBusyOverlay() {
+  const busy = useUpdateBusy((s) => s.busy);
+  const message = useUpdateBusy((s) => s.message);
+  const pct = useUpdateBusy((s) => s.pct);
+  if (!busy) return null;
+  return (
+    <div className="bc-update-blocker" role="alertdialog" aria-busy="true">
+      <div className="bc-update-blocker-card">
+        <div className="bc-update-spinner" />
+        <div className="bc-update-blocker-title">正在更新 BlockCanvas…</div>
+        <div className="bc-update-blocker-msg">{message || '请稍候…'}</div>
+        <div className="bc-update-blocker-bar">
+          <div className="bc-update-blocker-fill" style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+        </div>
+        <div className="bc-update-blocker-hint">
+          更新期间已锁定编辑器操作。完成后程序会自动重启，
+          <b>data/ 里的全部工程与快照都会保留</b>。
+        </div>
+      </div>
     </div>
   );
 }
@@ -550,6 +601,8 @@ function useKeyboardShortcuts(setView: (v: AppView) => void, onOpenShortcuts?: (
     };
 
     const onKey = (e: KeyboardEvent) => {
+      // 更新进行中：全局快捷键全部失效（连撤销都不允许，避免半途改数据）
+      if (useUpdateBusy.getState().busy) return;
       const t = e.target as HTMLElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
 

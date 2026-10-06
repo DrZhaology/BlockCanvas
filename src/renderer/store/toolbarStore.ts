@@ -88,16 +88,19 @@ const LS_DOCK = 'bc-toolbar-dock';
 const LS_VISIBLE = 'bc-toolbar-visible'; // 旧版显隐（只读迁移用）
 const LS_ORDER = 'bc-toolbar-order';
 const LS_GROUPS = 'bc-toolbar-groups';
+const LS_GROUPS_SCHEMA = 'bc-toolbar-groups-schema';
+const GROUPS_SCHEMA = 2; // v2：剪贴板组 → 「操作」组（并入撤销 / 重做按钮）
 
 /** 出厂默认工具组（首次运行 / 「恢复默认布局」时使用） */
 export const DEFAULT_GROUPS: ToolbarGroup[] = [
   {
-    id: 'grp.clipboard',
-    label: '剪贴板',
-    icon: '✂️',
-    itemIds: ['copy', 'cut', 'paste'],
+    id: 'grp.ops',
+    label: '操作',
+    icon: '🛠️',
+    // 撤销 / 重做 / 复制 / 剪切 / 粘贴 —— 全部高频编辑动作收进一个组
+    itemIds: ['undo', 'redo', 'copy', 'cut', 'paste'],
     dock: 'main',
-    order: 10
+    order: 8
   },
   {
     id: 'grp.device',
@@ -141,11 +144,33 @@ function newGroupId(): string {
   return 'grp.' + Date.now().toString(36) + '.' + groupSeq;
 }
 
+/**
+ * 读取工具组记忆（含一次性 schema 迁移）。
+ * v1 → v2：旧的「剪贴板」组（grp.clipboard）更名成「操作」（grp.ops），
+ * 并把新增的「撤销 / 重做」按钮并进去。迁移只跑一次（schema 标记），
+ * 之后用户手动把撤销/重做移出组的操作不会被反复覆盖。
+ */
+function loadGroups(): ToolbarGroup[] {
+  const saved = load<ToolbarGroup[] | null>(LS_GROUPS, null);
+  if (!saved) return DEFAULT_GROUPS;
+  const schema = load<number>(LS_GROUPS_SCHEMA, 1);
+  if (schema >= GROUPS_SCHEMA) return saved;
+
+  const groups = saved.map((g) => {
+    if (g.id !== 'grp.clipboard') return g;
+    const rest = g.itemIds.filter((x) => x !== 'undo' && x !== 'redo' && x !== 'copy' && x !== 'cut' && x !== 'paste');
+    return { ...g, id: 'grp.ops', label: '操作', icon: '🛠️', itemIds: ['undo', 'redo', 'copy', 'cut', 'paste', ...rest] };
+  });
+  save(LS_GROUPS, groups);
+  save(LS_GROUPS_SCHEMA, GROUPS_SCHEMA);
+  return groups;
+}
+
 export const useToolbar = create<ToolbarState>((set) => ({
   items: [],
   docks: {},
   order: load<string[]>(LS_ORDER, []),
-  groups: load<ToolbarGroup[] | null>(LS_GROUPS, null) ?? DEFAULT_GROUPS,
+  groups: loadGroups(),
 
   addItem: (it) =>
     set((st) => {
@@ -193,6 +218,7 @@ export const useToolbar = create<ToolbarState>((set) => ({
         localStorage.removeItem(LS_VISIBLE);
         localStorage.removeItem(LS_ORDER);
         localStorage.removeItem(LS_GROUPS);
+        localStorage.setItem(LS_GROUPS_SCHEMA, JSON.stringify(GROUPS_SCHEMA));
       } catch {}
       return { docks: {}, order: [], groups: DEFAULT_GROUPS };
     }),

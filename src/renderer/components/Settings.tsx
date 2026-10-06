@@ -65,6 +65,7 @@ export function Settings(props: Props) {
   }, [initialSection]);
 
   const handleClearCache = async () => {
+    if (!confirm('确定要清理运行缓存吗？\n\n· 只删除 Chromium/V8 生成的临时缓存文件；\n· 不会碰你的项目工程、快照与任何设计数据。')) return;
     setCleaningCache(true);
     try {
       const res = await window.bc.clearAppCache();
@@ -988,6 +989,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
   };
   const mainRows = ordered.filter((it) => placeOf(it) === 'main');
   const rightRows = ordered.filter((it) => placeOf(it) === 'right');
+  const moreRows = ordered.filter((it) => placeOf(it) === 'more');
   // 还没被收进任何组的按钮（供「加入按钮…」下拉选择）
   const ungrouped = ordered.filter((it) => !groupOfItem(it.id, groups));
 
@@ -1041,15 +1043,20 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
   const nameOf = (it: ToolbarItem) => (typeof it.label === 'function' ? it.label() : (it.label ?? it.id));
 
   // 预览区把「组」折叠成一个组 chip（组内工具不逐条铺开）
-  const previewChips = (list: ToolbarItem[], side: 'main' | 'right') => {
+  const previewChips = (list: ToolbarItem[], side: 'main' | 'right' | 'more') => {
     const done = new Set<string>();
     const out: React.ReactNode[] = [];
     for (const it of list) {
       const g = groupOfItem(it.id, groups);
       if (!g) {
         out.push(
-          <span key={it.id} className={chipClass(it.id) + (side === 'right' ? ' is-right' : '')} {...rowDragProps(it.id)}>
-            <span className="tbman-chip-grip">⠿</span>
+          <span
+            key={it.id}
+            className={chipClass(it.id) + (side === 'right' ? ' is-right' : '') + (side === 'more' ? ' is-more' : '')}
+            {...(side === 'more' ? {} : rowDragProps(it.id))}
+            title={side === 'more' ? '收在工具栏右端「⋯」里，点开才可见' : it.title}
+          >
+            {side !== 'more' && <span className="tbman-chip-grip">⠿</span>}
             {nameOf(it)}
           </span>
         );
@@ -1058,8 +1065,16 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
       if (done.has(g.id)) continue;
       done.add(g.id);
       out.push(
-        <span key={g.id} className="tbman-chip tbman-chip-group" title={`${g.label}：悬浮展开 ${g.itemIds.length} 个工具`}>
+        <span
+          key={g.id}
+          className={'tbman-chip tbman-chip-group' + (g.dock === 'right' ? ' is-right' : '')}
+          title={`工具组「${g.label}」· 悬浮展开 ${g.itemIds.length} 个工具：` + g.itemIds.map((id) => {
+            const m = items.find((x) => x.id === id);
+            return m ? nameOf(m) : id;
+          }).join(' / ')}
+        >
           {g.icon ?? '▦'} {g.label}
+          <span className="tbman-chip-count">{g.itemIds.length}</span>
         </span>
       );
     }
@@ -1160,22 +1175,34 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
         </div>
       </div>
 
-      <div className="fluent-group-title">工具栏预览（可直接拖动调整顺序）</div>
+      <div className="fluent-group-title">工具栏预览（与编辑器里的工具栏一致，可直接拖动调整顺序）</div>
       <div className="fluent-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+        <div className="tbman-preview-label">主区（放不下时横向滚动，滚轮可直接左右滚）</div>
         <div className="tbman-preview bc-hscroll">
           {mainRows.length === 0 && <span className="tbman-empty">主区没有按钮 —— 到下方把停靠切到「主区」</span>}
           {previewChips(mainRows, 'main')}
-          <span className="tbman-preview-sep" />
+        </div>
+        <div className="tbman-preview-label">右侧固定区（贴着工具栏右端，空间不够时同样可横向滚动）</div>
+        <div className="tbman-preview bc-hscroll">
+          {rightRows.length === 0 && <span className="tbman-empty">右区没有按钮</span>}
           {previewChips(rightRows, 'right')}
+        </div>
+        <div className="tbman-preview-label">「⋯ 更多」收纳（不占工具栏位置，点右端「⋯」才可见）</div>
+        <div className="tbman-preview bc-hscroll">
+          {moreRows.length === 0 && <span className="tbman-empty">没有隐藏的按钮</span>}
+          {previewChips(moreRows, 'more')}
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            左段 = 主区，右段 = 固定在右端；两段都放不下时各自可横向滚动（滚轮直接左右滚）。停靠切「更多」的按钮收进工具栏右端「⋯」。
+            虚线框 chip = 工具组（鼠标悬浮在组按钮上即展开组内工具）；灰色 chip = 收进「⋯更多」的按钮。
           </span>
           <button
             className="btn-mini"
-            onClick={() => { resetToolbar(); }}
-            title="清除排序 / 停靠 / 分组记忆，恢复出厂布局"
+            onClick={() => {
+              if (!confirm('确定要恢复默认布局吗？\n\n· 会清空全部「排序 / 停靠区 / 工具组」的自定义记忆；\n· 按钮回到出厂位置与分组（操作组、设备组），\n  收进「⋯更多」的按钮也会重新显示；\n· 此操作立即生效，且没有撤销。')) return;
+              resetToolbar();
+            }}
+            title="清除排序 / 停靠 / 分组记忆，恢复出厂布局（会二次确认）"
           >恢复默认布局</button>
         </div>
       </div>

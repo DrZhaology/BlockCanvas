@@ -71,31 +71,40 @@ declare global {
       getAppConfig: () => Promise<Record<string, any>>;
       setAppConfig: (patch: Record<string, unknown>) => Promise<Record<string, any>>;
 
-      // 自动更新（v0.4.1：软件内更新页面）
+      // 自动更新（v0.4.3：软件内更新页面 + 多镜像回退）
       checkUpdate: () => Promise<{
         ok: boolean;
         isDev?: boolean;
         error?: string;
         localVersion?: string;
-        hasUpdate: boolean;
+        hasUpdate?: boolean;
         platform?: string;
-        releases?: Array<{
+        /** 实际命中的读取镜像名 */
+        source?: string;
+        /** 读取 / 下载的镜像尝试顺序（用于界面提示） */
+        mirrors?: { read: string[]; download: string[] };
+        /** 展示列表：全部更新项 + 当前版本 + 往前 5 个历史版本（最新在前） */
+        entries?: Array<{
           tag: string;
           version: string;
           name: string;
           publishedAt: string;
           prerelease: boolean;
-          body?: string;
+          body: string;
           assets: { name: string; browser_download_url: string; size: number }[];
+          updateable: boolean;
+          isCurrent: boolean;
+          asset: { url: string; name: string; size: number } | null;
         }>;
+        /** 最新的可更新版本 */
         latest?: {
+          tag: string;
           version: string;
           name: string;
-          tag: string;
           publishedAt: string;
           prerelease: boolean;
           asset: { url: string; name: string; size: number } | null;
-        };
+        } | null;
       }>;
       applyUpdate: (assetUrl: string) => Promise<{ ok: boolean; error?: string }>;
       onUpdateProgress: (cb: (p: { msg: string; pct?: number }) => void) => () => void;

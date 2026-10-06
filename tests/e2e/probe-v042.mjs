@@ -73,7 +73,7 @@ async function main() {
   const grpCount = await grpBtns.count();
   ok('默认存在工具组按钮（剪贴板 / 设备）', grpCount >= 2, String(grpCount));
   const grpText = (await grpBtns.allTextContents()).join(' ');
-  ok('含「剪贴板」组', grpText.includes('剪贴板'), grpText);
+  ok('含「操作」组（原剪贴板组更名）', grpText.includes('操作'), grpText);
   ok('含「设备」组', grpText.includes('设备'), grpText);
 
   // 剪切/复制/粘贴 不再各自占位（已折进组里）
@@ -83,16 +83,16 @@ async function main() {
   ok('剪切/复制/粘贴 默认已折叠（主区不再单独占位）', mainClone === 0 && mainCut === 0 && mainPaste === 0,
     `copy=${mainClone} cut=${mainCut} paste=${mainPaste}`);
 
-  // 悬浮展开「剪贴板」组
-  await win.locator('.toolbar .tb-grp-btn', { hasText: '剪贴板' }).first().hover();
+  // 悬浮展开「操作」组
+  await win.locator('.toolbar .tb-grp-btn', { hasText: '操作' }).first().hover();
   await win.waitForSelector('.tb-grp-panel', { state: 'visible', timeout: 4000 }).catch(() => {});
   await sleep(400);
   const clipPanelVisible = await win.locator('.tb-grp-panel').count();
-  ok('悬浮「剪贴板」展开组面板', clipPanelVisible > 0);
+  ok('悬浮「操作」展开组面板', clipPanelVisible > 0);
   const clipItems = await win.locator('.tb-grp-panel .tb-grp-pop-body button').count();
-  ok('组面板内含 3 个工具（复制/剪切/粘贴）', clipItems === 3, String(clipItems));
+  ok('组面板内含 5 个工具（撤销/重做/复制/剪切/粘贴）', clipItems === 5, String(clipItems));
   const clipText = (await win.locator('.tb-grp-panel .tb-grp-pop-body').innerText().catch(() => '')) || '';
-  ok('组面板内确实含复制/剪切/粘贴', clipText.includes('复制') && clipText.includes('剪切') && clipText.includes('粘贴'), clipText.replace(/\n/g, ' '));
+  ok('组面板内确实含撤销/重做/复制/剪切/粘贴', clipText.includes('撤销') && clipText.includes('重做') && clipText.includes('复制') && clipText.includes('剪切') && clipText.includes('粘贴'), clipText.replace(/\n/g, ' '));
 
   // 鼠标移开 → 组面板收起
   await win.mouse.move(20, 400);
@@ -112,6 +112,25 @@ async function main() {
   const gear = await win.locator('.toolbar button', { hasText: '⚙' }).count();
   const prefTitle = await win.locator('.toolbar button[title*="偏好设置"]').count();
   ok('工具栏已移除「偏好设置」齿轮按钮', gear === 0 && prefTitle === 0, `gear=${gear} title=${prefTitle}`);
+
+  // ============ 2.5 粘贴按钮的禁用态要跟着剪贴板实时变化（历史 BUG：永远灰着）============
+  await win.locator('.element-btn', { hasText: '通用容器' }).first().click();
+  await sleep(400);
+  await win.locator('.toolbar .tb-grp-btn', { hasText: '操作' }).first().hover();
+  await win.waitForSelector('.tb-grp-panel .tb-grp-pop-body button', { timeout: 4000 }).catch(() => {});
+  await sleep(300);
+  const pasteDisabledBefore = await win.locator('.tb-grp-panel .tb-grp-pop-body button', { hasText: '粘贴' }).first().isDisabled().catch(() => true);
+  await win.locator('.tb-grp-panel .tb-grp-pop-body button', { hasText: '复制' }).first().click();
+  await sleep(350);
+  await win.mouse.move(20, 300);
+  await sleep(350);
+  await win.locator('.toolbar .tb-grp-btn', { hasText: '操作' }).first().hover();
+  await win.waitForSelector('.tb-grp-panel .tb-grp-pop-body button', { timeout: 4000 }).catch(() => {});
+  await sleep(300);
+  const pasteDisabledAfter = await win.locator('.tb-grp-panel .tb-grp-pop-body button', { hasText: '粘贴' }).first().isDisabled().catch(() => true);
+  ok('未复制前「粘贴」禁用 → 复制后自动可用（v0.4.3 修复）', pasteDisabledBefore === true && pasteDisabledAfter === false, `before=${pasteDisabledBefore} after=${pasteDisabledAfter}`);
+  await win.mouse.move(20, 300);
+  await sleep(300);
 
   // ============ 3. 工具栏左右两区都可横向滚动 + 滚轮直接左右滚 ============
   const overflow = await win.evaluate(() => {
@@ -138,8 +157,8 @@ async function main() {
     const el = document.querySelector('.tbman-preview');
     return el ? el.scrollWidth - el.clientWidth : -1;
   });
-  ok('工具栏管理预览条出现横向溢出', pvMax > 20, String(pvMax));
-  const pvBox = await win.locator('.tbman-preview').boundingBox();
+  ok('工具栏管理预览条出现横向溢出', pvMax > 8, String(pvMax));
+  const pvBox = await win.locator('.tbman-preview').first().boundingBox();
   const pvBefore = await win.evaluate(() => document.querySelector('.tbman-preview').scrollLeft);
   if (pvBox) {
     await win.mouse.move(pvBox.x + pvBox.width / 2, pvBox.y + pvBox.height / 2);
@@ -147,7 +166,9 @@ async function main() {
     await sleep(320);
   }
   const pvSl = await win.evaluate(() => document.querySelector('.tbman-preview').scrollLeft);
-  ok('竖向滚轮直接横向滚动（无需 Shift）', pvSl > pvBefore + 20, `before=${pvBefore} after=${pvSl} max=${pvMax}`);
+  // 预览条拆成主区/右区/更多三行后，主区自身溢出量不大 → 断言"滚轮把它推到了末端"
+  ok('竖向滚轮直接横向滚动（无需 Shift）', pvSl > pvBefore + 5 && pvSl >= pvMax - 1.5,
+    `before=${pvBefore} after=${pvSl} max=${pvMax}`);
 
   // 设置页里也能看到「工具组」编辑区
   ok('工具栏管理出现「工具组」编辑区', (await win.locator('.tbman-grp-row').count()) >= 2,

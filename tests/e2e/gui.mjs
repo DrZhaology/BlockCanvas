@@ -82,6 +82,26 @@ async function setCanvasAuto(win) {
   await pickDevice(win, '自适应');
 }
 
+/**
+ * 确保「选择器与标识」折叠区已展开。
+ * v0.4.1 起属性面板四大区块默认折叠，而类名 chips 输入框在「选择器与标识」里，
+ * 所以凡是操作 .cls-chip-input 的用例都要先展开它（否则 fill 会一直等不到元素）。
+ */
+async function ensureIdentitySection(win) {
+  if (await doc(win, '.cls-chip-input').count()) return;
+  const head = doc(win, '.inspector-sec-head:has-text("选择器与标识")');
+  if (await head.count()) { await head.first().click(); await new Promise((r) => setTimeout(r, 450)); }
+  if (!(await doc(win, '.cls-chip-input').count())) {
+    // 可能停在别的页签上（类名/页面/变量）→ 切回「元素」页签再来一次
+    const elTab = doc(win, '.inspector-tab:has-text("元素")');
+    if (await elTab.count()) {
+      await elTab.first().click();
+      await new Promise((r) => setTimeout(r, 300));
+      if (await head.count()) { await head.first().click(); await new Promise((r) => setTimeout(r, 450)); }
+    }
+  }
+}
+
 async function main() {
   log('=== BlockCanvas E2E 启动 ===');
   // 数据隔离：把 data/ 指向临时目录，保证 E2E 从「全新空工程」开始，且绝不污染用户真实数据
@@ -100,7 +120,7 @@ async function main() {
     // v0.4.2：若宿主终端带 ELECTRON_RUN_AS_NODE=1（常见于在 Electron 系终端里跑脚本），
     // Electron 会退化成纯 Node → Playwright "Process failed to launch!"，这里显式剔除。
     env: (() => {
-      const e = { ...process.env, BC_EXPORT_PATH: EXPORT_CHECK, BC_DATA_DIR: DATA_DIR };
+      const e = { ...process.env, BC_AUTO_EXPORT_PATH: EXPORT_CHECK, BC_DATA_DIR: DATA_DIR };
       delete e.ELECTRON_RUN_AS_NODE;
       return e;
     })()
@@ -715,6 +735,7 @@ async function main() {
     await doc(win, '.canvas > [data-bc-id]').nth(1).click();
     await new Promise((r) => setTimeout(r, 200));
     // 类名 chips（面板顶部）：一次贴两个 token（空格分隔）
+    await ensureIdentitySection(win);
     await doc(win, '.cls-chip-input').fill('banner test');
     await doc(win, '.cls-chip-input').evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 200));
@@ -809,13 +830,14 @@ async function main() {
     }
     await new Promise((r) => setTimeout(r, 200));
     // S25.0 模板页签仍在左侧面板内（非全屏遮罩）
-    // S25.1 点「模板」→ 底部布局下整条面板加高（430px），4 个模板缩略图卡片
+    // S25.1 点「模板」→ 底部布局下 4+ 个模板缩略图卡片
+    //（v0.4.2 起切到模板页不再改变面板宽/高，面板尺寸与元素页一致 → 不再断言"面板变高"）
     await doc(win, '.element-panel .inspector-tab:has-text("模板")').click();
     const panelW25 = await doc(win, '.element-panel').evaluate((el) => el.getBoundingClientRect().width);
     const panelH25 = await doc(win, '.element-panel').evaluate((el) => el.getBoundingClientRect().height);
     await waitUntil(async () => (await doc(win, '.tpl-card').count()) >= 4, 8000, '模板卡片出现');
     const tplNames25 = await doc(win, '.tpl-card-name').allTextContents();
-    check('S25.1 模板页：4 个模板缩略图出现且模板面板加高', tplNames25.length >= 4 && tplNames25.includes('首页大标题区') && panelH25 > 350, tplNames25.join(',') + ` panel=${Math.round(panelW25)}x${Math.round(panelH25)}`);
+    check('S25.1 模板页：4 个模板缩略图出现（面板尺寸与元素页一致）', tplNames25.length >= 4 && panelH25 > 150, tplNames25.join(',') + ` panel=${Math.round(panelW25)}x${Math.round(panelH25)}`);
     // S29.0 无全屏遮罩（画布仍可见/可操作）
     const overlay29 = await doc(win, '.tpl-modal-overlay').count();
     const canvasVisible29 = await doc(win, '.canvas').isVisible();
@@ -823,10 +845,10 @@ async function main() {
     // S29.1 资源包大板块 + 三角形箭头收起/展开
     const grpCount = await doc(win, '.tpl-group-header').count();
     await doc(win, '.tpl-group-header').first().click();
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 520)); // 折叠动画 0.3s + 卸载兜底 0.34s，等稳再断言
     const cardsCollapsed = await doc(win, '.tpl-group .tpl-card').first().count();
     await doc(win, '.tpl-group-header').first().click(); // 展开回来
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 520));
     const cardsExpanded = await doc(win, '.tpl-group .tpl-card').count();
     check('S29.1 资源包板块可折叠（箭头收起/展开）', grpCount >= 1 && cardsCollapsed === 0 && cardsExpanded >= 4, JSON.stringify({ grpCount, cardsCollapsed, cardsExpanded }));
     // S29.2 搜索过滤：输入「页脚」→ 只剩 1 个卡片；清空恢复
@@ -845,22 +867,24 @@ async function main() {
     const thumb29 = await doc(win, '.tpl-thumb-frame').first().evaluate((el) => {
       const f = el;
       const doc2 = f.contentDocument;
-      const h = doc2?.querySelector('h1')?.textContent ?? '';
+      // v0.4.3：不再断言某个固定标题文案（模板集会变），只验证 iframe 里**真的渲染出了内容**
+      const bodyKids = doc2?.body ? doc2.body.children.length : 0;
       const m = (el.style.transform || '').match(/scale\(([\d.]+)\)/);
       const s = m ? parseFloat(m[1]) : 0;
       const wrapW = el.parentElement.getBoundingClientRect().width;
       return {
-        hasH1: h.startsWith('欢迎来到'),
+        hasContent: bodyKids > 0,
         scaleNum: s,
         noScroll: el.scrolling === 'no',
         fit: s > 0 && s <= 1 && el.offsetWidth * s <= wrapW + 2,
         wrapW: Math.round(wrapW)
       };
     });
-    check('S29.3 缩略图运行时渲染（内容真实 + 等比贴合列宽 + 无滚动）', thumb29.hasH1 && thumb29.noScroll && thumb29.fit, JSON.stringify(thumb29));
+    check('S29.3 缩略图运行时渲染（内容真实 + 等比贴合列宽 + 无滚动）', thumb29.hasContent && thumb29.noScroll && thumb29.fit, JSON.stringify(thumb29));
     await shot(win, '4F-模板库左栏');
-    // S25.2 点模板插入 → 画布出现整棵子树（section > h1 + button），新 id 不与旧元素冲突
-    await doc(win, '.tpl-card:has-text("首页大标题区")').click();
+    // S25.2 点模板插入 → 画布出现整棵子树（section > … h1 + button），新 id 不与旧元素冲突
+    //（模板名跟随后来的资源包版本改成「左右分屏 Hero」，不再用旧名「首页大标题区」）
+    await doc(win, '.tpl-card:has-text("左右分屏 Hero")').first().click();
     await new Promise((r) => setTimeout(r, 400));
     const hero25 = await win.evaluate(() => {
       const sec = document.querySelector('.canvas > section');
@@ -873,7 +897,15 @@ async function main() {
         secBg: getComputedStyle(sec).backgroundColor
       };
     });
-    check('S25.2 模板插入画布（h1+按钮+样式+id 不撞车）', hero25.ok && hero25.h1.startsWith('欢迎来到') && hero25.btn && hero25.idsUnique && hero25.secBg === 'rgb(16, 24, 40)', JSON.stringify(hero25));
+    // v0.4.3：不再断言固定的 h1 文案与固定底色（模板内容/配色会随资源包版本变），
+    // 改为验证"整棵子树真的进来了"：有 h1、有按钮、id 唯一、根节点带上了自己的样式
+    const heroStyled = await win.evaluate(() => {
+      const sec = document.querySelector('.canvas > section');
+      if (!sec) return false;
+      const s = getComputedStyle(sec);
+      return sec.getAttribute('style') !== null || s.backgroundColor !== 'rgba(0, 0, 0, 0)';
+    });
+    check('S25.2 模板插入画布（h1+按钮+样式+id 不撞车）', hero25.ok && hero25.h1.length > 0 && hero25.btn && hero25.idsUnique && heroStyled, JSON.stringify({ ...hero25, heroStyled }));
     await shot(win, '模板插入-landing-hero');
     // S25.3 撤销模板插入
     await win.keyboard.press('Control+z');
@@ -958,6 +990,7 @@ async function main() {
     await doc(win, '.tab-btn:has-text("属性")').click();
     await ensurePropSection(win);
     await new Promise((r) => setTimeout(r, 200));
+    await ensureIdentitySection(win);
     await doc(win, '.cls-chip-input').fill('dup');
     await doc(win, '.cls-chip-input').evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 200));
@@ -970,6 +1003,7 @@ async function main() {
     await doc(win, '.tab-btn:has-text("属性")').click();
     await ensurePropSection(win);
     await new Promise((r) => setTimeout(r, 200));
+    await ensureIdentitySection(win);
     await doc(win, '.cls-chip-input').fill('dup');
     await doc(win, '.cls-chip-input').evaluate((el) => el.blur());
     await new Promise((r) => setTimeout(r, 200));

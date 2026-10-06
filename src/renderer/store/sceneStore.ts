@@ -126,6 +126,17 @@ function defaultStyleFor(type: ElementType): ElementStyle {
       };
     case 'table':
       return { width: '100%', minHeight: '60px', backgroundColor: '#ffffff' };
+    case 'thead':
+    case 'tbody':
+    case 'tfoot':
+      return {};
+    case 'caption':
+      return {
+        paddingTop: '6px',
+        paddingBottom: '6px',
+        fontWeight: '600',
+        textAlign: 'center'
+      };
     case 'th':
     case 'td':
       return {
@@ -179,6 +190,9 @@ function defaultTextFor(type: ElementType): string | undefined {
     case 'label': return '标签';
     case 'span': return '行内文字';
     case 'li': return '列表项';
+    case 'th': return '表头';
+    case 'td': return '单元格';
+    case 'caption': return '表格标题';
     case 'img': return undefined;
     case 'hr': return undefined;
     case 'input': return undefined;
@@ -425,6 +439,13 @@ export interface SceneStore {
   renameElement: (id: string, name: string) => void; // 阶段1只用 type 当显示名，预留
   toggleHidden: (id: string) => void;
   toggleLocked: (id: string) => void;
+  /** v0.4.3 表格编辑：写 HTML 原生属性（colspan / rowspan / scope 等）；value 传 undefined 即删除该属性 */
+  setNodeAttr: (id: string, key: string, value: string | undefined) => void;
+  /**
+   * v0.4.3 表格编辑：整体替换某节点的子树（表格结构操作都走它 —— 一条 undo）。
+   * 新树的 id 由调用方负责（tableOps 里已保证沿用旧 id，避免选中态丢失）。
+   */
+  replaceSubtree: (id: string, next: SceneElement) => void;
 
   // 历史
   commit: () => void;
@@ -1253,6 +1274,36 @@ export const useScene = create<SceneStore>((set) => ({
 
   renameElement: (_id, _name) => {
     // 阶段1：暂未实现自定义命名，UI 仅展示 type
+  },
+
+  setNodeAttr: (id, key, value) => {
+    set((st) => {
+      const scene = deepClone(st.scene);
+      const node = findNode(scene.root, id);
+      if (!node) return st;
+      const attrs = { ...(node.attrs ?? {}) };
+      if (value === undefined || value === '') delete attrs[key];
+      else attrs[key] = value;
+      node.attrs = Object.keys(attrs).length > 0 ? attrs : undefined;
+      return { scene, history: pushPast(st.history, st.scene) };
+    });
+  },
+
+  replaceSubtree: (id, next) => {
+    set((st) => {
+      const scene = deepClone(st.scene);
+      if (id === scene.root.id) {
+        // 根节点：保留原 id，只换内容
+        scene.root = { ...next, id: scene.root.id };
+        return { scene, history: pushPast(st.history, st.scene) };
+      }
+      const parent = findParent(scene.root, id);
+      if (!parent) return st;
+      const idx = indexOfChild(parent, id);
+      if (idx < 0) return st;
+      parent.children[idx] = next;
+      return { scene, history: pushPast(st.history, st.scene) };
+    });
   },
 
   toggleHidden: (id) => {

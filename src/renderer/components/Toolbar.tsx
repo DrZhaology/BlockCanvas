@@ -35,7 +35,13 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   onZoomChange: (z: number) => void;
 }) {
   const scene = useScene((s) => s.scene);
-  const clipboard = useScene((s) => s.clipboard);
+  // ⚠ 剪贴板 / 历史的「是否可用」一律在渲染时用 useScene.getState() 现取：
+  //    opMap 是 useMemo(..., []) 缓存的（只建一次），任何把 state 直接闭包进
+  //    disabled 谓词的写法都会永远读到首次渲染的值 —— 这正是 v0.4.2
+  //    「粘贴按钮永远灰着」的根因。这里只做订阅，用来触发重渲染。
+  useScene((s) => s.clipboard);
+  useScene((s) => s.history.past.length);
+  useScene((s) => s.history.future.length);
   const [tips, setTips] = useState<string | null>(null);
   const tipsTimer = useRef(0);
   // 缩放：按住百分比拖拽 / 双击手输
@@ -148,6 +154,18 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   // —— 全部内建按钮（注册进 toolbarStore，停靠默认值见 dock 字段）——
   const OPS: ToolbarOp[] = [
     {
+      id: 'undo', cls: 'tb-btn-ghost', dock: 'main', label: () => '↶ 撤销',
+      title: '撤销 (Ctrl+Z) — 回退上一步操作',
+      onClick: () => useScene.getState().undo(),
+      disabled: () => useScene.getState().history.past.length === 0
+    },
+    {
+      id: 'redo', cls: 'tb-btn-ghost', dock: 'main', label: () => '↷ 重做',
+      title: '重做 (Ctrl+Y / Ctrl+Shift+Z) — 恢复被撤销的操作',
+      onClick: () => useScene.getState().redo(),
+      disabled: () => useScene.getState().history.future.length === 0
+    },
+    {
       id: 'copy', cls: 'tb-btn-ghost', dock: 'main', label: () => {
         const n = useScene.getState().scene.selectedIds.length;
         return n > 1 ? `⧉ 复制(${n})` : '⧉ 复制';
@@ -166,13 +184,10 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
       disabled: () => useScene.getState().scene.selectedIds.length === 0
     },
     {
-      id: 'paste', cls: 'tb-btn-ghost', dock: 'main', label: () => {
-        const n = useScene.getState().scene.selectedIds.length;
-        return n > 1 ? `⎘ 粘贴(${n})` : '⎘ 粘贴';
-      },
+      id: 'paste', cls: 'tb-btn-ghost', dock: 'main', label: () => '⎘ 粘贴',
       title: '粘贴 (Ctrl+V) — 插入到当前选中元素内部（无选中时插到画布末尾）',
       onClick: () => { const st = useScene.getState(); st.paste(st.scene.selectedId); },
-      disabled: () => clipboard === null
+      disabled: () => useScene.getState().clipboard === null
     },
     {
       id: 'duplicate', cls: 'tb-btn-ghost', dock: 'main', label: () => '📑 副本', title: '原地创建副本 (Ctrl+D)',
@@ -233,6 +248,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   // 注册全部按钮（每次挂载执行一次；重复注册会原地刷新，停靠/顺序记忆不受影响）
   useEffect(() => {
     const orderOf: Record<string, number> = {
+      'undo': 4, 'redo': 6,
       'copy': 10, 'cut': 12, 'paste': 14, 'duplicate': 16, 'delete': 18,
       'preview': 30, 'export-html': 32, 'projects-center': 34,
       'export-template': 36, 'clear-selection': 38, 'outline': 40
