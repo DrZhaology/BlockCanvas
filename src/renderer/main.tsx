@@ -18,6 +18,7 @@ import './styles/13-polish-v040.css';
 import './styles/14-v04x-append.css';
 import './styles/15-v042-ui.css'; // v0.4.2：细滚动条 / 工具栏左右滚动 / 二级工具组 / 模板板块展开
 import './styles/16-v042b-ui.css'; // 第二批：更新中心重写 / 工具栏预览 / 表格编辑页 / 布局溢出
+import './styles/17-v043-table.css'; // v0.4.3：体检徽标不再被裁切 / 表格体检开关 / 向导说明
 import './animations.css'; // 统一动画体系：token + 全部 keyframes（分片里只写引用）
 
 createRoot(document.getElementById('root')!).render(

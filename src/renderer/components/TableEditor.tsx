@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { useScene, findNode } from '@store/sceneStore';
 import type { ElementStyle, SceneElement } from '@lib/types';
 import {
-  readTable, normalizeTable, colCount, applyTableOp, findTableAncestor, type TableOp
+  readTable, normalizeTable, buildGrid, canMergeRange, applyTableOp, findTableAncestor,
+  type GridCell, type TableOp
 } from '@lib/tableOps';
 import { TABLE_STYLE_PRESETS, TABLE_STRUCTURE_TEMPLATES, applyTableStylePreset } from '@lib/tablePresets';
 import { HelpButton } from './HelpButton';
@@ -57,13 +58,14 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
   // 编辑器只读展示：先规整再读，保证与结构操作看到的是同一套区块
   const parts = useMemo(() => (table && table.type === 'table' ? readTable(normalizeTable(table)) : null), [table]);
 
-  /** 每行的单元格（过滤掉万一混进来的非单元格节点，渲染与索引都以此为准） */
-  const rowCells = useMemo(
-    () => (parts ? parts.rows.map((r) => r.children.filter((c) => c.type === 'th' || c.type === 'td')) : []),
-    [parts]
-  );
-  const cols = parts ? colCount(parts) : 0;
-  const rowCount = rowCells.length;
+  /**
+   * 整张表的二维网格：colspan 与 rowspan 都摊平，每格的 row/col/cs/rs 就是它真实的位置与跨度。
+   * ⚠ 渲染、选区、插入轨全部走这张网格，不能走"单元格序号" ——
+   *   一旦出现合并格，序号就和真实行列对不上（合并完渲染错位、插列插错位置都是这个原因）。
+   */
+  const grid = useMemo(() => buildGrid(parts ? parts.rows : []), [parts]);
+  const cols = grid.cols;
+  const rowCount = grid.rowCount;
 
   // ——— 选区派生 ———
   const rect = useMemo(() => {
@@ -74,20 +76,19 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
     };
   }, [sel]);
 
+  /** 与选区有交叠的全部单元格（按可视矩形判定） */
   const rectCells = useMemo(() => {
     if (!rect) return [];
-    const out: SceneElement[] = [];
-    for (let r = rect.r0; r <= rect.r1; r++) {
-      for (let c = rect.c0; c <= rect.c1; c++) {
-        const cell = rowCells[r]?.[c];
-        if (cell) out.push(cell);
-      }
-    }
-    return out;
-  }, [rect, rowCells]);
+    return grid.cells
+      .filter((g) => g.row <= rect.r1 && g.row + g.rs - 1 >= rect.r0 && g.col <= rect.c1 && g.col + g.cs - 1 >= rect.c0)
+      .map((g) => g.cell);
+  }, [rect, grid]);
 
-  /** 右侧「单元格」卡的数据源：单元格选中 → 左上角那一格；整行 → 行节点 */
-  const anchor: SceneElement | null = rect ? rowCells[rect.r0]?.[rect.c0] ?? null : null;
+  /** 选区左上角那一格（合并时保留内容的就是它）；整行 → 行节点 */
+  const anchorBox: GridCell | null = rect
+    ? grid.cells.find((g) => g.row === rect.r0 && g.col === rect.c0) ?? null
+    : null;
+  const anchor: SceneElement | null = anchorBox?.cell ?? null;
   const selNode: SceneElement | null = useMemo(() => {
     if (!sel) return null;
     if (sel.kind === 'row') return parts?.rows[sel.r] ?? null;
@@ -105,9 +106,13 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
     }
   }, [sel, cols, rowCount]);
 
-  // 首次进入：默认选中左上角第一格，右侧面板不至于是空的
+  // 首次进入：默认选中左上角那一格（按它真实跨度整格选中），右侧面板不至于是空的
   useEffect(() => {
-    if (!sel && rowCount > 0 && cols > 0) setSel({ kind: 'cell', r: 0, c: 0, r2: 0, c2: 0 });
+    if (sel || rowCount === 0 || cols === 0) return;
+    const first = grid.cells[0];
+    setSel(first
+      ? { kind: 'cell', r: first.row, c: first.col, r2: first.row + first.rs - 1, c2: first.col + first.cs - 1 }
+      : { kind: 'cell', r: 0, c: 0, r2: 0, c2: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rowCount, cols]);
 
@@ -201,23 +206,22 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
       return;
     }
     if (rowCount === 0) return; // 一列都没有 = 一行都没有，先加行
-    const base = Math.min(at, cols - 1);
-    const refRow = rowCells[0];
-    const refCell = refRow?.[base];
-    if (at >= cols && rowCells[0]?.length) {
-      runOp({ kind: 'insertCol', refCellId: rowCells[0][rowCells[0].length - 1].id, side: 'after', index: cols - 1, count });
-    } else {
-      runOp({ kind: 'insertCol', refCellId: refCell?.id ?? '', side: 'before', index: base, count });
-    }
+    // 按"可视列号"插入：合并过的一行里，序号和列号不是一回事
+    runOp({ kind: 'insertColAt', vcol: Math.min(at, cols), count });
   };
 
   // ——— 单元格框选（按住拖出矩形） ———
-  const draggingRef = useRef<{ r: number; c: number } | null>(null);
-  const extendTo = (r: number, c: number) => {
+  // 拖动会话记的是"锚点那一格的完整格子盒"（含它的 colspan/rowspan），
+  // 选区永远吸附到格子边界上：不然压着合并格的边拖，合并判定会因为"只切到半格"而整体放弃。
+  const draggingRef = useRef<{ r0: number; c0: number; r1: number; c1: number } | null>(null);
+  const extendTo = (g: GridCell) => {
     const a = draggingRef.current;
     if (!a) return;
-    if (a.r === r && a.c === c) return;
-    setSel({ kind: 'cell', r: a.r, c: a.c, r2: r, c2: c });
+    setSel({
+      kind: 'cell',
+      r: Math.min(a.r0, g.row), c: Math.min(a.c0, g.col),
+      r2: Math.max(a.r1, g.row + g.rs - 1), c2: Math.max(a.c1, g.col + g.cs - 1)
+    });
   };
   useEffect(() => {
     const onUp = () => { draggingRef.current = null; };
@@ -237,18 +241,14 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
       const st = useScene.getState();
       const cur = findNode(st.scene.root, tableId);
       if (!cur) return;
-      const p = readTable(normalizeTable(cur));
-      const cells = p.rows.map((r) => r.children.filter((c) => c.type === 'th' || c.type === 'td'));
+      const g = buildGrid(readTable(normalizeTable(cur)).rows);
       let ids: string[] = [];
-      if (sel?.kind === 'row') ids = cells[sel.r]?.map((c) => c.id) ?? [];
-      else if (sel?.kind === 'col') ids = cells.map((row) => row[sel.c]?.id).filter(Boolean) as string[];
+      if (sel?.kind === 'row') ids = g.cells.filter((c) => c.row === sel.r).map((c) => c.cell.id);
+      else if (sel?.kind === 'col') ids = g.cells.filter((c) => c.col <= sel.c && c.col + c.cs - 1 >= sel.c).map((c) => c.cell.id);
       else if (rect) {
-        for (let r = rect.r0; r <= rect.r1; r++) {
-          for (let c = rect.c0; c <= rect.c1; c++) {
-            const cell = cells[r]?.[c];
-            if (cell) ids.push(cell.id);
-          }
-        }
+        ids = g.cells
+          .filter((c) => c.row <= rect.r1 && c.row + c.rs - 1 >= rect.r0 && c.col <= rect.c1 && c.col + c.cs - 1 >= rect.c0)
+          .map((c) => c.cell.id);
       }
       if (ids.length === 0) return;
       e.preventDefault();
@@ -262,9 +262,21 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
   if (!table || table.type !== 'table' || !parts) return null;
 
   const cellStyle: ElementStyle = anchor?.style ?? {};
-  const merged = anchor ? (Number(anchor.attrs?.colspan) > 1 || Number(anchor.attrs?.rowspan) > 1) : false;
   const rectArea = rect ? (rect.r1 - rect.r0 + 1) * (rect.c1 - rect.c0 + 1) : 0;
-  const canMerge = rectArea > 1 && !merged;
+  /** 锚点这一格已经合并过（跨度 > 1） */
+  const merged = !!anchorBox && (anchorBox.cs > 1 || anchorBox.rs > 1);
+  /** 选区正好就是锚点自己那一格（没有任何可合并的东西） */
+  const sameAsAnchor = !!anchorBox && !!rect
+    && rect.r0 === anchorBox.row && rect.c0 === anchorBox.col
+    && rect.r1 === anchorBox.row + anchorBox.rs - 1 && rect.c1 === anchorBox.col + anchorBox.cs - 1;
+  /**
+   * 能不能合并：选区不止一格 + **矩形正好由完整格子拼满**（判定用 tableOps 里同一套 planMerge，
+   * 所以按钮亮着就一定合得上）。
+   * ⚠ 不能用"锚点自己已经合并过"来禁用：把两行各自横向合并、再纵向合并成一块是常见做法，
+   *   那时锚点必然是已合并的（旧守卫会把这种合并挡掉，表现为"点了没反应"）。
+   */
+  const canMerge = !!anchor && rectArea > 1 && !sameAsAnchor
+    && canMergeRange(grid, anchor.id, rect!.c1 - rect!.c0 + 1, rect!.r1 - rect!.r0 + 1);
 
   const applyPreset = (id: string) => {
     const preset = TABLE_STYLE_PRESETS.find((p) => p.id === id);
@@ -308,7 +320,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
             <div className="tbl-panel-title">表格结构</div>
             <HelpButton
               title="怎么改表格结构"
-              content={'【插入行 / 列】\n把鼠标移到行与行、列与列之间那条缝上，会浮出一条轨道和 ＋。\n· 点一下：插入 1 行 / 1 列\n· 按住 ＋ 沿"列往右拖 / 行往下拖"：一次插入多个，气泡上会实时显示要插几个\n· 拖过头了按 Esc 取消\n\n【选中与合并】\n· 在格子上按住鼠标拖 → 拖选出一片（矩形选区）\n· Ctrl / ⌘ + 点某一格 → 把这一格并进当前选区（选区始终是矩形，取并集）\n· Shift + 点 → 从起点拉到你点的那一格\n· 点行号 / 列号 → 选中整行 / 整列\n· 选中后，上面那条操作条会亮起来：合并 / 拆分 / 设为表头 / 删除行 / 删除列\n\n【删除】\n按 Del / Backspace = 清空选中格子的文字（只动内容，不动结构）。\n要删掉整行 / 整列，请用操作条上的「删行 / 删列」。\n\n【跨度标记】\n合并后的格子右下角会显示 ⇥（跨几列）与 ⇩（跨几行）。'}
+              content={'【插入行 / 列】\n把鼠标移到行与行、列与列之间那条缝上，会浮出一条轨道和 ＋。\n· 点一下：插入 1 行 / 1 列\n· 按住 ＋ 沿"列往右拖 / 行往下拖"：一次插入多个，气泡上会实时显示要插几个\n· 拖过头了按 Esc 取消\n· 插入点落在某个合并格内部时，会自动吸附到那个格子的左边（保证每一行都在同一列边界上插，不会错位）\n\n【选中与合并】\n· 在格子上按住鼠标拖 → 拖选出一片（矩形选区，自动吸附到格子边界）\n· Ctrl / ⌘ + 点某一格 → 把这一格并进当前选区（选区始终是矩形，取并集）\n· Shift + 点 → 从选区左上角拉到你点的那一格\n· 点行号 / 列号 → 选中整行 / 整列\n· 选中后，上面那条操作条会亮起来：合并 / 拆分 / 设为表头 / 删除行 / 删除列\n\n【合并的规则】\n· 只有"选区正好由完整格子拼满"才允许合并；压到已有合并格的边上时，\n  「合并」按钮会灰着并把鼠标停上去写明原因 —— 不会出现"点了没反应"\n· 合并后只有左上角那格的内容保留，其余格子整格消失；用「拆分」还原\n· 可以先把两行各自横向合并、再把它们纵向合并成一块（2×2 一次合上也行）\n\n【删除】\n按 Del / Backspace = 清空选中格子的文字（只动内容，不动结构）。\n要删掉整行 / 整列，请用操作条上的「删行 / 删列」。\n删列时如果那一列正处在某个合并格内部，那一格不会被硬拆（该列在那一行保留）。\n\n【跨度标记】\n合并后的格子右下角会显示 ⇥（跨几列）与 ⇩（跨几行）。'}
             />
           </div>
           <div className="tbl-stage-tip">
@@ -327,8 +339,13 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
               <button
                 className="tbl-bar-btn"
                 disabled={!canMerge}
-                title={merged ? '这个格子已经是合并后的了 —— 先拆分再重新合并' : '把框选的这一片合并成一格（只有左上角那格的内容会保留）'}
-                onClick={() => runOp({ kind: 'mergeRange', cellId: anchor!.id, width: rect!.c1 - rect!.c0 + 1, height: rect!.r1 - rect!.r0 + 1 })}
+                title={
+                  rectArea <= 1 ? '先拖选一片格子（≥2 格）再合并'
+                    : sameAsAnchor ? '这一片已经是一格了 —— 想还原用「拆分」'
+                      : !canMerge ? '选区压到了已有合并格的边上 —— 把选区对齐到格子边界（或先拆分那一格）'
+                        : '把框选的这一片合并成一格（只有左上角那格的内容会保留）'
+                }
+                onClick={() => anchor && runOp({ kind: 'mergeRange', cellId: anchor.id, width: rect!.c1 - rect!.c0 + 1, height: rect!.r1 - rect!.r0 + 1 })}
               >⇥⇩ 合并</button>
             )}
             <button
@@ -412,29 +429,35 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                   >{r + 1}</div>
                 ))}
 
-                {/* 单元格 */}
-                {rowCells.map((cells, r) => cells.map((cell, c) => {
-                  const cs = Math.max(1, Number(cell.attrs?.colspan) || 1);
-                  const rs = Math.max(1, Number(cell.attrs?.rowspan) || 1);
-                  const inRect = !!rect && r >= rect.r0 && r <= rect.r1 && c >= rect.c0 && c <= rect.c1;
+                {/* 单元格：位置/跨度直接用网格算出的真实 row/col/cs/rs 摆位
+                    （跨列跨行的格子在 CSS Grid 里就是 span，行与行之间自动对齐） */}
+                {grid.cells.map((g) => {
+                  const cell = g.cell;
+                  const { row: r, col: c, cs, rs } = g;
+                  const cEnd = c + cs - 1;
+                  const rEnd = r + rs - 1;
+                  const inRect = !!rect && r <= rect.r1 && rEnd >= rect.r0 && c <= rect.c1 && cEnd >= rect.c0;
                   const isAnchor = !!rect && r === rect.r0 && c === rect.c0;
-                  const inRow = sel?.kind === 'row' && sel.r === r;
+                  const inRow = sel?.kind === 'row' && sel.r >= r && sel.r <= rEnd;
+                  const inCol = sel?.kind === 'col' && sel.c >= c && sel.c <= cEnd;
                   return (
                     <div
                       key={cell.id}
                       data-cell={`${r}-${c}`}
+                      data-span={`${cs}x${rs}`}
                       className={
                         'tbl-gcell tbl-cell'
                         + (cell.type === 'th' ? ' is-th' : '')
                         + (inRect && sel?.kind === 'cell' ? ' picked' : '')
-                        + (inRow ? ' picked' : '')
+                        + (inRow || inCol ? ' picked' : '')
                         + (isAnchor && sel?.kind === 'cell' ? ' active' : '')
                       }
                       style={{ gridColumn: `${3 + 2 * c} / span ${2 * cs - 1}`, gridRow: `${3 + 2 * r} / span ${2 * rs - 1}` }}
-                      title={`第 ${r + 1} 行 · 第 ${colLetter(c)} 列（按住可拖选一片；Ctrl/⌘ 点 = 并进选区）`}
+                      title={`第 ${r + 1} 行 · 第 ${colLetter(c)} 列${cs > 1 ? `（跨 ${cs} 列）` : ''}${rs > 1 ? `（跨 ${rs} 行）` : ''}（按住可拖选一片；Ctrl/⌘ 点 = 并进选区）`}
                       onPointerDown={(e) => {
                         if (e.button !== 0) return;
                         e.preventDefault();
+                        const box = { r0: r, c0: c, r1: rEnd, c1: cEnd };
                         // Ctrl/⌘ + 点：把这一格并进现有选区。
                         // 选区本身始终是矩形（合并需要矩形），所以取"并集的外接矩形"，
                         // 锚点自动落到左上角（合并后保留内容的也是那一格）。
@@ -442,29 +465,29 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                           draggingRef.current = null;
                           setSel({
                             kind: 'cell',
-                            r: Math.min(rect.r0, r), c: Math.min(rect.c0, c),
-                            r2: Math.max(rect.r1, r), c2: Math.max(rect.c1, c)
+                            r: Math.min(rect.r0, box.r0), c: Math.min(rect.c0, box.c0),
+                            r2: Math.max(rect.r1, box.r1), c2: Math.max(rect.c1, box.c1)
                           });
                           return;
                         }
-                        // Shift + 点：从锚点拉到你点的那一格（等价于拖到这个位置）
+                        // Shift + 点：从选区左上角拉到你点的那一格（含它的整格跨度）
                         if (e.shiftKey && rect) {
                           draggingRef.current = null;
-                          setSel({ kind: 'cell', r: rect.r0, c: rect.c0, r2: r, c2: c });
+                          setSel({ kind: 'cell', r: rect.r0, c: rect.c0, r2: box.r1, c2: box.c1 });
                           return;
                         }
-                        draggingRef.current = { r, c };
-                        setSel({ kind: 'cell', r, c, r2: r, c2: c });
+                        draggingRef.current = box;
+                        setSel({ kind: 'cell', r: box.r0, c: box.c0, r2: box.r1, c2: box.c1 });
                       }}
-                      onPointerEnter={() => extendTo(r, c)}
-                      onPointerMove={() => extendTo(r, c)}
+                      onPointerEnter={() => extendTo(g)}
+                      onPointerMove={() => extendTo(g)}
                     >
                       <span className="tbl-cell-text">{(cell.text ?? '').trim() || ' '}</span>
                       {cs > 1 && <span className="tbl-cell-badge">⇥{cs}</span>}
                       {rs > 1 && <span className="tbl-cell-badge">⇩{rs}</span>}
                     </div>
                   );
-                }))}
+                })}
 
                 {/* 行轨（放在最前 / 每行之间 / 最后） */}
                 {Array.from({ length: rowCount + 1 }, (_, j) => (
@@ -843,6 +866,31 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* 导出前体检：表格默认不参与（td/th 一般不起类名、也不写 CSS，参与体检会报一堆"未命名元素"） */}
+          <div className="tbl-card">
+            <div className="tbl-card-head">
+              <div className="tbl-card-title">导出前体检</div>
+              <HelpButton
+                title="表格与「导出前体检」"
+                content={'「导出前体检」会统计未命名元素、重复 ID、同名样式不统一之类的问题。\n\n表格是一类特例：一格一个 <td>/<th>，正常做表格时既不给每个格子起类名，也不用 CSS 单独描述它们 ——\n参与体检只会刷出一大串"未命名元素"，把真正要处理的问题淹掉。\n\n所以**表格默认不参与体检**（这个开关默认关闭）。\n如果这张表你确实用类名 / 关系选择器管了样式，想把它的格子也纳入体检，把开关打开即可。\n\n开关只影响"体检清单"，不影响导出：表格该导出的标签、colspan/rowspan、scope 一个都不会少。'}
+              />
+            </div>
+            <label className="tbl-switch-row">
+              <input
+                type="checkbox"
+                checked={table.healthCheck === true}
+                onChange={(e) => useScene.getState().setHealthCheck(tableId, e.target.checked)}
+              />
+              <span className="tbl-switch-text">
+                <b>让这张表参与导出前体检</b>
+                <em>
+                  默认关闭 = 表格与它的所有单元格不出现在体检清单里
+                  （不再报「未命名元素 / 类名 ID 问题」）。打开后这张表重新纳入体检。
+                </em>
+              </span>
+            </label>
           </div>
         </div>
       </div>

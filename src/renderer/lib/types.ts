@@ -210,6 +210,13 @@ export interface SceneElement {
   visibleProps?: string[];
   hidden?: boolean;
   locked?: boolean;
+  /**
+   * v0.4.3 表格：这张 <table> 是否参与「导出前体检」（缺省 = 不参与）。
+   * 表格一格一个 td/th，正常做表格既不给格子起类名也不写 CSS，参与体检只会刷出一堆
+   * "未命名元素"把真问题淹掉 —— 所以默认跳过；表格编辑器右侧面板的开关可把它打开。
+   * 纯编辑器侧标记，**不进导出**（导出器只认 type/style/attrs/children 与几个白名单属性）。
+   */
+  healthCheck?: boolean;
   // 子元素样式（关系选择器）：作用于该元素内部、匹配 sel 的后代/子代元素。
   // sel 支持 标签（p / h2 / a）、.类名、组合与空格（后代）、>（子代），如 ".card > p"。
   // css 存声明文本（编辑保真）；渲染/导出统一生成 `.父类名 sel { ... }` 规则。

@@ -647,13 +647,20 @@ function useKeyboardShortcuts(
         return;
       }
 
+      // ——— 撤销 / 重做：编辑器视图 **和表格编辑页** 都要能用 ———
+      // 表格编辑页改的是同一棵场景树、走的是同一条撤销栈（applyTableOp → replaceSubtree），
+      // 但以前这里一刀切"非 editor 视图全部 return"，导致表格编辑器里 Ctrl+Z 完全没反应。
+      const view = viewRef?.current;
+      const canvasView = !viewRef || view === 'editor';
+      const undoable = canvasView || view === 'table';
+      if (undoable && mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); triggerUndo(); return; }
+      if (undoable && mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); triggerRedo(); return; }
+
       // ——— 以下都是"对画布动手"的快捷键：只在编辑器视图里生效 ———
       // 表格编辑器 / 设置 / 项目中心 / 更新页各有自己的键位；在这里放行，Del、Ctrl+A
       // 之类会打到画布上（实测：在表格编辑器里按 Del 会把之前选中的表格删掉，看起来像"随机删表"）。
-      if (viewRef && viewRef.current !== 'editor') return;
+      if (!canvasView) return;
 
-      if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); triggerUndo(); return; }
-      if (mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); triggerRedo(); return; }
       if (mod && e.key.toLowerCase() === 'c') { e.preventDefault(); triggerCopy(); return; }
       if (mod && e.key.toLowerCase() === 'x') { e.preventDefault(); triggerCut(); return; }
       if (mod && e.key.toLowerCase() === 'v') { e.preventDefault(); triggerPaste(); return; }

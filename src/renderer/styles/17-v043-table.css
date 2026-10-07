@@ -1,0 +1,85 @@
+/* ==========================================================================
+   BlockCanvas · 17-v043-table.css —— v0.4.3 表格修复轮
+   --------------------------------------------------------------------------
+   ① 「导出前体检」按钮的黄色数字徽标不再被工具栏滚动容器切掉
+   ② 表格编辑器右侧「导出前体检」开关样式
+   ③ 体检向导头部"已跳过 N 张表格"的说明样式
+
+   分片顺序 = 级联顺序，本片最后 import，用来覆盖前面分片的旧规则。
+   ========================================================================== */
+
+/* ==========================================================================
+   ① 徽标被裁切（真 BUG）
+   --------------------------------------------------------------------------
+   .tb-health-badge 挂在按钮右上角外（top:-6px / right:-6px），而右侧工具区
+   `.tb-right` 为了横向滚动写了 overflow-y: hidden —— 隐藏轴会把挂出去的那 5~6px
+   直接切掉，看起来就是"黄色提示被遮住一部分"。
+
+   ⚠ 别想着用 overflow-y: clip + overflow-clip-margin 绕过去：按 CSS Overflow 规范，
+     当另一轴是可滚动值（auto / scroll / hidden）时，clip 会被**计算成 hidden**，
+     overflow-clip-margin 也跟着失效（实测 computed overflow-y 仍是 hidden）。
+     也别想 overflow-y: visible：同样会被算成 auto。
+
+   可行做法：让容器比按钮行本身高 8px（上下各 8px 内边距，再用等量负外边距把
+   布局尺寸还原成 28px）—— 工具栏高度与按钮位置完全不变，但裁切边界上下各外扩 8px，
+   挂出按钮外 6px 的徽标就完整落在容器内了。
+   容器原本的 border-left 分隔线会跟着长到 44px，所以改成一条 1px×28px 的渐变背景线：
+   视觉与原来一致（背景不随内容滚动，分隔线也不会跟着内容跑）。
+   ========================================================================== */
+.toolbar .tb-right {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  margin-top: -8px;
+  margin-bottom: -8px;
+  border-left: none;
+  background-image: linear-gradient(var(--border), var(--border));
+  background-size: 1px 28px;
+  background-position: 0 50%;
+  background-repeat: no-repeat;
+}
+
+/* ==========================================================================
+   ② 表格编辑器右侧：导出前体检开关
+   ========================================================================== */
+.tbl-switch-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0 2px;
+  cursor: pointer;
+}
+.tbl-switch-row input[type='checkbox'] {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 1px 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.tbl-switch-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.tbl-switch-text b {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.tbl-switch-text em {
+  font-style: normal;
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+.tbl-switch-row:hover .tbl-switch-text b { color: var(--accent); }
+
+/* ==========================================================================
+   ③ 体检向导头部：跳过表格的说明（浅色小字，跟在统计后面）
+   ========================================================================== */
+.hc-sub-note {
+  color: var(--text-muted);
+  opacity: 0.85;
+  cursor: help;
+}

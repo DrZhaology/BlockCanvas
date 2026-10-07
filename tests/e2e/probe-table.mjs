@@ -36,6 +36,27 @@ const READ_TABLE = `(() => {
   };
 })()`;
 
+/** 读当前画布里"最后一张"表（新插的表在树末尾）：合并相关断言都看它 */
+const READ_LAST_TABLE = `(() => {
+  let t = null;
+  const w = (n) => { if (n.type === 'table') t = n; for (const c of n.children) w(c); };
+  w(window.__sceneStore.getState().scene.root);
+  if (!t) return null;
+  const secs = t.children.filter((c) => c.type === 'thead' || c.type === 'tbody' || c.type === 'tfoot');
+  const rows = [];
+  for (const s of secs) for (const r of s.children) rows.push({ sec: s.type, cells: r.children.map((c) => ({ type: c.type, cs: c.attrs && c.attrs.colspan, rs: c.attrs && c.attrs.rowspan, text: c.text ?? '' })) });
+  // 可视列数：把 colspan 摊开（合并后"单元格个数"不等于"列数"）
+  const vis = (r) => r.cells.reduce((n, c) => n + (Number(c.cs) || 1), 0);
+  return {
+    sections: t.children.map((c) => c.type),
+    rows,
+    rowCount: rows.length,
+    visCols: rows.map(vis),
+    healthCheck: t.healthCheck === true,
+    cls: t.attrs && t.attrs.className
+  };
+})()`;
+
 async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-table-probe');
   rmSync(DATA_DIR, { recursive: true, force: true });
@@ -285,6 +306,233 @@ async function main() {
     ok('画布 Ctrl+点 能多选', selOne === 1 && multi === 2, `${selOne} → ${multi}`);
   } else {
     ok('画布 Ctrl+点 能多选', false, '元素不足 2 个');
+  }
+
+  // ============ 16. 合并逻辑重写（v0.4.3）：干净表上跑关键用例 ============
+  // 新插一张干净表 → 3 行 × 3 列。
+  // ⚠ 先清空选中：否则新表会插进"当前选中的那个元素"里面（可能是别的表的单元格），
+  //   嵌套在"不参与体检"的表里 → 它自己也会被一起跳过，后面的体检断言就没意义了。
+  await win.evaluate(() => window.__sceneStore.getState().selectElement(null));
+  await sleep(250);
+  await win.locator('.element-btn', { hasText: '表格' }).first().click();
+  await sleep(500);
+  await win.locator('.tab-btn', { hasText: '属性' }).first().click();
+  await sleep(400);
+  await win.locator('.tbl-entry button').first().click();
+  await win.waitForSelector('.table-page', { timeout: 8000 });
+  await sleep(400);
+  await win.locator('.tbl-empty-state .tbl-btn', { hasText: '加 3 行' }).first().click();
+  await sleep(450);
+  await win.locator('.tbl-rail-col').last().click();
+  await sleep(400);
+  await win.locator('.tbl-rail-col').last().click();
+  await sleep(400);
+
+  const readLast = () => win.evaluate(READ_LAST_TABLE);
+  const dragSelect = async (r0, c0, r1, c1) => {
+    const a = await win.locator(`[data-cell="${r0}-${c0}"]`).boundingBox();
+    const b = await win.locator(`[data-cell="${r1}-${c1}"]`).boundingBox();
+    // ⚠ 落点避开"插入轨"：合并格的几何中心正好压在列轨上（列轨 z-index 更高、会吃掉指针事件），
+    //   所以统一取格子左侧靠内的位置，保证指针真的落在格子上。
+    const ax = a.x + Math.min(6, a.width / 3);
+    const bx = b.x + Math.min(6, b.width / 3);
+    await win.mouse.move(ax, a.y + a.height / 2);
+    await win.mouse.down();
+    await win.mouse.move(bx, b.y + b.height / 2, { steps: 10 });
+    await win.mouse.up();
+    await sleep(350);
+  };
+  const clickBar = async (txt) => {
+    await win.locator('.tbl-bar-btn', { hasText: txt }).first().click();
+    await sleep(450);
+  };
+
+  let f = await readLast();
+  ok('干净表就绪：3 行 × 3 列', f.rowCount === 3 && f.visCols.join(',') === '3,3,3', JSON.stringify(f.visCols));
+
+  // 16.1 两行各自横向合并
+  await dragSelect(0, 0, 0, 1);
+  await clickBar('合并');
+  await dragSelect(1, 0, 1, 1);
+  await clickBar('合并');
+  f = await readLast();
+  ok('两行各自横向合并 → 都是 colspan=2', f.rows[0].cells[0].cs === '2' && f.rows[1].cells[0].cs === '2',
+    JSON.stringify([f.rows[0].cells[0], f.rows[1].cells[0]]));
+
+  // 16.2 再把它们纵向合并成 2×2（旧实现：这种"先横后纵"直接放弃，点了没反应）
+  // 拖到 (1,0) 就够：那一格自己已经跨了 0~1 列，选区会按格子盒吸附成 2×2
+  await dragSelect(0, 0, 1, 0);
+  await clickBar('合并');
+  f = await readLast();
+  const anchorCell = f.rows[0].cells[0];
+  ok('先横后纵 → 合成一块 2×2（colspan=2 + rowspan=2）', anchorCell.cs === '2' && anchorCell.rs === '2', JSON.stringify(anchorCell));
+  ok('被吃掉的第 2 行只剩第 3 列那格', f.rows[1].cells.length === 1 && f.visCols[1] === 1, JSON.stringify(f.rows[1].cells));
+
+  // 16.3 拆分复原：每行回到 3 列
+  await clickBar('拆分');
+  f = await readLast();
+  ok('拆分复原：3 行 × 3 列、无跨度残留',
+    f.visCols.join(',') === '3,3,3' && f.rows.every((r) => r.cells.every((c) => !c.cs && !c.rs)), JSON.stringify(f.visCols));
+
+  // 16.4 合并格内部插列 → 吸附到该格左侧，各行不错位
+  await dragSelect(0, 0, 0, 1);
+  await clickBar('合并');
+  await win.locator('.tbl-rail-col').nth(1).click(); // 第 2 条缝正落在合并格内部
+  await sleep(450);
+  f = await readLast();
+  ok('合并格内部插列：3 列 → 4 列且每行都是 4 列', f.visCols.join(',') === '4,4,4', JSON.stringify(f.visCols));
+  ok('合并格被整体推到第 2 列起（吸附到左侧）', f.rows[0].cells[1]?.cs === '2', JSON.stringify(f.rows[0].cells));
+
+  // ============ 17. 表格编辑器里 Ctrl+Z 能撤销结构操作 ============
+  // 16.4 插列后合并格被推到第 2 列起；点它要偏左一点，别落在格子中心的列轨上
+  await win.locator('[data-cell="0-1"]').click({ position: { x: 6, y: 8 } });
+  await sleep(250);
+  await clickBar('拆分');
+  const afterSplit = await readLast();
+  await win.locator('[data-cell="0-0"]').click({ position: { x: 6, y: 8 } });
+  await sleep(200);
+  await win.keyboard.press('Control+z');
+  await sleep(500);
+  const afterUndo = await readLast();
+  ok('Ctrl+Z 撤销表格结构操作（拆分被撤回）',
+    afterSplit.rows[0].cells.every((c) => !c.cs) && afterUndo.rows[0].cells.some((c) => c.cs === '2'),
+    `拆分后=${afterSplit.rows[0].cells.length}格 / 撤销后=${JSON.stringify(afterUndo.rows[0].cells.map((c) => c.cs ?? '1'))}`);
+
+  // ============ 18. 表格默认不参与「导出前体检」 ============
+  const swDefault = await win.locator('.tbl-switch-row input[type="checkbox"]').isChecked();
+  ok('体检开关默认关闭（表格默认不参与体检）', swDefault === false, String(swDefault));
+  ok('数据层默认也没有 healthCheck 标记', (await readLast()).healthCheck === false);
+
+  /** 直接读体检结果（测试钩子 window.__healthCheck），不刮向导 DOM */
+  const healthIssues = () => win.evaluate(() =>
+    window.__healthCheck(window.__sceneStore.getState().scene.root).map((i) => ({ id: i.id, sev: i.severity, title: i.title })));
+  /** 「N 个元素没有类名 / ID」里的 N（没有这条 = 0） */
+  const unnamedOf = (list) => {
+    const line = (list.find((i) => i.id === 'unnamed') || {}).title || '';
+    const m = /(\d+)/.exec(line);
+    return m ? Number(m[1]) : 0;
+  };
+  /** 向导确实能打开（顺带确认没报错） */
+  const wizardOpens = async () => {
+    await win.locator('.tb-health-btn').click();
+    await win.waitForSelector('.hc-modal', { timeout: 8000 });
+    await sleep(300);
+    const clean = (await win.locator('.hc-clean').count()) > 0;
+    const n = await win.locator('.hc-list-item').count();
+    await win.locator('.hc-modal .cp-close').click();
+    await sleep(300);
+    return { clean, n };
+  };
+  const openTableEditor = async () => {
+    await win.locator('.tab-btn', { hasText: '属性' }).first().click();
+    await sleep(350);
+    await win.locator('.tbl-entry button').first().click();
+    await win.waitForSelector('.table-page', { timeout: 8000 });
+    await sleep(400);
+  };
+  const backToEditor = async () => {
+    await win.locator('.fluent-back-btn').first().click();
+    await sleep(600);
+  };
+
+  await backToEditor();
+  const listOff = await healthIssues();
+  const offCount = unnamedOf(listOff);
+  const wizOff = await wizardOpens();
+  console.log('  · 表格不参与时：unnamed=' + offCount + ' 清单=' + JSON.stringify(listOff.map((i) => i.id)) + ' 向导=' + JSON.stringify(wizOff));
+
+  await openTableEditor();
+  await win.locator('.tbl-switch-row input[type="checkbox"]').check();
+  await sleep(500);
+  const onFlag = (await readLast()).healthCheck;
+  await backToEditor();
+  const listOn = await healthIssues();
+  const onCount = unnamedOf(listOn);
+  const wizOn = await wizardOpens();
+  console.log('  · 表格参与时：healthCheck=' + onFlag + ' unnamed=' + onCount + ' 清单=' + JSON.stringify(listOn.map((i) => i.id)) + ' 向导=' + JSON.stringify(wizOn));
+  ok('打开开关 → 表格纳入体检（未命名元素数量变多）', onFlag === true && onCount > offCount, `${offCount} → ${onCount}`);
+  ok('向导里也能看到这条问题（不是只在数据层）', wizOn.n > wizOff.n || wizOn.n > 0, JSON.stringify([wizOff, wizOn]));
+
+  await openTableEditor();
+  await win.locator('.tbl-switch-row input[type="checkbox"]').uncheck();
+  await sleep(400);
+  const offFlag2 = (await readLast()).healthCheck;
+  await backToEditor();
+  const offCount2 = unnamedOf(await healthIssues());
+  ok('关回去 → 表格重新被跳过（数量回到原值）', offFlag2 === false && offCount2 === offCount, `${onCount} → ${offCount2}（原始 ${offCount}）`);
+
+  // ============ 19. 体检徽标不再被工具栏容器裁掉 ============
+  // 徽标只统计"非 info"问题，所以先放一个未命名元素（标题 → warn 级「未命名元素」）保证它出现
+  await win.evaluate(() => window.__sceneStore.getState().selectElement(null));
+  await sleep(200);
+  await win.locator('.element-btn', { hasText: '标题' }).first().click();
+  await sleep(500);
+  const badgeIssues = await healthIssues();
+  console.log('  · 徽标前体检清单：' + JSON.stringify(badgeIssues.map((i) => i.id + ':' + i.sev)));
+  await sleep(500);
+  const badgeHit = await win.evaluate(() => {
+    const b = document.querySelector('.tb-health-badge');
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    const at = (x, y) => { const el = document.elementFromPoint(x, y); return el === b; };
+    const who = (x, y) => {
+      const el = document.elementFromPoint(x, y);
+      if (!el) return 'null';
+      return el.tagName.toLowerCase() + '.' + String(el.className || '').split(' ').slice(0, 2).join('.');
+    };    const parent = b.closest('.tb-right');
+    const btn = b.closest('.tb-health-btn');
+    const pcs = parent ? getComputedStyle(parent) : null;
+    return {
+      box: { x: +r.x.toFixed(1), y: +r.y.toFixed(1), w: +r.width.toFixed(1), h: +r.height.toFixed(1) },
+      hitTL: at(r.left + 1, r.top + 1),
+      hitTR: at(r.right - 1, r.top + 1),
+      hitBL: at(r.left + 1, r.bottom - 1),
+      hitBR: at(r.right - 1, r.bottom - 1),
+      // 徽标是胶囊形（border-radius:999px），外接矩形四角本来就在形状外，
+      // 所以取"内部若干点"做命中判定，再用裁切矩形做"没被切掉"的几何判定。
+      hitCenter: at(r.left + r.width / 2, r.top + r.height / 2),
+      hitTop: at(r.left + r.width / 2, r.top + 1),
+      hitBottom: at(r.left + r.width / 2, r.bottom - 1),
+      insideClip: (() => {
+        if (!parent) return false;
+        const cs = getComputedStyle(parent);
+        const pr = parent.getBoundingClientRect();
+        const top = pr.top + parseFloat(cs.borderTopWidth || '0');
+        const left = pr.left + parseFloat(cs.borderLeftWidth || '0');
+        const right = pr.right - parseFloat(cs.borderRightWidth || '0');
+        const bottom = pr.bottom - parseFloat(cs.borderBottomWidth || '0');
+        return r.top >= top - 0.5 && r.left >= left - 0.5 && r.right <= right + 0.5 && r.bottom <= bottom + 0.5;
+      })(),
+      clipRect: (() => {
+        if (!parent) return null;
+        const cs = getComputedStyle(parent);
+        const pr = parent.getBoundingClientRect();
+        return { top: +pr.top.toFixed(1), left: +pr.left.toFixed(1), bottom: +pr.bottom.toFixed(1), right: +pr.right.toFixed(1), oy: cs.overflowY, ox: cs.overflowX };
+      })(),
+      whoTL: who(r.left + 1, r.top + 1),
+      whoCenter: who(r.left + r.width / 2, r.top + r.height / 2),
+      pe: getComputedStyle(b).pointerEvents,
+      zIndex: getComputedStyle(b).zIndex,
+      overflowY: pcs ? pcs.overflowY : null,
+      containerTop: parent ? +parent.getBoundingClientRect().top.toFixed(1) : null,
+      btnTop: btn ? +btn.getBoundingClientRect().top.toFixed(1) : null
+    };
+  });
+  ok('体检徽标整块落在容器裁切区内（不再被 overflow 切掉上沿）',
+    !!badgeHit && badgeHit.insideClip, JSON.stringify(badgeHit));
+  ok('体检徽标内部各点都点得中（可见可交互）',
+    !!badgeHit && badgeHit.hitCenter && badgeHit.hitTop && badgeHit.hitBottom, JSON.stringify(badgeHit));
+  ok('徽标确实挂在按钮上沿之外（说明这条断言有效）',
+    !!badgeHit && badgeHit.btnTop !== null && badgeHit.box.y < badgeHit.btnTop,
+    JSON.stringify(badgeHit));
+
+  // 拍一张徽标特写，留给人眼/多模态复核（几何断言 + 视觉核对，双重保险）
+  const btnBox = await win.locator('.tb-health-btn').first().boundingBox();
+  if (btnBox) {
+    await win.screenshot({
+      path: resolve(ROOT, 'tests/e2e/shots-v042/health-badge.png'),
+      clip: { x: btnBox.x - 16, y: btnBox.y - 16, width: btnBox.width + 44, height: btnBox.height + 32 }
+    });
   }
 
   // ============ 关键部位截图（只留 2 张，供人眼复核） ============

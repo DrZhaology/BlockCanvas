@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useScene } from '@store/sceneStore';
 import {
-  runHealthCheck, countBySeverity, hasBlocking,
+  runHealthCheck, countBySeverity, hasBlocking, countSkippedTables,
   type HealthIssue, type Severity
 } from '@lib/healthCheck';
 
@@ -40,6 +40,8 @@ export function HealthWizard(props: Props) {
   const [closing, setClosing] = useState(false);
 
   const issues = useMemo(() => runHealthCheck(root), [root, nonce]);
+  /** 被跳过体检的表格张数（默认就不参与；见 lib/healthCheck 的说明） */
+  const skippedTables = useMemo(() => countSkippedTables(root), [root, nonce]);
 
   useEffect(() => {
     if (open) { setMounted(true); setClosing(false); setStep(0); setDone(new Set()); setNonce((n) => n + 1); return; }
@@ -117,6 +119,14 @@ export function HealthWizard(props: Props) {
                 {issues.length === 0
                   ? '这一页很干净，可以直接导出'
                   : `共 ${issues.length} 项 · 严重 ${counts.critical} · 提醒 ${counts.warn} · 提示 ${counts.info}`}
+                {skippedTables > 0 && (
+                  <span
+                    className="hc-sub-note"
+                    title={'表格默认不参与体检：一格一个 td/th，正常做表格既不给格子起类名也不写 CSS，参与只会刷出一堆"未命名元素"。\n想把某张表纳入体检：打开表格编辑器 → 右侧「导出前体检」→ 打开开关。'}
+                  >
+                    （已跳过 {skippedTables} 张表格）
+                  </span>
+                )}
               </div>
             </div>
           </div>

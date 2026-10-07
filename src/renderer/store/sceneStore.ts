@@ -439,6 +439,11 @@ export interface SceneStore {
   renameElement: (id: string, name: string) => void; // 阶段1只用 type 当显示名，预留
   toggleHidden: (id: string) => void;
   toggleLocked: (id: string) => void;
+  /**
+   * v0.4.3 表格：设置这张 <table> 是否参与「导出前体检」（缺省 = 不参与）。
+   * 纯编辑器侧标记，不进导出；开关在表格编辑器右侧面板。
+   */
+  setHealthCheck: (id: string, on: boolean) => void;
   /** v0.4.3 表格编辑：写 HTML 原生属性（colspan / rowspan / scope 等）；value 传 undefined 即删除该属性 */
   setNodeAttr: (id: string, key: string, value: string | undefined) => void;
   /**
@@ -1322,6 +1327,18 @@ export const useScene = create<SceneStore>((set) => ({
       const node = findNode(scene.root, id);
       if (!node) return st;
       node.locked = !node.locked;
+      return { scene, history: pushPast(st.history, st.scene) };
+    });
+  },
+
+  // v0.4.3 表格：这张表是否参与「导出前体检」（一条 undo；缺省 = 不参与）
+  setHealthCheck: (id, on) => {
+    set((st) => {
+      const scene = deepClone(st.scene);
+      const node = findNode(scene.root, id);
+      if (!node) return st;
+      if (on) node.healthCheck = true;
+      else delete node.healthCheck;
       return { scene, history: pushPast(st.history, st.scene) };
     });
   },

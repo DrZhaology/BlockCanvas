@@ -38,12 +38,7 @@ function makeRow(header: boolean, cols: number): SceneElement {
   const tr = createElement('tr');
   tr.style = {};
   tr.text = undefined;
-  tr.children = Array.from({ length: Math.max(1, cols) }, () => {
-    const cell = createElement(header ? 'th' : 'td');
-    cell.style = {};
-    cell.text = header ? '表头' : '单元格';
-    return cell;
-  });
+  tr.children = Array.from({ length: Math.max(1, cols) }, () => makeCell(header));
   return tr;
 }
 
@@ -96,11 +91,211 @@ export function readTable(table: SceneElement): TableParts {
   return { caption, thead, tbody, tfoot, rows };
 }
 
-/** 最大列数（按各行的单元格数取最大；colspan 不展开，够用且直观） */
+/** 一个单元格在网格里的真实位置与跨度 */
+export interface GridCell {
+  cell: SceneElement;
+  /** 所属行节点 */
+  rowNode: SceneElement;
+  /** 起始物理行（0 起） */
+  row: number;
+  /** 起始可视列（0 起，colspan 已摊平） */
+  col: number;
+  /** 跨几列（colspan） */
+  cs: number;
+  /** 跨几行（rowspan） */
+  rs: number;
+}
+
+export interface TableGrid {
+  /** 全部数据行（thead → tbody → tfoot） */
+  rows: SceneElement[];
+  cells: GridCell[];
+  byId: Map<string, GridCell>;
+  /** 占用表：occ[r][c] = 占着这一格的 cellId（被上方 rowspan 盖住的格子也在内） */
+  occ: (string | null)[][];
+  /** 可视列数（含被 colspan / rowspan 占用的列） */
+  cols: number;
+  rowCount: number;
+}
+
+/**
+ * 把表格摊成一张二维网格：**colspan 与 rowspan 都摊平**。
+ *
+ * ⚠ 一切结构操作都必须走这张网格，不能按"第几个单元格"算：
+ *   只要出现一个合并格，"单元格序号"就和它真实所在的行列对不上。
+ *   历史 BUG 全是这个原因 —— 合并完渲染错位、插入列插错位置、
+ *   先把两行各自横向合并再想纵向合并时直接放弃（"合并完全不对"）。
+ *   被上方 rowspan 盖住的列是空洞，本行不占位；摊平后每格的 row/col
+ *   就是它真实落在的行列，CSS Grid 与合并矩形都直接用它。
+ */
+export function buildGrid(rows: SceneElement[]): TableGrid {
+  const occ: (string | null)[][] = [];
+  const cells: GridCell[] = [];
+  const byId = new Map<string, GridCell>();
+  let cols = 0;
+
+  const put = (r: number, c: number, id: string) => {
+    while (occ.length <= r) occ.push([]);
+    const line = occ[r];
+    while (line.length <= c) line.push(null);
+    line[c] = id;
+    if (c + 1 > cols) cols = c + 1;
+  };
+
+  rows.forEach((rowNode, r) => {
+    let c = 0;
+    for (const cell of rowNode.children) {
+      if (!isCell(cell)) continue;
+      while (occ[r]?.[c]) c += 1; // 跳过被上方 rowspan 占掉的列
+      const cs = intAttr(cell.attrs?.colspan);
+      const rs = intAttr(cell.attrs?.rowspan);
+      for (let dr = 0; dr < rs; dr += 1) for (let dc = 0; dc < cs; dc += 1) put(r + dr, c + dc, cell.id);
+      const g: GridCell = { cell, rowNode, row: r, col: c, cs, rs };
+      cells.push(g);
+      byId.set(cell.id, g);
+      c += cs;
+    }
+  });
+
+  return { rows, cells, byId, occ, cols: Math.max(1, cols), rowCount: rows.length };
+}
+
+/** 可视列数（把 colspan / rowspan 都摊开后的最大列数） */
 export function colCount(parts: TableParts): number {
-  let n = 1;
-  for (const r of parts.rows) n = Math.max(n, r.children.filter(isCell).length);
-  return n;
+  return buildGrid(parts.rows).cols;
+}
+
+/** 在某一行的 children 里，找到"第 vcol 列之前"该插入的下标 */
+function insertIndexOf(rowNode: SceneElement, vcol: number): number {
+  let c = 0;
+  for (let i = 0; i < rowNode.children.length; i += 1) {
+    const cell = rowNode.children[i];
+    if (!isCell(cell)) continue;
+    if (c >= vcol) return i;
+    c += intAttr(cell.attrs?.colspan);
+  }
+  return rowNode.children.length;
+}
+
+/**
+ * 把"落在合并格内部"的列号吸附到所有行都成立的列边界上（取包含它的那一格的起始列）。
+ * 不吸附的话，同一列在不同行会插到不同位置，整张表当场错位。
+ */
+export function snapCol(grid: TableGrid, vcol: number): number {
+  let v = Math.max(0, Math.min(vcol, grid.cols));
+  for (let guard = 0; guard < 64; guard += 1) {
+    const hit = grid.cells.find((g) => g.col < v && v < g.col + g.cs);
+    if (!hit) return v;
+    v = hit.col;
+  }
+  return v;
+}
+
+/**
+ * 新插入的行该建"几列"：只数**上方 rowspan 盖过来**的列，本行自己的格子不算（新行还没插进去）。
+ * ⚠ 不能拿"插入位置上那一行的占用表"来数：在最上方插行时那一行被自己的格子占满，
+ *   会算出 0 个空位 → 新行只建 1 格、整行少列（探针抓到的真 BUG）。
+ */
+function freeWidthAt(grid: TableGrid, rowIndex: number): number {
+  let free = 0;
+  for (let c = 0; c < grid.cols; c += 1) {
+    const covered = grid.cells.some(
+      (g) => g.col <= c && g.col + g.cs - 1 >= c && g.row < rowIndex && g.row + g.rs - 1 >= rowIndex
+    );
+    if (!covered) free += 1;
+  }
+  return Math.max(1, free);
+}
+
+/** 新单元格：表头行插 th，数据行插 td */
+function makeCell(isHead: boolean, text?: string): SceneElement {
+  const cell = createElement(isHead ? 'th' : 'td');
+  cell.style = {};
+  cell.text = text ?? (isHead ? '表头' : '单元格');
+  return cell;
+}
+
+/**
+ * 合并计划：矩形 [row..row+h-1] × [col..col+w-1] 必须**正好**由若干个完整格子拼满。
+ * 只要有格子被切到一半（选区压到已有合并格的边上）、越界、或只剩一格 → 返回 null，
+ * 调用方整体放弃：宁可什么都不做，也不能产出一张列错位的表。
+ */
+function planMerge(grid: TableGrid, anchor: GridCell, w: number, h: number): { anchor: GridCell; victims: GridCell[] } | null {
+  if (w === 1 && h === 1) return null;
+  const r1 = anchor.row + h - 1;
+  const c1 = anchor.col + w - 1;
+  if (r1 >= grid.rowCount || c1 >= grid.cols) return null;
+  const victims: GridCell[] = [];
+  for (const g of grid.cells) {
+    const overlap = g.row <= r1 && g.row + g.rs - 1 >= anchor.row && g.col <= c1 && g.col + g.cs - 1 >= anchor.col;
+    if (!overlap) continue;
+    const contained = g.row >= anchor.row && g.row + g.rs - 1 <= r1 && g.col >= anchor.col && g.col + g.cs - 1 <= c1;
+    if (!contained) return null;
+    if (g !== anchor) victims.push(g);
+  }
+  return victims.length === 0 ? null : { anchor, victims };
+}
+
+/** 这块矩形现在能不能合并（UI 用它决定「合并」按钮亮不亮，判定与 mergeRange 完全同一套） */
+export function canMergeRange(grid: TableGrid, cellId: string, width: number, height: number): boolean {
+  const a = grid.byId.get(cellId);
+  if (!a) return false;
+  return planMerge(grid, a, Math.max(1, width), Math.max(1, height)) !== null;
+}
+
+/** 合并矩形：给锚点写 colspan/rowspan，其余格子整格删掉 */
+function mergeCells(next: SceneElement, parts: TableParts, anchor: GridCell, w: number, h: number): SceneElement {
+  const grid = buildGrid(parts.rows);
+  const a = grid.byId.get(anchor.cell.id);
+  if (!a) return next;
+  const plan = planMerge(grid, a, Math.max(1, w), Math.max(1, h));
+  if (!plan) return next;
+  for (const g of plan.victims) {
+    const row = grid.rows[g.row];
+    const i = row.children.findIndex((c) => c.id === g.cell.id);
+    if (i >= 0) row.children.splice(i, 1);
+  }
+  plan.anchor.cell.attrs = {
+    ...(plan.anchor.cell.attrs ?? {}),
+    colspan: String(Math.max(1, w)),
+    rowspan: String(Math.max(1, h))
+  };
+  return next;
+}
+
+/** 在"第 vcol 列之前"给每一行插 count 个新格（vcol 会被吸附到合法列边界） */
+function insertColsAt(next: SceneElement, parts: TableParts, vcol: number, count: number): SceneElement {
+  if (parts.rows.length === 0) return next;
+  const grid = buildGrid(parts.rows);
+  const v = snapCol(grid, vcol);
+  const n = clampCount(count);
+  for (let r = 0; r < grid.rowCount; r += 1) {
+    const row = grid.rows[r];
+    const at = insertIndexOf(row, v);
+    const isHead = row.children.some((c) => c.type === 'th');
+    for (let k = 0; k < n; k += 1) row.children.splice(Math.min(at + k, row.children.length), 0, makeCell(isHead));
+  }
+  return next;
+}
+
+/**
+ * 删除若干"可视列号"对应的列。
+ * 只有"正好从这一列开始、且只占一列"的格子删得掉；合并格的一部分不硬拆（跳过）。
+ * 跳过不会让行错位：别的行少了这一列后，后面的格子会自然补到这一列上。
+ */
+function deleteColsAt(next: SceneElement, parts: TableParts, indexes: number[]): SceneElement {
+  const grid = buildGrid(parts.rows);
+  const targets = [...new Set(indexes)].sort((a, b) => b - a); // 从右往左删，索引不位移
+  for (const row of grid.rows) {
+    for (const v of targets) {
+      if (row.children.filter(isCell).length <= 1) break; // 至少留一列
+      const g = grid.cells.find((x) => x.rowNode === row && x.col === v && x.cs === 1);
+      if (!g) continue;
+      const i = row.children.findIndex((c) => c.id === g.cell.id);
+      if (i >= 0) row.children.splice(i, 1);
+    }
+  }
+  return next;
 }
 
 /** 找某一行所在的区块 */
@@ -130,6 +325,8 @@ export type TableOp =
   | { kind: 'deleteRow'; rowId: string }
   /** refCellId 为空时用 index 兜底（空表格没有任何单元格也能插列） */
   | { kind: 'insertCol'; refCellId: string; side: 'before' | 'after'; index?: number; count?: number }
+  /** 按"可视列号"插入（插入轨用它）：vcol = 插在第几个可视列之前 */
+  | { kind: 'insertColAt'; vcol: number; count?: number }
   | { kind: 'deleteCol'; refCellId: string; index?: number }
   | { kind: 'mergeRight'; cellId: string }
   | { kind: 'mergeDown'; cellId: string }
@@ -140,7 +337,7 @@ export type TableOp =
   | { kind: 'setRangeType'; cellIds: string[]; type: 'th' | 'td' }
   /** 清空若干单元格的文案（Del / Backspace 用）：只动文字，不动结构 */
   | { kind: 'clearCells'; cellIds: string[] }
-  /** 批量删除（选区覆盖到的行 / 列） */
+  /** 批量删除（选区覆盖到的行 / 列）—— indexes 是"可视列号" */
   | { kind: 'deleteRows'; rowIds: string[] }
   | { kind: 'deleteCols'; indexes: number[] }
   | { kind: 'toggleHeaderRow'; rowId: string }
@@ -169,8 +366,15 @@ export function applyTableOp(table: SceneElement, op: TableOp): SceneElement {
       const isHead = sec.type === 'thead';
       const n = clampCount(op.count);
       const at = op.side === 'before' ? Math.max(0, idx) : idx + 1;
-      const width = Math.max(1, (sec.children[idx]?.children.length) || cols);
-      for (let k = 0; k < n; k++) sec.children.splice(at + k, 0, makeRow(isHead, width));
+      // 新行宽度 = 该位置"空着的列数"（上方有 rowspan 盖过来的话要少建几格，否则整行多出一列）
+      const grid = buildGrid(parts.rows);
+      let before = 0;
+      for (const c of next.children) {
+        if (c.id === sec.id) break;
+        if (c.type === 'thead' || c.type === 'tbody' || c.type === 'tfoot') before += c.children.filter(isRow).length;
+      }
+      const width = freeWidthAt(grid, Math.min(before + at, grid.rowCount));
+      for (let k = 0; k < n; k += 1) sec.children.splice(at + k, 0, makeRow(isHead, width));
       return next;
     }
 
@@ -210,113 +414,54 @@ export function applyTableOp(table: SceneElement, op: TableOp): SceneElement {
     }
 
     case 'insertCol': {
-      const loc = op.refCellId ? locateCell(next, op.refCellId, true) : null;
-      const base = loc ? loc.cellIndex : Math.max(0, op.index ?? 0);
-      const at = op.side === 'before' ? base : base + 1;
-      const n = clampCount(op.count);
-      for (const row of parts.rows) {
-        const inSection = sectionOf(next, row.id);
-        const target = inSection?.children.find((r) => r.id === row.id);
-        if (!target) continue;
-        const isHead = target.children.some((c) => c.type === 'th');
-        for (let k = 0; k < n; k++) {
-          const cell = createElement(isHead ? 'th' : 'td');
-          cell.style = {};
-          cell.text = isHead ? '表头' : '单元格';
-          target.children.splice(Math.min(at + k, target.children.length), 0, cell);
-        }
-      }
-      return next;
+      // 一律换算成"可视列号"再插：refCellId 指向的格子可能本身是合并格
+      const grid = buildGrid(parts.rows);
+      const loc = op.refCellId ? grid.byId.get(op.refCellId) : null;
+      const v = loc
+        ? (op.side === 'before' ? loc.col : loc.col + loc.cs)
+        : (op.side === 'before' ? Math.max(0, op.index ?? 0) : Math.max(0, op.index ?? 0) + 1);
+      return insertColsAt(next, parts, v, op.count ?? 1);
     }
 
     case 'deleteCol': {
-      const loc = op.refCellId ? locateCell(next, op.refCellId, true) : null;
-      const target0 = loc ? loc.cellIndex : Math.max(0, op.index ?? 0);
-      for (const row of parts.rows) {
-        const sec = sectionOf(next, row.id);
-        const target = sec?.children.find((r) => r.id === row.id);
-        if (!target) continue;
-        if (target.children.length <= 1) continue; // 至少留一列
-        target.children.splice(Math.min(target0, target.children.length - 1), 1);
-      }
-      return next;
+      const grid = buildGrid(parts.rows);
+      const loc = op.refCellId ? grid.byId.get(op.refCellId) : null;
+      const v = loc ? loc.col : Math.max(0, op.index ?? 0);
+      return deleteColsAt(next, parts, [v]);
     }
 
     case 'deleteCols': {
-      const targets = [...new Set(op.indexes)].sort((a, b) => b - a); // 从右往左删，索引不位移
-      for (const row of parts.rows) {
-        const sec = sectionOf(next, row.id);
-        const target = sec?.children.find((r) => r.id === row.id);
-        if (!target) continue;
-        for (const ci of targets) {
-          if (target.children.length <= 1) break; // 至少留一列
-          if (ci >= 0 && ci < target.children.length) target.children.splice(ci, 1);
-        }
-      }
-      return next;
+      return deleteColsAt(next, parts, op.indexes);
+    }
+
+    case 'insertColAt': {
+      // vcol = 插在第几个可视列之前（0 = 最前，>= 可视列数 = 最后）
+      return insertColsAt(next, parts, op.vcol, op.count ?? 1);
     }
 
     case 'mergeRight': {
-      const loc = locateCell(next, op.cellId, true);
-      if (!loc) return next;
-      const row = sectionOf(next, loc.row.id)?.children.find((r) => r.id === loc.row.id);
-      if (!row) return next;
-      const i = row.children.findIndex((c) => c.id === op.cellId);
-      const cur = row.children[i];
-      const right = row.children[i + 1];
+      const grid = buildGrid(parts.rows);
+      const a = grid.byId.get(op.cellId);
+      if (!a) return next;
+      const right = grid.cells.find((g) => g.row === a.row && g.col === a.col + a.cs);
       if (!right) return next;
-      cur.attrs = { ...(cur.attrs ?? {}), colspan: String(intAttr(cur.attrs?.colspan) + intAttr(right.attrs?.colspan)) };
-      row.children.splice(i + 1, 1);
-      return next;
+      return mergeCells(next, parts, a, a.cs + right.cs, Math.max(a.rs, right.rs));
     }
 
     case 'mergeDown': {
-      const loc = locateCell(next, op.cellId, true);
-      if (!loc) return next;
-      const rows = parts.rows;
-      const below = rows[loc.rowIndex + 1];
+      const grid = buildGrid(parts.rows);
+      const a = grid.byId.get(op.cellId);
+      if (!a) return next;
+      const below = grid.cells.find((g) => g.col === a.col && g.row === a.row + a.rs);
       if (!below) return next;
-      const secRow = sectionOf(next, loc.row.id)?.children.find((r) => r.id === loc.row.id);
-      const secBelow = sectionOf(next, below.id)?.children.find((r) => r.id === below.id);
-      if (!secRow || !secBelow) return next;
-      const i = secRow.children.findIndex((c) => c.id === op.cellId);
-      const cur = secRow.children[i];
-      const victim = secBelow.children[Math.min(i, secBelow.children.length - 1)];
-      if (!victim) return next;
-      cur.attrs = { ...(cur.attrs ?? {}), rowspan: String(intAttr(cur.attrs?.rowspan) + intAttr(victim.attrs?.rowspan)) };
-      secBelow.children = secBelow.children.filter((c) => c.id !== victim.id);
-      return next;
+      return mergeCells(next, parts, a, Math.max(a.cs, below.cs), a.rs + below.rs);
     }
 
     case 'mergeRange': {
-      const loc = locateCell(next, op.cellId, true);
-      if (!loc) return next;
-      const w = Math.max(1, op.width);
-      const h = Math.max(1, op.height);
-      if (w === 1 && h === 1) return next;
-      // 先把矩形里的单元格全部核对一遍：只要有"已经跨行/跨列"的（会破坏索引对齐），
-      // 就整体放弃 —— 宁可不动，也不能产出一张错乱的表。
-      for (let r = loc.rowIndex; r < loc.rowIndex + h; r++) {
-        const row = parts.rows[r];
-        if (!row) return next;
-        for (let c = loc.cellIndex; c < loc.cellIndex + w; c++) {
-          const cell = row.children[c];
-          if (!cell) return next;
-          if (cell.id === op.cellId) continue;
-          if (intAttr(cell.attrs?.colspan) > 1 || intAttr(cell.attrs?.rowspan) > 1) return next;
-        }
-      }
-      const anchor = parts.rows[loc.rowIndex].children[loc.cellIndex];
-      // 从右下往左上移除，索引才不会位移
-      for (let r = loc.rowIndex + h - 1; r >= loc.rowIndex; r--) {
-        const row = parts.rows[r];
-        for (let c = loc.cellIndex + w - 1; c >= loc.cellIndex; c--) {
-          if (r === loc.rowIndex && c === loc.cellIndex) continue;
-          row.children.splice(c, 1);
-        }
-      }
-      anchor.attrs = { ...(anchor.attrs ?? {}), colspan: String(w), rowspan: String(h) };
-      return next;
+      const grid = buildGrid(parts.rows);
+      const a = grid.byId.get(op.cellId);
+      if (!a) return next;
+      return mergeCells(next, parts, a, op.width, op.height);
     }
 
     case 'setRangeType': {
@@ -348,43 +493,28 @@ export function applyTableOp(table: SceneElement, op: TableOp): SceneElement {
     }
 
     case 'unmerge': {
-      const loc = locateCell(next, op.cellId, true);
-      if (!loc) return next;
-      const rows = parts.rows;
-      const secRow = sectionOf(next, loc.row.id)?.children.find((r) => r.id === loc.row.id);
-      if (!secRow) return next;
-      const i = secRow.children.findIndex((c) => c.id === op.cellId);
-      const cur = secRow.children[i];
-      const cs = intAttr(cur.attrs?.colspan);
-      const rs = intAttr(cur.attrs?.rowspan);
-      const isHead = cur.type === 'th';
-      // 恢复自身
-      const attrs = { ...(cur.attrs ?? {}) };
+      const grid = buildGrid(parts.rows);
+      const a = grid.byId.get(op.cellId);
+      if (!a) return next;
+      const { cs, rs, row: r0, col: c0 } = a;
+      if (cs === 1 && rs === 1) return next;
+      const isHead = a.cell.type === 'th';
+      // ① 自己先回到 1×1
+      const attrs = { ...(a.cell.attrs ?? {}) };
       delete attrs.colspan;
       delete attrs.rowspan;
-      cur.attrs = Object.keys(attrs).length > 0 ? attrs : undefined;
-      // 右侧补 cs-1 个空格
-      for (let k = 1; k < cs; k++) {
-        const cell = createElement(isHead ? 'th' : 'td');
-        cell.style = {};
-        cell.text = '';
-        secRow.children.splice(i + k, 0, cell);
-      }
-      // 下方各行补 cs 个空格。
-      // ⚠ 是 cs 而不是 cs-1：合并时，锚点所在行只少了 cs-1 个（锚点自己留着），
-      //   但下面每一行被覆盖的 cs 个格子是**整行全被删掉**的（含锚点正下方那格），
-      //   这里少补一个就会让那一行永久少一列（历史 bug：合并 2×2 再拆分，第二行掉一列）。
-      for (let r = 1; r < rs; r++) {
-        const target = rows[loc.rowIndex + r];
-        if (!target) break;
-        const secT = sectionOf(next, target.id)?.children.find((x) => x.id === target.id);
-        if (!secT) continue;
-        for (let k = 0; k < cs; k++) {
-          const cell = createElement(isHead ? 'th' : 'td');
-          cell.style = {};
-          cell.text = '';
-          secT.children.splice(Math.min(i + k, secT.children.length), 0, cell);
-        }
+      a.cell.attrs = Object.keys(attrs).length > 0 ? attrs : undefined;
+      // ② 本行右侧补 cs-1 个空位
+      const i = a.rowNode.children.findIndex((c) => c.id === a.cell.id);
+      for (let k = 1; k < cs; k += 1) a.rowNode.children.splice(i + k, 0, makeCell(isHead, ''));
+      // ③ 下面每一行补 cs 个空位，插在"第 c0 列"的位置（各行的空格位置可能不同，不能沿用锚点行的下标）。
+      //    ⚠ 是 cs 而不是 cs-1：锚点行只少了 cs-1 个（自己留着），下面各行被覆盖的 cs 个格子
+      //      是整片消失的（含锚点正下方那格），少补一个那一行就永久少一列
+      //      （历史 BUG：合并 2×2 再拆分，第二行掉一列）。
+      for (let r = r0 + 1; r <= r0 + rs - 1 && r < grid.rowCount; r += 1) {
+        const row = grid.rows[r];
+        const at = insertIndexOf(row, c0);
+        for (let k = 0; k < cs; k += 1) row.children.splice(Math.min(at + k, row.children.length), 0, makeCell(isHead, ''));
       }
       return next;
     }
