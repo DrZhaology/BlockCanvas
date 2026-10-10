@@ -4,10 +4,13 @@
 > 剩下 90% 的场景都能自己搞定。命令都用大白话解释，GitHub Desktop 的对应操作也标了。
 >
 > 本仓库当前的实际情况（写这份文档时的状态）：
-> - `main` → 稳定发布线（`9b6dcc1`）
-> - `alpha` → 开发线（`a92718f`），**比 main 多 6 个提交**
-> - `backup-v042`、`rescue-wip` → 历史快照分支，只读，留着当备份
+> - `main` → 稳定发布线，**一个小版本一个提交**（`v0.3.0` → `v0.3.1` → `v0.4.0` → `v0.4.1` → `v0.4.2`）
+> - `alpha` → 开发线，保留全部过程提交
+> - `backup-v042`、`rescue-wip`、`backup-main-20261010` → 历史快照分支，只读，留着当备份
 > - 远程：`origin/main`、`origin/alpha`
+>
+> 第八节是**发布线怎么维护**（含当初把 main 清理成"一版一提交"的完整命令），
+> 那一节最贴近你日常要干的事。
 
 ---
 
@@ -237,18 +240,72 @@ git switch alpha                  # 一定记得切回来！
 > 切分支不会同步它们，直接跑就是"旧代码 + 新产物"的错觉。
 > 稳妥做法：`git switch alpha && pnpm install --frozen-lockfile && pnpm build`。
 
-### 要发布时
-```bash
-git switch main
-git merge alpha           # 快进或产生合并提交
-git log --oneline -3      # 确认
-# 然后打 tag / 跑 build-exe.ps1（打包用）
-```
+### 要发布时（把这一版记到 main 上）
+见第八节。一句话：`git switch main` → `git read-tree -u --reset alpha` → `git commit -m "v<版本>: …"`。
 本仓库约定：**AI 不擅自合并、不 push、不打 tag**，这几步由你决定。
 
 ---
 
-## 八、几个容易搞混的问题（自问自答）
+## 八、发布线怎么维护（一个小版本一个提交）
+
+`main` 的定位是"**发布台账**"，不是开发历史 —— 一个小版本一条提交，内容 = 该版本最终代码状态，
+过程性提交全都留在 `alpha`。
+
+### 发一个新版本（例如 0.4.3）
+
+```bash
+# ① 先把版本号改了（只改这一个文件）
+#    version.json → { "version": "0.4.3", "stage": "阶段 5 · …" }
+
+# ② 在 alpha 上把这一版收尾提交
+git switch alpha
+git add -A && git commit -m "…"
+
+# ③ 给 main 添一条发布记录：把 main 的目录内容直接对齐到 alpha 当前状态
+git branch backup-main-$(Get-Date -Format yyyyMMdd) main   # 备份（建议每次发布前都留一条）
+git switch main
+git read-tree -u --reset alpha     # ⚠ 只动 main 的索引与工作区，不会碰 alpha
+git commit -m "v0.4.3: <一句话总结这一版>"
+
+# ④ 检查
+git log --oneline -8               # main 应该只有 v0.3.0 / v0.3.1 / v0.4.0 / v0.4.1 / v0.4.2 / v0.4.3
+git diff alpha main                # 应该没有任何输出（两边内容一模一样）
+```
+
+- `git read-tree -u --reset alpha` = "把 main 的工作区和暂存区直接摆成 alpha 的样子"，
+  连"删除 alpha 里没有的文件"也一并处理 → **不需要 merge、不会有冲突**。
+- 这样 main 永远是一条直线、一版一提交；alpha 完整保留开发过程。
+
+> ⚠ **重写过 main 之后，远程还没同步**：本地 main 的提交哈希与 GitHub 上的 `origin/main` 不一样了
+> （远程仍是旧历史，不影响本地使用）。要更新远程时用
+> `git push --force-with-lease origin main` —— `--force-with-lease` 是"带保护的强推"：
+> 万一远端被别人动过，它会拒绝而不是覆盖。这一步由你决定何时做。
+
+### 当初怎么把 main 清理干净的（2026-10-10 做过一次，备查）
+
+原来 main 上有 19 条提交（v0.3.0 一路到 v0.4.1，中间夹着 `feat(v0.4.2)` 和它的 `revert`
+这种"迁移分支残留"）。清理思路：**不删内容，只按"发布状态"重新拼一条线** ——
+每条发布提交的目录内容（tree）直接取自对应版本那次提交的 tree。
+
+```bash
+git branch backup-main-20261010 main          # ① 先备份（可随时切回去看）
+
+# ② 用低层命令逐个生成"发布提交"（<提交>^{tree} = 那个版本的目录内容）
+P0=$(git commit-tree $(git rev-parse 114a4c4^{tree}) -m "Initial commit: BlockCanvas v0.3.0")
+P1=$(git commit-tree $(git rev-parse b4bdf00^{tree}) -p $P0 -m "v0.3.1: …")
+P2=$(git commit-tree $(git rev-parse 1bf453b^{tree}) -p $P1 -m "v0.4.0: …")
+P3=$(git commit-tree $(git rev-parse 9b6dcc1^{tree}) -p $P2 -m "v0.4.1: …")
+P4=$(git commit-tree $(git rev-parse alpha^{tree})  -p $P3 -m "v0.4.2: …")
+
+git branch -f main $P4                        # ③ 让 main 指向这条新线
+git diff alpha main                           # ④ 验证：与 alpha 内容一致则无输出
+```
+
+日常发版用 `read-tree` 那套就够；`commit-tree` 只是因为"要一次拼出好几条历史"才用上。
+
+---
+
+## 九、几个容易搞混的问题（自问自答）
 
 **Q：切到 main 之后，我在 alpha 上提交的东西还在吗？**
 A：在。它属于 alpha 那条历史，main 看不到而已。切回 alpha 就都在。
@@ -281,7 +338,7 @@ A：commit = 存到**本机**仓库；push = 把本机提交复制到**远程**�
 
 ---
 
-## 九、危险等级速查表
+## 十、危险等级速查表
 
 | 操作 | 危险度 | 备注 |
 |---|---|---|
@@ -297,7 +354,7 @@ A：commit = 存到**本机**仓库；push = 把本机提交复制到**远程**�
 
 ---
 
-## 十、一句话总结
+## 十一、一句话总结
 
 > **提交是一串不会变的快照，分支只是贴在某张快照上的便签。**
 > 提交之后随便切分支都不会丢东西；切分支之前先 `git status` 确认干净；

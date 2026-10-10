@@ -9,7 +9,7 @@ import {
   readSession, writeSession, getStorageStats, clearAppCache, clearOrphanBackups
 } from './userData';
 import {
-  getLocalVersion, fetchReleases, buildUpdateList, getMirrorInfo, applyUpdate
+  getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo, applyUpdate
 } from './updater';
 
 // 启动最优先：初始化纯便携数据区 data/，隔离系统盘
@@ -173,6 +173,8 @@ ipcMain.handle('data:clear-orphan-backups', () => clearOrphanBackups());
 
 // ============ 自动更新 IPC ============
 ipcMain.handle('update:get-version', () => getLocalVersion());
+// 「关于」页的阶段文案（来源 version.json → tools/sync-version.mjs → package.json.bcStage）
+ipcMain.handle('app:get-stage', () => getAppStage());
 
 ipcMain.handle('update:check', async () => {
   const localVer = getLocalVersion();

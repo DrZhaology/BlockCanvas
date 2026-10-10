@@ -41,6 +41,19 @@ export function getLocalVersion(): string {
   return '0.0.0';
 }
 
+/**
+ * 当前阶段展示文案（「关于」页用）。
+ * 来源：根目录 version.json 的 stage → tools/sync-version.mjs 写进 package.json 的 bcStage
+ * （package.json 会随 asar 一起打包，所以打包后也读得到）。读不到就返回空串。
+ */
+export function getAppStage(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf-8'));
+    return String(pkg.bcStage ?? '');
+  } catch { /* 忽略 */ }
+  return '';
+}
+
 // ============ 镜像源 ============
 
 export interface MirrorDef {

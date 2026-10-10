@@ -1,12 +1,16 @@
 {
   "name": "blockcanvas",
   "version": "0.4.2",
+  "bcStage": "阶段 4 · 响应式与打磨（阶段测试版）",
   "description": "BlockCanvas 积木画布 - 可视化静态网页构建工具",
   "main": "out/main/main.js",
   "author": "Dr.Zhaology",
   "license": "MIT",
   "private": true,
   "scripts": {
+    "version:sync": "node tools/sync-version.mjs",
+    "version:check": "node tools/sync-version.mjs --check",
+    "prebuild": "node tools/sync-version.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",

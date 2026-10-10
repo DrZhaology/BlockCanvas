@@ -109,6 +109,8 @@ declare global {
       applyUpdate: (assetUrl: string) => Promise<{ ok: boolean; error?: string }>;
       onUpdateProgress: (cb: (p: { msg: string; pct?: number }) => void) => () => void;
       getLocalVersion: () => Promise<string>;
+      /** 阶段展示文案（version.json → package.json.bcStage） */
+      getAppStage: () => Promise<string>;
 
       // 扩展与插件
       scanExtensions: () => Promise<ScanResult>;

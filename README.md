@@ -130,10 +130,22 @@ node tests/unit/table-ops.test.mjs   # 表格结构单测（37 项，秒级，�
 powershell -ExecutionPolicy Bypass -File build-exe.ps1
 ```
 
-产物为 `dist\win-unpacked\`（绿色便携文件夹）+ `dist\BlockCanvas-0.4.2-win64.zip`。
+产物为 `dist\win-unpacked\`（绿色便携文件夹）+ `dist\BlockCanvas-<版本>-win64.zip`。
 绿色便携：**免安装、不写 AppData**；`data/extensions/` 内置插件/资源包随 zip 分发，开箱即用。
 
-> 版本号规则：`0.X.X` = 阶段测试版，`X.X` = 正式版（如 1.0、2.3）。当前 `0.4.2`。
+**版本号只有一个来源：根目录 [`version.json`](version.json)**（`version` + `stage` 两个字段）。
+改版本只改这一个文件即可：
+
+```jsonc
+{ "version": "0.4.2", "stage": "阶段 4 · 响应式与打磨（阶段测试版）" }
+```
+
+它会经 `tools/sync-version.mjs` 同步进 `package.json`（`version` → 安装包元数据 / 更新中心 /
+应用内「关于」；`stage` → 「关于」页的阶段文案）。同步时机：
+`build-exe.ps1` 第 0 步、`pnpm build` 前（`prebuild` 钩子），也可手动 `pnpm version:sync`；
+`pnpm version:check` 只校验是否一致（不一致退出码 1）。
+
+> 版本号规则：`0.X.X` = 阶段测试版，`X.X` = 正式版（如 1.0、2.3）。当前版本见 [`version.json`](version.json)。
 
 ## 📁 目录结构
 
@@ -195,6 +207,9 @@ BlockCanvas/
 8. **插件改动要同步三处副本**：`extensions/`、`data/extensions/`、`dist/win-unpacked/data/extensions/`。
 9. **导出代码要干净**：类名/关系选择器优先，无名元素走行内样式并提示起名；
    伪类样式必须有类名/ID/关系选择器才能在导出后生效（面板要主动提醒）。
+10. **PowerShell 脚本（`build-exe.ps1` 等）必须存成「UTF-8 **带 BOM**」**：Windows PowerShell 5.1
+    对没有 BOM 的文件按系统 ANSI（中文机器上是 GBK）解码，中文注释会被读成乱码，
+    连字符串引号都会被截断 → 报一堆莫名其妙的语法错误。改完 `.ps1` 记得确认 BOM 还在。
 10. **块级容器默认 padding 必须写 4 个 longhand**（不能写 `padding: '8px'` 简写）——
     四值输入读 longhand，简写会导致显示 0 且编辑值被残留简写覆盖。
 11. **状态选择器不要返回新数组/新对象**（zustand + useSyncExternalStore 会误判变化）；
@@ -226,7 +241,18 @@ BlockCanvas/
 - **`main` = 稳定分支**：一个小版本完成并验证后，把 alpha 合并回 main（通常为快进合并），
   打 tag 作为里程碑，再推送；
 - `main` 上不做直接开发（小修除外），保证 main 的每个存档都可信；
-- 版本号规则不变：`0.X.X` = 阶段测试版（当前 **0.4.2**），`X.X` = 正式版。
+- **main 只留"发布记录"**：一个小版本一个提交（`v0.3.0` → `v0.3.1` → `v0.4.0` → `v0.4.1` → `v0.4.2`），
+  过程性提交全部留在 `alpha`。发布一个版本 = 把 main 的树对齐到 alpha 当前状态再提交：
+
+  ```bash
+  git switch main
+  git read-tree -u --reset alpha     # 让 main 的目录内容 = alpha 当前内容（不动 alpha）
+  git commit -m "v0.4.3: <一句话总结这一版>"
+  ```
+
+  （这样 main 是一条干净的发布线，历史里没有开发过程提交；`alpha` 仍保留全部过程。）
+- 版本号规则不变：`0.X.X` = 阶段测试版，`X.X` = 正式版（当前值见 [`version.json`](version.json)）；
+  改版本只改 [`version.json`](version.json) 一个文件。
 - 分支/提交的机制与安全操作（含"切错了怎么回去"）见
   [Git 分支使用说明](docs/Git分支使用说明.md)；本仓库另有 `backup-v042`、`rescue-wip`
   两个历史快照分支，只读保留。
@@ -260,7 +286,7 @@ BlockCanvas/
 - [开发历程](docs/开发历程.md) —— 按时间倒序的迭代记录
 - [v0.4.0 收尾与下一阶段规划](docs/v0.4.0-收尾与下一阶段规划.md) —— 本阶段改动清单、验收清单、下一步方向
 - [扩展规范](docs/扩展规范.md) —— 插件 / 资源包开发规范
-- [Git 分支使用说明](docs/Git分支使用说明.md) —— 分支/提交怎么算、怎么切、怎么合并、切错了怎么办（自用备忘）
+- [Git 分支使用说明](docs/Git分支使用说明.md) —— 分支/提交怎么算、怎么切、怎么合并、切错了怎么办 + 本仓库发布线怎么维护（自用备忘）
 - [图标设计](docs/图标设计.md) —— Logo 设计说明与重新生成方法
 
 ## 🧩 扩展系统
