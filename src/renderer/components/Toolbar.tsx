@@ -268,8 +268,8 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 画布宽度：自定义像素值显示在设备条上
-  const WIDTH_OPTIONS = ['auto', '1440px', '768px', '375px'];
+  // 画布宽度：自定义像素值显示在设备条上（1920px 是「电脑」预设宽度，不算自定义）
+  const WIDTH_OPTIONS = ['auto', '1920px', '1440px', '768px', '375px'];
   const customWidth = canvasWidth !== 'auto' && !WIDTH_OPTIONS.includes(canvasWidth) ? canvasWidth : null;
 
   // —— 缩放：按住百分比左右拖拽（阻尼，最小 1%）——

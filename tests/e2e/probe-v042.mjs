@@ -275,6 +275,132 @@ async function main() {
   await sleep(1800);
   await checkTemplateSections('左侧布局');
 
+  // ============ 6. 设备组：「电脑」= 固定 1920px，「自适应」= 铺满（v0.4.4）============
+  // 设备组折在悬浮面板里（Portal + 鼠标移开 220ms 卸载），操作前先确保按钮可见。
+  const devBtnAll = () => win.locator('.tb-device .tb-bp-btn');
+  const openDeviceGroup = async () => {
+    if (await devBtnAll().count()) return;
+    const grp = win.locator('.toolbar .tb-grp-btn', { hasText: '设备' }).first();
+    if (!(await grp.count())) return;
+    await grp.hover({ timeout: 5000 }).catch(() => {});
+    await win.waitForSelector('.tb-device .tb-bp-btn', { state: 'visible', timeout: 5000 }).catch(() => {});
+    await sleep(200);
+  };
+  const devBtn = (text) => win.locator('.tb-device .tb-bp-btn', { hasText: text }).first();
+  const devBtnActive = (text) => devBtn(text).evaluate((el) => el.classList.contains('active')).catch(() => null);
+  const canvasInlineWidth = () => win.evaluate(() => (document.querySelector('.canvas')?.style.width) || '');
+  const bpWidthLabel = () => win.locator('.tb-device .tb-bp-width').first().innerText().catch(() => '');
+
+  await openDeviceGroup();
+  const devBtnCount = await devBtnAll().count();
+  ok('设备组面板含「自适应 + 电脑/平板/手机」4 个按钮', devBtnCount === 4, String(devBtnCount));
+
+  await devBtn('电脑').click({ timeout: 5000 }).catch(() => {});
+  await sleep(350);
+  const deskInline = await canvasInlineWidth();
+  await openDeviceGroup();
+  const deskLabel = (await bpWidthLabel()) || '';
+  const deskOn = await devBtnActive('电脑');
+  const autoOff = await devBtnActive('自适应');
+  ok('点「电脑」→ 画布固定 1920px（宽度标签含 1920、电脑高亮、自适应不亮）',
+    deskInline === '1920px' && deskLabel.includes('1920') && deskOn === true && autoOff === false,
+    `inline=${deskInline} label=${deskLabel} desktopActive=${deskOn} autoActive=${autoOff}`);
+
+  await devBtn('自适应').click({ timeout: 5000 }).catch(() => {});
+  await sleep(350);
+  const autoInline = await canvasInlineWidth();
+  await openDeviceGroup();
+  const autoLabel = (await bpWidthLabel()) || '';
+  const autoOn = await devBtnActive('自适应');
+  const deskOff = await devBtnActive('电脑');
+  ok('点「自适应」→ 画布回到铺满（不再写死宽度、显示「自适应」、自适应高亮）',
+    autoInline === '' && autoLabel.includes('自适应') && autoOn === true && deskOff === false,
+    `inline=${autoInline || '(无)'} label=${autoLabel} autoActive=${autoOn} desktopActive=${deskOff}`);
+  await win.mouse.move(20, 400);
+  await sleep(400);
+
+  // ============ 7. 标签页关闭保护：空 + 有撤销历史 → 必须二次确认（v0.4.4）============
+  const dialogs = [];
+  win.on('dialog', (d) => {
+    dialogs.push(d.type() + ':' + d.message().slice(0, 24).replace(/\n/g, ' '));
+    d.dismiss().catch(() => {});
+  });
+  const tabCount = () => win.locator('.project-tab-bar .tab-item').count();
+  const waitTabCount = async (n, ms = 3000) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      if ((await tabCount()) === n) return true;
+      await sleep(100);
+    }
+    return (await tabCount()) === n;
+  };
+  // confirm 会同步阻塞渲染进程 → 用「渲染器还响应吗」给弹窗补一道副证（主证是上面的 dialog 事件）
+  const rendererBlocked = async (ms = 600) => {
+    try { await win.waitForSelector('.project-tab-bar', { state: 'attached', timeout: ms }); return false; }
+    catch { return true; }
+  };
+  // 未保存标签的关闭叉只在 hover 时出现（CSS :hover），必须先 hover 再点
+  const clickActiveTabClose = async () => {
+    const tab = win.locator('.project-tab-bar .tab-item.active').first();
+    await tab.hover({ timeout: 4000 }).catch(() => {});
+    await sleep(150);
+    await tab.locator('.tab-close-btn').click({ timeout: 4000 }).catch(() => {});
+  };
+  const sceneProbe = () => win.evaluate(() => {
+    const s = () => window.__sceneStore.getState();
+    return { past: s().history.past.length, future: s().history.future.length, children: s().scene.root.children.length };
+  });
+  const drawThenDelete = () => win.evaluate(() => {
+    const s = () => window.__sceneStore.getState();
+    s().addElement('div');
+    const kids = s().scene.root.children;
+    s().removeElement(kids[kids.length - 1].id);
+    return { past: s().history.past.length, children: s().scene.root.children.length };
+  });
+
+  // 先给「旧标签」造出撤销历史 —— 这样「新开空标签不该继承它的撤销栈」才有区分度
+  const seeded = await drawThenDelete();
+  ok('（前置）旧标签插入又删除 → 它的撤销栈非空', seeded.past > 0, JSON.stringify(seeded));
+  const tabsBase = await tabCount();
+
+  // 7.1 新建空标签：撤销栈必须从零开始（旧行为会沿用上一个标签的历史 → Ctrl+Z 串台）
+  await win.locator('.tab-add-btn').first().click({ timeout: 4000 });
+  await sleep(350);
+  const freshTab = await sceneProbe();
+  ok('新开空标签的撤销栈是空的（不再继承上一个标签的撤销历史）',
+    freshTab.past === 0 && freshTab.future === 0 && freshTab.children === 0, JSON.stringify(freshTab));
+
+  // 7.2 空 + 无撤销历史 → 点 × 静默关闭，不弹窗
+  dialogs.length = 0;
+  await clickActiveTabClose();
+  const closedSilently = await waitTabCount(tabsBase);
+  ok('空且无撤销历史 → 点 × 直接关闭、不弹窗',
+    closedSilently && dialogs.length === 0,
+    `tabs=${await tabCount()}/${tabsBase} dialogs=${dialogs.length} ${dialogs.join(' | ')}`);
+
+  // 7.3 空 + 有撤销历史 → 点 × 必须二次确认
+  await win.locator('.tab-add-btn').first().click({ timeout: 4000 });
+  await sleep(350);
+  const made = await drawThenDelete();
+  ok('（前置）空标签「画过又删掉」：画布回到空、撤销栈非空',
+    made.past > 0 && made.children === 0, JSON.stringify(made));
+  const tabsBeforeBlock = await tabCount();
+  dialogs.length = 0;
+  await clickActiveTabClose();
+  let blocked = false;
+  for (let i = 0; i < 14 && dialogs.length === 0 && !blocked; i++) {
+    await sleep(120);
+    blocked = await rendererBlocked(500);
+  }
+  const dialogShown = dialogs.length > 0 || blocked;
+  ok('空但有撤销历史 → 点 × 必须二次确认（弹窗拦一道）', dialogShown,
+    `dialogs=${dialogs.length} blocked=${blocked} ${dialogs.join(' | ')}`);
+  if (blocked && dialogs.length === 0) { try { await win.keyboard.press('Escape'); } catch { /* 兜底关窗 */ } }
+  const unblocked = !(await rendererBlocked(2000));
+  const tabsAfterCancel = unblocked ? await tabCount() : -1;
+  ok('二次确认里选「取消」→ 标签保持打开、不误删',
+    unblocked && tabsAfterCancel === tabsBeforeBlock, `tabs=${tabsAfterCancel}/${tabsBeforeBlock} blocked=${!unblocked}`);
+
   ok('全程零 console / page 错误', errs.length === 0, errs.slice(0, 3).join(' || '));
 
   await app.close();

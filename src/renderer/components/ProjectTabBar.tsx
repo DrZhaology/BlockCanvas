@@ -66,11 +66,15 @@ export function ProjectTabBar() {
     // —— v0.4.3：完全空的项目直接关 ——
     // 新建标签默认 isDirty=true（否则连"要不要保存"都不会问），但"不小心点出来、
     // 什么都没放"的空壳再拦一道就很烦。根容器没有子元素 + 页面 CSS / 设计变量仍是
-    // 出厂状态 = 完全空，直接关闭；只要动过任何东西，仍走下面的二次确认。
-    const liveScene = tab.id === useTabStore.getState().activeTabId
-      ? useScene.getState().scene
-      : tab.scene;
-    if (isEmptyProject(liveScene)) {
+    // 出厂状态 = 完全空且没有撤销历史，直接关闭；只要动过任何东西，仍走下面的二次确认。
+    const isActiveTab = tab.id === useTabStore.getState().activeTabId;
+    const liveScene = isActiveTab ? useScene.getState().scene : tab.scene;
+    // —— v0.4.4：空壳直接关，但有过撤销历史（画过又删掉 / 撤销回去）就拦一道 ——
+    // "看着空"不等于"没动过"：撤销栈非空说明这块画布真的被编辑过，静默关掉容易误删项目。
+    // 撤销栈属于当前文档，只有激活标签读得到它；非激活标签拿不到历史，按"无历史"处理
+    //（保持原来的静默关闭行为，不因此弹窗）。
+    const hasUndoHistory = isActiveTab && useScene.getState().history.past.length > 0;
+    if (isEmptyProject(liveScene) && !hasUndoHistory) {
       closeTab(tab.id);
       return;
     }

@@ -690,12 +690,17 @@ export function ColorPicker(props: Props) {
     ? ((node?.pseudoStyles?.[pseudo!]?.[styleKey] as string) ?? '')
     : ((effStyle[styleKey] as string) ?? '');
 
+  // 会话收尾：beginStyleEdit 开了连续编辑会话（focus / 开色盘），必须在这里结束。
+  // ⚠ 以前只 begin 不 end：会话标记会一直挂着，之后所有样式改动的还原点都不再入栈，
+  //   表现为"用了调色盘之后，撤销就不灵了"。
+  const endStyleEdit = useScene((s) => s.endStyleEdit);
   const commit = (v: string) => {
     if (isPseudo) {
       updatePseudoStyle(elementId, pseudo!, { [styleKey]: v });
     } else {
       updateStyle(elementId, { [styleKey]: v } as any);
     }
+    endStyleEdit();
   };
 
   const onChangeVal = (v: string) => {

@@ -6,7 +6,7 @@ import type { Breakpoint } from './types';
 // 在属性面板把断点切到「手机」，画布宽度却纹丝不动，用户完全看不出效果。
 //
 // 现在合并为**单一设备状态**：设备 = 画布宽度 = 编辑中的断点，三者永远同步。
-//   💻 电脑 → 自适应窗口（桌面为基准，不生成 @media）
+//   💻 电脑 → 固定 1920px（桌面为基准，不生成 @media）；「自适应」是独立按钮（画布铺满编辑区）
 //   📱 平板 → 768px（对应 @media max-width: 768px）
 //   📱 手机 → 375px（对应 @media max-width: 480px）
 //   自定义宽度 → 按像素落回最近断点
@@ -14,7 +14,7 @@ import type { Breakpoint } from './types';
 export type DeviceId = 'desktop' | 'tablet' | 'mobile';
 
 export const DEVICE_LIST: Array<{ id: DeviceId; label: string; icon: string; width: string; hint: string }> = [
-  { id: 'desktop', label: '电脑', icon: '💻', width: 'auto', hint: '电脑端基准样式（自适应窗口宽度）' },
+  { id: 'desktop', label: '电脑', icon: '💻', width: '1920px', hint: '电脑端基准样式（固定 1920px 画布）' },
   { id: 'tablet', label: '平板', icon: '📱', width: '768px', hint: '平板端 ≤768px 样式定制' },
   { id: 'mobile', label: '手机', icon: '📲', width: '375px', hint: '手机端 ≤480px 样式定制' }
 ];
@@ -29,11 +29,11 @@ export function widthToBreakpoint(w: string): Breakpoint {
   return 'desktop';
 }
 
-/** 断点 → 标准画布宽度 */
+/** 断点 → 标准画布宽度（与 DEVICE_LIST 保持一致：电脑 = 固定 1920px） */
 export function breakpointToWidth(bp: Breakpoint): string {
   if (bp === 'mobile') return '375px';
   if (bp === 'tablet') return '768px';
-  return 'auto';
+  return '1920px';
 }
 
 /** 画布宽度 → 当前设备 id */

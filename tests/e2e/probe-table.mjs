@@ -538,6 +538,151 @@ async function main() {
   // ============ 关键部位截图（只留 2 张，供人眼复核） ============
   mkdirSync(resolve(ROOT, 'tests/e2e/shots-v042'), { recursive: true });
 
+  // ============ 20. 表格编辑器「所见即所得」：样式实时生效 + 一次交互 = 一条 undo ============
+  // 选中最后一张表 → 进表格编辑页（section 19 插了个标题元素，选中态已经不在表上）
+  const liveTableId = await win.evaluate(() => {
+    let t = null;
+    const w = (n) => { if (n.type === 'table') t = n; for (const c of n.children) w(c); };
+    w(window.__sceneStore.getState().scene.root);
+    if (!t) return null;
+    window.__sceneStore.getState().selectElement(t.id);
+    return t.id;
+  });
+  await sleep(350);
+  await openTableEditor();
+
+  const pastLen = () => win.evaluate(() => window.__sceneStore.getState().history.past.length);
+  const pendingEdit = () => win.evaluate(() => window.__sceneStore.getState().styleEditPending === true);
+  const cssOf = (sel, prop) => win.locator(sel).first().evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
+  const cellSel = (r, c) => `[data-cell="${r}-${c}"]`;
+
+  ok('右面板出现「单元格大预览」与「表格样式预览」',
+    (await win.locator('.cpv-box').count()) === 1 && (await win.locator('.tpv-table').count()) === 1,
+    `cpv=${await win.locator('.cpv-box').count()} tpv=${await win.locator('.tpv-table').count()}`);
+
+  // 20.1 表格级底色 → 左边结构网格必须实时跟着变（旧版编辑器页面完全不跟）
+  const pastBeforeTableBg = await pastLen();
+  await win.evaluate((id) => window.__sceneStore.getState().updateStyle(id, { backgroundColor: 'rgb(255, 238, 221)' }), liveTableId);
+  await sleep(300);
+  const gridBg = await cssOf('.tbl-grid', 'background-color');
+  ok('改表格底色 → 左侧结构网格实时生效', gridBg === 'rgb(255, 238, 221)', gridBg);
+  ok('改表格底色 → 右侧「大致效果」预览实时生效',
+    (await cssOf('.tpv-table', 'background-color')) === 'rgb(255, 238, 221)', await cssOf('.tpv-table', 'background-color'));
+
+  // 20.2 单元格底色/字号 → 左侧格子本体实时生效（选中态用半透明叠加，不再盖掉真实底色）
+  await win.locator(cellSel(1, 1)).click({ position: { x: 6, y: 8 } });
+  await sleep(250);
+  const pastBeforeCell = await pastLen();
+  await win.evaluate((sel) => {
+    const st = window.__sceneStore.getState();
+    const el = document.querySelector(sel);
+    const id = el && el.getAttribute('data-cell-id');
+    if (id) st.updateStyle(id, { backgroundColor: 'rgb(0, 128, 255)', fontSize: '19px' });
+  }, cellSel(1, 1));
+  await sleep(300);
+  const cellBg = await cssOf(cellSel(1, 1), 'background-color');
+  const cellFs = await cssOf(cellSel(1, 1), 'font-size');
+  ok('改单元格底色/字号 → 左侧格子实时生效（选中态也不盖底色）',
+    cellBg === 'rgb(0, 128, 255)' && cellFs === '19px', `bg=${cellBg} fs=${cellFs}`);
+
+  // 20.3 拖「大预览」的上边 → 内边距实时变，且整段拖动只压一条撤销记录
+  const padBefore = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
+  const pastBeforePadDrag = await pastLen();
+  const edge = await win.locator('.cpv-edge.is-top').first().boundingBox();
+  await win.mouse.move(edge.x + edge.width / 2, edge.y + 4);
+  await win.mouse.down();
+  await win.mouse.move(edge.x + edge.width / 2, edge.y + 4 + 24, { steps: 8 });
+  await win.mouse.up();
+  await sleep(350);
+  const padAfter = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
+  const pastAfterPadDrag = await pastLen();
+  ok('按住预览上边往下拖 → 单元格内边距实时变大',
+    Math.abs(padAfter - (padBefore + 24)) <= 2, `${padBefore} → ${padAfter}`);
+  ok('一次拖动只压一条撤销记录（不是几十条）',
+    pastAfterPadDrag - pastBeforePadDrag === 1, `${pastBeforePadDrag} → ${pastAfterPadDrag}`);
+  ok('拖动结束后编辑会话已收尾（不会卡住后续撤销）', (await pendingEdit()) === false);
+
+  await win.keyboard.press('Control+z');
+  await sleep(350);
+  const padUndone = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
+  ok('Ctrl+Z 一次就把整段拖动撤销回去', Math.abs(padUndone - padBefore) <= 1, `${padAfter} → ${padUndone}`);
+
+  // 20.4 颜色：开调色盘点一个色板 → 左边格子与预览都变，且只压一条记录（旧版 <input type=color> 会压几十条）
+  const pastBeforeColor = await pastLen();
+  await win.locator('.tbl-card', { hasText: '单元格' }).locator('.tbl-field', { hasText: '底色' }).locator('.color-swatch-btn').first().click();
+  await win.waitForSelector('.cp-modal', { timeout: 6000 });
+  await sleep(300);
+  await win.locator('.cp-swatch').nth(8).click(); // 色板第 9 个 = #ef4444
+  await sleep(250);
+  await win.locator('.cp-ok').first().click();
+  await sleep(400);
+  const pastAfterColor = await pastLen();
+  const colorBg = await cssOf(cellSel(1, 1), 'background-color');
+  ok('调色盘选色 → 左侧格子实时生效', colorBg === 'rgb(239, 68, 68)', colorBg);
+  ok('调色盘选色 → 右侧大预览同步', (await cssOf('.cpv-box', 'background-color')) === 'rgb(239, 68, 68)',
+    await cssOf('.cpv-box', 'background-color'));
+  ok('一次取色只压一条撤销记录（旧版会压几十条 → Ctrl+Z 要按半天）',
+    pastAfterColor - pastBeforeColor === 1, `${pastBeforeColor} → ${pastAfterColor}`);
+  ok('调色盘关闭后编辑会话已收尾', (await pendingEdit()) === false);
+  await win.keyboard.press('Control+z');
+  await sleep(350);
+  const colorUndone = await cssOf(cellSel(1, 1), 'background-color');
+  ok('Ctrl+Z 一次就撤销掉取色', colorUndone === 'rgb(0, 128, 255)', `${colorBg} → ${colorUndone}`);
+
+  // 20.5 双击格子就地改字
+  const dcBox = await win.locator(cellSel(1, 0)).boundingBox();
+  await win.mouse.move(dcBox.x + 8, dcBox.y + dcBox.height / 2);
+  await win.mouse.down(); await win.mouse.up();
+  await sleep(70);
+  await win.mouse.down(); await win.mouse.up();
+  await sleep(300);
+  const editOpen = await win.locator('.tbl-cell-input').count();
+  await win.keyboard.press('Control+a');
+  await win.keyboard.type('双击改字OK');
+  await win.keyboard.press('Enter');
+  await sleep(400);
+  const cellText = await win.locator(cellSel(1, 0)).first().evaluate((el) => el.textContent || '');
+  ok('双击格子 → 就地出现输入框', editOpen === 1, String(editOpen));
+  ok('输入文字回车 → 写回这一格（左侧立刻显示）',
+    cellText.includes('双击改字OK') && !(await win.locator('.tbl-cell-input').count()),
+    cellText.trim().slice(0, 20));
+
+  // 留一张右侧面板实况图（单元格大预览 / 字号滑杆 / 表格样式预览），供人眼 + 多模态复核
+  const sideBox = await win.locator('.table-side').first().boundingBox();
+  if (sideBox) {
+    const vp = await win.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }));
+    const x = Math.max(0, sideBox.x);
+    const y = Math.max(0, sideBox.y);
+    await win.screenshot({
+      path: resolve(ROOT, 'tests/e2e/shots-v042/table-live.png'),
+      clip: { x, y, width: Math.min(sideBox.width, vp.w - x), height: Math.min(sideBox.height, vp.h - y) }
+    });
+  }
+  // 左侧结构网格也来一张：表格底色 + 单元格底色/内边距的实时渲染效果
+  const stageBox = await win.locator('.table-stage').first().boundingBox();
+  if (stageBox) {
+    await win.screenshot({
+      path: resolve(ROOT, 'tests/e2e/shots-v042/table-left-live.png'),
+      clip: { x: Math.max(0, stageBox.x), y: Math.max(0, stageBox.y), width: stageBox.width, height: Math.min(stageBox.height, 520) }
+    });
+  }
+  // 「表格样式」卡片滚进视野，单独来一张（大致效果预览）
+  await win.locator('.tbl-card', { hasText: '表格样式' }).first().scrollIntoViewIfNeeded().catch(() => {});
+  await sleep(300);
+  const styleCard = await win.locator('.tbl-card', { hasText: '表格样式' }).first().boundingBox();
+  if (styleCard) {
+    const vp2 = await win.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }));
+    const x2 = Math.max(0, styleCard.x);
+    const y2 = Math.max(0, Math.min(styleCard.y, vp2.h - 200));
+    await win.screenshot({
+      path: resolve(ROOT, 'tests/e2e/shots-v042/table-style-preview.png'),
+      clip: { x: x2, y: y2, width: styleCard.width, height: Math.min(styleCard.height, vp2.h - y2) }
+    });
+  }
+
+  await win.locator('.fluent-back-btn').first().click();
+  await sleep(500);
+
   ok('无 console 错误', errs.length === 0, errs.slice(0, 3).join(' | '));
   console.log(`\n===== 表格探针：${pass} 通过 / ${fail} 失败 =====`);
   await app.close();

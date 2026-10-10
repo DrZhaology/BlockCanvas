@@ -1371,7 +1371,9 @@ export const useScene = create<SceneStore>((set) => ({
       };
     }),
 
-  setScene: (s) => set((st) => ({ scene: s, history: st.history, styleEditPending: false }))
+  // 撤销栈属于当前文档：切换 / 打开 / 新建标签一律清空（沿用上一个标签的历史会导致
+  // 切标签后 Ctrl+Z 把别的标签的内容恢复进来，也会让"这个空画布有没有历史"判断失真）。
+  setScene: (s) => set(() => ({ scene: s, history: { past: [], future: [] }, styleEditPending: false }))
 }));
 
 function pushPast(h: History, snapshot: SceneGraph): History {
