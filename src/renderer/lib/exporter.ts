@@ -41,6 +41,17 @@ function buildAttrsString(node: SceneElement, ctx: StyleClassSet): { attrsStr: s
   if (node.type === 'input' && get('typeAttr')) {
     out.push(`type="${escapeAttr(get('typeAttr'))}"`);
   }
+  // 表格单元格：colspan / rowspan（值为 1 时不写，保持代码干净）
+  if (node.type === 'th' || node.type === 'td') {
+    const cs = get('colspan');
+    if (cs && cs !== '1') out.push(`colspan="${escapeAttr(cs)}"`);
+    const rs = get('rowspan');
+    if (rs && rs !== '1') out.push(`rowspan="${escapeAttr(rs)}"`);
+  }
+  // 表头单元格：scope（col / row / colgroup / rowgroup）
+  if (node.type === 'th' && get('scope')) {
+    out.push(`scope="${escapeAttr(get('scope'))}"`);
+  }
   const attrsStr = out.length ? ' ' + out.join(' ') : '';
   return { attrsStr };
 }

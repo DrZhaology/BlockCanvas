@@ -1,0 +1,201 @@
+/* ==========================================================================
+   BlockCanvas · 18-v044-table-ui.css —— 表格编辑器"所见即所得"轮
+   --------------------------------------------------------------------------
+   ① 格子/表格的真实样式在编辑器里**实时生效**（底色走变量，别盖掉选中高亮）
+   ② 双击格子就地改字
+   ③ 右侧「单元格大预览」：虚线边拖动改内边距、滑杆拖字号
+   ④ 右侧「表格样式预览」：大致效果 mock
+
+   分片顺序 = 级联顺序，本片最后 import，用来覆盖 16-v042b-ui.css 的旧规则。
+   ========================================================================== */
+
+/* ==========================================================================
+   ① 实时渲染：格子底色 / 表格线颜色
+   --------------------------------------------------------------------------
+   底色必须走 CSS 变量，不能内联 background ——
+   内联样式优先级最高，会把 .picked / .active 的选中高亮一起盖掉，
+   结果就是"改完底色，选中的格子看不出被选中了"。
+   ========================================================================== */
+.tbl-cell { background: var(--cell-bg, var(--bg-panel)); }
+.tbl-cell.is-th { background: var(--cell-bg, var(--panel-soft)); }
+/* 单元格下的真实网格线颜色跟着「表格样式 → 边框颜色」走 */
+.tbl-gcell { box-shadow: inset 0 0 0 1px var(--tbl-line, var(--border)); }
+/* 表格自己带外框/圆角时，网格整体跟着变（编辑器里的结构网格也一样） */
+.tbl-grid { overflow: hidden; }
+
+/* 悬浮 / 选中的高亮改成"半透明叠加"（inset 阴影铺满）+ 保留真实底色的 background ——
+   16 分片里的 :hover / .picked 是直接写 background 的，这里必须显式改回来：
+   否则一选中就把格子底色盖住，调完色根本看不见效果。 */
+.tbl-cell:hover {
+  background: var(--cell-bg, var(--row-hover));
+  box-shadow: inset 0 0 0 999px rgba(15, 23, 42, 0.02), inset 0 0 0 1px var(--tbl-line, var(--border));
+}
+.tbl-cell.picked,
+.tbl-cell.picked:hover {
+  background: var(--cell-bg, var(--row-active));
+  box-shadow: inset 0 0 0 999px rgba(30, 136, 229, 0.16), inset 0 0 0 1px var(--tbl-line, var(--border));
+}
+.tbl-cell.active,
+.tbl-cell.active:hover {
+  background: var(--cell-bg, var(--row-active));
+  box-shadow: inset 0 0 0 999px rgba(30, 136, 229, 0.16), inset 0 0 0 2px var(--accent);
+}
+
+/* ==========================================================================
+   ② 双击格子就地改字
+   ========================================================================== */
+.tbl-cell-input {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+}
+.tbl-cell-input::selection { background: var(--accent-soft, rgba(30, 136, 229, 0.25)); }
+
+/* ==========================================================================
+   ③ 单元格大预览（右面板）
+   ========================================================================== */
+.cpv-block { display: flex; flex-direction: column; gap: 6px; }
+.cpv-box {
+  position: relative;
+  display: flex;
+  min-height: 92px;
+  border: 1px dashed var(--border-strong, var(--border));
+  border-radius: 8px;
+  background: var(--panel-soft);
+  user-select: none;
+  box-sizing: border-box;
+}
+.cpv-box.is-dragging { border-color: var(--accent); }
+.cpv-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: inherit;
+  padding: 6px 8px;
+  border-radius: 4px;
+  outline: 1px dashed var(--border);
+  outline-offset: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+  overflow: hidden;
+}
+
+/* 四条可拖的边（10px 热区，鼠标放上去就能拖） */
+.cpv-edge { position: absolute; z-index: 2; }
+.cpv-edge.is-top { left: 0; right: 0; top: 0; height: 10px; cursor: ns-resize; }
+.cpv-edge.is-bottom { left: 0; right: 0; bottom: 0; height: 10px; cursor: ns-resize; }
+.cpv-edge.is-left { top: 0; bottom: 0; left: 0; width: 10px; cursor: ew-resize; }
+.cpv-edge.is-right { top: 0; bottom: 0; right: 0; width: 10px; cursor: ew-resize; }
+.cpv-edge:hover,
+.cpv-edge.active { background: var(--accent-soft, rgba(30, 136, 229, 0.16)); }
+
+/* 右下角：四边一起拖 */
+.cpv-corner {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  border-right: 2px solid var(--border-strong, var(--border));
+  border-bottom: 2px solid var(--border-strong, var(--border));
+  border-bottom-right-radius: 7px;
+}
+.cpv-corner:hover,
+.cpv-corner.active { border-color: var(--accent); background: var(--accent-soft, rgba(30, 136, 229, 0.16)); }
+
+.cpv-readout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.cpv-readout b { color: var(--text); font-weight: 700; }
+.cpv-hint { opacity: 0.85; }
+
+/* 字号：滑杆拖动 + 数值输入 */
+.cpv-size { display: flex; align-items: center; gap: 8px; }
+.cpv-size-head {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  min-width: 62px;
+}
+.cpv-size-head b { font-size: 11px; color: var(--text); }
+.cpv-size-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.cpv-size-fill {
+  position: absolute;
+  left: 1px;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 8px;
+  background: var(--accent-soft, rgba(30, 136, 229, 0.22));
+}
+.cpv-size-knob {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 14px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: translateY(-50%);
+}
+.cpv-size-track.is-dragging { border-color: var(--accent); }
+.cpv-size-num {
+  flex: 0 0 auto;
+  width: 62px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+/* 右侧面板里的四个"边距"数值：一行四个，窄一点 */
+.tbl-field.tiny { flex: 1 1 46px; }
+.tbl-field.tiny input { padding: 0 6px; }
+/* 复选框靠左，别在整行里居中（列方向 flex 会被拉成整行） */
+.tbl-field input[type='checkbox'] { align-self: flex-start; }
+/* ColorField 在表格面板里跟着字段行宽走 */
+.tbl-color-input { height: 28px; }
+
+/* 拖动改样式期间：全局光标保持一致，避免划过别的元素时闪回箭头 */
+body.bc-style-dragging,
+body.bc-style-dragging * { cursor: nwse-resize; }
+
+/* ==========================================================================
+   ④ 表格样式「大致效果」预览
+   ========================================================================== */
+.tpv-wrap { display: flex; flex-direction: column; gap: 4px; }
+.tpv-label { font-size: 10.5px; color: var(--text-muted); }
+.tpv-caption { font-size: 11px; color: var(--text); text-align: center; opacity: 0.9; }
+.tpv-table { border-radius: 6px; transition: background 0.12s ease, border-color 0.12s ease; }
+.tpv-cell { color: inherit; }
+.tpv-cell.is-head { font-weight: 600; }

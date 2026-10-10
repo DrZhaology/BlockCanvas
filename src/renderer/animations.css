@@ -86,6 +86,12 @@
   100% { box-shadow: 0 0 0 0 rgba(255, 138, 0, 0), 0 0 0 24px rgba(255, 138, 0, 0); }
 }
 
+/* ---------- 无限旋转（更新进度转圈） ---------- */
+@keyframes bcSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 /* ---------- 无障碍：系统开启「减少动态效果」时全部动画瞬时完成 ----------
    实现：所有动画引用统一走 --dur-* token，这里把 token 归零即可全局瞬时完成，
    无需任何强制优先级（遵守项目「零 !important」铁律）。 */

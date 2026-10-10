@@ -1,16 +1,21 @@
 import { create } from 'zustand';
 
-// BlockCanvas · 工具栏动态管理器（v0.4.3 全按钮自由池）
+// BlockCanvas · 工具栏动态管理器（v0.4.2 全按钮自由池 + 二级工具组）
 //
 // 所有按钮（含编辑操作、设备切换、缩放、体检、设置、插件命令）全部注册进本 store：
 //   · 每个按钮有「停靠区」dock：main = 主区（可滚动）/ right = 右侧固定区 / more = 收进「⋯更多」
 //   · 顺序全局共享一份（拖拽排序跨区有效），显隐由 dock 派生（more = 隐藏）
-//   · 显隐、顺序、停靠全部持久化到 localStorage；「恢复默认」一键清空
+//   · v0.4.2 新增「二级工具组」groups：若干按钮可打包成一个组按钮，
+//     鼠标浮在组按钮上即展开组内工具（不再让工具栏横向堆满）。
+//     —— 组内成员的最终停靠以「组」的 dock 为准（组移到右侧，成员一起走）。
+//   · 显隐、顺序、停靠、工具组全部持久化到 localStorage；「恢复默认」一键清空
 //
 // 兼容：老版本只有 visible 开关（bc-toolbar-visible）。首次读到 docks 缺失时，
 // 用 visible 推导初始停靠：false → more，true → 按钮的默认停靠。
 
 export type ToolbarDock = 'main' | 'right' | 'more';
+/** 工具组停靠区只允许放在可见区（主区 / 右侧），不能放进「更多」 */
+export type ToolbarGroupDock = 'main' | 'right';
 
 export interface ToolbarItem {
   /** 稳定 id（跨会话记忆），插件 id 统一加 "plg." 前缀避免重名 */
@@ -36,23 +41,76 @@ export interface ToolbarItem {
   block?: boolean;
 }
 
+/** 二级工具组：把若干按钮折叠成一个「组按钮」，鼠标悬浮展开里面的工具 */
+export interface ToolbarGroup {
+  /** 稳定 id（跨会话记忆），形如 "grp.xxx" */
+  id: string;
+  /** 组按钮显示名（悬浮面板顶部作为组标题） */
+  label: string;
+  /** 组按钮前导图标 */
+  icon?: string;
+  /** 组内成员（成员仍各自保留 order，用于组内排序） */
+  itemIds: string[];
+  /** 组停靠区：主区 / 右侧 */
+  dock: ToolbarGroupDock;
+  order: number;
+}
+
 interface ToolbarState {
   items: ToolbarItem[];
   /** 停靠记忆：id → main | right | more（more = 收进更多 = 不直接显示） */
   docks: Record<string, ToolbarDock>;
   /** 用户自定义的排序（id 序列）；未列出的按 order 兜底 */
   order: string[];
+  /** 二级工具组（v0.4.2） */
+  groups: ToolbarGroup[];
 
   addItem: (it: ToolbarItem) => void;
   removeItem: (id: string) => void;
   setDock: (id: string, dock: ToolbarDock) => void;
   setOrder: (ids: string[]) => void;
   reset: () => void;
+
+  // —— 工具组 ——
+  addGroup: (label: string, dock: ToolbarGroupDock, itemIds?: string[]) => string;
+  removeGroup: (id: string) => void;
+  renameGroup: (id: string, label: string) => void;
+  setGroupDock: (id: string, dock: ToolbarGroupDock) => void;
+  /** 把按钮加入某组（自动从原组移出，保证一个按钮只属于一个组） */
+  addToGroup: (groupId: string, itemId: string) => void;
+  /** 把按钮移出其所在组（回到自身 dock 决定的位置） */
+  removeFromGroup: (itemId: string) => void;
+  /** 重置某组成员（拖拽排序 / 批量整理用） */
+  setGroupMembers: (groupId: string, itemIds: string[]) => void;
 }
 
 const LS_DOCK = 'bc-toolbar-dock';
 const LS_VISIBLE = 'bc-toolbar-visible'; // 旧版显隐（只读迁移用）
 const LS_ORDER = 'bc-toolbar-order';
+const LS_GROUPS = 'bc-toolbar-groups';
+const LS_GROUPS_SCHEMA = 'bc-toolbar-groups-schema';
+const GROUPS_SCHEMA = 2; // v2：剪贴板组 → 「操作」组（并入撤销 / 重做按钮）
+
+/** 出厂默认工具组（首次运行 / 「恢复默认布局」时使用） */
+export const DEFAULT_GROUPS: ToolbarGroup[] = [
+  {
+    id: 'grp.ops',
+    label: '操作',
+    icon: '🛠️',
+    // 撤销 / 重做 / 复制 / 剪切 / 粘贴 —— 全部高频编辑动作收进一个组
+    itemIds: ['undo', 'redo', 'copy', 'cut', 'paste'],
+    dock: 'main',
+    order: 8
+  },
+  {
+    id: 'grp.device',
+    label: '设备',
+    icon: '📱',
+    itemIds: ['blk.device'],
+    dock: 'right',
+    order: 59
+  }
+];
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -80,10 +138,39 @@ function migrateDocks(items: ToolbarItem[]): Record<string, ToolbarDock> {
   return out;
 }
 
+let groupSeq = 0;
+function newGroupId(): string {
+  groupSeq += 1;
+  return 'grp.' + Date.now().toString(36) + '.' + groupSeq;
+}
+
+/**
+ * 读取工具组记忆（含一次性 schema 迁移）。
+ * v1 → v2：旧的「剪贴板」组（grp.clipboard）更名成「操作」（grp.ops），
+ * 并把新增的「撤销 / 重做」按钮并进去。迁移只跑一次（schema 标记），
+ * 之后用户手动把撤销/重做移出组的操作不会被反复覆盖。
+ */
+function loadGroups(): ToolbarGroup[] {
+  const saved = load<ToolbarGroup[] | null>(LS_GROUPS, null);
+  if (!saved) return DEFAULT_GROUPS;
+  const schema = load<number>(LS_GROUPS_SCHEMA, 1);
+  if (schema >= GROUPS_SCHEMA) return saved;
+
+  const groups = saved.map((g) => {
+    if (g.id !== 'grp.clipboard') return g;
+    const rest = g.itemIds.filter((x) => x !== 'undo' && x !== 'redo' && x !== 'copy' && x !== 'cut' && x !== 'paste');
+    return { ...g, id: 'grp.ops', label: '操作', icon: '🛠️', itemIds: ['undo', 'redo', 'copy', 'cut', 'paste', ...rest] };
+  });
+  save(LS_GROUPS, groups);
+  save(LS_GROUPS_SCHEMA, GROUPS_SCHEMA);
+  return groups;
+}
+
 export const useToolbar = create<ToolbarState>((set) => ({
   items: [],
   docks: {},
   order: load<string[]>(LS_ORDER, []),
+  groups: loadGroups(),
 
   addItem: (it) =>
     set((st) => {
@@ -105,7 +192,8 @@ export const useToolbar = create<ToolbarState>((set) => ({
     set((st) => ({
       items: st.items.filter((x) => x.id !== id),
       docks: Object.fromEntries(Object.entries(st.docks).filter(([k]) => k !== id)),
-      order: st.order.filter((x) => x !== id)
+      order: st.order.filter((x) => x !== id),
+      groups: st.groups.map((g) => ({ ...g, itemIds: g.itemIds.filter((x) => x !== id) }))
     })),
 
   setDock: (id, dock) =>
@@ -129,8 +217,67 @@ export const useToolbar = create<ToolbarState>((set) => ({
         localStorage.removeItem(LS_DOCK);
         localStorage.removeItem(LS_VISIBLE);
         localStorage.removeItem(LS_ORDER);
+        localStorage.removeItem(LS_GROUPS);
+        localStorage.setItem(LS_GROUPS_SCHEMA, JSON.stringify(GROUPS_SCHEMA));
       } catch {}
-      return { docks: {}, order: [] };
+      return { docks: {}, order: [], groups: DEFAULT_GROUPS };
+    }),
+
+  // —————————————— 工具组 ——————————————
+  addGroup: (label, dock, itemIds = []) => {
+    const id = newGroupId();
+    set((st) => {
+      const groups = [...st.groups, { id, label, dock, itemIds, order: 50 }];
+      save(LS_GROUPS, groups);
+      return { groups };
+    });
+    return id;
+  },
+
+  removeGroup: (id) =>
+    set((st) => {
+      const groups = st.groups.filter((g) => g.id !== id);
+      save(LS_GROUPS, groups);
+      return { groups };
+    }),
+
+  renameGroup: (id, label) =>
+    set((st) => {
+      const groups = st.groups.map((g) => (g.id === id ? { ...g, label } : g));
+      save(LS_GROUPS, groups);
+      return { groups };
+    }),
+
+  setGroupDock: (id, dock) =>
+    set((st) => {
+      const groups = st.groups.map((g) => (g.id === id ? { ...g, dock } : g));
+      save(LS_GROUPS, groups);
+      return { groups };
+    }),
+
+  addToGroup: (groupId, itemId) =>
+    set((st) => {
+      const groups = st.groups.map((g) => {
+        const without = g.itemIds.filter((x) => x !== itemId);
+        if (g.id === groupId) return { ...g, itemIds: [...without, itemId] };
+        return { ...g, itemIds: without };
+      });
+      save(LS_GROUPS, groups);
+      return { groups };
+    }),
+
+  removeFromGroup: (itemId) =>
+    set((st) => {
+      const groups = st.groups.map((g) => ({ ...g, itemIds: g.itemIds.filter((x) => x !== itemId) }));
+      save(LS_GROUPS, groups);
+      return { groups };
+    }),
+
+  setGroupMembers: (groupId, itemIds) =>
+    set((st) => {
+      const groups = st.groups.map((g) => (g.id === groupId ? { ...g, itemIds } : g));
+      save(LS_GROUPS, groups);
+      return { groups };
     })
 }));
 
@@ -157,4 +304,14 @@ export function getSortedItems(items: ToolbarItem[], order: string[]): ToolbarIt
     if (a.order !== b.order) return a.order - b.order;
     return a.id.localeCompare(b.id);
   });
+}
+
+/** itemId → 所属工具组 */
+export function groupOfItem(itemId: string, groups: ToolbarGroup[]): ToolbarGroup | undefined {
+  return groups.find((g) => g.itemIds.includes(itemId));
+}
+
+/** 取某组在「已排序 item 序列」中的成员（顺序跟随全局排序） */
+export function orderedMembers(g: ToolbarGroup, sorted: ToolbarItem[]): ToolbarItem[] {
+  return sorted.filter((it) => g.itemIds.includes(it.id));
 }

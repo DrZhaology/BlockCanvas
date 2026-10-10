@@ -35,17 +35,44 @@ export interface HealthIssue {
 
 // ============ 工具 ============
 
-/** 收集树里所有非根节点 */
+/**
+ * 这张 <table> 是否参与体检。
+ * 表格默认**不参与**：一格一个 td/th，正常做表格既不给格子起类名也不写 CSS，
+ * 参与体检只会刷出一大串"未命名元素"，把真正要处理的问题淹掉。
+ * 想纳入的表格，在表格编辑器右侧面板把「参与导出前体检」打开（node.healthCheck = true）。
+ */
+function tableInHealthCheck(n: SceneElement): boolean {
+  return n.type !== 'table' || n.healthCheck === true;
+}
+
+/**
+ * 收集树里所有参与体检的非根节点。
+ * 遇到"不参与体检"的表格 → 整棵子树（含它的所有单元格）一起跳过。
+ */
 function collect(root: SceneElement): SceneElement[] {
   const out: SceneElement[] = [];
   const walk = (n: SceneElement) => {
     for (const c of n.children) {
+      if (!tableInHealthCheck(c)) continue;
       out.push(c);
       walk(c);
     }
   };
   walk(root);
   return out;
+}
+
+/** 当前被"跳过体检"的表格张数（向导里给用户一句说明，避免以为是漏检） */
+export function countSkippedTables(root: SceneElement): number {
+  let n = 0;
+  const walk = (node: SceneElement) => {
+    for (const c of node.children) {
+      if (c.type === 'table' && c.healthCheck !== true) { n += 1; continue; }
+      walk(c);
+    }
+  };
+  walk(root);
+  return n;
 }
 
 /** 元素的"名字"：关系选择器 > 类名 > ID。没有则为空 */
@@ -80,7 +107,9 @@ function suggestClassName(n: SceneElement, used: Set<string>): string {
 export function runHealthCheck(root: SceneElement): HealthIssue[] {
   const issues: HealthIssue[] = [];
   const all = collect(root);
-  if (all.length === 0) {
+  // 「画布还是空的」看的是真实子节点，不是"参与体检的元素"——
+  // 否则一张被跳过体检的表格会让向导说"画布还是空的"。
+  if (root.children.length === 0) {
     issues.push({
       id: 'empty',
       severity: 'info',
@@ -301,4 +330,9 @@ export function countBySeverity(issues: HealthIssue[]): Record<Severity, number>
 /** 是否存在「导出必错」级别的问题（用于导出前拦截） */
 export function hasBlocking(issues: HealthIssue[]): boolean {
   return issues.some((i) => i.severity === 'critical');
+}
+
+// 测试钩子：E2E 探针直接读体检结果，不用去刮向导 DOM（与 sceneStore 的 window.__sceneStore 同一套做法）
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__healthCheck = runHealthCheck;
 }

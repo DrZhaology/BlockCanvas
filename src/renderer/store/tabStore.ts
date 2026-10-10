@@ -37,6 +37,31 @@ function genTabId() {
   return 'tab-' + Date.now().toString(36) + '-' + (nextId++);
 }
 
+/**
+ * 判断一个工程是不是「完全空」（v0.4.3）。
+ * 用途：新建标签默认 isDirty=true（便于提示保存），但一不小心点出来的空项目
+ * 关闭时不该再被拦一道 —— 凡是根容器没有任何子元素、且页面级 CSS / 设计变量
+ * 都还是出厂状态的，就是"什么都没做过的空壳"，可以直接关。
+ */
+export function isEmptyProject(scene: SceneGraph | null | undefined): boolean {
+  if (!scene || !scene.root) return true;
+  const fresh = createEmptyScene();
+  if (scene.root.children.length > 0) return false;
+  if (JSON.stringify(scene.root.style ?? {}) !== JSON.stringify(fresh.root.style)) return false;
+  const qc = scene.quickCss ?? {};
+  for (const v of Object.values(qc)) {
+    if (v !== undefined && v !== null && String(v).trim() !== '') return false;
+  }
+  const cur = scene.tokens ?? [];
+  const def = fresh.tokens ?? [];
+  if (cur.length !== def.length) return false;
+  for (const t of cur) {
+    const o = def.find((x) => x.name === t.name);
+    if (!o || JSON.stringify(o) !== JSON.stringify(t)) return false;
+  }
+  return true;
+}
+
 let syncTimer: number = 0;
 let isSwitchingTab = false; // 标记当前是否正处于切 tab 过程中，防止 subscribe 误判 dirty
 function debouncePersistSession(get: () => TabState) {

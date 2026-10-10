@@ -6,9 +6,11 @@ import { zipCreate, zipList } from './zip';
 import {
   dataRoot, initDataDirectories, readAppConfig, writeAppConfig, listProjects,
   listProjectBackups, saveProjectSnapshotFile, deleteProjectBackupFolder,
-  readSession, writeSession, getStorageStats, clearAppCache, clearOrphanBackups,
-  getLocalVersion, fetchReleases, compareVersion, findMatchingAsset, applyUpdate
+  readSession, writeSession, getStorageStats, clearAppCache, clearOrphanBackups
 } from './userData';
+import {
+  getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo, applyUpdate
+} from './updater';
 
 // 启动最优先：初始化纯便携数据区 data/，隔离系统盘
 initDataDirectories();
@@ -171,39 +173,30 @@ ipcMain.handle('data:clear-orphan-backups', () => clearOrphanBackups());
 
 // ============ 自动更新 IPC ============
 ipcMain.handle('update:get-version', () => getLocalVersion());
+// 「关于」页的阶段文案（来源 version.json → tools/sync-version.mjs → package.json.bcStage）
+ipcMain.handle('app:get-stage', () => getAppStage());
 
 ipcMain.handle('update:check', async () => {
   const localVer = getLocalVersion();
-  const releases = await fetchReleases(10);
-  if (!releases || releases.length === 0) return { ok: false, error: '无法连接到更新服务器（请检查网络，并确保已关闭 Watt Toolkit / Clash 等后台代理）' };
-
-  const latest = releases[0];
-  const hasUpdate = compareVersion(localVer, latest.version) < 0;
-  // 当前平台的匹配资产（null = 这一版没有当前平台的构建，可检测不可更新）
-  const latestAsset = findMatchingAsset(latest.assets);
+  // per_page=100：够覆盖"当前版本 + 往前 5 个 + 往后的全部版本"
+  const fetched = await fetchReleases(100);
+  if (!fetched) {
+    return {
+      ok: false,
+      isDev: !app.isPackaged,
+      localVersion: localVer,
+      platform: process.platform,
+      mirrors: getMirrorInfo(),
+      error: '三个来源都连不上（NexaCode 镜像 / gh-proxy 镜像 / GitHub 直连）。请检查网络，并关闭 Watt Toolkit / Clash 等后台代理后重试。'
+    };
+  }
+  const built = buildUpdateList(localVer, fetched.list, fetched.source);
   return {
     ok: true,
     isDev: !app.isPackaged,
-    localVersion: localVer,
-    hasUpdate,
     platform: process.platform,
-    releases: releases.map((r) => ({
-      tag: r.tag,
-      version: r.version,
-      name: r.name,
-      publishedAt: r.publishedAt,
-      prerelease: !!r.prerelease,
-      body: r.body || '',
-      assets: r.assets
-    })),
-    latest: {
-      version: latest.version,
-      name: latest.name,
-      tag: latest.tag,
-      publishedAt: latest.publishedAt,
-      prerelease: !!latest.prerelease,
-      asset: latestAsset
-    }
+    mirrors: getMirrorInfo(),
+    ...built
   };
 });
 

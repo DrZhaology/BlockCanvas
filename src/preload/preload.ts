@@ -61,6 +61,9 @@ contextBridge.exposeInMainWorld('bc', {
     ipcRenderer.invoke('update:apply', assetUrl),
   getLocalVersion: () =>
     ipcRenderer.invoke('update:get-version'),
+  /** 阶段展示文案（version.json → package.json.bcStage） */
+  getAppStage: () =>
+    ipcRenderer.invoke('app:get-stage'),
   /** 更新进度推送（下载百分比 / 阶段消息），返回取消监听的函数 */
   onUpdateProgress: (cb: (p: { msg: string; pct?: number }) => void) => {
     const h = (_e: unknown, p: { msg: string; pct?: number }) => cb(p);
