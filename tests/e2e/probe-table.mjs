@@ -3,7 +3,7 @@
 import { createRequire } from 'module';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
-import { mkdirSync, rmSync, cpSync, existsSync } from 'fs';
+import { mkdirSync, rmSync, cpSync, existsSync, readFileSync } from 'fs';
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
 const { _electron: electron } = require('playwright');
@@ -59,11 +59,16 @@ const READ_LAST_TABLE = `(() => {
 
 async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-table-probe');
-  rmSync(DATA_DIR, { recursive: true, force: true });
+  // 上一轮残留的 Electron 可能还锁着临时目录（Windows 会报 EBUSY）——
+  // 清不掉就沿用旧目录，别让清理动作把整轮测试打断。
+  try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
   const SRC = resolve(ROOT, 'extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  // 导出验证：命中 BC_AUTO_EXPORT_PATH 时主进程跳过保存对话框直接落盘
+  const EXPORT_PATH = resolve(ROOT, 'tests/e2e/tmp-table-export.html');
+  if (existsSync(EXPORT_PATH)) rmSync(EXPORT_PATH, { force: true });
+  const env = { ...process.env, BC_DATA_DIR: DATA_DIR, BC_AUTO_EXPORT_PATH: EXPORT_PATH };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -257,7 +262,7 @@ async function main() {
   mkdirSync(resolve(ROOT, 'tests/e2e/shots-v042'), { recursive: true });
     await win.locator('[data-cell="0-0"]').hover();
   await sleep(400);
-  await win.screenshot({ path: resolve(ROOT, 'tests/e2e/shots-v042/table-editor.png') });
+  await win.screenshot({ path: resolve(ROOT, 'tests/e2e/shots-v042/table-editor.png'), timeout: 5000 });
   const b00 = await win.locator('[data-cell="0-0"]').boundingBox();
   const b12 = await win.locator('[data-cell="1-2"]').boundingBox();
   if (b00 && b12) {
@@ -266,7 +271,7 @@ async function main() {
     await win.mouse.move(b12.x + b12.width / 2, b12.y + b12.height / 2, { steps: 8 });
     await win.mouse.up();
     await sleep(500);
-    await win.screenshot({ path: resolve(ROOT, 'tests/e2e/shots-v042/table-editor-select.png') });
+    await win.screenshot({ path: resolve(ROOT, 'tests/e2e/shots-v042/table-editor-select.png'), timeout: 5000 });
   }
 
   // ============ 11. 结构开关：表头行 / 表尾行 / 标题 ============
@@ -590,6 +595,7 @@ async function main() {
   const btnBox = await win.locator('.tb-health-btn').first().boundingBox();
   if (btnBox) {
     await win.screenshot({
+      timeout: 5000,
       path: resolve(ROOT, 'tests/e2e/shots-v042/health-badge.png'),
       clip: { x: btnBox.x - 16, y: btnBox.y - 16, width: btnBox.width + 44, height: btnBox.height + 32 }
     });
@@ -745,6 +751,7 @@ async function main() {
     const x = Math.max(0, sideBox.x);
     const y = Math.max(0, sideBox.y);
     await win.screenshot({
+      timeout: 5000,
       path: resolve(ROOT, 'tests/e2e/shots-v042/table-live.png'),
       clip: { x, y, width: Math.min(sideBox.width, vp.w - x), height: Math.min(sideBox.height, vp.h - y) }
     });
@@ -753,6 +760,7 @@ async function main() {
   const stageBox = await win.locator('.table-stage').first().boundingBox();
   if (stageBox) {
     await win.screenshot({
+      timeout: 5000,
       path: resolve(ROOT, 'tests/e2e/shots-v042/table-left-live.png'),
       clip: { x: Math.max(0, stageBox.x), y: Math.max(0, stageBox.y), width: stageBox.width, height: Math.min(stageBox.height, 520) }
     });
@@ -766,6 +774,7 @@ async function main() {
     const x2 = Math.max(0, styleCard.x);
     const y2 = Math.max(0, Math.min(styleCard.y, vp2.h - 200));
     await win.screenshot({
+      timeout: 5000,
       path: resolve(ROOT, 'tests/e2e/shots-v042/table-style-preview.png'),
       clip: { x: x2, y: y2, width: styleCard.width, height: Math.min(styleCard.height, vp2.h - y2) }
     });
@@ -773,6 +782,139 @@ async function main() {
 
   await win.locator('.fluent-back-btn').first().click();
   await sleep(500);
+
+  // ============ 16. 跨表唯一命名 / 不串味 / 每表独立 <style>（v0.4.4） ============
+  // 老 bug：元素面板插表时每张表都套默认类名 data-table → 自动取名给两张表生成
+  // 一模一样的关系选择器 → 导出互相覆盖 + syncClassmates 按同名选择器全量复制
+  // → "改表 A 的一格，表 B 的同一格跟着变"。
+  const mkTable = async () => {
+    await win.evaluate(() => window.__sceneStore.getState().selectElement(null));
+    await win.locator('.element-btn', { hasText: '表格' }).first().click();
+    await sleep(600);
+    await win.locator('.tab-btn', { hasText: '属性' }).first().click();
+    await sleep(400);
+    await win.locator('.tbl-entry button').first().click();
+    await win.waitForSelector('.table-page', { timeout: 8000 });
+    await sleep(500);
+    await win.locator('.tbl-empty-state .tbl-btn', { hasText: '加 3 行' }).first().click().catch(() => {});
+    await sleep(450);
+    await win.locator('.tbl-rail-col').last().click().catch(() => {});
+    await sleep(350);
+    await win.locator('.tbl-rail-col').last().click().catch(() => {});
+    await sleep(420);
+    await win.locator('.tbl-autoname-btn').first().click().catch(() => {});
+    await sleep(500);
+    await win.locator('.fluent-back-btn').first().click();
+    await sleep(600);
+  };
+  await mkTable();
+  await mkTable();
+
+  const dumpTables = () => win.evaluate(() => {
+    const tables = [];
+    const find = (n) => { if (n.type === 'table') tables.push(n); for (const c of n.children) find(c); };
+    find(window.__sceneStore.getState().scene.root);
+    const out = [];
+    for (const t of tables) {
+      const nodes = [];
+      const walk = (n, d) => {
+        nodes.push({ d, type: n.type, id: n.id,
+          rsel: (n.attrs && n.attrs.relSelector) || '',
+          style: Object.keys(n.style || {}).map((k) => k + '=' + n.style[k]).join(',') });
+        for (const c of n.children) walk(c, d + 1);
+      };
+      walk(t, 0);
+      out.push({ id: t.id, cls: (t.attrs && t.attrs.className) || '', nodes });
+    }
+    return out;
+  });
+
+  let allTables = await dumpTables();
+  const fresh = allTables.slice(-2); // 只校验本轮新插的这两张（文档里还有前面章节留下的表）
+  ok('两张表拿到互不相同的默认类名', fresh.length === 2 && fresh[0].cls !== fresh[1].cls,
+    JSON.stringify(fresh.map((t) => t.cls)));
+  const allRels = [];
+  for (const t of allTables) for (const n of t.nodes) if (n.rsel) allRels.push(n.rsel);
+  const dupRels = [...new Set(allRels.filter((r, i) => allRels.indexOf(r) !== i))];
+  ok('自动取名后**全文档**没有重复的关系选择器（每个元素都有自己的）',
+    dupRels.length === 0, `共 ${allRels.length} 条，重复 ${dupRels.length}`);
+  const unnamedInner = fresh.reduce((n, t) => n + t.nodes.filter((x) => x.d > 0 && !x.rsel).length, 0);
+  ok('新插的表格里每个元素都有独立选择器', unnamedInner === 0, `未命名 ${unnamedInner}`);
+
+  // 改表 2 第 2 行第 1 格 → 只能有 1 格变化
+  const pair = await win.evaluate(() => {
+    const tables = [];
+    const find = (n) => { if (n.type === 'table') tables.push(n); for (const c of n.children) find(c); };
+    find(window.__sceneStore.getState().scene.root);
+    const a = tables[0].children.find((c) => c.type === 'tbody');
+    const b = tables[1].children.find((c) => c.type === 'tbody');
+    return { aSame: a.children[1].children[0].id, b: b.children[1].children[0].id };
+  });
+  await win.evaluate((id) => window.__sceneStore.getState().updateStyle(id, { backgroundColor: '#ff0000' }), pair.b);
+  await sleep(400);
+  const red = [];
+  allTables = await dumpTables();
+  for (const t of allTables) for (const n of t.nodes) if (n.style.includes('#ff0000')) red.push(n.id);
+  ok('改表2的格子不会带动表1的同名格子（syncClassmates 不再跨表误伤）',
+    red.length === 1 && red[0] === pair.b, `变红 ${red.length} 格`);
+
+  // ============ 17. 表格编辑器 Ctrl+C（TSV / 整表 HTML） ============
+  await win.locator('.tab-btn', { hasText: '属性' }).first().click();
+  await sleep(400);
+  await win.locator('.tbl-entry button').first().click();
+  await win.waitForSelector('.table-page', { timeout: 8000 });
+  await sleep(500);
+  await win.locator('.tbl-cell[data-cell="0-0"]').first().click({ position: { x: 8, y: 10 } });
+  await sleep(350);
+  await win.keyboard.press('Control+c');
+  await sleep(500);
+  const toast1 = ((await win.locator('.tbl-toast').first().innerText().catch(() => '')) || '').trim();
+  ok('Ctrl+C 复制选中格 → 有结果提示且说明是 Tab 分隔',
+    toast1.includes('已复制') && toast1.includes('1 行'), toast1);
+
+  // 拖选一片再复制
+  await win.locator('.tbl-cell[data-cell="0-0"]').first().click({ position: { x: 8, y: 10 } });
+  await sleep(200);
+  const dragBox = await win.locator('.tbl-cell[data-cell="1-1"]').first().boundingBox();
+  if (dragBox) {
+    await win.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2);
+    await win.mouse.down();
+    await win.mouse.move(dragBox.x + dragBox.width / 2 + 4, dragBox.y + dragBox.height / 2 + 4);
+    await win.mouse.up();
+    await sleep(350);
+  }
+  await win.keyboard.press('Control+c');
+  await sleep(500);
+  const toast2 = ((await win.locator('.tbl-toast').first().innerText().catch(() => '')) || '').trim();
+  ok('Ctrl+C 复制选区 → 提示行数×列数', /已复制 \d+ 行 × \d+ 列/.test(toast2), toast2);
+
+  await win.keyboard.press('Control+Shift+c');
+  await sleep(500);
+  const toast3 = ((await win.locator('.tbl-toast').first().innerText().catch(() => '')) || '').trim();
+  ok('Ctrl+Shift+C 复制整张表 HTML', toast3.includes('HTML'), toast3);
+
+  // ============ 18. 导出：每张表一个独立 <style> ============
+  await win.locator('.fluent-back-btn').first().click();
+  await win.waitForSelector('.toolbar', { timeout: 8000 });
+  await sleep(600);
+  await win.locator('button', { hasText: '导出 HTML' }).first().click();
+  for (let i = 0; i < 25 && !existsSync(EXPORT_PATH); i++) await sleep(300);
+  if (existsSync(EXPORT_PATH)) {
+    const html = readFileSync(EXPORT_PATH, 'utf-8');
+    const tableTags = [...html.matchAll(/<style data-bc-table="([^"]+)"/g)].map((m) => m[1]);
+    ok('导出里每张表一个 <style data-bc-table="…">', tableTags.length >= 2, JSON.stringify(tableTags));
+    // 每块只含自己那张表的选择器
+    const blocks = html.split(/<style[^>]*>/).slice(1).map((s) => s.split('</style>')[0]);
+    const tableBlocks = blocks.filter((b) => b.includes('这张表专属'));
+    const crossContaminated = tableBlocks.filter((b, i) => {
+      const others = tableTags.filter((_, j) => j !== i);
+      return others.some((o) => b.includes('.' + o + ' '));
+    });
+    ok('表格样式块之间没有互相混入别的表的选择器', crossContaminated.length === 0,
+      `被污染的块 ${crossContaminated.length}`);
+  } else {
+    ok('导出成功（BC_AUTO_EXPORT_PATH）', false, '没等到文件');
+  }
 
   ok('无 console 错误', errs.length === 0, errs.slice(0, 3).join(' | '));
   console.log(`\n===== 表格探针：${pass} 通过 / ${fail} 失败 =====`);

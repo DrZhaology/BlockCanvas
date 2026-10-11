@@ -115,6 +115,28 @@ async function main() {
   await sleep(450);
   await shot('08-表格设置面板-数值与单位分离', '.tbl-card:has-text("表格设置")');
 
+  // 5. 编辑器 vs 画布：同一张表两边长得一样吗（v0.4.4 第二批）
+  await win.locator('.tbl-rail-col').last().click().catch(() => {});
+  await sleep(400);
+  await win.locator('.tbl-card:has-text("一键预设样式") .tbl-preset', { hasText: '斑马' }).first().click().catch(() => {});
+  await sleep(600);
+  await win.locator('.tbl-autoname-btn').first().click().catch(() => {});
+  await sleep(600);
+  await win.screenshot({ path: resolve(OUT, '09-表格编辑器-套预设后.png'), timeout: 8000 });
+  console.log('  ✓ 09-表格编辑器-套预设后');
+
+  await win.locator('.fluent-back-btn').first().click().catch(() => {});
+  await win.waitForSelector('.toolbar', { timeout: 8000 });
+  await sleep(900);
+  const tbl = await win.locator('.canvas table').first().boundingBox().catch(() => null);
+  if (tbl) {
+    await win.screenshot({
+      path: resolve(OUT, '10-画布上的同一张表.png'),
+      clip: { x: Math.max(0, tbl.x - 12), y: Math.max(0, tbl.y - 12), width: Math.min(tbl.width + 24, 1400), height: Math.min(tbl.height + 24, 700) }
+    });
+    console.log('  ✓ 10-画布上的同一张表');
+  }
+
   await app.close();
   console.log('\n图已存到 tests/e2e/shots-v044/');
 }

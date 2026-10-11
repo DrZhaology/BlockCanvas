@@ -23,7 +23,9 @@ const ok = (name, cond, extra) => {
 
 async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-probe-update');
-  rmSync(DATA_DIR, { recursive: true, force: true });
+  // 上一轮残留的 Electron 可能还锁着临时目录（Windows 会报 EBUSY）——
+  // 清不掉就沿用旧目录，别让清理动作把整轮测试打断。
+  try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
   const SRC = resolve(ROOT, 'extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });

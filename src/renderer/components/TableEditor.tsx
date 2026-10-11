@@ -4,13 +4,15 @@ import { useScene, findNode } from '@store/sceneStore';
 import type { ElementStyle, SceneElement } from '@lib/types';
 import {
   readTable, normalizeTable, buildGrid, canMergeRange, applyTableOp, findTableAncestor,
-  autoNameTableInner, countUnnamedInner,
+  autoNameTableInner, countUnnamedInner, collectUsedNames, uniqueTableClassName,
   type GridCell, type TableOp
 } from '@lib/tableOps';
 import { TABLE_STYLE_PRESETS, TABLE_STRUCTURE_TEMPLATES, applyTableStylePreset, type TableStylePreset } from '@lib/tablePresets';
 import { HelpButton } from './HelpButton';
 import { ColorPicker, ColorField } from './ColorPicker';
 import { useWheelAdjust } from '@lib/wheelAdjust';
+import { isValidChildSelector, cssTextToObject } from '@lib/styleClass';
+import { exportHTML } from '@lib/exporter';
 
 // ============================================================================
 // BlockCanvas · 表格编辑页（v0.4.3）
@@ -96,10 +98,109 @@ function tableLiveStyle(s: ElementStyle | undefined): React.CSSProperties {
   if (bw || bs || bc) out.border = `${bw || '1px'} ${bs || 'solid'} ${bc || 'var(--border)'}`;
   if (s.borderTopLeftRadius) out.borderRadius = s.borderTopLeftRadius;
   if (s.boxShadow) out.boxShadow = s.boxShadow;
+  // v0.4.4：把"能在这张网格上体现"的表格级设置也画出来 —— 否则会出现
+  // "右边设了宽度/对齐，左边网格没反应，看着像设置项没生效"。
+  if (s.width) out.width = s.width;
+  if (s.textAlign) out.textAlign = s.textAlign;
   // 内部网格线跟着边框颜色走，改一次颜色整张表的线一起变
   if (bc) out['--tbl-line'] = bc;
   return out as React.CSSProperties;
 }
+
+// ============================================================================
+// 单元格最终外观：把表格的「子元素样式」（childStyles：`.data-table th { … }`）
+// 里**命中这一格**的规则按顺序叠起来，再盖上这一格自己的 style。
+// ----------------------------------------------------------------------------
+// 为什么要这么做：预设的 th / td 内边距、分隔线都写在表格的 childStyles 里，
+// 画布与导出会按 CSS 规则应用它们，而编辑器以前只看格子自己的 style ——
+// 于是"编辑器里看到的"和"画布/导出的"长得不一样（用户报的"设置项没作用/不一致"）。
+// 优先级与浏览器一致：childStyles 规则先铺底，格子自己的 style 覆盖在上面
+//（格子有类名/关系选择器/行内样式时都比 `.表 th` 更具体）。
+// ============================================================================
+
+/** 单段复合选择器（`td` / `.cls` / `#id` / `td.note`）是否命中某元素 */
+function matchCompound(part: string, el: SceneElement): boolean {
+  const tagM = /^[A-Za-z][A-Za-z0-9-]*/.exec(part);
+  if (tagM && el.type.toLowerCase() !== tagM[0].toLowerCase()) return false;
+  const rest = part.slice(tagM ? tagM[0].length : 0);
+  const tokens = rest.match(/[.#][A-Za-z0-9_-]+/g) ?? [];
+  for (const t of tokens) {
+    if (t[0] === '.') {
+      const list = (el.attrs?.className ?? '').trim().split(/\s+/).filter(Boolean);
+      if (!list.includes(t.slice(1))) return false;
+    } else if ((el.attrs?.id ?? '').trim() !== t.slice(1)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** 拆选择器为「复合段 + 组合符」（只支持空格后代与 > 子代，够覆盖本项目能生成的写法） */
+function parseChainSelector(sel: string): { compounds: string[]; combs: ('desc' | 'child')[] } {
+  const raw = sel.trim().split(/(\s*>\s*|\s+)/).filter((s) => s !== '');
+  const compounds: string[] = [];
+  const combs: ('desc' | 'child')[] = [];
+  for (const p of raw) {
+    if (p.includes('>')) { combs.push('child'); continue; }
+    if (/^\s+$/.test(p)) { combs.push('desc'); continue; }
+    compounds.push(p.trim());
+  }
+  const out: ('desc' | 'child')[] = [];
+  for (let i = 0; i < compounds.length - 1; i++) out.push(combs[i] === 'child' ? 'child' : 'desc');
+  return { compounds, combs: out };
+}
+
+/** 选择器是否命中「从表根到这一格」的链（chain 的最后一项就是元素自己） */
+function matchesChain(sel: string, chain: SceneElement[]): boolean {
+  if (chain.length === 0) return false;
+  const { compounds, combs } = parseChainSelector(sel);
+  if (compounds.length === 0) return false;
+  if (!matchCompound(compounds[compounds.length - 1], chain[chain.length - 1])) return false;
+  let ci = chain.length - 2;
+  for (let i = compounds.length - 2; i >= 0; i--) {
+    if (combs[i] === 'child') {
+      if (ci < 0 || !matchCompound(compounds[i], chain[ci])) return false;
+      ci -= 1;
+    } else {
+      let found = false;
+      while (ci >= 0) {
+        if (matchCompound(compounds[i], chain[ci])) { found = true; ci -= 1; break; }
+        ci -= 1;
+      }
+      if (!found) return false;
+    }
+  }
+  return true;
+}
+
+/** 合并出这一格的最终样式（camelCase，可直接喂给 cellLiveStyle / React） */
+function resolveCellStyle(
+  chain: SceneElement[],
+  childStyles: { sel: string; css: string }[] | undefined
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const cs of childStyles ?? []) {
+    const sel = (cs.sel ?? '').trim();
+    if (!sel || !isValidChildSelector(sel) || !matchesChain(sel, chain)) continue;
+    Object.assign(out, cssTextToObject(cs.css));
+  }
+  const own = chain[chain.length - 1]?.style as Record<string, string> | undefined;
+  if (own) {
+    // ⚠ 简写会吃掉长写：`.data-table td { padding: 9px 12px }` 给了 padding 简写，
+    //   而这一格自己只改 paddingTop —— 若两条并存，readPad/render 会按简写走，
+    //   用户改的值就"没作用"了。所以这一格一旦碰了某一组属性，先把继承来的整组清掉。
+    for (const group of [PAD_KEYS, MARGIN_KEYS, RADIUS_KEYS]) {
+      if (group.some((k) => own[k] != null && own[k] !== '')) for (const k of group) delete out[k];
+    }
+    for (const [k, v] of Object.entries(own)) if (v != null && v !== '') out[k] = v;
+  }
+  return out;
+}
+
+/** 会被"简写 vs 长写"互相覆盖的几组属性 */
+const PAD_KEYS = ['padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'];
+const MARGIN_KEYS = ['margin', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft'];
+const RADIUS_KEYS = ['borderRadius', 'borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomRightRadius', 'borderBottomLeftRadius'];
 
 /**
  * 单元格最终外观 = 表格级（继承） + 这一格自己的覆盖。
@@ -128,6 +229,10 @@ function cellLiveStyle(cell: ElementStyle | undefined, table: ElementStyle | und
   if (cell.verticalAlign) {
     out.alignItems = cell.verticalAlign === 'top' ? 'flex-start' : cell.verticalAlign === 'bottom' ? 'flex-end' : 'center';
   }
+  // v0.4.4：补齐"画布上会画、编辑器以前不画"的几项，让两边看起来一致
+  if (cell.whiteSpace) out.whiteSpace = cell.whiteSpace;
+  const bw = cell.borderTopWidth, bs = cell.borderTopStyle, bc = cell.borderTopColor;
+  if (bw || bs || bc) out.border = `${bw || '1px'} ${bs || 'solid'} ${bc || 'var(--tbl-line, var(--border))'}`;
   return out as React.CSSProperties;
 }
 
@@ -159,6 +264,34 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
   const grid = useMemo(() => buildGrid(parts ? parts.rows : []), [parts]);
   const cols = grid.cols;
   const rowCount = grid.rowCount;
+
+  /**
+   * 每个元素的「祖先链」（相对 <table>，含自己）—— 用来判断表格的 childStyles 规则
+   * （`.data-table th { … }`）有没有命中它，好让编辑器里看到的和画布/导出一致。
+   */
+  const cellChains = useMemo(() => {
+    const m = new Map<string, SceneElement[]>();
+    if (!parts) return m;
+    const secs: SceneElement[] = [];
+    if (parts.caption) secs.push(parts.caption);
+    if (parts.thead) secs.push(parts.thead);
+    secs.push(parts.tbody);
+    if (parts.tfoot) secs.push(parts.tfoot);
+    for (const sec of secs) {
+      m.set(sec.id, [sec]);
+      if (sec.type === 'caption') continue;
+      for (const row of sec.children) {
+        if (row.type !== 'tr') continue;
+        m.set(row.id, [sec, row]);
+        for (const cell of row.children) m.set(cell.id, [sec, row, cell]);
+      }
+    }
+    return m;
+  }, [parts]);
+
+  /** 这一格在编辑器里应该长什么样 = 表格子元素规则（命中的那些）+ 这一格自己的样式 */
+  const styleOfCell = (cell: SceneElement) =>
+    resolveCellStyle(cellChains.get(cell.id) ?? [cell], table?.childStyles);
 
   // ——— 选区派生 ———
   const rect = useMemo(() => {
@@ -198,6 +331,84 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
       if (sel.r >= rowCount || sel.r2 >= rowCount || sel.c >= cols || sel.c2 >= cols) setSel(null);
     }
   }, [sel, cols, rowCount]);
+
+  // ——— Ctrl/⌘ + C：复制选中格（TSV，可直接粘进 Excel）/ 没选中时复制整张表 ———
+  // 表格编辑器是独立视图，全局快捷键在这里是放行的，所以自己接管。
+  const [toast, setToast] = useState('');
+  const toastTimer = useRef(0);
+  const flashToast = (msg: string) => {
+    setToast(msg);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(''), 3600);
+  };
+
+  /** 某一格的文字（合并格统一由锚点提供，被盖住的坐标返回空串 —— 与 Excel 粘贴一致） */
+  const textAt = (r: number, c: number): string => {
+    const g = grid.cells.find((x) => x.row === r && x.col === c);
+    return g ? (g.cell.text ?? '').trim() : '';
+  };
+  /** 当前选区 → TSV（Tab 分隔换行，粘进表格软件就是一张表） */
+  const selectionTsv = (): { tsv: string; rows: number; cols: number } => {
+    const rowsList = parts ? parts.rows : [];
+    if (!sel) {
+      const rows = rowsList.map((row) =>
+        row.children.filter((c) => c.type === 'td' || c.type === 'th').map((c) => (c.text ?? '').trim()).join('\t')
+      );
+      return { tsv: rows.join('\n'), rows: rows.length, cols: Math.max(0, ...rows.map((r) => r.split('\t').length)) };
+    }
+    if (sel.kind === 'row') {
+      const row = rowsList[sel.r];
+      const cells = row ? row.children.filter((c) => c.type === 'td' || c.type === 'th') : [];
+      return { tsv: cells.map((c) => (c.text ?? '').trim()).join('\t'), rows: 1, cols: cells.length };
+    }
+    const c0 = sel.kind === 'col' ? sel.c : rect!.c0;
+    const c1 = sel.kind === 'col' ? sel.c : rect!.c1;
+    const r0 = sel.kind === 'col' ? 0 : rect!.r0;
+    const r1 = sel.kind === 'col' ? rowCount - 1 : rect!.r1;
+    const out: string[] = [];
+    for (let r = r0; r <= r1; r++) {
+      const line: string[] = [];
+      for (let c = c0; c <= c1; c++) line.push(textAt(r, c));
+      out.push(line.join('\t'));
+    }
+    return { tsv: out.join('\n'), rows: r1 - r0 + 1, cols: c1 - c0 + 1 };
+  };
+
+  /** 整张表的 HTML 源码（复用导出器，取 body 内容） */
+  const tableHtml = (): string => {
+    const st = useScene.getState();
+    const cur = findNode(st.scene.root, tableId);
+    if (!cur) return '';
+    const graph = { ...st.scene, root: { ...st.scene.root, id: 'bc-copy-root', children: [cur] } };
+    const res = exportHTML(graph);
+    const m = /<body[^>]*>([\s\S]*)<\/body>/i.exec(res.html);
+    return (m ? m[1] : res.html).trim();
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      if (e.key.toLowerCase() !== 'c') return;
+      // 正在输入框里打字 → 交还给浏览器（用户想复制的是自己输入的内容）
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.shiftKey) {
+        const html = tableHtml();
+        flashToast(copyText(html) ? '✓ 已复制整张表的 HTML 源码（可直接粘进别的网页/编辑器）' : '复制失败：剪贴板不可用');
+        return;
+      }
+      const { tsv, rows, cols } = selectionTsv();
+      if (!tsv.trim()) { flashToast('这张表还没有内容可复制'); return; }
+      flashToast(copyText(tsv)
+        ? `✓ 已复制 ${rows} 行 × ${cols} 列（Tab 分隔，可直接粘进 Excel / WPS）`
+        : '复制失败：剪贴板不可用');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, rect, rowCount, parts, tableId]);
 
   // 选区可以完全取消（用户要求：不强制始终选中一格）：
   //   · 按 Esc
@@ -314,12 +525,26 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
 
   /** 表格里还有多少内部元素没有名字（自动命名按钮上的计数） */
   const unnamedInner = useMemo(() => (table ? countUnnamedInner(table) : 0), [table]);
+  /** 自动命名后的结果提示（6 秒后淡出） */
+  const [autoNameHint, setAutoNameHint] = useState('');
 
-  /** 一键给内部元素生成精准关系选择器：.data-table > tbody > tr:nth-child(2) > td:nth-child(1) */
+  /**
+   * 一键给内部元素生成精准关系选择器：.data-table > tbody > tr:nth-child(2) > td:nth-child(1)
+   * ⚠ 会先扫文档，保证**跨表不重名**（表锚点重名就自动加序号，内部选择器跟着换锚点）。
+   */
   const autoNameInner = () => {
-    const cur = findNode(useScene.getState().scene.root, tableId);
+    const st = useScene.getState();
+    const cur = findNode(st.scene.root, tableId);
     if (!cur || cur.type !== 'table') return;
-    useScene.getState().replaceSubtree(tableId, autoNameTableInner(cur));
+    const { classes, selectors } = collectUsedNames(st.scene.root, tableId);
+    const r = autoNameTableInner(cur, { usedClasses: classes, usedSelectors: selectors });
+    st.replaceSubtree(tableId, r.table);
+    const bits: string[] = [];
+    if (r.named > 0) bits.push(`新命名 ${r.named} 个元素`);
+    if (r.fixed > 0) bits.push(`修正 ${r.fixed} 个会串味的选择器`);
+    if (r.renamedTo) bits.push(`表名与别的表重复，已改用 ${r.renamedTo}`);
+    setAutoNameHint(bits.length > 0 ? '✓ ' + bits.join('；') : '✓ 所有内部元素都已经是各自独立的选择器');
+    window.setTimeout(() => setAutoNameHint(''), 6000);
   };
 
   /** 把当前这一格的样式复制给表格里所有单元格（会话式写入 → 一条撤销） */
@@ -470,7 +695,9 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
   const applyPreset = (id: string) => {
     const preset = TABLE_STYLE_PRESETS.find((p) => p.id === id);
     if (!preset) return;
-    const cls = (table.attrs?.className ?? '').trim() || 'data-table';
+    // 预设需要"挂靠点"；表还没有类名时给一个**文档内唯一**的（避免两张表同名互相覆盖）
+    const cls = (table.attrs?.className ?? '').trim()
+      || uniqueTableClassName(useScene.getState().scene.root, tableId);
     useScene.getState().replaceSubtree(tableId, applyTableStylePreset(table, preset, cls));
   };
 
@@ -480,7 +707,12 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
     const st = useScene.getState();
     const owner = findTableAncestor(scene.root, tableId);
     const parentId = owner ? findParentOf(scene.root, owner.id) : null;
-    st.insertTemplate(tpl.build(), parentId);
+    const built = tpl.build();
+    // 新插的表也要拿到文档内唯一的默认类名（否则两张表的子元素规则会互相覆盖）
+    if (built.type === 'table' && !(built.attrs?.className ?? '').trim()) {
+      built.attrs = { ...(built.attrs ?? {}), className: uniqueTableClassName(st.scene.root) };
+    }
+    st.insertTemplate(built, parentId);
     onBack();
   };
 
@@ -522,6 +754,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
           </div>
           <div className="tbl-stage-tip">
             缝上悬浮出 <b>＋</b>：点一下插 1 个，按住拖动可一次插多个 · 格子上拖动可拖选一片，<b>Ctrl+点</b> 加选、<b>Del</b> 清空文字
+            · <b>Ctrl+C</b> 复制选区（Tab 分隔，可直接粘进 Excel）、<b>Ctrl+Shift+C</b> 复制整张表 HTML
           </div>
 
           {/* 选区操作条：固定位置（不浮在格子上挡住视线），没选中时按钮禁用 */}
@@ -658,7 +891,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                       style={{
                         gridColumn: `${3 + 2 * c} / span ${2 * cs - 1}`,
                         gridRow: `${3 + 2 * r} / span ${2 * rs - 1}`,
-                        ...cellLiveStyle(cell.style, table.style)
+                        ...cellLiveStyle(styleOfCell(cell), table.style)
                       }}
                       title={`第 ${r + 1} 行 · 第 ${colLetter(c)} 列${cs > 1 ? `（跨 ${cs} 列）` : ''}${rs > 1 ? `（跨 ${rs} 行）` : ''}（按住可拖选一片；Ctrl/⌘ 点 = 并进选区；双击 = 改文字）`}
                       onPointerDown={(e) => {
@@ -816,10 +1049,17 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                 onClick={autoNameInner}
               >⚡ 自动取名表格内的元素{unnamedInner > 0 ? `（${unnamedInner}）` : ''}</button>
               <span className="tbl-hint">
-                {unnamedInner > 0
-                  ? '内部元素按结构序号自动命名，不再需要一个个起类名'
-                  : '内部元素都已命名'}
+                {autoNameHint
+                  ? autoNameHint
+                  : unnamedInner > 0
+                    ? '内部元素按结构序号自动命名，不再需要一个个起类名'
+                    : '内部元素都已命名'}
               </span>
+            </div>
+            {autoNameHint && <div className="tbl-autoname-result">{autoNameHint}</div>}
+            <div className="tbl-hint tbl-autoname-tip">
+              每个内部元素都会拿到<b>只有它自己</b>的选择器（如 <code>.data-table &gt; tbody &gt; tr:nth-child(2) &gt; td:nth-child(1)</code>）；
+              表名与别的表重复时自动改用 <code>-2 / -3</code> 后缀，避免两张表互相覆盖样式。
             </div>
             <label className="tbl-switch-row">
               <input
@@ -1304,6 +1544,12 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
         </div>,
         document.body
       )}
+
+      {/* 复制结果提示（Ctrl+C / Ctrl+Shift+C） */}
+      {toast && createPortal(
+        <div className="tbl-toast">{toast}</div>,
+        document.body
+      )}
     </div>
   );
 }
@@ -1311,6 +1557,35 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
 /** 统一的样式写入入口（都走 store.updateStyle → 有 undo） */
 function setStyleOf(id: string, patch: Partial<ElementStyle>) {
   useScene.getState().updateStyle(id, patch);
+}
+
+/**
+ * 复制文本到系统剪贴板。
+ * ⚠ 不用 navigator.clipboard 打头：打包版是 file:// 载入的，不是安全上下文，
+ *   navigator.clipboard 可能整个不存在。textarea + execCommand 在老环境下更稳。
+ */
+function copyText(text: string): boolean {
+  if (!text) return false;
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '0';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (ok) return true;
+  } catch { /* 落到下面的兜底 */ }
+  try {
+    void navigator.clipboard?.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ============================================================================

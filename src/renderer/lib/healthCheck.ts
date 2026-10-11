@@ -8,9 +8,10 @@
 //
 // 本模块是纯逻辑（不 import React），工具栏 ⚠ 面板与「导出前体检」向导共用同一份结果。
 
-import { useScene } from '@store/sceneStore';
+import { useScene, findNode } from '@store/sceneStore';
 import { styleToCssText, simplifyStyle } from '@lib/styleClass';
 import { isValidClassToken } from '@lib/classColor';
+import { collectUsedNames, autoNameTableInner, findTableAncestor } from '@lib/tableOps';
 import type { SceneElement } from '@lib/types';
 
 export type Severity = 'critical' | 'warn' | 'info';
@@ -255,7 +256,57 @@ export function runHealthCheck(root: SceneElement): HealthIssue[] {
     });
   }
 
-  // ⑤ 非法类名 —— CSS 里根本选不中
+  // ⑤ 关系选择器重名 —— 关系选择器是"结构定位"，两张同名表会长得一模一样
+  // （v0.4.4：元素面板插表时每张都套默认类名 data-table，自动取名后两张表的
+  //  `.data-table > tbody > tr:nth-child(2) > td:nth-child(1)` 完全相同：
+  //   导出 CSS 互相覆盖 + 改一张表的一格、另一张表的同位置格子跟着变。）
+  const relOwners = new Map<string, string[]>();
+  for (const n of all) {
+    const rel = (n.attrs?.relSelector ?? '').trim();
+    if (!rel) continue;
+    const list = relOwners.get(rel) ?? [];
+    list.push(n.id);
+    relOwners.set(rel, list);
+  }
+  const dupRels = [...relOwners.entries()].filter(([, ids]) => ids.length > 1);
+  if (dupRels.length > 0) {
+    // 找出"受影响"的表（重名选择器所属的表）
+    const affectedIds: string[] = [];
+    for (const [, ids] of dupRels) {
+      for (const id of ids) {
+        const t = findTableAncestor(root, id);
+        if (t && !affectedIds.includes(t.id)) affectedIds.push(t.id);
+      }
+    }
+    issues.push({
+      id: 'dup-rel-selector',
+      severity: 'critical',
+      title: `${dupRels.length} 个关系选择器被多个元素共用`,
+      detail:
+        '关系选择器是按结构定位的，例如 `.data-table > tbody > tr:nth-child(2) > td:nth-child(1)`。\n' +
+        '两张表如果用了同一个类名，它们同位置的格子会算出一模一样的选择器 —— 导出的 CSS 互相覆盖，\n' +
+        '而且改一张表的格子，另一张表的格子也会跟着变。\n' +
+        '一键修复 = 给重名的表换一个独有的类名，并把内部选择器重排成各自专属的。',
+      fixLabel: '自动消歧',
+      fix: () => {
+        const st = useScene.getState();
+        st.beginStyleEdit();
+        for (const tid of affectedIds) {
+          // 每改一张表都重新取一次最新树：前面的改动会影响后面的查重结果
+          const cur = findNode(useScene.getState().scene.root, tid);
+          if (!cur || cur.type !== 'table') continue;
+          const { classes, selectors } = collectUsedNames(useScene.getState().scene.root, tid);
+          const r = autoNameTableInner(cur, { usedClasses: classes, usedSelectors: selectors });
+          if (r.renamedTo || r.fixed > 0 || r.named > 0) st.replaceSubtree(tid, r.table);
+        }
+        st.endStyleEdit();
+      },
+      locateId: dupRels[0][1][0],
+      goto: 'class'
+    });
+  }
+
+  // ⑥ 非法类名 —— CSS 里根本选不中
   const badNames = all.filter((n) => {
     const cls = (n.attrs?.className ?? '').trim();
     if (!cls) return false;
@@ -273,7 +324,7 @@ export function runHealthCheck(root: SceneElement): HealthIssue[] {
     });
   }
 
-  // ⑥ 图片缺 alt —— 可访问性与 SEO
+  // ⑦ 图片缺 alt —— 可访问性与 SEO
   const imgsNoAlt = all.filter((n) => n.type === 'img' && !(n.attrs?.alt ?? '').trim());
   if (imgsNoAlt.length > 0) {
     issues.push({
@@ -287,7 +338,7 @@ export function runHealthCheck(root: SceneElement): HealthIssue[] {
     });
   }
 
-  // ⑦ 空链接 —— a 标签没有 href，点击没反应
+  // ⑧ 空链接 —— a 标签没有 href，点击没反应
   const emptyLinks = all.filter((n) => n.type === 'a' && !(n.attrs?.href ?? '').trim());
   if (emptyLinks.length > 0) {
     issues.push({

@@ -191,6 +191,10 @@ export function applyTableStylePreset(table: SceneElement, preset: TableStylePre
   }
 
   // 斑马纹 → 偶数数据行（tbody 内第 2/4/6… 行）整行底色
+  // ⚠ v0.4.4：只在"这一格没有自定义底色"时才铺 —— 以前无条件写，
+  //   用户手改过的格子底色会被下一次套预设悄悄冲掉（表现为"设置了没作用"）。
+  //   判定方法：先把上一次预设留下的斑马色清掉，再看还剩下什么。
+  const ZEBRA_LEFTOVERS = new Set(['#f8fafc', '#fbfdff', '#fafbfc']);
   const tbody = next.children.find((c) => c.type === 'tbody');
   const bodyRows = (tbody ? tbody.children : next.children).filter((c) => c.type === 'tr');
   bodyRows.forEach((row, i) => {
@@ -198,8 +202,8 @@ export function applyTableStylePreset(table: SceneElement, preset: TableStylePre
     for (const cell of row.children) {
       if (cell.type !== 'th' && cell.type !== 'td') continue;
       const s = { ...cell.style };
-      if (preset.zebra && even) s.backgroundColor = preset.zebra;
-      else if (s.backgroundColor === '#f8fafc' || s.backgroundColor === '#fbfdff' || s.backgroundColor === '#fafbfc') delete s.backgroundColor;
+      if (s.backgroundColor && ZEBRA_LEFTOVERS.has(s.backgroundColor)) delete s.backgroundColor;
+      if (preset.zebra && even && !s.backgroundColor) s.backgroundColor = preset.zebra;
       cell.style = s;
     }
   });

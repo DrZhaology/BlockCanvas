@@ -335,32 +335,58 @@ export function quickCssToCss(q: SceneGraph['quickCss'] | undefined): string {
 // 生成 <style> 块：① 自动规则 ② 快速设置 ③ 用户全局 CSS（放最后 → 用户可覆盖）
 // 规则直接写 .类名 / #id（不做 :where）：自动块在最前面，用户全局 CSS 在最后，
 // 同特异性选择器后来者胜 → 用户永远能覆盖自动样式（即"所见即所得、可覆盖"）
+//
+// v0.4.4 新增 opts：支持把自动规则**按选择器分块**输出（导出时"一张表一个 <style>"就是靠它）。
+//   · onlySelectors    只输出这些选择器的自动规则
+//   · excludeSelectors 排除这些选择器（表格规则单独成块时给主块用）
+//   · withTokens       是否带「设计变量」段（默认 true）
+//   · withPageCss      是否带「快速设置 + 用户全局 CSS」段（默认 true）
+export interface StyleBlockOpts {
+  onlySelectors?: Set<string>;
+  excludeSelectors?: Set<string>;
+  withTokens?: boolean;
+  withPageCss?: boolean;
+  /** 自动规则段前面的注释（分块时用来写"表 N · .data-table"） */
+  autoComment?: string;
+}
+
 export function buildStyleBlock(
   ctx: StyleClassSet,
   globalCss?: string,
   quickCss?: SceneGraph['quickCss'],
-  tokens?: SceneGraph['tokens']
+  tokens?: SceneGraph['tokens'],
+  opts: StyleBlockOpts = {}
 ): string {
-  const autoRules = ctx.order.map((sel) => `${sel} { ${ctx.rules.get(sel)} }`);
+  const { onlySelectors, excludeSelectors, withTokens = true, withPageCss = true, autoComment } = opts;
+  const keep = (sel: string): boolean => {
+    if (onlySelectors && !onlySelectors.has(sel)) return false;
+    if (excludeSelectors && excludeSelectors.has(sel)) return false;
+    return true;
+  };
+  const autoRules = ctx.order.filter(keep).map((sel) => `${sel} { ${ctx.rules.get(sel)} }`);
   const rulesBlock = autoRules.length > 0 ? autoRules.join('\n') : '';
-  const userCss = (globalCss ?? '').trim();
-  const quickBlock = quickCssToCss(quickCss);
-  const tokenBlock = tokensToCss(tokens ?? []);
-  if (!rulesBlock && !userCss && !quickBlock && !tokenBlock) return '';
+  const userCss = withPageCss ? (globalCss ?? '').trim() : '';
+  const quickBlock = withPageCss ? quickCssToCss(quickCss) : '';
+  const tokenBlock = withTokens ? tokensToCss(tokens ?? []) : '';
+  const tabletOrder = ctx.tabletOrder.filter(keep);
+  const mobileOrder = ctx.mobileOrder.filter(keep);
+  if (!rulesBlock && !userCss && !quickBlock && !tokenBlock && tabletOrder.length === 0 && mobileOrder.length === 0) return '';
   const parts: string[] = [];
   // 变量必须最先定义：后面的规则（含自动样式、快速设置、用户 CSS）才能引用 var(--bc-*)
   if (tokenBlock) {
     parts.push('/* ==== 设计变量（改这里，所有引用 var(--bc-*) 的地方会一起变） ==== */\n' + tokenBlock);
   }
   if (rulesBlock) {
-    parts.push('/* ==== 自动生成的样式（放最前面；你写的全局 CSS 放最后，同权重规则后写者胜，可以覆盖这里） ==== */\n' + rulesBlock);
+    parts.push((autoComment
+      || '/* ==== 自动生成的样式（放最前面；你写的全局 CSS 放最后，同权重规则后写者胜，可以覆盖这里） ==== */')
+      + '\n' + rulesBlock);
   }
-  if (ctx.tabletOrder.length > 0) {
-    const tabletLines = ctx.tabletOrder.map((sel) => `  ${sel} { ${ctx.tabletRules.get(sel)} }`).join('\n');
+  if (tabletOrder.length > 0) {
+    const tabletLines = tabletOrder.map((sel) => `  ${sel} { ${ctx.tabletRules.get(sel)} }`).join('\n');
     parts.push('/* ==== 平板端响应式样式 (max-width: 768px) ==== */\n@media (max-width: 768px) {\n' + tabletLines + '\n}');
   }
-  if (ctx.mobileOrder.length > 0) {
-    const mobileLines = ctx.mobileOrder.map((sel) => `  ${sel} { ${ctx.mobileRules.get(sel)} }`).join('\n');
+  if (mobileOrder.length > 0) {
+    const mobileLines = mobileOrder.map((sel) => `  ${sel} { ${ctx.mobileRules.get(sel)} }`).join('\n');
     parts.push('/* ==== 手机端响应式样式 (max-width: 480px) ==== */\n@media (max-width: 480px) {\n' + mobileLines + '\n}');
   }
   if (quickBlock) {
