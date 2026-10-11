@@ -476,8 +476,11 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
             }}
           />
           {queryInput.trim() && (
-            <span className={'help-search-count' + (hits === 0 ? ' is-empty' : '')}>
-              {results.length > 0 ? `${results.length} 个段落` : '没有匹配'}
+            <span
+              className={'help-search-count' + (hits === 0 ? ' is-empty' : '')}
+              title={`当前文档命中 ${hits} 处；下方结果框按权重列出全部三份文档的相关段落`}
+            >
+              {hits === 0 ? '没有匹配' : `${hits} 处`}
             </span>
           )}
           {/* 搜索结果下拉框（按权重排序） */}
