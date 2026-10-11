@@ -1,5 +1,7 @@
 // BlockCanvas 渲染进程向主进程暴露的 API（由 preload 注入）
 
+import type { BgTask } from '@lib/taskTypes';
+
 export interface ProjectFileInfo {
   fileName: string;
   filePath: string;
@@ -106,13 +108,29 @@ declare global {
           asset: { url: string; name: string; size: number } | null;
         } | null;
       }>;
-      applyUpdate: (assetUrl: string) => Promise<{ ok: boolean; error?: string }>;
+      applyUpdate: (assetUrl: string, fileName: string, version: string, tag: string) => Promise<{ ok: boolean; error?: string; taskId?: string }>;
       onUpdateProgress: (cb: (p: { msg: string; pct?: number }) => void) => () => void;
       getLocalVersion: () => Promise<string>;
       /** 阶段展示文案（version.json → package.json.bcStage） */
       getAppStage: () => Promise<string>;
-      /** 单独下载发行版资产到 data/downloads/（不替换程序） */
-      downloadReleaseAsset: (assetUrl: string, fileName: string) => Promise<{ ok: boolean; path?: string; error?: string; mirror?: string }>;
+      /** 单独下载发行版资产到 data/downloads/（不替换程序）—— 后台任务 */
+      downloadReleaseAsset: (assetUrl: string, fileName: string, tag?: string, title?: string) => Promise<{ ok: boolean; path?: string; error?: string; taskId?: string }>;
+
+      // ============ 后台任务（下载 / 更新，v0.4.4）============
+      listTasks: () => Promise<BgTask[]>;
+      pauseTask: (id: string) => Promise<BgTask[]>;
+      resumeTask: (id: string) => Promise<BgTask[]>;
+      cancelTask: (id: string) => Promise<BgTask[]>;
+      dismissTask: (id: string) => Promise<BgTask[]>;
+      revealTask: (id: string) => Promise<{ ok: boolean; error?: string }>;
+      revealPath: (p: string) => Promise<{ ok: boolean; error?: string }>;
+      /** 用系统默认浏览器打开外链（只放行 http/https） */
+      openExternal: (url: string) => Promise<{ ok: boolean; error?: string }>;
+      onTasksChanged: (cb: (tasks: BgTask[]) => void) => () => void;
+
+      // ============ 帮助文档（README.md）============
+      getReadme: () => Promise<{ ok: boolean; text?: string; path?: string; source?: string; bundled?: boolean }>;
+      getAppRoot: () => Promise<string>;
 
       // 扩展与插件
       scanExtensions: () => Promise<ScanResult>;

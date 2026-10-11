@@ -1,24 +1,26 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useUpdateBusy } from '@store/updateStore';
+import { useTasks } from '@store/taskStore';
+import { InlineTaskStrip } from './TaskButton';
+import { RESUMABLE_STATUS, type BgTask } from '@lib/taskTypes';
 
-// BlockCanvas · 更新中心（v0.4.4 重排 + UI 打磨）
+// BlockCanvas · 更新中心（v0.4.4 第三版）
 //
 // 读取发行版信息：NexaCode 镜像 → gh-proxy(v4) → GitHub 直连（三层自动回退，用户无感）
-// 下载更新包：    gh-proxy(v4) → NexaCode → GitHub 直连 + zip 完整性校验
+// 下载：           gh-proxy(v4) → NexaCode → GitHub 直连 + zip 完整性校验
 //
-// 三个板块（默认展开状态按"用户最可能想看的"排）：
-//   ① 可更新        默认**完全展开**：比本地新的版本 + 直接显示发行说明（Markdown 渲染）+ 更新按钮
-//   ② 可选择更新    默认折叠：就是当前在装的这一版，展开后可「重新安装此版本」
-//   ③ 历史版本      默认折叠：更早的版本，逐条可查看发行说明（Markdown）、可「下载 zip」到 data/downloads/
-//                 底部「查看更多」逐段放开更多历史（后端一次给 30 条）
-// 读取源 / 下载源这类技术细节默认收起在「检测详情」里。
+// 三个板块：① 可更新（默认完全展开）② 可选择更新（重装）③ 历史版本（默认折叠）
 //
-// ⚠ 两条硬规则（v0.4.4 修）：
-//   · 「更新」（替换程序）才锁死编辑器 + 全屏遮罩；
-//   · 「下载 zip」只落盘、不替换程序 → 绝不弹全屏遮罩、绝不锁编辑器，
-//     进度条显示在**对应版本卡片的下方**（每个版本各自一条）。
-//     以前两者共用同一个 updateStore.progress 且 progress() 会把 busy 置真，
-//     于是点一下"下载 zip"就弹出"正在更新 BlockCanvas…"并永远卡在最后一帧。
+// v0.4.4 的两处结构性变化：
+//   · **进度不再由本页记** —— 下载/更新都是主进程里的"后台任务"，页面只是订阅者。
+//     于是：离开这一页、切到别的视图、甚至重启软件，任务与"已下载"都还在；
+//     也能在工具栏「任务」按钮里统一查看与暂停/继续（以前进度存在组件 state 里，一离开就没了）。
+//   · **少弹窗**：更新不再有 confirm 确认框 —— 点「更新到这一版」直接开始，
+//     进度显示在版本卡片下方 + 工具栏任务按钮里；替换程序那一步才锁编辑器。
+//
+// ⚠ 两条硬规则（v0.4.4 起）：
+//   · 「更新」（替换程序）最后一步才锁死编辑器 + 全屏遮罩；
+//   · 「下载 zip」只落盘、不替换程序 → 绝不弹全屏遮罩、绝不锁编辑器。
 
 interface VersionEntry {
   tag: string;
@@ -58,13 +60,6 @@ const ADAPTED_PLATFORMS = ['win32', 'darwin', 'linux'];
 
 const HISTORY_PAGE = 5;
 
-/** 某个版本的「下载 zip」进度（与全局更新状态完全隔离） */
-interface DlState {
-  msg: string;
-  pct: number | null;
-  error?: boolean;
-}
-
 function fmtSize(bytes: number): string {
   if (!bytes) return '-';
   const mb = bytes / 1048576;
@@ -92,8 +87,10 @@ function pickDownloadAsset(entry: VersionEntry): { name: string; url: string; si
 }
 
 // ============ 极简 Markdown 渲染（发行说明用） ============
-// 只支持 GitHub Release 里最常见的几种：标题 / 列表 / 引用 / 代码块 / 分隔线 + 行内粗体·斜体·代码·链接。
-// 不走 dangerouslySetInnerHTML —— 远端内容一律当纯文本节点渲染，天然免疫注入。
+// ⚠ 这一份是给**远端内容**（GitHub Release 正文）用的：只做白名单式解析，
+//   从不产生原始 HTML，所以天然免疫注入。
+//   帮助中心渲染本地 README 用的是 marked（见 HelpCenter.tsx）—— 那里需要保留 README 里的
+//   居中横幅等原始 HTML，属于可信来源，两者用途不同、刻意分开。
 
 /** 行内标记：**粗** *斜* `码` [文字](链接) */
 function mdInline(text: string, keyPrefix: string): ReactNode[] {
@@ -119,7 +116,7 @@ function mdInline(text: string, keyPrefix: string): ReactNode[] {
   return out;
 }
 
-function Markdown({ text }: { text: string }) {
+export function Markdown({ text }: { text: string }) {
   const lines = (text || '').replace(/\r\n/g, '\n').split('\n');
   const blocks: ReactNode[] = [];
   let list: ReactNode[] = [];
@@ -214,7 +211,6 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
   const [checking, setChecking] = useState(true);
   const [result, setResult] = useState<CheckResult | null>(null);
   const [applyError, setApplyError] = useState('');
-  const [restarting, setRestarting] = useState(false);
   // 三个板块的折叠状态：① 可更新默认展开；②③ 默认折叠
   const [openUpdatable, setOpenUpdatable] = useState(true);
   const [openReinstall, setOpenReinstall] = useState(false);
@@ -223,19 +219,14 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
   const [historyShown, setHistoryShown] = useState(HISTORY_PAGE);
   // 每条历史版本各自展开的发行说明
   const [notesOpen, setNotesOpen] = useState<string | null>(null);
-  // 「下载 zip」的进度：**按版本 tag 分开存**，只显示在对应卡片下方，不锁编辑器
-  const [dlState, setDlState] = useState<Record<string, DlState>>({});
-  const [downloaded, setDownloaded] = useState<Record<string, string>>({});
-  // 主进程进度推送是共用通道：用 ref 区分"这次是下载 zip"还是"这次是真正的更新"
-  const dlTagRef = useRef<string | null>(null);
 
+  // 后台任务（主进程持有真相）：进度、暂停、继续、取消都从这里来
+  const tasks = useTasks((s) => s.tasks);
   const busy = useUpdateBusy((s) => s.busy);
-  // ⚠ 注意：selector 必须返回**稳定值**（基本类型）。写成 `(s) => ({a:s.a,b:s.b})`
-  //    每次都会产出新对象 → useSyncExternalStore 判定"快照变了"→ 无限重渲染（白屏）。
-  const message = useUpdateBusy((s) => s.message);
-  const pct = useUpdateBusy((s) => s.pct);
-  const startBusy = useUpdateBusy((s) => s.start);
-  const setProgress = useUpdateBusy((s) => s.progress);
+
+  /** 某个版本 tag 相关的任务：更新的（tag 相同）或下载 zip 的 */
+  const taskOfTag = (tag: string, kind: 'download' | 'update'): BgTask | undefined =>
+    tasks.find((t) => t.tag === tag && t.kind === kind);
 
   const check = async () => {
     setChecking(true);
@@ -254,60 +245,28 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
   // 进入页面自动检测一次
   useEffect(() => { void check(); }, []);
 
-  // 订阅主进程的进度推送：
-  //   · 正在下载 zip → 进度挂到对应版本卡片下方（不进全局 store，编辑器照常可用）
-  //   · 否则（真正的更新流程）→ 走全局进度（配合 App 的全屏遮罩）
-  useEffect(() => {
-    const off = window.bc.onUpdateProgress((p) => {
-      const tag = dlTagRef.current;
-      if (tag) {
-        setDlState((m) => ({ ...m, [tag]: { msg: p.msg, pct: p.pct ?? null } }));
-      } else {
-        setProgress(p.msg, p.pct);
-      }
-    });
-    return off;
-  }, [setProgress]);
-
+  /**
+   * 更新到某一版：**不再弹 confirm**（v0.4.4「尽量少弹窗」）。
+   * 点一下就直接开始 —— 下载进度会出现在这张卡片下方，同时工具栏「任务」按钮里也能看到。
+   * 只有到"解压 / 替换程序"那一步才锁编辑器（全屏遮罩）。
+   */
   const install = async (entry: VersionEntry) => {
     if (!entry.asset) return;
-    const ok = confirm(
-      `确定要更新到 v${entry.version} 吗？\n\n` +
-      `· 更新包：${entry.asset.name}（${fmtSize(entry.asset.size)}）\n` +
-      `· 只替换程序本体，data/ 里的全部工程与快照都会保留；\n` +
-      `· 下载完成后程序会自动重启，期间请不要操作软件。`
-    );
-    if (!ok) return;
-
     setApplyError('');
-    startBusy('正在准备下载…');
-    const r = (await window.bc.applyUpdate(entry.asset.url)) as unknown as { ok: boolean; error?: string };
-    if (r.ok) {
-      setRestarting(true);
-    } else {
-      useUpdateBusy.getState().finish();
-      setApplyError(r.error || '更新失败');
-    }
+    const r = (await window.bc.applyUpdate(
+      entry.asset.url, entry.asset.name, entry.version, entry.tag
+    )) as unknown as { ok: boolean; error?: string };
+    if (!r.ok) setApplyError(r.error || '更新失败');
   };
 
-  /** 下载某个版本的 zip 到 data/downloads/（换程序本体？不 —— 所以不锁编辑器、不弹遮罩） */
+  /** 下载某个版本的 zip 到 data/downloads/（后台任务：可暂停/继续，离开页面也不会断） */
   const downloadZip = async (entry: VersionEntry) => {
     const asset = pickDownloadAsset(entry);
-    if (!asset || dlState[entry.tag] && !dlState[entry.tag].error) return;
-    dlTagRef.current = entry.tag;
-    setDlState((m) => ({ ...m, [entry.tag]: { msg: `正在准备下载 ${asset.name}…`, pct: 0 } }));
-    try {
-      const r = await window.bc.downloadReleaseAsset(asset.url, asset.name);
-      if (r.ok && r.path) {
-        setDownloaded((m) => ({ ...m, [entry.tag]: r.path! }));
-        setDlState((m) => { const n = { ...m }; delete n[entry.tag]; return n; });
-      } else {
-        setDlState((m) => ({ ...m, [entry.tag]: { msg: `下载失败：${r.error || '未知错误'}`, pct: null, error: true } }));
-      }
-    } catch (e: any) {
-      setDlState((m) => ({ ...m, [entry.tag]: { msg: `下载失败：${e?.message || '未知错误'}`, pct: null, error: true } }));
-    }
-    dlTagRef.current = null;
+    if (!asset) return;
+    const r = (await window.bc.downloadReleaseAsset(
+      asset.url, asset.name, entry.tag, `下载 ${entry.tag} 的 zip`
+    )) as unknown as { ok: boolean; error?: string };
+    if (!r.ok) setApplyError(r.error || '下载启动失败');
   };
 
   const entries = result?.entries ?? [];
@@ -324,43 +283,80 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
   const platformAdapted = ADAPTED_PLATFORMS.includes(platform);
   const shownOlder = older.slice(0, historyShown);
 
-  /** 历史版本行里：下载进度 / 已保存提示 —— 都放在卡片下方（v0.4.4） */
-  const renderDlStrip = (tag: string) => {
-    const dl = dlState[tag];
-    const saved = downloaded[tag];
-    if (!dl && !saved) return null;
-    if (saved && !dl) {
-      return (
-        <div className="update-dl-strip is-done">
-          <span className="update-dl-done">✓ 已下载到 <b title={saved}>data/downloads/</b></span>
-          <button
-            className="btn-mini"
-            onClick={() => { void window.bc.openDataPath('downloads'); }}
-            title="在文件管理器里打开 data/downloads 文件夹"
-          >打开文件夹</button>
+  /** 正在跑的更新任务（页面顶部也会显示一条总览） */
+  const runningUpdate = tasks.find((t) => t.kind === 'update' && (t.status === 'running' || t.status === 'applying'));
+
+  /**
+   * 版本卡片下方的任务条：
+   *   · update 任务 → 显示"更新进行中"的阶段与进度
+   *   · download 任务 → 进行中/可继续/失败都显示
+   *   · 下载完成 → 「✓ 已下到 data/downloads」+「打开 zip 所在的文件夹」
+   * 数据全部来自主进程，所以**下次打开这一页它还在**。
+   */
+  const renderTaskStrip = (tag: string) => {
+    const dlTask = taskOfTag(tag, 'download');
+    const upTask = taskOfTag(tag, 'update');
+    const strips: ReactNode[] = [];
+
+    if (upTask) {
+      const failed = upTask.status === 'error';
+      strips.push(
+        <div key={`up-${upTask.id}`} className={'update-dl-strip' + (failed ? ' is-error' : '')}>
+          <div className="update-dl-head">
+            <span className="update-dl-msg">{upTask.detail}</span>
+            {!failed && <span className="update-dl-pct">{Math.round(upTask.pct)}%</span>}
+            {failed && (
+              <button className="btn-mini" onClick={() => void window.bc.dismissTask(upTask.id)}>知道了</button>
+            )}
+          </div>
+          {!failed && (
+            <div className="update-dl-bar">
+              <div className="update-dl-fill" style={{ width: `${Math.max(0, Math.min(100, upTask.pct))}%` }} />
+            </div>
+          )}
+          {upTask.status === 'running' && (
+            <div className="update-dl-actions">
+              <button className="btn-mini" onClick={() => void window.bc.pauseTask(upTask.id)}>停止</button>
+              <button className="btn-mini" onClick={() => void window.bc.cancelTask(upTask.id)}>取消</button>
+              <span className="update-dl-hint">下载期间可以继续编辑，不影响。</span>
+            </div>
+          )}
+          {RESUMABLE_STATUS.includes(upTask.status) && upTask.kind === 'update' && (
+            <div className="update-dl-actions">
+              <button className="btn-mini btn-primary" onClick={() => void window.bc.resumeTask(upTask.id)}>继续更新</button>
+              <button className="btn-mini" onClick={() => void window.bc.dismissTask(upTask.id)}>移除记录</button>
+            </div>
+          )}
+          {upTask.status === 'applying' && (
+            <div className="update-dl-hint">正在替换程序本体，请不要关闭软件；data/ 下的一切都会保留。</div>
+          )}
         </div>
       );
     }
-    if (!dl) return null;
-    return (
-      <div className={'update-dl-strip' + (dl.error ? ' is-error' : '')}>
-        <div className="update-dl-head">
-          <span className="update-dl-msg">{dl.msg}</span>
-          {dl.pct != null && !dl.error && <span className="update-dl-pct">{dl.pct}%</span>}
-          {dl.error && (
-            <button className="btn-mini" onClick={() => setDlState((m) => { const n = { ...m }; delete n[tag]; return n; })}>
-              知道了
-            </button>
-          )}
-        </div>
-        {dl.pct != null && !dl.error && (
-          <div className="update-dl-bar">
-            <div className="update-dl-fill" style={{ width: `${Math.max(0, Math.min(100, dl.pct))}%` }} />
+
+    if (dlTask) {
+      if (dlTask.status === 'done') {
+        strips.push(
+          <div key={`dl-${dlTask.id}`} className="update-dl-strip is-done">
+            <span className="update-dl-done">✓ 已下载 <b title={dlTask.dest}>{dlTask.fileName}</b></span>
+            <button
+              className="btn-mini"
+              onClick={() => void window.bc.revealTask(dlTask.id)}
+              title="在文件管理器里打开这个 zip 所在的文件夹"
+            >打开 zip 所在文件夹</button>
+            <button
+              className="btn-mini"
+              onClick={() => void window.bc.dismissTask(dlTask.id)}
+              title="只从任务列表移除这条记录（磁盘文件不动）"
+            >移除记录</button>
           </div>
-        )}
-        {!dl.error && <div className="update-dl-hint">下载不替换程序、也不影响编辑，你可以继续做别的事情；完成后可在 data/downloads/ 找到它。</div>}
-      </div>
-    );
+        );
+      } else {
+        strips.push(<InlineTaskStrip key={`dl-${dlTask.id}`} task={dlTask} />);
+      }
+    }
+
+    return strips.length > 0 ? <>{strips}</> : null;
   };
 
   return (
@@ -395,7 +391,7 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
                     : <span className="update-status-inline ok">✓ 已是最新版本</span>
                   : <span className="update-status-inline err">连接失败</span>}
             </div>
-            <button className="btn-primary update-recheck-btn" onClick={check} disabled={checking || busy}>
+            <button className="btn-primary update-recheck-btn" onClick={check} disabled={checking}>
               {checking ? '正在检测…' : '↻ 重新检测'}
             </button>
           </div>
@@ -418,10 +414,40 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
               <br />
               <b>下载源</b>（自动回退）：{(result?.mirrors?.download ?? ['gh-proxy 镜像 (v4)', 'NexaCode 镜像', 'GitHub 直连']).join(' → ')}
               <br />
-              <span className="update-mirror-warn">全部失败时，请先关闭 Watt Toolkit / Clash 等后台代理再重试。</span>
+              <span className="update-mirror-warn">下载支持暂停 / 断点续传；任务在工具栏「任务」按钮里也能看到。</span>
             </div>
           )}
         </div>
+
+        {/* 更新任务总览（下载 / 解压 / 替换三个阶段都在这里说明白） */}
+        {runningUpdate && (
+          <div className="update-card update-running-card">
+            <div className="update-running-head">
+              <b>{runningUpdate.title}</b>
+              <span className="update-running-stage">
+                {runningUpdate.status === 'applying' ? '正在替换程序' : '正在下载更新包'}
+              </span>
+              <span className="update-running-pct">{Math.round(runningUpdate.pct)}%</span>
+            </div>
+            <div className="update-progress-bar">
+              <div className="update-progress-fill" style={{ width: `${Math.max(0, Math.min(100, runningUpdate.pct))}%` }} />
+            </div>
+            <div className="update-running-detail">{runningUpdate.detail}</div>
+            <div className="update-dl-actions">
+              {runningUpdate.status === 'running' && (
+                <>
+                  <button className="btn-mini" onClick={() => void window.bc.pauseTask(runningUpdate.id)}>停止下载</button>
+                  <button className="btn-mini" onClick={() => void window.bc.cancelTask(runningUpdate.id)}>取消更新</button>
+                </>
+              )}
+              <span className="update-dl-hint">
+                {runningUpdate.status === 'applying'
+                  ? '正在替换程序本体，请不要关闭软件。'
+                  : '下载期间可以继续编辑别的内容；替换程序那一步才会自动重启。'}
+              </span>
+            </div>
+          </div>
+        )}
 
         {!checking && result && !result.ok && (
           <div className="update-card update-error">检测失败：{result.error || '未知错误'}</div>
@@ -466,13 +492,15 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
                     <div className="update-release-actions">
                       <button
                         className="btn-primary update-install-btn"
-                        disabled={!e.asset || busy}
+                        disabled={!e.asset || busy || Boolean(taskOfTag(e.tag, 'update') && taskOfTag(e.tag, 'update')!.status === 'running')}
                         onClick={() => install(e)}
                       >
-                        {busy ? '更新进行中…' : `⬇ 更新到 v${e.version}`}
+                        {`⬇ 更新到 v${e.version}`}
                       </button>
                       {!e.asset && <span className="update-asset-none">（本平台无对应安装包）</span>}
+                      <span className="update-asset-none">点击即开始，无需二次确认</span>
                     </div>
+                    {renderTaskStrip(e.tag)}
                   </div>
                 ))}
               </>
@@ -513,9 +541,10 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
                         disabled={!e.asset || busy}
                         onClick={() => install(e)}
                       >
-                        {busy ? '更新进行中…' : '⟲ 重新安装此版本'}
+                        ⟲ 重新安装此版本
                       </button>
                     </div>
+                    {renderTaskStrip(e.tag)}
                   </div>
                 ))}
               </>
@@ -536,8 +565,9 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
                     <div className="update-history-list">
                       {shownOlder.map((e) => {
                         const asset = pickDownloadAsset(e);
-                        const dl = dlState[e.tag];
-                        const isDownloading = Boolean(dl) && !dl.error;
+                        const dlTask = taskOfTag(e.tag, 'download');
+                        const isDownloading = dlTask?.status === 'running' || dlTask?.status === 'applying';
+                        const saved = dlTask?.status === 'done';
                         return (
                           <div key={e.tag} className="update-history-row">
                             <div className="update-history-main">
@@ -559,11 +589,11 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
                                 title={asset ? `下载 ${asset.name}（${fmtSize(asset.size)}）到 data/downloads/` : '这个版本没有可下载的附件'}
                                 onClick={() => downloadZip(e)}
                               >
-                                {isDownloading ? '下载中…' : '⬇ 下载 zip'}
+                                {isDownloading ? '下载中…' : saved ? '重新下载' : '⬇ 下载 zip'}
                               </button>
-                              {downloaded[e.tag] && !isDownloading && <span className="update-history-saved" title={downloaded[e.tag]}>已下载</span>}
+                              {saved && <span className="update-history-saved" title={dlTask?.dest}>已下载</span>}
                             </div>
-                            {renderDlStrip(e.tag)}
+                            {renderTaskStrip(e.tag)}
                             {notesOpen === e.tag && (
                               <div className="update-history-notes">
                                 <Markdown text={e.body} />
@@ -583,22 +613,7 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
               </>
             )}
 
-            {restarting && (
-              <div className="update-card update-progress done">
-                ✓ 更新完成！程序正在重启…（重启后即为所选版本，data/ 数据全部保留）
-              </div>
-            )}
-            {applyError && <div className="update-card update-apply-error">更新失败：{applyError}</div>}
-
-            {/* 更新进行中：页面内的进度（全屏遮罩另有更醒目的一份） */}
-            {busy && (
-              <div className="update-card update-progress">
-                <div className="update-progress-msg">{message}</div>
-                <div className="update-progress-bar">
-                  <div className="update-progress-fill" style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-            )}
+            {applyError && <div className="update-card update-apply-error">{applyError}</div>}
           </>
         )}
       </div>

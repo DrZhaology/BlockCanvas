@@ -1,9 +1,10 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
-import { useScene, findParent, getEffectiveStyle } from '@store/sceneStore';
+import { useScene, findParent, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS, TEXT_TAGS } from '@lib/types';
 import type { SceneElement } from '@lib/types';
 import { selectorForNode, collectStyleClasses, buildStyleBlock, createStyleClassSet, quickCssToCss, cssTextToObject, simplifyStyle } from '@lib/styleClass';
 import { classColor } from '@lib/classColor';
+import { CanvasTextMenu, isTextStylable } from './CanvasTextMenu';
 
 // BlockCanvas · 画布
 // 阶段1：递归渲染 scene graph。
@@ -95,12 +96,214 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   const toggleSelect = useScene((s) => s.toggleSelect);
   const selectMany = useScene((s) => s.selectMany);
 
-  // 拖框选中状态（client 坐标系：起点可在画布空白或条纹背景，拖到哪都能继续选）
-  const dragRef = useRef<{ startX: number; startY: number; active: boolean; ctrl: boolean } | null>(null);
+  // 拖框选中状态（**内容坐标系**：起点钉在画布内容上，容器滚动时选框跟着内容走，
+  // 于是可以把画布滚出去的部分也框进来；绘制时再换算回 client 坐标）。
+  const dragRef = useRef<{
+    startX: number; startY: number;   // 起点（client）
+    startCx: number; startCy: number; // 起点（内容坐标，= client - wrapRect + scroll）
+    scrollLeft0: number; scrollTop0: number; // 起框时的滚动量（诊断用）
+    active: boolean;
+    ctrl: boolean;
+    wrapRect: DOMRect;
+  } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   // 拖框结束后会跟着一个 click（冒泡到 .canvas）——用它吞掉，避免框选完又清空选区
   const suppressClickRef = useRef(false);
+  // 拖框自动滚动：指针靠近容器边缘时持续滚动，让"视口外的内容"也能被框选
+  const autoScrollRef = useRef<{ vx: number; vy: number; raf: number; clientX: number; clientY: number } | null>(null);
+
+  // ============ Alt 交互（v0.4.4d）============
+  // 按住 Alt 后，画布元素才进入"可编辑"状态（平时只负责选中/预览，避免误触）：
+  //   · 指针贴到元素边缘 → 拖拽改宽高（resize）
+  //   · 指针落在文字元素中间 → 左右拖动改字号（font，鼠标隐藏）
+  //   · 指针落在其它元素中间 → 拖动移动位置（move，改 left/top 或 margin）
+  // 不按 Alt 时行为完全不变；Alt+单击（不拖）= 选中父级（沿用旧行为）。
+  type AltEdge = 'l' | 'r' | 't' | 'b' | 'tl' | 'tr' | 'bl' | 'br';
+  type AltMode = 'resize' | 'font' | 'move';
+  const [altHover, setAltHover] = useState<{ id: string; edge: AltEdge | null; mode: AltMode; rect: { x: number; y: number; w: number; h: number } } | null>(null);
+  const altHoverRef = useRef<typeof altHover>(null);
+  altHoverRef.current = altHover;
+  const [altBadge, setAltBadge] = useState<{ x: number; y: number; text: string } | null>(null);
+  const altDragRef = useRef<null | {
+    id: string; mode: AltMode; edge: AltEdge | null;
+    startX: number; startY: number;
+    rect: DOMRect;
+    startStyle: Record<string, string | undefined>;
+    startFont: number;
+    engaged: boolean;
+  }>(null);
+
+  const EDGE_PX = 7; // 边缘热区宽度（按住 Alt 后才生效）
+  // 被标了 Alt 光标属性的元素（CSS 按 data-bc-alt 切换 resize/move/pointer 光标；
+  // 因为元素光标已不在内联里，样式表能正常覆盖）
+  const altTaggedRef = useRef<HTMLElement | null>(null);
+  const tagAltCursor = (el: HTMLElement | null, kind: string) => {
+    if (altTaggedRef.current && altTaggedRef.current !== el) {
+      altTaggedRef.current.removeAttribute('data-bc-alt');
+      altTaggedRef.current = null;
+    }
+    if (el) {
+      el.setAttribute('data-bc-alt', kind);
+      altTaggedRef.current = el;
+    }
+  };
+
+  /** 判断指针落在某个元素的哪条边上（贴边才算，避免整块都能拖） */
+  const edgeAt = (rect: DOMRect, x: number, y: number): AltEdge | null => {
+    const nearL = x - rect.left <= EDGE_PX;
+    const nearR = rect.right - x <= EDGE_PX;
+    const nearT = y - rect.top <= EDGE_PX;
+    const nearB = rect.bottom - y <= EDGE_PX;
+    const h = nearL ? 'l' : nearR ? 'r' : '';
+    const v = nearT ? 't' : nearB ? 'b' : '';
+    if (h && v) return (v + h) as AltEdge; // tl / tr / bl / br
+    if (h) return h as AltEdge;
+    if (v) return v as AltEdge;
+    return null;
+  };
+
+  // Alt 悬停：算出"鼠标下面是谁、贴着哪条边、该进入哪种模式"，并给出对应的光标
+  const onWrapPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.altKey || altDragRef.current) {
+      if (altHover) setAltHover(null);
+      tagAltCursor(null, '');
+      return;
+    }
+    const el = (e.target as HTMLElement)?.closest?.('.canvas [data-bc-id]') as HTMLElement | null;
+    if (!el || el.getAttribute('data-bc-locked') === '1') {
+      if (altHover) setAltHover(null);
+      tagAltCursor(null, '');
+      return;
+    }
+    const id = el.getAttribute('data-bc-id')!;
+    const node = findNode(root, id);
+    if (!node) { if (altHover) setAltHover(null); tagAltCursor(null, ''); return; }
+    const r = el.getBoundingClientRect();
+    const edge = edgeAt(r, e.clientX, e.clientY);
+    const isText = TEXT_TAGS.has(node.type);
+    const mode: AltMode = edge ? 'resize' : isText ? 'font' : 'move';
+    tagAltCursor(el, mode === 'resize' ? (edge === 'l' || edge === 'r' ? 'x' : edge === 't' || edge === 'b' ? 'y' : 'xy') : mode);
+    const next = { id, edge, mode, rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
+    const prev = altHoverRef.current;
+    if (prev && prev.id === id && prev.edge === edge && prev.mode === mode
+      && Math.abs(prev.rect.x - next.rect.x) < 0.5 && Math.abs(prev.rect.y - next.rect.y) < 0.5
+      && Math.abs(prev.rect.w - next.rect.w) < 0.5 && Math.abs(prev.rect.h - next.rect.h) < 0.5) return;
+    setAltHover(next);
+  };
+
+  // Alt + 按下：开始一次"可能发生的"拖拽（真正开始改样式要等指针移动超过阈值，
+  // 否则单纯 Alt+单击仍按老规矩 = 选中父级）
+  const onWrapPointerDownCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.altKey || e.button !== 0) return;
+    const h = altHoverRef.current;
+    if (!h) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(h.id)}"]`) as HTMLElement | null;
+    const cs = el ? getComputedStyle(el) : null;
+    const node = findNode(root, h.id);
+    altDragRef.current = {
+      id: h.id, mode: h.mode, edge: h.edge,
+      startX: e.clientX, startY: e.clientY,
+      rect: (el?.getBoundingClientRect()) ?? new DOMRect(),
+      startStyle: {
+        width: node?.style.width, height: node?.style.height,
+        left: node?.style.left, top: node?.style.top,
+        marginLeft: node?.style.marginLeft, marginTop: node?.style.marginTop
+      },
+      startFont: cs ? (parseFloat(cs.fontSize) || 16) : 16,
+      engaged: false
+    };
+    window.addEventListener('pointermove', onAltDragMove);
+    window.addEventListener('pointerup', onAltDragUp);
+  };
+
+  const onAltDragMove = (ev: PointerEvent) => {
+    const d = altDragRef.current;
+    if (!d) return;
+    const dx = ev.clientX - d.startX;
+    const dy = ev.clientY - d.startY;
+    if (!d.engaged && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    const st = useScene.getState();
+    if (!d.engaged) {
+      d.engaged = true;
+      document.body.classList.add('bc-alt-dragging');
+      if (d.mode === 'font') document.body.classList.add('bc-alt-fonting');
+      st.selectElement(d.id);
+      st.beginStyleEdit(); // 单条撤销：整个拖动 = 一步 Ctrl+Z
+    }
+    const node = findNode(st.scene.root, d.id);
+    if (!node) return;
+
+    if (d.mode === 'resize') {
+      const patch: Record<string, string> = {};
+      const w0 = parseFloat(d.startStyle.width || '') || d.rect.width;
+      const h0 = parseFloat(d.startStyle.height || '') || d.rect.height;
+      if (d.edge && /[lr]/.test(d.edge)) {
+        const nw = Math.max(8, Math.round(w0 + (/l$/.test(d.edge) ? -dx : dx)));
+        patch.width = nw + 'px';
+      }
+      if (d.edge && /[tb]/.test(d.edge)) {
+        const nh = Math.max(8, Math.round(h0 + (/t$/.test(d.edge) ? -dy : dy)));
+        patch.height = nh + 'px';
+      }
+      st.updateStyle(d.id, patch);
+      setAltBadge({
+        x: d.rect.right, y: d.rect.top,
+        text: `${patch.width ? Math.round(parseFloat(patch.width)) : Math.round(w0)} × ${patch.height ? Math.round(parseFloat(patch.height)) : Math.round(h0)}`
+      });
+    } else if (d.mode === 'font') {
+      const size = Math.max(6, Math.min(400, Math.round(d.startFont + dx / 3)));
+      st.updateStyle(d.id, { fontSize: size + 'px' });
+      setAltBadge({ x: ev.clientX + 14, y: ev.clientY + 14, text: `${size}px` });
+    } else {
+      // move：定位元素改 left/top，常规流元素改 margin（与方向键微调同一套逻辑）
+      const pos = node.style.position;
+      const patch: Record<string, string> = {};
+      if (pos === 'absolute' || pos === 'fixed' || pos === 'relative') {
+        const l0 = parseFloat(d.startStyle.left || '0') || 0;
+        const t0 = parseFloat(d.startStyle.top || '0') || 0;
+        patch.left = Math.round(l0 + dx) + 'px';
+        patch.top = Math.round(t0 + dy) + 'px';
+      } else {
+        const ml0 = parseFloat(d.startStyle.marginLeft || '0') || 0;
+        const mt0 = parseFloat(d.startStyle.marginTop || '0') || 0;
+        patch.marginLeft = Math.round(ml0 + dx) + 'px';
+        patch.marginTop = Math.round(mt0 + dy) + 'px';
+      }
+      st.updateStyle(d.id, patch);
+      setAltBadge({ x: ev.clientX + 14, y: ev.clientY + 14, text: `${Math.round(dx)}, ${Math.round(dy)}` });
+    }
+  };
+
+  const onAltDragUp = () => {
+    const d = altDragRef.current;
+    altDragRef.current = null;
+    window.removeEventListener('pointermove', onAltDragMove);
+    window.removeEventListener('pointerup', onAltDragUp);
+    document.body.classList.remove('bc-alt-dragging');
+    document.body.classList.remove('bc-alt-fonting');
+    setAltBadge(null);
+    if (!d) return;
+    if (d.engaged) {
+      useScene.getState().endStyleEdit();
+      // 吞掉这次拖拽之后冒泡上来的 click（否则会顺手选中/选中父级）
+      const swallow = (ev: MouseEvent) => { ev.stopPropagation(); ev.preventDefault(); window.removeEventListener('click', swallow, true); };
+      window.addEventListener('click', swallow, true);
+    }
+    // 没拖（纯 Alt+单击）→ 什么都不做，交给元素自身的 onClick 走"选中父级"
+  };
+
+  // 松开 Alt / 组件卸载 → 清掉 Alt 悬停高亮与光标标记
+  useEffect(() => {
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Alt' || !e.altKey) { setAltHover(null); tagAltCursor(null, ''); }
+    };
+    window.addEventListener('keyup', onKeyUp);
+    return () => { window.removeEventListener('keyup', onKeyUp); tagAltCursor(null, ''); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onCanvasWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     if (!e.ctrlKey) return;
@@ -158,6 +361,72 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     window.removeEventListener('pointermove', onWindowMove);
     window.removeEventListener('pointerup', onWindowUp);
     document.body.classList.remove('bc-marqueeing');
+    if (autoScrollRef.current) { cancelAnimationFrame(autoScrollRef.current.raf); autoScrollRef.current = null; }
+  };
+
+  /** 画布滚动容器的当前滚动量 */
+  const canvasScroll = () => {
+    const w = canvasRef.current?.closest('.canvas-wrap') as HTMLElement | null;
+    return { left: w?.scrollLeft ?? 0, top: w?.scrollTop ?? 0 };
+  };
+
+  /**
+   * 把「内容坐标」的选框换算回 client 坐标。
+   * 起点钉在内容上（startCx/Cy），滚动时选框跟着内容走 —— 于是可以把画布滚出去、
+   * 当前不在视口里的部分也框进来（这正是"框选视口外内容"的修法）。
+   * 绘制（fixed 覆盖层）与命中判定共用同一份结果。
+   */
+  const marqueeClientRect = (d: NonNullable<typeof dragRef.current>, cx: number, cy: number) => {
+    const sc = canvasScroll();
+    const curCx = cx - d.wrapRect.left + sc.left;
+    const curCy = cy - d.wrapRect.top + sc.top;
+    const minCx = Math.min(d.startCx, curCx);
+    const maxCx = Math.max(d.startCx, curCx);
+    const minCy = Math.min(d.startCy, curCy);
+    const maxCy = Math.max(d.startCy, curCy);
+    return {
+      x: minCx - sc.left + d.wrapRect.left,
+      y: minCy - sc.top + d.wrapRect.top,
+      w: maxCx - minCx,
+      h: maxCy - minCy
+    };
+  };
+
+  // 自动滚动：指针靠近（或越过）容器边缘时按距离给速度，rAF 里持续滚并实时重算选框
+  const updateAutoScroll = (clientX: number, clientY: number) => {
+    const wrap = canvasRef.current?.closest('.canvas-wrap') as HTMLElement | null;
+    if (!wrap) return;
+    const r = wrap.getBoundingClientRect();
+    const ZONE = 44;
+    const MAX = 22; // px / 帧
+    const speed = (over: number) => Math.sign(over) * Math.min(MAX, Math.abs(over) * 0.5);
+    const vy = clientY < r.top + ZONE ? speed(clientY - (r.top + ZONE))
+      : clientY > r.bottom - ZONE ? speed(clientY - (r.bottom - ZONE)) : 0;
+    const vx = clientX < r.left + ZONE ? speed(clientX - (r.left + ZONE))
+      : clientX > r.right - ZONE ? speed(clientX - (r.right - ZONE)) : 0;
+    const cur = autoScrollRef.current;
+    if (!cur) {
+      if (!vx && !vy) return;
+      const state = { vx, vy, clientX, clientY, raf: 0 };
+      const step = () => {
+        const s = autoScrollRef.current;
+        const d = dragRef.current;
+        const w = canvasRef.current?.closest('.canvas-wrap') as HTMLElement | null;
+        if (!s || !d || !w) { if (s) s.raf = 0; return; }
+        const beforeL = w.scrollLeft, beforeT = w.scrollTop;
+        w.scrollLeft += s.vx;
+        w.scrollTop += s.vy;
+        if (w.scrollLeft !== beforeL || w.scrollTop !== beforeT) {
+          setMarquee(marqueeClientRect(d, s.clientX, s.clientY));
+        }
+        s.raf = requestAnimationFrame(step);
+      };
+      state.raf = requestAnimationFrame(step);
+      autoScrollRef.current = state;
+    } else {
+      cur.vx = vx; cur.vy = vy; cur.clientX = clientX; cur.clientY = clientY;
+      if (!vx && !vy) { cancelAnimationFrame(cur.raf); autoScrollRef.current = null; }
+    }
   };
 
   // window 级监听：指针跑到画布外（条纹区/面板上）也持续更新选框
@@ -169,12 +438,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     if (!d.active && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
     d.active = true;
     window.getSelection()?.removeAllRanges();
-    setMarquee({
-      x: Math.min(d.startX, e.clientX),
-      y: Math.min(d.startY, e.clientY),
-      w: Math.abs(dx),
-      h: Math.abs(dy)
-    });
+    setMarquee(marqueeClientRect(d, e.clientX, e.clientY));
+    updateAutoScroll(e.clientX, e.clientY);
   };
 
   const onWindowUp = (e: PointerEvent) => {
@@ -186,12 +451,13 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     if (!d) return;
     if (!d.active) return; // 没拖成框 = 普通点击，交给 onClick 清空选区
     suppressClickRef.current = true;
-    // 100% 在框内才算选中（与 Windows 桌面框选一致）。client 坐标对比，
-    // getBoundingClientRect 已含缩放 → zoom 下天然正确
-    const minX = Math.min(d.startX, e.clientX);
-    const minY = Math.min(d.startY, e.clientY);
-    const maxX = Math.max(d.startX, e.clientX);
-    const maxY = Math.max(d.startY, e.clientY);
+    // 用「内容坐标」选框换算回 client，与元素 rect（已含滚动 / 缩放）对比：
+    // 100% 落在框内才算选中（与 Windows 桌面框选一致）
+    const rect = marqueeClientRect(d, e.clientX, e.clientY);
+    const minX = rect.x;
+    const minY = rect.y;
+    const maxX = rect.x + rect.w;
+    const maxY = rect.y + rect.h;
     const ids: string[] = [];
     for (const el of document.querySelectorAll('.canvas [data-bc-id]')) {
       if (el.getAttribute('data-bc-locked') === '1') continue;
@@ -212,13 +478,24 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
 
   const onCanvasPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
+    if (e.altKey) return; // 按住 Alt = 画布交互模式（缩放 / 移动 / 改字号），空白处不起框
     // 起点允许：条纹背景（wrap 自身）或画布空白处（canvas 自身）；
     // 元素上的按下由元素自身处理（选中/多选），不在此起框
     const t = e.target as HTMLElement;
     if (t !== e.currentTarget && t !== canvasRef.current) return;
     e.preventDefault();
     window.getSelection()?.removeAllRanges();
-    dragRef.current = { startX: e.clientX, startY: e.clientY, active: false, ctrl: e.ctrlKey || e.metaKey };
+    const wrap = canvasRef.current?.closest('.canvas-wrap') as HTMLElement | null;
+    const wrapRect = wrap?.getBoundingClientRect() ?? new DOMRect();
+    const sc = canvasScroll();
+    dragRef.current = {
+      startX: e.clientX, startY: e.clientY,
+      // 起点钉在「内容坐标」上：容器滚动时选框跟着内容走，不会错位
+      startCx: e.clientX - wrapRect.left + sc.left,
+      startCy: e.clientY - wrapRect.top + sc.top,
+      wrapRect, scrollLeft0: sc.left, scrollTop0: sc.top,
+      active: false, ctrl: e.ctrlKey || e.metaKey
+    };
     document.body.classList.add('bc-marqueeing');
     window.addEventListener('pointermove', onWindowMove);
     window.addEventListener('pointerup', onWindowUp);
@@ -230,6 +507,20 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     if (t !== e.currentTarget && t !== canvasRef.current) return;
     if (suppressClickRef.current) { suppressClickRef.current = false; return; }
     select(null);
+  };
+
+  // 右键：命中文字元素 → 弹「单独调整这段文字」菜单（不按 Alt；块级容器不弹）
+  const [textMenu, setTextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const onWrapContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = (e.target as HTMLElement)?.closest?.('.canvas [data-bc-id]') as HTMLElement | null;
+    if (!el) return;
+    const id = el.getAttribute('data-bc-id')!;
+    const node = findNode(root, id);
+    if (!node || node.locked || !isTextStylable(node)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    select(id);
+    setTextMenu({ id, x: e.clientX, y: e.clientY });
   };
 
   // 拖动画布左/右边缘调整宽度。整条边都可抓握（和面板手柄同逻辑）。
@@ -264,10 +555,14 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
 
   return (
     <div
-      className="canvas-wrap"
+      className={'canvas-wrap' + (altHover ? ' is-alt-mode' : '')}
       style={wDrag ? { justifyContent: 'flex-start', paddingLeft: wDrag.padLeft, paddingRight: 0, paddingBottom: 24, paddingTop: 24 } : undefined}
-      title="提示：Ctrl+点击 多选；空白/条纹处拖框批量选中（可拖出画布）；Alt+点击 选中父级；Ctrl+滚轮 缩放画布"
+      title="提示：Ctrl+点击 多选；空白/条纹处拖框批量选中（可拖出画布，靠边自动滚动）；Alt+点击 选中父级；Alt+贴边拖 改大小；Alt+按住文字左右拖 改字号；Alt+按住元素中间拖 移动；Ctrl+滚轮 缩放画布"
       onPointerDown={onCanvasPointerDown}
+      onPointerDownCapture={onWrapPointerDownCapture}
+      onPointerMove={onWrapPointerMove}
+      onPointerLeave={() => setAltHover(null)}
+      onContextMenu={onWrapContextMenu}
       onClick={onCanvasClick}
     >
       {/* 画布样式注入（与导出同源同序）：① 自动样式类 ② 快速设置 ③ 用户全局 CSS ④ 同类同色（编辑器可视化） */}
@@ -327,6 +622,21 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
         />
       ))}
+      {/* Alt 悬停高亮：按住 Alt 后，鼠标下的元素亮出可交互边框 + 命中边提示 */}
+      {altHover && !altDragRef.current && (
+        <div
+          className={'bc-alt-box mode-' + altHover.mode}
+          style={{ left: altHover.rect.x, top: altHover.rect.y, width: altHover.rect.w, height: altHover.rect.h }}
+        >
+          {altHover.edge && <span className={'bc-alt-edge e-' + altHover.edge} />}
+        </div>
+      )}
+      {/* Alt 拖拽实时数值气泡 */}
+      {altBadge && (
+        <div className="bc-alt-badge" style={{ left: altBadge.x, top: altBadge.y }}>{altBadge.text}</div>
+      )}
+      {/* 右键文字样式菜单（Portal 到 body） */}
+      {textMenu && <CanvasTextMenu id={textMenu.id} x={textMenu.x} y={textMenu.y} onClose={() => setTextMenu(null)} />}
     </div>
   );
 }
@@ -399,10 +709,11 @@ const CanvasNode = React.memo(function CanvasNode(props: {
     useScene.getState().setText(node.id, inlineDraft);
   };
   // 有类名/ID 的元素：样式由自动类承担。无类名无 ID 的元素：行内样式与导出一致。
-  // 内联里还混着编辑器交互装饰：光标、选中框、空容器可见性兜底 —— 全部不导出。
-  const baseStyle: React.CSSProperties = {
-    cursor: node.locked ? 'default' : 'pointer'
-  };
+  // 内联里还混着编辑器交互装饰：选中框、空容器可见性兜底 —— 全部不导出。
+  // ⚠ 光标（pointer / Alt 交互的 resize 等）**不再写内联** —— 内联 cursor 会盖过
+  //   任何样式表规则，导致 Alt 悬停时无法切换成 resize/move 光标。改由 CSS 按
+  //   data-bc-locked / data-bc-alt 属性统一控制（见 23-v044d-ui.css）。
+  const baseStyle: React.CSSProperties = {};
   const activeBreakpoint = useScene((s) => s.activeBreakpoint);
   // 无类名无 ID：样式照抄导出的 style 属性值（同一文本 → 画布 = 导出）
   if (selInfo.inlineCss) {
@@ -412,6 +723,8 @@ const CanvasNode = React.memo(function CanvasNode(props: {
       Object.assign(baseStyle, simplifyStyle(eff));
     }
   }
+  // 内联样式覆盖（v0.4.4d 右键文字微调）：永远生效，且排在内联样式之后 → 覆盖
+  if (node.inlineStyle) Object.assign(baseStyle, simplifyStyle(node.inlineStyle));
   // flex 横排容器里，空的无宽子容器会被压缩到 0 宽 → 完全不可见不可点（"插进去看不到"）。
   // 编辑器专用兜底：无显式 width 的容器/hr 补 min-width 60px（不进 node.style、不导出）；
   // 用户设了 width（含百分比）则尊重用户值

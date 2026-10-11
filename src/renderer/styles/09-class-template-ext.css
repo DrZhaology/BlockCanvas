@@ -222,6 +222,8 @@
   pointer-events: none;
   font-size: 12px;
   line-height: 1.55;
+  /* 统一浮层动效：纯淡入（位置由内联 transform 决定，不能用带位移的 bcPopIn） */
+  animation: bcFadeIn var(--dur-pop) var(--ease-standard) both;
 }
 .ele-tip-tag {
   font-family: 'Consolas', monospace;

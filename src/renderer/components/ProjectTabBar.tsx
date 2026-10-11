@@ -174,6 +174,13 @@ export function ProjectTabBar() {
         ＋
       </button>
 
+      {/* 帮助：常驻页面上方（标签栏右端），点开是「使用手册 / 帮助中心」（内容取自 README.md） */}
+      <button
+        className="tabbar-help-btn"
+        onClick={() => window.dispatchEvent(new CustomEvent('bc:open-help'))}
+        title="使用手册 / 帮助中心 (F1) — 内容就是项目的 README，支持完整 Markdown"
+      >?</button>
+
       {/* 小技巧轮播条：标签再多也常驻右端（自身允许收窄省略，绝不把标签挤没） */}
       <TipsTicker variant="tabbar" />
     </div>

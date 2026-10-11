@@ -1,0 +1,179 @@
+/* ==========================================================================
+   BlockCanvas · v0.4.4d UI 统一批（样式选择器统一 / 交互增强 / 帮助中心多文档）
+   --------------------------------------------------------------------------
+   本分片只做「新增与统一」，不重定义既有语义分片里的东西。约定：
+     · 所有新增浮层一律复用 animations.css 的 token 与 keyframes（只写引用）；
+     · 交互类新增（画布 Alt 缩放/移动、文字快捷字号、右键菜单）的选择器统一加
+       bc- 前缀，方便后续插件按统一规则接管/扩展。
+   ========================================================================== */
+
+/* ---------- 渐变编辑器：径向「扩散范围」分段换行 + 「中心位置」下拉 ---------- */
+.grad-seg-wrap { flex-wrap: wrap; }
+.grad-pos-select {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.grad-pos-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* 色标握把：明确的可拖拽手型，提示"这里才能拖" */
+.grad-stop-grip { cursor: grab; user-select: none; }
+.grad-stop-grip:active { cursor: grabbing; }
+
+/* ==========================================================================
+   画布元素光标（统一由 CSS 控制，不再写内联 —— 内联会盖过样式表规则）
+   ========================================================================== */
+.canvas [data-bc-id] { cursor: pointer; }
+.canvas [data-bc-locked="1"] { cursor: default; }
+/* Alt 悬停：按命中模式切换光标（属性由 Canvas 在 pointermove 时挂上） */
+.canvas [data-bc-alt="x"] { cursor: ew-resize; }
+.canvas [data-bc-alt="y"] { cursor: ns-resize; }
+.canvas [data-bc-alt="xy"] { cursor: nwse-resize; }
+.canvas [data-bc-alt="move"] { cursor: move; }
+.canvas [data-bc-alt="font"] { cursor: pointer; }
+
+/* Alt 交互进行中：文字拖动时隐藏光标（用户要求"鼠标消失"），全局禁选避免拖出蓝色选区 */
+body.bc-alt-dragging { user-select: none; }
+body.bc-alt-fonting, body.bc-alt-fonting * { cursor: none; }
+
+/* Alt 悬停高亮框（fixed，跟随元素 client rect） */
+.bc-alt-box {
+  position: fixed;
+  z-index: 88;
+  pointer-events: none;
+  border: 1.5px dashed var(--accent);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(30, 136, 229, 0.25) inset;
+}
+.bc-alt-box.mode-font { border-color: #f59e0b; border-style: solid; }
+.bc-alt-box.mode-move { border-color: #10b981; border-style: solid; }
+/* 命中边的加粗提示（8 条边） */
+.bc-alt-edge { position: absolute; background: var(--accent); border-radius: 2px; }
+.bc-alt-edge.e-l { left: -3px; top: 0; width: 6px; height: 100%; }
+.bc-alt-edge.e-r { right: -3px; top: 0; width: 6px; height: 100%; }
+.bc-alt-edge.e-t { top: -3px; left: 0; height: 6px; width: 100%; }
+.bc-alt-edge.e-b { bottom: -3px; left: 0; height: 6px; width: 100%; }
+.bc-alt-edge.e-tl { left: -3px; top: -3px; width: 10px; height: 10px; }
+.bc-alt-edge.e-tr { right: -3px; top: -3px; width: 10px; height: 10px; }
+.bc-alt-edge.e-bl { left: -3px; bottom: -3px; width: 10px; height: 10px; }
+.bc-alt-edge.e-br { right: -3px; bottom: -3px; width: 10px; height: 10px; }
+
+/* Alt 拖拽实时数值气泡 */
+.bc-alt-badge {
+  position: fixed;
+  z-index: 400;
+  pointer-events: none;
+  transform: translate(0, 0);
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: rgba(17, 24, 39, 0.92);
+  border-radius: 5px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   画布文字「右键快捷菜单」（v0.4.4d）
+   ========================================================================== */
+.bc-text-menu {
+  position: fixed;
+  z-index: 500;
+  width: 244px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.2);
+  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+  transform-origin: top left;
+}
+.bc-text-menu-head { display: flex; align-items: center; gap: 6px; }
+.bc-text-menu-tag {
+  font-family: 'Consolas', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--hover-accent);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.bc-text-menu-tip { font-size: 10px; color: var(--text-muted); line-height: 1.35; }
+.bc-text-menu-row { display: flex; align-items: center; gap: 8px; }
+.bc-text-menu-row-col { flex-direction: column; align-items: stretch; gap: 5px; }
+.bc-text-menu-label { font-size: 11px; font-weight: 600; color: var(--text-muted); min-width: 26px; }
+.bc-text-menu-hint { font-size: 10px; color: var(--text-muted); }
+
+.bc-text-size { display: flex; align-items: center; gap: 2px; }
+.bc-ts-btn {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.bc-ts-btn:hover { border-color: var(--accent); color: var(--accent); }
+.bc-ts-val {
+  min-width: 44px; text-align: center;
+  font-size: 12px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.bc-weight-seg { display: flex; gap: 2px; flex: 1; }
+.bc-weight-btn {
+  flex: 1;
+  height: 24px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.bc-weight-btn:hover { color: var(--text); background: var(--hover); }
+.bc-weight-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+.bc-color-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.bc-color-swatch {
+  position: relative;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+.bc-color-swatch.active { box-shadow: 0 0 0 2px var(--accent); border-color: var(--accent); }
+.bc-color-custom {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--panel-soft);
+  color: var(--text-muted);
+  font-size: 12px; font-weight: 700;
+  overflow: hidden;
+}
+.bc-color-custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+.bc-text-menu-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+

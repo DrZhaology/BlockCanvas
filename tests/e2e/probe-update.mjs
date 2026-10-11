@@ -125,25 +125,35 @@ async function main() {
         }
 
         // —— v0.4.4 关键回归：「下载 zip」不得弹全屏遮罩、进度贴卡片下方 ——
-        // 把 update:download-asset 换成"永远不返回"的桩，让下载停在进行中，
-        // 再从主进程推一条进度（复现真实链路），验证页面行为。
+        // v0.4.4 起下载是**主进程后台任务**，渲染层只订阅 `task:changed`（不再有 update:progress）。
+        // 这里：① 把 update:download-asset 换成"立刻返回 taskId"的桩（不真下载）；
+        //      ② 从主进程广播一条 running 任务，复现真实链路；③ 断言页面行为。
+        const firstRow = win.locator('.update-history-row').first();
+        const firstTag = ((await firstRow.locator('.update-history-ver').innerText().catch(() => '')) || '').trim();
         await app.evaluate(({ ipcMain }) => {
           ipcMain.removeHandler('update:download-asset');
-          ipcMain.handle('update:download-asset', async () => new Promise(() => {}));
+          ipcMain.handle('update:download-asset', async () => ({ ok: true, taskId: 'probe-dl' }));
         });
-        const firstRow = win.locator('.update-history-row').first();
         await firstRow.locator('button', { hasText: '下载 zip' }).click();
-        await sleep(350);
-        await app.evaluate(({ BrowserWindow }) => {
+        await sleep(250);
+        await app.evaluate(({ BrowserWindow }, tag) => {
           const w = BrowserWindow.getAllWindows()[0];
-          if (w) w.webContents.send('update:progress', { msg: '已下载 1.2 / 4.8 MB', pct: 42 });
-        });
+          const now = new Date().toISOString();
+          if (!w) return;
+          w.webContents.send('task:changed', [{
+            id: 'probe-dl', kind: 'download', title: '下载 ' + tag + ' 的 zip',
+            detail: '正在通过 gh-proxy 镜像下载… 1.2 / 4.8 MB',
+            url: 'https://example.invalid/x.zip', fileName: 'x.zip', dest: 'C:\\tmp\\x.zip',
+            status: 'running', received: 1258291, total: 5033164, pct: 42,
+            tag, createdAt: now, updatedAt: now
+          }]);
+        }, firstTag);
         await sleep(450);
         ok('下载 zip 期间**不弹**全屏更新遮罩（编辑器不被锁）',
           (await win.locator('.bc-update-blocker').count()) === 0,
           `blocker=${await win.locator('.bc-update-blocker').count()}`);
         const strip = firstRow.locator('.update-dl-strip');
-        ok('下载进度显示在版本卡片下方', (await strip.count()) === 1);
+        ok('下载进度显示在版本卡片下方', (await strip.count()) === 1, `count=${await strip.count()}`);
         const stripTxt = ((await strip.first().innerText().catch(() => '')) || '').replace(/\n/g, ' ');
         ok('进度条带百分比与阶段文案', stripTxt.includes('42%') && stripTxt.includes('1.2 / 4.8'), stripTxt.slice(0, 60));
         const widths = await win.evaluate(() => {
@@ -178,6 +188,43 @@ async function main() {
   await win.locator('.fluent-back-btn').first().click();
   await sleep(600);
   ok('返回编辑器正常', (await win.locator('.update-page').count()) === 0 && (await win.locator('.workspace').count()) === 1);
+
+  // ============ v0.4.4 新增：工具栏「任务」按钮（「⋯更多」左边）============
+  // 任务按钮在**编辑器视图**的工具栏里，所以放在"返回编辑器"之后断言。
+  // 上面那条假任务此刻仍留在渲染层 store 里，正好用它验证按钮的展示与操作。
+  ok('工具栏出现常驻「任务」按钮', (await win.locator('.toolbar .tb-task-btn').count()) === 1,
+    `count=${await win.locator('.toolbar .tb-task-btn').count()}`);
+  const order = await win.evaluate(() => {
+    const right = document.querySelector('.toolbar .tb-right');
+    if (!right) return null;
+    const kids = Array.from(right.children).map((c) => String(c.className));
+    return {
+      ti: kids.findIndex((c) => c.includes('tb-task-wrap')),
+      mi: kids.findIndex((c) => c.includes('tb-more-wrap'))
+    };
+  });
+  ok('任务按钮排在「⋯更多」的左边', !!order && order.ti >= 0 && (order.mi < 0 || order.ti < order.mi), JSON.stringify(order));
+  const taskTitle = ((await win.locator('.toolbar .tb-task-btn').getAttribute('title', { timeout: 3000 }).catch(() => '')) || '');
+  ok('鼠标浮上去的提示里写明当前任务', taskTitle.includes('下载'), taskTitle.slice(0, 70));
+  const ringTxt = ((await win.locator('.toolbar .tb-task-ring-in').innerText().catch(() => '')) || '').trim();
+  ok('任务按钮上直接显示环形进度百分比', ringTxt === '42', `ring=${ringTxt}`);
+
+  // 真实 hover（React 的 onMouseEnter 走事件委托，直接派发 mouseenter 唤不出来）
+  await win.locator('.toolbar .tb-task-btn').hover();
+  await sleep(500);
+  ok('悬浮唤出任务浮层', (await win.locator('.tb-task-pop').count()) === 1);
+  const rowTxt = ((await win.locator('.tb-task-pop').first().innerText().catch(() => '')) || '').replace(/\n/g, ' ');
+  ok('任务浮层列出该任务与进度', rowTxt.includes('1.2 / 4.8') || rowTxt.includes('42%'), rowTxt.slice(0, 90));
+  ok('任务浮层给出「停止」与「取消」动作', rowTxt.includes('停止') && rowTxt.includes('取消'), rowTxt.slice(0, 110));
+
+  // 清场：撤掉假任务
+  await app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows()[0];
+    if (w) w.webContents.send('task:changed', []);
+  });
+  await sleep(300);
+  ok('任务清空后按钮回到空闲态（不再显示环形进度）',
+    (await win.locator('.toolbar .tb-task-ring').count()) === 0 && (await win.locator('.toolbar .tb-task-btn').count()) === 1);
 
   ok('无 console 错误', errs.length === 0, errs.slice(0, 3).join(' | '));
   console.log(`\n===== 更新中心探针：${pass} 通过 / ${fail} 失败 =====`);

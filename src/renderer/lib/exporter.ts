@@ -1,6 +1,6 @@
 import type { SceneGraph, SceneElement } from '@lib/types';
 import { SELF_CLOSING_TAGS } from '@lib/types';
-import { collectStyleClasses, buildStyleBlock, createStyleClassSet, type StyleClassSet } from '@lib/styleClass';
+import { collectStyleClasses, buildStyleBlock, createStyleClassSet, styleToCssText, simplifyStyle, type StyleClassSet } from '@lib/styleClass';
 import { collectTableSelectors } from '@lib/tableOps';
 import { applyExportPostHooks } from './pluginHost';
 
@@ -25,7 +25,10 @@ function buildAttrsString(node: SceneElement, ctx: StyleClassSet): { attrsStr: s
   if (get('id')) out.push(`id="${escapeAttr(get('id'))}"`);
 
   // 无类名无 ID 的元素 → 行内 style 属性（与画布内联渲染同一文本）
-  const inline = ctx.inlineCss.get(node.id);
+  // 内联样式覆盖（v0.4.4d，右键文字微调）→ 无论有没有类名都额外拼一份，放最后 → 覆盖类规则
+  const inlineBase = ctx.inlineCss.get(node.id) || '';
+  const override = node.inlineStyle ? styleToCssText(simplifyStyle(node.inlineStyle)) : '';
+  const inline = [inlineBase, override].filter((s) => s && s.trim()).join('; ');
   if (inline) out.push(`style="${escapeAttr(inline)}"`);
 
   // 元素专属属性

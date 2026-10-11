@@ -1,10 +1,8 @@
 import { app } from 'electron';
 import { join, dirname, basename } from 'node:path';
 import {
-  existsSync, mkdirSync, readdirSync, rmSync, writeFileSync, chmodSync, readFileSync,
-  openSync, readSync, closeSync, createWriteStream
+  existsSync, mkdirSync, readdirSync, rmSync, writeFileSync, chmodSync, readFileSync
 } from 'node:fs';
-import { dataRoot } from './userData';
 
 // ============================================================================
 // BlockCanvas · 自动更新中枢（v0.4.3 重写）
@@ -73,9 +71,9 @@ export const MIRRORS: MirrorDef[] = [
 /** 读取发行版信息的尝试顺序：NexaCode 优先 */
 const READ_ORDER = ['nexacode', 'ghproxy-v4', 'direct'];
 /** 下载更新包的尝试顺序：gh-proxy v4 优先（Cloudflare 节点，理论上最稳） */
-const DOWNLOAD_ORDER = ['ghproxy-v4', 'nexacode', 'direct'];
+export const DOWNLOAD_ORDER = ['ghproxy-v4', 'nexacode', 'direct'];
 
-function mirrorById(id: string): MirrorDef {
+export function mirrorById(id: string): MirrorDef {
   return MIRRORS.find((m) => m.id === id) || MIRRORS[MIRRORS.length - 1];
 }
 function wrap(prefix: string, url: string): string {
@@ -305,105 +303,11 @@ export function buildUpdateList(localVersion: string, releases: LatestReleaseInf
   };
 }
 
-// ============ 下载（多镜像回退 + zip 完整性校验） ============
-
-interface DownloadHooks {
-  onProgress?: (pct: number, mb: number, totalMb: number) => void;
-  /** 切换镜像 / 阶段提示（"正在通过 NexaCode 镜像下载…"） */
-  onNotice?: (msg: string) => void;
-}
-
-function isZipFile(path: string): boolean {
-  try {
-    const fd = openSync(path, 'r');
-    const buf = Buffer.alloc(2);
-    readSync(fd, buf, 0, 2, 0);
-    closeSync(fd);
-    return buf[0] === 0x50 && buf[1] === 0x4b; // "PK"
-  } catch {
-    return false;
-  }
-}
-
-/**
- * 下载更新包：按 gh-proxy(v4) → NexaCode → GitHub 直连 依次尝试。
- * 每个源下载完成后校验 zip 头（"PK"），损坏/被劫持成 HTML 就自动换下一个源。
- */
-export async function downloadUpdateAsset(
-  url: string,
-  destPath: string,
-  hooks?: DownloadHooks
-): Promise<{ ok: boolean; error?: string; mirror?: string }> {
-  mkdirSync(dirname(destPath), { recursive: true });
-  const errors: string[] = [];
-
-  for (const id of DOWNLOAD_ORDER) {
-    const m = mirrorById(id);
-    const target = wrap(m.prefix, url);
-    hooks?.onNotice?.(`正在通过 ${m.name} 下载更新包…`);
-    try {
-      const res = await fetch(target, { headers: { Accept: 'application/octet-stream' } });
-      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-
-      const total = Number(res.headers.get('content-length') || 0);
-      const totalMb = Math.round((total / 1048576) * 10) / 10;
-      const reader = res.body.getReader();
-      const ws = createWriteStream(destPath);
-      let received = 0;
-      let lastPct = -1;
-
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!value) continue;
-        received += value.length;
-        ws.write(Buffer.from(value));
-        if (hooks?.onProgress && total > 0) {
-          const pct = Math.min(99, Math.floor((received / total) * 100));
-          if (pct !== lastPct) {
-            lastPct = pct;
-            hooks.onProgress(pct, Math.round((received / 1048576) * 10) / 10, totalMb);
-          }
-        }
-      }
-      await new Promise<void>((resolve, reject) => {
-        ws.on('error', reject);
-        ws.end(() => resolve());
-      });
-
-      if (received < 1024 || !isZipFile(destPath)) {
-        throw new Error('下载内容不是有效的 zip（可能被镜像劫持或中断）');
-      }
-      hooks?.onProgress?.(100, Math.round((received / 1048576) * 10) / 10, totalMb);
-      return { ok: true, mirror: m.name };
-    } catch (e: any) {
-      errors.push(`${m.name}：${e?.message || '失败'}`);
-      try { rmSync(destPath, { force: true }); } catch { /* 忽略 */ }
-    }
-  }
-  return { ok: false, error: errors.join('；') || '全部镜像均下载失败' };
-}
-
-/**
- * 单独下载某个发行版资产（更新中心「下载 zip」按钮用）。
- * 与自动更新不同：**只落盘、不替换程序**，存到 `data/downloads/` 下。
- * 放 data/ 里有两个好处：便携版升级时 data/ 永远保留；E2E 可用 BC_DATA_DIR 隔离。
- */
-export async function downloadReleaseAsset(
-  url: string,
-  fileName: string,
-  onProgress?: (msg: string, pct?: number) => void
-): Promise<{ ok: boolean; path?: string; error?: string; mirror?: string }> {
-  if (!url) return { ok: false, error: '缺少下载地址' };
-  const safe = (fileName || 'BlockCanvas-asset.zip').replace(/[\\/:*?"<>|]/g, '_');
-  const dest = join(dataRoot(), 'downloads', safe);
-  const r = await downloadUpdateAsset(url, dest, {
-    onNotice: (msg) => onProgress?.(msg),
-    onProgress: (pct, mb, totalMb) => onProgress?.(`已下载 ${mb} / ${totalMb} MB`, pct)
-  });
-  if (!r.ok) return { ok: false, error: r.error };
-  return { ok: true, path: dest, mirror: r.mirror };
-}
+// ============ 下载 ============
+// v0.4.4 起，"下载"整体挪到了 `main/tasks.ts`（后台任务 + 断点续传 + 暂停/继续/取消）。
+// 这里只保留「拿到的 zip 之后怎么替换程序本体」——见下面的 finishUpdateFromZip()。
+// 之所以挪走：下载进度以前存在渲染层组件里，一离开更新页 / 一重启就丢，
+// 而且没法暂停续传、也没法在别处（工具栏「任务」按钮）看到它在跑。
 
 // ============ 解压 / 替换 ============
 
@@ -442,7 +346,7 @@ function findExtractRoot(stagingDir: string): string | null {
 }
 
 /** 程序主目录（要被替换的目标） */
-function resolveInstallDir(): string {
+export function resolveInstallDir(): string {
   const execDir = dirname(process.execPath);
   // macOS：execPath 在 Xxx.app/Contents/MacOS 里面 → 替换目标是包含 .app 的那一层目录
   if (process.platform === 'darwin' && /\.app[\\/]Contents[\\/]MacOS$/i.test(execDir)) {
@@ -452,73 +356,114 @@ function resolveInstallDir(): string {
 }
 
 /**
- * 执行应用更新（Windows / macOS / Linux）。
- * 步骤：下载（多镜像回退）→ 解压 → 找到程序根 → 生成"退出后执行"的替换脚本
- *      （排除 data / .update，其余全部替换）→ 启动独立进程 → 主进程退出交锁。
+ * 版本化的文件夹名：把结尾的版本号换掉。
+ *   `BlockCanvas`            → `BlockCanvas-v0.4.4`
+ *   `BlockCanvas-v0.4.3`     → `BlockCanvas-v0.4.4`
+ *   `BlockCanvas-portable`   → `BlockCanvas-portable-v0.4.4`
+ * 这样用户一眼就知道手上这包是哪个版本，多版本共存时也不会互相覆盖。
  */
-export async function applyUpdate(
-  assetUrl: string,
+export function versionedFolderName(current: string, version: string): string {
+  const base = String(current || '').replace(/[-_ ]?v?\d+(?:\.\d+)*$/i, '').trim() || 'BlockCanvas';
+  return version ? `${base}-v${version}` : base;
+}
+
+/**
+ * 拿到更新包之后的收尾：解压 → 找到程序本体 → 生成"程序退出后执行"的替换脚本 → 拉起独立进程。
+ * 调用方负责：① 先把 zip 下到 `<installDir>/.update/update.zip`；② 本函数返回 ok 后自行 `app.exit(0)` 交出文件锁。
+ *
+ * v0.4.4 的变化：
+ *   · 下载不再在这里做（挪到了 tasks.ts，可暂停/续传/看进度）；
+ *   · **替换脚本挪到系统临时目录执行** —— 因为收尾还要把程序文件夹改名，
+ *     脚本若待在被改名的目录里，`%~f0`/`$0` 这些自我引用会立刻失效；
+ *   · 替换完成后自动把程序文件夹改成 `<原名>-v<新版本>`（权限不够时请求一次 UAC）。
+ */
+export async function finishUpdateFromZip(
+  zipPath: string,
+  version: string,
   onProgress?: (msg: string, pct?: number) => void
 ): Promise<{ ok: boolean; error?: string }> {
-  const installDir = resolveInstallDir();
-  const updateDir = join(installDir, '.update');
-  const stagingDir = join(updateDir, 'staging');
-  const zipPath = join(updateDir, 'update.zip');
-
   if (!app.isPackaged) {
     return { ok: false, error: '当前处于源码开发模式（pnpm dev / pnpm build 直接运行），没有可替换的安装目录。自动更新仅对打包后的便携版生效。' };
   }
+  const installDir = resolveInstallDir();
+  const updateDir = join(installDir, '.update');
+  const stagingDir = join(updateDir, 'staging');
+  const workDir = join(app.getPath('temp'), `bc-updater-${Date.now().toString(36)}`);
 
   try {
-    rmSync(updateDir, { recursive: true, force: true });
+    if (!existsSync(zipPath)) return { ok: false, error: '更新包不存在（可能已被清理），请重新下载。' };
+    rmSync(stagingDir, { recursive: true, force: true });
     mkdirSync(stagingDir, { recursive: true });
+    mkdirSync(workDir, { recursive: true });
 
-    // 1. 下载（多镜像回退 + zip 校验）
-    onProgress?.('准备下载更新包…', 0);
-    const dl = await downloadUpdateAsset(assetUrl, zipPath, {
-      onProgress: (pct, mb, totalMb) => onProgress?.(`正在下载更新包… ${mb} / ${totalMb} MB`, pct),
-      onNotice: (msg) => onProgress?.(msg, 0)
-    });
-    if (!dl.ok) return { ok: false, error: `下载失败：${dl.error}` };
-    onProgress?.(`下载完成（经由 ${dl.mirror}）`, 100);
-
-    // 2. 解压
+    // 1. 解压
     onProgress?.('正在解压更新包…', 100);
     const unz = await unzipUpdate(zipPath, stagingDir);
     if (!unz.ok) return { ok: false, error: `解压失败：${unz.error}` };
 
-    // 3. 找到程序本体所在层
+    // 2. 找到程序本体所在层
     const extractRoot = findExtractRoot(stagingDir);
     if (!extractRoot) {
       return { ok: false, error: '更新包内容异常：没有找到程序本体（Windows 找 BlockCanvas.exe / macOS 找 BlockCanvas.app / Linux 找 blockcanvas），下载可能不完整。' };
     }
 
-    // 4. 生成"程序退出后执行"的替换脚本
+    // 3. 目标文件夹名（带版本号）；已一致就不改名
+    const parent = dirname(installDir);
+    const oldName = basename(installDir);
+    const newName = versionedFolderName(oldName, version);
+
+    // 4. 生成替换脚本（放在临时目录，不随程序文件夹改名而失效）
     onProgress?.('正在准备替换脚本…', 100);
     const scriptPath = process.platform === 'win32'
-      ? writeWindowsScript(updateDir, extractRoot, installDir)
-      : writePosixScript(updateDir, extractRoot, installDir);
+      ? writeWindowsScript(workDir, updateDir, extractRoot, installDir, { parent, oldName, newName })
+      : writePosixScript(workDir, updateDir, extractRoot, installDir, { parent, oldName, newName });
 
-    // 5. 启动独立进程执行替换，然后本进程退出（交出文件锁）
+    // 5. 拉起独立进程执行替换；主进程随后退出交出文件锁
     onProgress?.('准备就绪，正在重启以完成更新…', 100);
     const { spawn } = await import('node:child_process');
     const child = process.platform === 'win32'
       ? spawn('cmd.exe', ['/c', scriptPath], { detached: true, stdio: 'ignore', windowsHide: true })
       : spawn('/bin/sh', [scriptPath], { detached: true, stdio: 'ignore' });
     child.unref();
-
-    setTimeout(() => { app.exit(0); }, 400);
     return { ok: true };
   } catch (e: any) {
-    try { rmSync(updateDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
+    try { rmSync(workDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
     return { ok: false, error: e?.message || '更新失败' };
   }
 }
 
-/** Windows：robocopy /E /PURGE，排除 data 与 .update（用户数据永不被删/覆盖） */
-function writeWindowsScript(updateDir: string, src: string, dst: string): string {
-  const batPath = join(updateDir, 'apply-update.bat');
+interface RenamePlan { parent: string; oldName: string; newName: string }
+
+/** Windows：robocopy /E /PURGE（排除 data / .update）→ 删掉 .update → 改名 → 启动新程序 */
+function writeWindowsScript(workDir: string, updateDir: string, src: string, dst: string, plan: RenamePlan): string {
+  const batPath = join(workDir, 'apply-update.bat');
+  const psPath = join(workDir, 'rename-folder.ps1');
   const exeName = basename(process.execPath);
+  const needRename = plan.oldName !== plan.newName;
+
+  // 改名脚本：先直接改；改不动（例如装在 Program Files / 目录被占）再请求一次 UAC 提权重试。
+  const ps = [
+    'param([string]$Parent, [string]$Old, [string]$New, [string]$Elevated = "0")',
+    '$ErrorActionPreference = "SilentlyContinue"',
+    '$src = Join-Path $Parent $Old',
+    '$dst = Join-Path $Parent $New',
+    'if (-not (Test-Path -LiteralPath $src)) { exit 0 }',
+    'if ($Old -eq $New) { exit 0 }',
+    'if (Test-Path -LiteralPath $dst) { exit 0 }   # 目标已存在 → 不动，避免覆盖',
+    'try { Rename-Item -LiteralPath $src -NewName $New -ErrorAction Stop; exit 0 } catch { }',
+    'if ($Elevated -eq "1") { exit 1 }',
+    '# 普通权限改不动 → 请求一次 UAC 授权后重试（用户会在屏幕上看到系统授权框）',
+    'try {',
+    '  Start-Process -FilePath "powershell" -Verb RunAs -Wait -ErrorAction Stop -ArgumentList @(',
+    '    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath,',
+    '    "-Parent", $Parent, "-Old", $Old, "-New", $New, "-Elevated", "1"',
+    '  )',
+    '} catch { }',
+    'exit 0'
+  ].join('\r\n');
+  writeFileSync(psPath, ps, 'utf-8');
+
+  const targetNew = join(plan.parent, plan.newName);
   const bat = [
     '@echo off',
     'rem BlockCanvas 自动更新脚本（主进程生成，程序退出后由独立进程执行）',
@@ -529,12 +474,19 @@ function writeWindowsScript(updateDir: string, src: string, dst: string): string
     `robocopy "${src}" "${dst}" /E /PURGE /XD "data" ".update" /R:3 /W:2 /NFL /NDL /NJH /NJS /NP`,
     'rem robocopy 退出码 0-7 都算成功，8 以上才是错误',
     'if errorlevel 8 (',
-    '  echo 更新失败：文件替换出错。更新包保留在 .update 目录，程序未受影响。',
+    '  echo 更新失败：文件替换出错。程序未受影响，可重开软件重试。',
     '  pause',
     '  exit /b 1',
     ')',
     `rmdir /s /q "${updateDir}"`,
-    `start "" "${join(dst, exeName)}"`,
+    ...(needRename ? [
+      'rem —— 把程序文件夹名换成带版本号的（可能需要一次 UAC 授权）——',
+      `powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}" -Parent "${plan.parent}" -Old "${plan.oldName}" -New "${plan.newName}"`
+    ] : []),
+    'set "TARGET="',
+    ...(needRename ? [`if exist "${join(targetNew, exeName)}" set "TARGET=${targetNew}"`] : []),
+    `if not defined TARGET set "TARGET=${dst}"`,
+    'start "" "%TARGET%\\' + exeName + '"',
     'exit /b 0',
     'del "%~f0"'
   ].join('\r\n');
@@ -542,10 +494,11 @@ function writeWindowsScript(updateDir: string, src: string, dst: string): string
   return batPath;
 }
 
-/** macOS / Linux：rsync（优先）或 tar 覆盖，排除 data 与 .update，然后重启 */
-function writePosixScript(updateDir: string, src: string, dst: string): string {
-  const shPath = join(updateDir, 'apply-update.sh');
+/** macOS / Linux：rsync（优先）或 tar 覆盖 → 删掉 .update → 改名 → 启动新程序 */
+function writePosixScript(workDir: string, updateDir: string, src: string, dst: string, plan: RenamePlan): string {
+  const shPath = join(workDir, 'apply-update.sh');
   const execPath = process.execPath;
+  const targetNew = join(plan.parent, plan.newName);
   const lines = [
     '#!/bin/sh',
     '# BlockCanvas 自动更新脚本（主进程生成，程序退出后由独立进程执行）',
@@ -560,10 +513,23 @@ function writePosixScript(updateDir: string, src: string, dst: string): string {
     'fi',
     `rm -rf "${updateDir}"`
   ];
-  if (process.platform === 'darwin') {
-    lines.push(`open -n "${join(dst, 'BlockCanvas.app')}" 2>/dev/null || (nohup "${execPath}" >/dev/null 2>&1 &)`);
+  if (plan.oldName !== plan.newName) {
+    lines.push(
+      '# —— 把程序文件夹名换成带版本号的 ——',
+      `PARENT="${plan.parent}"`,
+      `OLD="${plan.oldName}"`,
+      `NEW="${plan.newName}"`,
+      'if [ -d "$PARENT/$OLD" ] && [ ! -e "$PARENT/$NEW" ]; then mv "$PARENT/$OLD" "$PARENT/$NEW" 2>/dev/null || true; fi',
+      `TARGET="${dst}"`,
+      `[ -d "${targetNew}" ] && TARGET="${targetNew}"`
+    );
   } else {
-    lines.push(`nohup "${execPath}" >/dev/null 2>&1 &`);
+    lines.push(`TARGET="${dst}"`);
+  }
+  if (process.platform === 'darwin') {
+    lines.push(`open -n "$TARGET/BlockCanvas.app" 2>/dev/null || (nohup "${execPath}" >/dev/null 2>&1 &)`);
+  } else {
+    lines.push(`nohup "$TARGET/$(basename "${execPath}")" >/dev/null 2>&1 &`);
   }
   lines.push('rm -f "$0"');
   writeFileSync(shPath, lines.join('\n') + '\n', 'utf-8');

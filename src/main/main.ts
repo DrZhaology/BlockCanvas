@@ -9,9 +9,13 @@ import {
   readSession, writeSession, getStorageStats, clearAppCache, clearOrphanBackups
 } from './userData';
 import {
-  getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo, applyUpdate,
-  downloadReleaseAsset
+  getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo,
+  resolveInstallDir
 } from './updater';
+import {
+  listTasks, startTask, pauseTask, resumeTask, cancelTask, dismissTask, revealTask,
+  flushTasksOnQuit
+} from './tasks';
 
 // 启动最优先：初始化纯便携数据区 data/，隔离系统盘
 initDataDirectories();
@@ -97,6 +101,11 @@ function buildMenu(win: BrowserWindow): Menu {
     {
       label: '帮助',
       submenu: [
+        { label: '📖 使用手册（帮助中心）', accelerator: 'F1', click: () => win.webContents.send('menu:help') },
+        { type: 'separator' },
+        { label: '⌨️ 键盘快捷键速查表', accelerator: 'Shift+/', click: () => win.webContents.send('menu:shortcuts') },
+        { label: '🔄 检测更新…', click: () => win.webContents.send('menu:check-update') },
+        { type: 'separator' },
         { label: '关于 BlockCanvas', click: () => win.webContents.send('menu:about') }
       ]
     },
@@ -201,29 +210,95 @@ ipcMain.handle('update:check', async () => {
   };
 });
 
-ipcMain.handle('update:apply', async (evt, assetUrl: string) => {
+ipcMain.handle('update:apply', async (_evt, assetUrl: string, fileName: string, version: string, tag: string) => {
   if (!assetUrl) return { ok: false, error: '未找到下载地址' };
   if (!app.isPackaged) {
     return { ok: false, error: '当前处于源码开发模式（pnpm dev），没有可替换的安装目录。自动更新仅对打包后的便携版生效。' };
   }
-  // 进度推送到发起更新的窗口（渲染层在更新页面里展示）
-  return await applyUpdate(assetUrl, (msg, pct) => {
-    try { evt.sender.send('update:progress', { msg, pct }); } catch { /* 窗口可能已关闭 */ }
+  // v0.4.4：更新也是一个「后台任务」（可暂停/续传/取消，进度在工具栏「任务」按钮里也看得到）。
+  // 下载包就放在安装目录的 .update/ 下，替换脚本用完会连目录一起删掉。
+  const t = startTask({
+    kind: 'update',
+    url: assetUrl,
+    fileName: fileName || 'update.zip',
+    title: `更新到 v${version || ''}`.trim(),
+    tag,
+    version,
+    destDir: join(resolveInstallDir(), '.update')
   });
+  return { ok: true, taskId: t.id };
 });
 
-// 「下载 zip」：只落盘到 data/downloads/，不替换程序（进度复用 update:progress 通道）
-ipcMain.handle('update:download-asset', async (evt, assetUrl: string, fileName: string) => {
+// 「下载 zip」：只落盘到 data/downloads/，不替换程序 —— 同样是后台任务，
+// 于是可以随时暂停/继续，也能在工具栏「任务」按钮里看到它，重启后记录还在。
+ipcMain.handle('update:download-asset', async (_evt, assetUrl: string, fileName: string, tag?: string, title?: string) => {
   if (!assetUrl) return { ok: false, error: '缺少下载地址' };
-  return await downloadReleaseAsset(assetUrl, fileName, (msg, pct) => {
-    try { evt.sender.send('update:progress', { msg, pct }); } catch { /* 窗口可能已关闭 */ }
-  });
+  const t = startTask({ kind: 'download', url: assetUrl, fileName, tag, title });
+  return { ok: true, taskId: t.id, path: t.dest };
+});
+
+// ============ 后台任务 IPC（下载 / 更新的统一出口） ============
+ipcMain.handle('task:list', () => listTasks());
+ipcMain.handle('task:pause', (_evt, id: string) => { pauseTask(id); return listTasks(); });
+ipcMain.handle('task:resume', (_evt, id: string) => { resumeTask(id); return listTasks(); });
+ipcMain.handle('task:cancel', (_evt, id: string) => { cancelTask(id); return listTasks(); });
+ipcMain.handle('task:dismiss', (_evt, id: string) => { dismissTask(id); return listTasks(); });
+ipcMain.handle('task:reveal', async (_evt, id: string) => {
+  const err = await revealTask(id);
+  return { ok: !err, error: err || undefined };
+});
+// 「打开 zip 所在的文件夹」用：给一个文件路径就定位到它，给目录就打开目录。
+ipcMain.handle('shell:reveal', async (_evt, p: string) => {
+  if (!p) return { ok: false, error: '缺少路径' };
+  try {
+    if (existsSync(p) && statSync(p).isDirectory()) return { ok: !(await shell.openPath(p)) };
+    shell.showItemInFolder(p);
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || '打开失败' };
+  }
+});
+
+// 帮助中心里的外链（GitHub / 文档站）用系统默认浏览器打开。
+// 只放行 http/https —— 避免被别的协议（file:、自定义 scheme）当跳板用。
+ipcMain.handle('shell:open-external', async (_evt, url: string) => {
+  try {
+    if (!/^https?:\/\//i.test(String(url || ''))) return { ok: false, error: '只允许打开 http / https 链接' };
+    await shell.openExternal(url);
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || '打开失败' };
+  }
 });
 
 ipcMain.handle('data:open-path', async (_evt, target: string) => {
   const p = target === 'data' ? dataRoot() : target === 'extensions' ? extRoot() : join(dataRoot(), target);
   return shell.openPath(p);
 });
+
+// ============ 帮助文档（README.md） ============
+// 「打包时硬编码、运行时直读」：
+//   · 打包版（asar）里没有 README（electron-builder 排除了 docs/**、根目录也只剩 out/**），
+//     渲染层用的是构建时内联进去的那份（vite `?raw`）；
+//   · 开发态（pnpm dev）则走这里**实时读盘**，改完 README 刷新就能看到，不用重新构建。
+ipcMain.handle('help:get-readme', () => {
+  if (app.isPackaged) return { ok: false, bundled: true };
+  const candidates = [
+    join(app.getAppPath(), 'README.md'),
+    join(process.cwd(), 'README.md')
+  ];
+  for (const p of candidates) {
+    try {
+      if (existsSync(p)) {
+        const text = readFileSync(p, 'utf-8');
+        return { ok: true, text, path: p, source: 'disk' };
+      }
+    } catch { /* 试下一个 */ }
+  }
+  return { ok: false, source: 'none' };
+});
+// 帮助页里的相对图片（docs/screenshots/xxx.png）在开发态指向仓库里的真实文件
+ipcMain.handle('help:get-root', () => (app.isPackaged ? '' : app.getAppPath()));
 
 ipcMain.handle('cfg:get', () => readAppConfig());
 ipcMain.handle('cfg:set', (_evt, patch: Record<string, any>) => writeAppConfig(patch));
@@ -848,6 +923,12 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+// 退出前把后台任务落盘：正在跑的任务标成"已中断"（分片文件保留），
+// 下次启动时用户可以在工具栏「任务」按钮里看到它并点「继续」。
+app.on('before-quit', () => {
+  try { flushTasksOnQuit(); } catch { /* 忽略 */ }
 });
 
 app.on('activate', () => {

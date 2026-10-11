@@ -893,6 +893,31 @@ async function main() {
   const toast3 = ((await win.locator('.tbl-toast').first().innerText().catch(() => '')) || '').trim();
   ok('Ctrl+Shift+C 复制整张表 HTML', toast3.includes('HTML'), toast3);
 
+  // —— v0.4.4 修正：用户上一轮说的其实是「Ctrl+A 用不了」（不是 Ctrl+C）——
+  // Ctrl+A 必须全选所有单元格；且不能落到浏览器默认的"全选整页文字"。
+  await win.locator('.tbl-cell[data-cell="0-0"]').first().click({ position: { x: 8, y: 10 } });
+  await sleep(250);
+  await win.keyboard.press('Control+a');
+  await sleep(450);
+  const toastA = ((await win.locator('.tbl-toast').first().innerText().catch(() => '')) || '').trim();
+  ok('Ctrl+A 全选整张表 → 有反馈提示', toastA.includes('全选') || /\d+ 行 × \d+ 列/.test(toastA), toastA);
+  const selA = await win.evaluate(() => {
+    const picked = document.querySelectorAll('.tbl-cell.picked');
+    const total = document.querySelectorAll('.tbl-cell').length;
+    return {
+      picked: picked.length,
+      total,
+      textSelected: String(window.getSelection ? window.getSelection().toString() : '').length
+    };
+  });
+  ok('Ctrl+A 后所有单元格都进入选区', selA && selA.total > 0 && selA.picked >= selA.total, JSON.stringify(selA));
+  ok('Ctrl+A 不会落到浏览器默认的"全选文字"', selA && selA.textSelected < 20, JSON.stringify(selA));
+  // 复制这个"全选"结果 → 应当是整张表的 TSV
+  await win.keyboard.press('Control+c');
+  await sleep(450);
+  const toastA2 = ((await win.locator('.tbl-toast').first().innerText().catch(() => '')) || '').trim();
+  ok('全选后 Ctrl+C → 复制整张表内容', /已复制 \d+ 行 × \d+ 列/.test(toastA2), toastA2);
+
   // ============ 18. 导出：每张表一个独立 <style> ============
   await win.locator('.fluent-back-btn').first().click();
   await win.waitForSelector('.toolbar', { timeout: 8000 });

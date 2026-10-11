@@ -12,10 +12,12 @@ import { Settings, type SettingsSection } from '@comp/Settings';
 import { TableEditor } from '@comp/TableEditor';
 import { ProjectTabBar } from '@comp/ProjectTabBar';
 import { AboutModal } from '@comp/About';
+import { HelpCenter } from '@comp/HelpCenter';
 import { ShortcutsModal } from '@comp/ShortcutsModal';
 import { useScene, findNode } from '@store/sceneStore';
 import { useTabStore } from '@store/tabStore';
 import { useUpdateBusy } from '@store/updateStore';
+import { useTasks, subscribeTasks } from '@store/taskStore';
 import { refreshPlugins } from '@lib/pluginHost';
 import { withViewTransition } from '@lib/viewTransition';
 import { useHorizontalWheel } from '@lib/hScroll';
@@ -42,7 +44,7 @@ const BOTTOM_HEIGHT_MIN = 175;
 const RIGHT_WIDTH_DEFAULT = 416;
 const RIGHT_WIDTH_MIN = 340;
 
-export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table';
+export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 'help';
 
 export default function App() {
   // v0.4.2：全局「横向滚动区直接滚轮」桥接（容器加 .bc-hscroll 即生效）
@@ -96,6 +98,12 @@ export default function App() {
   }, []);
 
   useKeyboardShortcuts(switchView, () => setShowShortcuts(true), viewRef);
+
+  // 0. 后台任务：主进程是唯一真相，这里挂一次订阅（工具栏「任务」按钮与更新中心共用同一份数据）
+  useEffect(() => subscribeTasks(), []);
+
+  // 0.1 「更新任务进入替换阶段」→ 才锁死编辑器（下载阶段不锁，用户可以继续干活）
+  useUpdateTaskBridge();
 
   // 0. 设备 / 断点 / 画布宽度 三合一同步
   //    - 画布宽度变化 → 自动推导当前编辑断点（电脑 / 平板 / 手机）
@@ -226,6 +234,7 @@ export default function App() {
       window.dispatchEvent(new CustomEvent('bc:open-class'));
     };
     const openAbout = () => setShowAbout(true);
+    const openHelp = () => { if (!useUpdateBusy.getState().busy) setView('help'); };
 
     const onNewTab = () => {
       if (blocked()) return;
@@ -294,6 +303,9 @@ export default function App() {
     window.addEventListener('menu:settings', () => openSettings());
     window.addEventListener('menu:class-manager', openClass);
     window.addEventListener('menu:about', openAbout);
+    window.addEventListener('menu:help', openHelp);
+    window.addEventListener('bc:open-help', openHelp);
+    window.addEventListener('menu:shortcuts', () => setShowShortcuts(true));
     window.addEventListener('menu:check-update', openUpdateCenter);
     const onOpenTable = (e: Event) => {
       if (blocked()) return;
@@ -318,6 +330,8 @@ export default function App() {
       window.bc.onMenu('menu:settings', () => openSettings()),
       window.bc.onMenu('menu:class-manager', openClass),
       window.bc.onMenu('menu:about', openAbout),
+      window.bc.onMenu('menu:help', openHelp),
+      window.bc.onMenu('menu:shortcuts', () => setShowShortcuts(true)),
       window.bc.onMenu('menu:check-update', openUpdateCenter),
       window.bc.onMenu('menu:new-tab', onNewTab),
       window.bc.onMenu('menu:save-project', onSaveProject),
@@ -339,6 +353,7 @@ export default function App() {
       window.removeEventListener('menu:settings', () => openSettings());
       window.removeEventListener('menu:class-manager', openClass);
       window.removeEventListener('menu:about', openAbout);
+      window.removeEventListener('menu:help', openHelp);
       window.removeEventListener('menu:check-update', openUpdateCenter);
       window.removeEventListener('bc:open-table-editor', onOpenTable);
       window.removeEventListener('menu:new-tab', onNewTab);
@@ -361,6 +376,8 @@ export default function App() {
         <ProjectsCenter
           onBack={() => switchView('editor')}
         />
+      ) : view === 'help' ? (
+        <HelpCenter onBack={() => switchView('editor')} />
       ) : view === 'settings' ? (
         <Settings
           onBack={() => switchView('editor')}
@@ -492,12 +509,34 @@ function UpdateBusyOverlay() {
           <div className="bc-update-blocker-fill" style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
         </div>
         <div className="bc-update-blocker-hint">
-          更新期间已锁定编辑器操作。完成后程序会自动重启，
-          <b>data/ 里的全部工程与快照都会保留</b>。
+          正在替换程序本体，这期间锁定编辑器操作。完成后程序会自动重启，
+          <b>data/ 里的全部工程与快照都会保留</b>；
+          程序文件夹还会自动改名带上新版本号（必要时会弹出一次系统授权框）。
         </div>
       </div>
     </div>
   );
+}
+
+// ============ 「更新任务 → 全屏遮罩」桥接（v0.4.4） ============
+// 以前一发起更新就立刻锁编辑器；现在**下载阶段不锁**（进度在版本卡片与工具栏「任务」按钮里），
+// 只有任务进入 `applying`（解压 / 替换 / 重启）才盖遮罩 —— 这是真正不能动数据的时刻。
+function useUpdateTaskBridge() {
+  const tasks = useTasks((s) => s.tasks);
+  const start = useUpdateBusy((s) => s.start);
+  const setProgress = useUpdateBusy((s) => s.progress);
+  const finish = useUpdateBusy((s) => s.finish);
+  useEffect(() => {
+    const applying = tasks.find((t) => t.kind === 'update' && t.status === 'applying');
+    const st = useUpdateBusy.getState();
+    if (applying) {
+      if (!st.busy) start(applying.detail);
+      else setProgress(applying.detail, applying.pct);
+    } else if (st.busy) {
+      // 任务失败 / 被取消 / 已完成（已完成时程序马上会退出）→ 解锁
+      finish();
+    }
+  }, [tasks, start, setProgress, finish]);
 }
 
 function startResize(

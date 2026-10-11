@@ -192,6 +192,12 @@ export interface SceneElement {
   text?: string; // 文本内容（h1/p/button 等用）
   children: SceneElement[]; // 流式布局：子元素按数组顺序堆叠
   style: ElementStyle; // 内联样式
+  /**
+   * 内联样式覆盖（v0.4.4d）：直接输出到该元素的 `style` 属性，永远不抽成类/选择器规则。
+   * 用于「右键选中一段文字 → 单独加粗 / 改色 / 改字号」这种一次性微调 ——
+   * 有类名的元素也会额外带一份内联 style（在类规则之后生效 → 只覆盖这一个元素）。
+   */
+  inlineStyle?: ElementStyle;
   attrs?: {
     // HTML 原生属性（非 CSS）
     className?: string;

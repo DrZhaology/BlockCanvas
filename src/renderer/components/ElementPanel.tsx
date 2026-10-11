@@ -7,6 +7,7 @@ import { Collapse } from './Collapse';
 import { getPluginElements } from '@lib/pluginHost';
 import { TABLE_STYLE_PRESETS, applyTableStylePreset } from '@lib/tablePresets';
 import { uniqueTableClassName } from '@lib/tableOps';
+import { HOVER_OPEN_MS } from '@lib/hoverPop';
 
 // BlockCanvas · 元素面板
 // 阶段1：按类别分组，点击插入选中元素的父级（或根）
@@ -288,7 +289,7 @@ export function ElementPanel() {
                               y: r.top,
                               below: r.top < 190
                             });
-                          }, 500); // 悬停 0.5 秒（与右侧面板的「?」气泡一致，原来 1 秒太慢）
+                          }, HOVER_OPEN_MS); // 悬停 0.5 秒（统一走 lib/hoverPop，与「?」气泡一致）
                         }}
                         onMouseLeave={() => {
                           clearHoverTimer();
@@ -314,7 +315,7 @@ export function ElementPanel() {
                           const vw = window.innerWidth;
                           hoverTimer.current = window.setTimeout(() => {
                             setTip({ def: it as any, x: Math.min(Math.max(8, r.left), Math.max(8, vw - 288)), y: r.top, below: r.top < 190 });
-                          }, 500); // 悬停 0.5 秒（同上）
+                          }, HOVER_OPEN_MS); // 悬停 0.5 秒（同上，统一走 lib/hoverPop）
                         }}
                         onMouseLeave={() => { clearHoverTimer(); setTip(null); }}
                       >

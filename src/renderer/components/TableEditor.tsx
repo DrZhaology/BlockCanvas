@@ -388,10 +388,24 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-      if (e.key.toLowerCase() !== 'c') return;
-      // 正在输入框里打字 → 交还给浏览器（用户想复制的是自己输入的内容）
+      const k = e.key.toLowerCase();
+      if (k !== 'c' && k !== 'a') return;
+      // 正在输入框里打字 → 交还给浏览器（用户想复制/全选的是自己输入的内容）
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+
+      // ——— Ctrl/⌘ + A：全选所有单元格 ———
+      // 以前这里完全没接管，而全局快捷键对非 editor 视图是放行的 →
+      // 按下去等于"什么都没发生"，还会顺手把浏览器默认的"全选整页文字"带出来。
+      if (k === 'a') {
+        if (rowCount === 0 || cols === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setSel({ kind: 'cell', r: 0, c: 0, r2: rowCount - 1, c2: cols - 1 });
+        flashToast(`✓ 已全选整张表（${rowCount} 行 × ${cols} 列）—— 可直接设样式、合并或复制`);
+        return;
+      }
+
       e.preventDefault();
       e.stopPropagation();
       if (e.shiftKey) {
@@ -399,16 +413,16 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
         flashToast(copyText(html) ? '✓ 已复制整张表的 HTML 源码（可直接粘进别的网页/编辑器）' : '复制失败：剪贴板不可用');
         return;
       }
-      const { tsv, rows, cols } = selectionTsv();
+      const { tsv, rows, cols: nCols } = selectionTsv();
       if (!tsv.trim()) { flashToast('这张表还没有内容可复制'); return; }
       flashToast(copyText(tsv)
-        ? `✓ 已复制 ${rows} 行 × ${cols} 列（Tab 分隔，可直接粘进 Excel / WPS）`
+        ? `✓ 已复制 ${rows} 行 × ${nCols} 列（Tab 分隔，可直接粘进 Excel / WPS）`
         : '复制失败：剪贴板不可用');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel, rect, rowCount, parts, tableId]);
+  }, [sel, rect, rowCount, cols, parts, tableId]);
 
   // 选区可以完全取消（用户要求：不强制始终选中一格）：
   //   · 按 Esc
@@ -749,12 +763,12 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
             <div className="tbl-panel-title">表格结构</div>
             <HelpButton
               title="怎么改表格结构"
-              content={'【插入行 / 列】\n把鼠标移到行与行、列与列之间那条缝上，会浮出一条轨道和 ＋。\n· 点一下：插入 1 行 / 1 列\n· 按住 ＋ 沿"列往右拖 / 行往下拖"：一次插入多个，气泡上会实时显示要插几个\n· 拖过头了按 Esc 取消\n· 插入点落在某个合并格内部时，会自动吸附到那个格子的左边（保证每一行都在同一列边界上插，不会错位）\n\n【选中与合并】\n· 在格子上按住鼠标拖 → 拖选出一片（矩形选区，自动吸附到格子边界）\n· Ctrl / ⌘ + 点某一格 → 把这一格并进当前选区（选区始终是矩形，取并集）\n· Shift + 点 → 从选区左上角拉到你点的那一格\n· 点行号 / 列号 → 选中整行 / 整列\n· 选中后，上面那条操作条会亮起来：合并 / 拆分 / 设为表头 / 删除行 / 删除列\n\n【合并的规则】\n· 只有"选区正好由完整格子拼满"才允许合并；压到已有合并格的边上时，\n  「合并」按钮会灰着并把鼠标停上去写明原因 —— 不会出现"点了没反应"\n· 合并后只有左上角那格的内容保留，其余格子整格消失；用「拆分」还原\n· 可以先把两行各自横向合并、再把它们纵向合并成一块（2×2 一次合上也行）\n\n【删除】\n按 Del / Backspace = 清空选中格子的文字（只动内容，不动结构）。\n要删掉整行 / 整列，请用操作条上的「删行 / 删列」。\n删列时如果那一列正处在某个合并格内部，那一格不会被硬拆（该列在那一行保留）。\n\n【跨度标记】\n合并后的格子右下角会显示 ⇥（跨几列）与 ⇩（跨几行）。'}
+              content={'【插入行 / 列】\n把鼠标移到行与行、列与列之间那条缝上，会浮出一条轨道和 ＋。\n· 点一下：插入 1 行 / 1 列\n· 按住 ＋ 沿"列往右拖 / 行往下拖"：一次插入多个，气泡上会实时显示要插几个\n· 拖过头了按 Esc 取消\n· 插入点落在某个合并格内部时，会自动吸附到那个格子的左边（保证每一行都在同一列边界上插，不会错位）\n\n【选中与合并】\n· 在格子上按住鼠标拖 → 拖选出一片（矩形选区，自动吸附到格子边界）\n· Ctrl / ⌘ + 点某一格 → 把这一格并进当前选区（选区始终是矩形，取并集）\n· Shift + 点 → 从选区左上角拉到你点的那一格\n· 点行号 / 列号 → 选中整行 / 整列\n· Ctrl / ⌘ + A → 全选整张表（所有单元格）\n· 选中后，上面那条操作条会亮起来：合并 / 拆分 / 设为表头 / 删除行 / 删除列\n\n【合并的规则】\n· 只有"选区正好由完整格子拼满"才允许合并；压到已有合并格的边上时，\n  「合并」按钮会灰着并把鼠标停上去写明原因 —— 不会出现"点了没反应"\n· 合并后只有左上角那格的内容保留，其余格子整格消失；用「拆分」还原\n· 可以先把两行各自横向合并、再把它们纵向合并成一块（2×2 一次合上也行）\n\n【删除】\n按 Del / Backspace = 清空选中格子的文字（只动内容，不动结构）。\n要删掉整行 / 整列，请用操作条上的「删行 / 删列」。\n删列时如果那一列正处在某个合并格内部，那一格不会被硬拆（该列在那一行保留）。\n\n【跨度标记】\n合并后的格子右下角会显示 ⇥（跨几列）与 ⇩（跨几行）。'}
             />
           </div>
           <div className="tbl-stage-tip">
             缝上悬浮出 <b>＋</b>：点一下插 1 个，按住拖动可一次插多个 · 格子上拖动可拖选一片，<b>Ctrl+点</b> 加选、<b>Del</b> 清空文字
-            · <b>Ctrl+C</b> 复制选区（Tab 分隔，可直接粘进 Excel）、<b>Ctrl+Shift+C</b> 复制整张表 HTML
+            · <b>Ctrl+A</b> 全选整张表 · <b>Ctrl+C</b> 复制选区（Tab 分隔，可直接粘进 Excel）· <b>Ctrl+Shift+C</b> 复制整张表 HTML
           </div>
 
           {/* 选区操作条：固定位置（不浮在格子上挡住视线），没选中时按钮禁用 */}

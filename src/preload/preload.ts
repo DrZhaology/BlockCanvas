@@ -57,17 +57,45 @@ contextBridge.exposeInMainWorld('bc', {
   // 自动更新
   checkUpdate: () =>
     ipcRenderer.invoke('update:check'),
-  applyUpdate: (assetUrl: string) =>
-    ipcRenderer.invoke('update:apply', assetUrl),
+  /** 发起更新（后台任务）：先把包下下来，下完自动解压 / 替换 / 重启 */
+  applyUpdate: (assetUrl: string, fileName: string, version: string, tag: string) =>
+    ipcRenderer.invoke('update:apply', assetUrl, fileName, version, tag),
   getLocalVersion: () =>
     ipcRenderer.invoke('update:get-version'),
-  /** 单独下载某个发行版资产到 data/downloads/（更新中心「下载 zip」） */
-  downloadReleaseAsset: (assetUrl: string, fileName: string) =>
-    ipcRenderer.invoke('update:download-asset', assetUrl, fileName),
+  /** 单独下载某个发行版资产到 data/downloads/（更新中心「下载 zip」）—— 同样是后台任务 */
+  downloadReleaseAsset: (assetUrl: string, fileName: string, tag?: string, title?: string) =>
+    ipcRenderer.invoke('update:download-asset', assetUrl, fileName, tag, title),
   /** 阶段展示文案（version.json → package.json.bcStage） */
   getAppStage: () =>
     ipcRenderer.invoke('app:get-stage'),
-  /** 更新进度推送（下载百分比 / 阶段消息），返回取消监听的函数 */
+
+  // ============ 后台任务（下载 / 更新）============
+  /** 当前全部任务（新的在前） */
+  listTasks: () => ipcRenderer.invoke('task:list'),
+  pauseTask: (id: string) => ipcRenderer.invoke('task:pause', id),
+  resumeTask: (id: string) => ipcRenderer.invoke('task:resume', id),
+  cancelTask: (id: string) => ipcRenderer.invoke('task:cancel', id),
+  dismissTask: (id: string) => ipcRenderer.invoke('task:dismiss', id),
+  /** 在文件管理器里定位到这个任务下好的文件 */
+  revealTask: (id: string) => ipcRenderer.invoke('task:reveal', id),
+  /** 打开 / 定位任意路径（文件 → 定位，目录 → 打开） */
+  revealPath: (p: string) => ipcRenderer.invoke('shell:reveal', p),
+  /** 用系统默认浏览器打开外链（只放行 http/https） */
+  openExternal: (url: string) => ipcRenderer.invoke('shell:open-external', url),
+  /** 任务列表变化推送（返回取消监听的函数） */
+  onTasksChanged: (cb: (tasks: unknown) => void) => {
+    const h = (_e: unknown, t: unknown) => cb(t);
+    ipcRenderer.on('task:changed', h);
+    return () => { ipcRenderer.removeListener('task:changed', h); };
+  },
+
+  // ============ 帮助文档 ============
+  /** 开发态实时读盘；打包版返回 ok:false（渲染层用构建时内联的那份） */
+  getReadme: () => ipcRenderer.invoke('help:get-readme'),
+  /** 开发态返回仓库根目录（帮助页里相对图片要用它拼绝对路径） */
+  getAppRoot: () => ipcRenderer.invoke('help:get-root'),
+
+  /** 兼容旧调用：更新进度（v0.4.4 起进度统一走 task:changed，这里仅保留签名） */
   onUpdateProgress: (cb: (p: { msg: string; pct?: number }) => void) => {
     const h = (_e: unknown, p: { msg: string; pct?: number }) => cb(p);
     ipcRenderer.on('update:progress', h);
