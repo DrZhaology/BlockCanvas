@@ -37,12 +37,14 @@ export interface HealthIssue {
 
 /**
  * 这张 <table> 是否参与体检。
- * 表格默认**不参与**：一格一个 td/th，正常做表格既不给格子起类名也不写 CSS，
- * 参与体检只会刷出一大串"未命名元素"，把真正要处理的问题淹掉。
- * 想纳入的表格，在表格编辑器右侧面板把「参与导出前体检」打开（node.healthCheck = true）。
+ * v0.4.3 起**默认参与**（用户要求改回来：表格里的复杂设置还是需要 CSS 的）——
+ * 编辑器「选择器与标识」里配了「自动取名表格内的元素」按钮：
+ * 一键给内部元素生成精准的关系选择器（`.cls > tbody > tr:nth-child(2) > td:nth-child(1)`），
+ * 所以体检报出来的"未命名元素"点一下就清干净了。
+ * 只有显式关掉（node.healthCheck === false）的表格才整棵子树跳过。
  */
 function tableInHealthCheck(n: SceneElement): boolean {
-  return n.type !== 'table' || n.healthCheck === true;
+  return n.type !== 'table' || n.healthCheck !== false;
 }
 
 /**
@@ -67,7 +69,7 @@ export function countSkippedTables(root: SceneElement): number {
   let n = 0;
   const walk = (node: SceneElement) => {
     for (const c of node.children) {
-      if (c.type === 'table' && c.healthCheck !== true) { n += 1; continue; }
+      if (c.type === 'table' && c.healthCheck === false) { n += 1; continue; }
       walk(c);
     }
   };

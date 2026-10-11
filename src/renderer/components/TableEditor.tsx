@@ -4,11 +4,13 @@ import { useScene, findNode } from '@store/sceneStore';
 import type { ElementStyle, SceneElement } from '@lib/types';
 import {
   readTable, normalizeTable, buildGrid, canMergeRange, applyTableOp, findTableAncestor,
+  autoNameTableInner, countUnnamedInner,
   type GridCell, type TableOp
 } from '@lib/tableOps';
-import { TABLE_STYLE_PRESETS, TABLE_STRUCTURE_TEMPLATES, applyTableStylePreset } from '@lib/tablePresets';
+import { TABLE_STYLE_PRESETS, TABLE_STRUCTURE_TEMPLATES, applyTableStylePreset, type TableStylePreset } from '@lib/tablePresets';
 import { HelpButton } from './HelpButton';
 import { ColorPicker, ColorField } from './ColorPicker';
+import { useWheelAdjust } from '@lib/wheelAdjust';
 
 // ============================================================================
 // BlockCanvas · 表格编辑页（v0.4.3）
@@ -196,15 +198,20 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
     }
   }, [sel, cols, rowCount]);
 
-  // 首次进入：默认选中左上角那一格（按它真实跨度整格选中），右侧面板不至于是空的
+  // 选区可以完全取消（用户要求：不强制始终选中一格）：
+  //   · 按 Esc
+  //   · 点左边的空白处（结构网格之外）
+  // 表格设置 / 预设 / 表格结构 这些板块跟选区无关，取消选中后照样能用。
   useEffect(() => {
-    if (sel || rowCount === 0 || cols === 0) return;
-    const first = grid.cells[0];
-    setSel(first
-      ? { kind: 'cell', r: first.row, c: first.col, r2: first.row + first.rs - 1, c2: first.col + first.cs - 1 }
-      : { kind: 'cell', r: 0, c: 0, r2: 0, c2: 0 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowCount, cols]);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      setSel(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     if (anchor && !editingRef.current) setCellDraft(anchor.text ?? '');
@@ -280,131 +287,62 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [railDrag?.id]);
 
-  // ——— 连续编辑会话（撤销只回退一步） ———
-  // 拖内边距 / 拖字号 / 拖调色盘，一次交互 = 一条 undo：
-  // beginStyleEdit 在开始压一个还原点，中间的 updateStyle 因 styleEditPending 不再压栈。
-  // ⚠ 以前这里用 <input type="color"> 直接 updateStyle：系统调色盘一拖就是几十次 input 事件，
-  //   历史里塞满中间色，Ctrl+Z 就得按几十下才"慢慢变回原来的颜色"。
+  // ——— 样式写入 + "连续编辑会话"（一次交互 = 一条撤销） ———
+  // 连续输入 / 调色盘拖动：交互开始压一个还原点，会话中间随便写都不再入栈。
   const beginEdit = () => useScene.getState().beginStyleEdit();
   const endEdit = () => useScene.getState().endStyleEdit();
 
-  const applyPad = (p: Pad) => {
+  /** 四边内边距共用的单位（没写过就是 px）；这里只能看 anchor —— cellStyle 在本文件后面才算出来 */
+  const padUnit = (() => {
+    const st = anchor?.style;
+    const raw = String(st?.padding || st?.paddingTop || '').trim();
+    const m = /[a-z%]+$/i.exec(raw);
+    return m ? m[0] : 'px';
+  })();
+
+  const applyPad = (p: Pad, unit: string = padUnit) => {
     if (!anchor) return;
     useScene.getState().updateStyle(anchor.id, {
       padding: undefined,
-      paddingTop: p.top + 'px',
-      paddingRight: p.right + 'px',
-      paddingBottom: p.bottom + 'px',
-      paddingLeft: p.left + 'px'
+      paddingTop: p.top + unit,
+      paddingRight: p.right + unit,
+      paddingBottom: p.bottom + unit,
+      paddingLeft: p.left + unit
     });
   };
 
-  const applyFont = (px: number) => {
+  /** 表格里还有多少内部元素没有名字（自动命名按钮上的计数） */
+  const unnamedInner = useMemo(() => (table ? countUnnamedInner(table) : 0), [table]);
+
+  /** 一键给内部元素生成精准关系选择器：.data-table > tbody > tr:nth-child(2) > td:nth-child(1) */
+  const autoNameInner = () => {
+    const cur = findNode(useScene.getState().scene.root, tableId);
+    if (!cur || cur.type !== 'table') return;
+    useScene.getState().replaceSubtree(tableId, autoNameTableInner(cur));
+  };
+
+  /** 把当前这一格的样式复制给表格里所有单元格（会话式写入 → 一条撤销） */
+  const applyToAllCells = () => {
     if (!anchor) return;
-    useScene.getState().updateStyle(anchor.id, { fontSize: px > 0 ? px + 'px' : undefined });
+    const st = useScene.getState();
+    const cur = findNode(st.scene.root, tableId);
+    if (!cur) return;
+    const g = buildGrid(readTable(normalizeTable(cur)).rows);
+    const keys = [
+      'backgroundColor', 'color', 'fontSize', 'fontWeight', 'fontFamily',
+      'textAlign', 'verticalAlign', 'whiteSpace',
+      'padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'
+    ] as const;
+    const src = anchor.style ?? {};
+    st.beginStyleEdit();
+    for (const c of g.cells) {
+      if (c.cell.id === anchor.id) continue;
+      const patch: Record<string, string | undefined> = {};
+      for (const k of keys) patch[k] = (src as Record<string, string | undefined>)[k];
+      st.updateStyle(c.cell.id, patch as Partial<ElementStyle>);
+    }
+    st.endStyleEdit();
   };
-
-  type PadSession = { id: number; side: PadSide | 'all'; startX: number; startY: number; base: Pad };
-  type SizeSession = { id: number; startX: number; base: number; left: number; width: number };
-  const padSession = useRef<PadSession | null>(null);
-  const sizeSession = useRef<SizeSession | null>(null);
-  const styleSeq = useRef(0);
-  const [padDrag, setPadDrag] = useState<{ id: number; side: PadSide | 'all' } | null>(null);
-  const [sizeDrag, setSizeDrag] = useState<number | null>(null);
-
-  const startPad = (side: PadSide | 'all', e: React.PointerEvent) => {
-    if (e.button !== 0 || !anchor) return;
-    e.preventDefault();
-    e.stopPropagation();
-    beginEdit();
-    // 起点 = 预览上现在显示的内边距（没写过就是编辑器默认值），这样拖动跟手、不会突然归零
-    const s: PadSession = { id: ++styleSeq.current, side, startX: e.clientX, startY: e.clientY, base: { ...pad } };
-    padSession.current = s;
-    setPadDrag({ id: s.id, side });
-  };
-
-  const startSize = (e: React.PointerEvent) => {
-    if (e.button !== 0 || !anchor) return;
-    e.preventDefault();
-    e.stopPropagation();
-    beginEdit();
-    const track = e.currentTarget as HTMLElement;
-    const r = track.getBoundingClientRect();
-    const cur = parseFloat(String(anchor.style?.fontSize ?? table?.style?.fontSize ?? '').replace('px', ''));
-    const s: SizeSession = {
-      id: ++styleSeq.current, startX: e.clientX,
-      base: Number.isFinite(cur) ? cur : 14, left: r.left, width: r.width
-    };
-    sizeSession.current = s;
-    setSizeDrag(s.id);
-    // 按下即定位（点哪就是哪个字号），拖动再继续跟手
-    applyFont(Math.round((FONT_MIN + ((e.clientX - r.left) / Math.max(1, r.width)) * (FONT_MAX - FONT_MIN)) * 2) / 2);
-  };
-
-  // 内边距拖动：会话放 ref，effect 只依赖会话 id（别把每次移动的坐标写进依赖，会重挂监听把起点刷掉）
-  useEffect(() => {
-    if (!padDrag) return;
-    const onMove = (e: PointerEvent) => {
-      const s = padSession.current;
-      if (!s) return;
-      const fast = e.shiftKey ? 3 : 1;
-      const dx = (e.clientX - s.startX) * fast;
-      const dy = (e.clientY - s.startY) * fast;
-      const next: Pad = { ...s.base };
-      if (s.side === 'top' || s.side === 'all') next.top = clampPad(s.base.top + dy);
-      if (s.side === 'bottom' || s.side === 'all') next.bottom = clampPad(s.base.bottom - dy);
-      if (s.side === 'left' || s.side === 'all') next.left = clampPad(s.base.left + dx);
-      if (s.side === 'right' || s.side === 'all') next.right = clampPad(s.base.right - dx);
-      applyPad(next);
-    };
-    const finish = () => {
-      padSession.current = null;
-      setPadDrag(null);
-      endEdit();
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') finish(); };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', finish);
-    window.addEventListener('keydown', onKey);
-    document.body.classList.add('bc-style-dragging');
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', finish);
-      window.removeEventListener('keydown', onKey);
-      document.body.classList.remove('bc-style-dragging');
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [padDrag?.id]);
-
-  // 字号拖动：普通模式 = 按滑杆位置定位；按住 Shift = 相对起点微调（0.5px 一档）
-  useEffect(() => {
-    if (sizeDrag === null) return;
-    const onMove = (e: PointerEvent) => {
-      const s = sizeSession.current;
-      if (!s) return;
-      const v = e.shiftKey
-        ? s.base + (e.clientX - s.startX) * 0.25
-        : FONT_MIN + Math.max(0, Math.min(1, (e.clientX - s.left) / Math.max(1, s.width))) * (FONT_MAX - FONT_MIN);
-      applyFont(Math.max(1, Math.round(v * 2) / 2));
-    };
-    const finish = () => {
-      sizeSession.current = null;
-      setSizeDrag(null);
-      endEdit();
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') finish(); };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', finish);
-    window.addEventListener('keydown', onKey);
-    document.body.classList.add('bc-style-dragging');
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', finish);
-      window.removeEventListener('keydown', onKey);
-      document.body.classList.remove('bc-style-dragging');
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sizeDrag]);
 
   // ——— 双击格子直接改字（编辑器里就地编辑，比来回看右侧面板顺手） ———
   const [editingCellId, setEditingCellId] = useState<string | null>(null);
@@ -510,10 +448,6 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
   const cellStyle: ElementStyle = anchor?.style ?? {};
   /** 这一格的内边距四值（右侧预览的间距 = 它，拖动改的也是它）；没写过就按编辑器默认显示 */
   const pad = hasPad(cellStyle) ? readPad(cellStyle) : { ...PAD_FALLBACK };
-  /** 字号滑杆位置：这一格没写就跟着表格默认走 */
-  const sizeVal = parseFloat(String(cellStyle.fontSize ?? table.style?.fontSize ?? '').replace('px', ''));
-  const sizeBase = Number.isFinite(sizeVal) && sizeVal > 0 ? sizeVal : 14;
-  const sizePct = Math.round(Math.max(0, Math.min(100, ((sizeBase - FONT_MIN) / (FONT_MAX - FONT_MIN)) * 100)));
   /** 表格标题在预览里放上还是放下（跟 captionSide 一致） */
   const captionTop = (table.style?.captionSide ?? 'top') !== 'bottom';
   const rectArea = rect ? (rect.r1 - rect.r0 + 1) * (rect.c1 - rect.c0 + 1) : 0;
@@ -569,7 +503,15 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
 
       <div className="table-body">
         {/* ————— 左：结构网格 ————— */}
-        <div className="table-stage">
+        {/* 点这一整块空白（网格之外）也能取消选中：不用非去点小格子 */}
+        <div
+          className="table-stage"
+          onPointerDown={(e) => {
+            const el = e.target as HTMLElement;
+            if (el.closest('.tbl-cell') || el.closest('.tbl-rail') || el.closest('.tbl-actionbar') || el.closest('.tbl-colhead') || el.closest('.tbl-rowhead')) return;
+            setSel(null);
+          }}
+        >
           <div className="tbl-stage-head">
             <div className="tbl-panel-title">表格结构</div>
             <HelpButton
@@ -835,25 +777,83 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
 
         {/* ————— 右：属性与操作 ————— */}
         <div className="table-side">
-          {/* 单元格 */}
+          {/* 选择器与标识：整张表只需要一个名字；内部元素一键自动命名（精准关系选择器） */}
           <div className="tbl-card">
             <div className="tbl-card-head">
-              <div className="tbl-card-title">单元格</div>
+              <div className="tbl-card-title">选择器与标识</div>
               <HelpButton
-                title="单元格属性怎么改"
-                content={'【大预览 + 直接拖】\n右边这块就是这一格的实时预览（和左边表格同步）：\n· 鼠标放到虚线边上 → 拖动 = 改那一边的内边距（往外拖变大、往里拖变小；按住 Shift 拖得快）\n· 拖右下角小方块 = 四边一起改\n· 字号那条滑杆：按住左右拖 = 改字号；按住 Shift 拖 = 微调（0.5px 一档）\n· 颜色块点一下 = 打开调色盘选色（也可以直接改数值，同样实时生效）\n\n【文案】这一格里显示的字。\n也可以直接在左边表格里**双击格子**改字：回车确认、Esc 取消、点别处自动保存。\n\n【类型 th / td】\n· td = 普通数据格\n· th = 表头格（浏览器默认加粗居中、屏幕阅读器会当成"这行/这列的名字"）\n\n【scope】只对 th 有意义：告诉屏幕阅读器这个表头管的是哪一片。\n· col = 管它下面这一列 · row = 管它右边这一行\n· colgroup / rowgroup = 管这一整列组 / 行组（一般配合 <colgroup> 用）\n\n【colspan / rowspan】跨几列 / 跨几行。\n选一片格子点"合并"就是自动填这两个值；此处手填适合做精细控制。\n\n【内边距】文字到格子边框的距离（上 / 右 / 下 / 左 四个数值，和拖动等价）。\n【不换行】打开后这一格的长文字不再折行（表格会因此变宽）。\n\n⚠ 这里改的都会立刻反映到左边表格上；一次拖动 = 一条撤销记录，Ctrl+Z 一下回到拖动前。'}
+                title="表格的名字与自动命名"
+                content={'整张表只需要最外层 <table> 有一个类名或 ID —— 表格里的复杂样式都挂在它上面。\n\n【自动取名表格内的元素】\n表格内部（thead / tbody / tr / td / th / caption）正常情况下**不需要**你一个个起名：\n点一下这个按钮，程序会按结构序号生成精准的关系选择器，例如\n  .data-table > tbody > tr:nth-child(2) > td:nth-child(1)\n\n· 只给"还没有名字"的元素补，已经手动命名的不会被覆盖；\n· 表还没有名字时会顺手给 table 一个默认类名 data-table（格子一个类名都不加）；\n· 这样导出的是干净精准的 CSS，导出前体检也不会再报"未命名元素"。'}
+              />
+            </div>
+            <div className="tbl-field-row">
+              <label className="tbl-field small">
+                <span>类名 Class <em>表格的名字</em></span>
+                <input
+                  className="cls-chip-input"
+                  value={table.attrs?.className ?? ''}
+                  placeholder="如 data-table"
+                  onChange={(e) => useScene.getState().updateAttr(tableId, 'className', e.target.value)}
+                />
+              </label>
+              <label className="tbl-field small">
+                <span>ID <em>唯一标识</em></span>
+                <input
+                  value={table.attrs?.id ?? ''}
+                  placeholder="可留空"
+                  onChange={(e) => useScene.getState().updateAttr(tableId, 'id', e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="tbl-field-row tbl-name-row">
+              <button
+                className="btn-secondary tbl-autoname-btn"
+                disabled={unnamedInner === 0}
+                title={unnamedInner === 0
+                  ? '表格内部元素都已经有名字了'
+                  : `给表格内 ${unnamedInner} 个还没有名字的元素生成精准关系选择器（一条撤销记录）`}
+                onClick={autoNameInner}
+              >⚡ 自动取名表格内的元素{unnamedInner > 0 ? `（${unnamedInner}）` : ''}</button>
+              <span className="tbl-hint">
+                {unnamedInner > 0
+                  ? '内部元素按结构序号自动命名，不再需要一个个起类名'
+                  : '内部元素都已命名'}
+              </span>
+            </div>
+            <label className="tbl-switch-row">
+              <input
+                type="checkbox"
+                checked={table.healthCheck !== false}
+                onChange={(e) => useScene.getState().setHealthCheck(tableId, e.target.checked)}
+              />
+              <span className="tbl-switch-text">
+                <b>参与导出前体检</b>
+                <em>默认参与（表格里的复杂样式确实需要 CSS）。关掉后这张表与它的所有单元格都不出现在体检清单里。</em>
+              </span>
+            </label>
+          </div>
+
+          {/* 单元格设置：作用于选中的单元格（可能多格），带「应用到全部」 */}
+          <div className="tbl-card">
+            <div className="tbl-card-head">
+              <div className="tbl-card-title">单元格设置</div>
+              <HelpButton
+                title="单元格设置怎么用"
+                content={'【作用范围】\n这里的每一项都作用在**左侧选中的单元格**上（可以拖选多格）。\n想让整张表所有格子都一样，点最下面那个「应用到全部单元格」。\n\n【上方预览】\n就是这一格的实时预览，和左边表格、和导出结果一致：\n底色 / 字色 / 字号 / 内边距 / 对齐 / 不换行 都在这里看得到。\n\n【数值怎么填】\n点一下输入框 → 正常打字；**聚焦状态下滚动滚轮**可以调数值（按住 Shift 一次调 10）。\n单位用右边的下拉框选，默认 px。\n\n【colspan / rowspan 去哪了】\n跨行跨列用左侧操作条的「合并 / 拆分」就够了，这里不再重复放两个输入框。\n真要精细控制，选中格子用「合并」再手改也行。'}
               />
             </div>
             {!selNode || (selNode.type !== 'th' && selNode.type !== 'td') ? (
               <div className="tbl-empty">
-                {sel?.kind === 'row' ? '当前选的是整行 —— 点一个具体格子可以改它的样式。' : '先在左侧点一个格子。'}
+                {sel?.kind === 'row'
+                  ? '当前选的是整行 —— 点一个具体格子再改样式。'
+                  : '先在左侧点一个格子（或拖选一片）。按 Esc / 点空白处可取消选中。'}
               </div>
             ) : (
               <>
-                {/* 大预览：底色/字色/字号/对齐/内边距全在这里看，虚线边可以直接拖 */}
+                {/* 实时预览（与真实单元格一致：底色/字色/字号/内边距/对齐/不换行） */}
                 <div className="cpv-block">
                   <div
-                    className={'cpv-box' + (padDrag ? ' is-dragging' : '')}
+                    className="cpv-box"
                     style={{
                       padding: `${pad.top}px ${pad.right}px ${pad.bottom}px ${pad.left}px`,
                       background: cellStyle.backgroundColor || undefined,
@@ -873,50 +873,11 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                     >
                       {(selNode.text ?? '').trim() || '（空）'}
                     </div>
-                    {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
-                      <div
-                        key={side}
-                        className={'cpv-edge is-' + side + (padDrag?.side === side ? ' active' : '')}
-                        title={`拖动改「${PAD_NAME[side]}」内边距（往外拖变大 · 按住 Shift 拖得快）`}
-                        onPointerDown={(e) => startPad(side, e)}
-                      />
-                    ))}
-                    <div
-                      className={'cpv-corner' + (padDrag?.side === 'all' ? ' active' : '')}
-                      title="拖动 = 四边内边距一起改"
-                      onPointerDown={(e) => startPad('all', e)}
-                    />
                   </div>
                   <div className="cpv-readout">
-                    <span>内边距 <b>{pad.top}</b> · <b>{pad.right}</b> · <b>{pad.bottom}</b> · <b>{pad.left}</b> px</span>
-                    <span className="cpv-hint">拖虚线边 / 右下角改</span>
+                    <span>内边距 <b>{pad.top}</b> · <b>{pad.right}</b> · <b>{pad.bottom}</b> · <b>{pad.left}</b> {padUnit}</span>
+                    <span className="cpv-hint">数值可滚轮微调（Shift ×10）</span>
                   </div>
-                </div>
-
-                {/* 字号：滑杆拖动 + 数值输入，改哪边都实时生效 */}
-                <div className="cpv-size">
-                  <div className="cpv-size-head">
-                    <span>字号</span>
-                    <b>{cellStyle.fontSize || '继承表格'}</b>
-                  </div>
-                  <div
-                    className={'cpv-size-track' + (sizeDrag !== null ? ' is-dragging' : '')}
-                    title="按住左右拖动改字号（按住 Shift = 微调 0.5px 一档）"
-                    onPointerDown={startSize}
-                  >
-                    <div className="cpv-size-fill" style={{ width: sizePct + '%' }} />
-                    <div className="cpv-size-knob" style={{ left: sizePct + '%' }} />
-                  </div>
-                  <input
-                    className="cpv-size-num"
-                    type="number" min={FONT_MIN} max={FONT_MAX} step={0.5}
-                    value={parseFloat(String(cellStyle.fontSize ?? '').replace('px', '')) || ''}
-                    placeholder="继承"
-                    title="也可以直接填数值（px，留空 = 继承表格）"
-                    onFocus={beginEdit}
-                    onChange={(e) => applyFont(parseFloat(e.target.value) || 0)}
-                    onBlur={endEdit}
-                  />
                 </div>
 
                 <label className="tbl-field">
@@ -930,35 +891,67 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                   />
                 </label>
 
-                {/* 内边距四值：与拖动等价，改哪边动哪边 */}
+                {/* —— 颜色 —— */}
+                <div className="tbl-sub-title">颜色</div>
+                <div className="tbl-field-row">
+                  <label className="tbl-field small">
+                    <span>单元格底色 <em>这一格的背景</em></span>
+                    <ColorPicker elementId={selNode.id} styleKey="backgroundColor" fallback="#ffffff" />
+                  </label>
+                  <label className="tbl-field small">
+                    <span>文字颜色 <em>这一格的文字</em></span>
+                    <ColorPicker elementId={selNode.id} styleKey="color" fallback="#1f2328" />
+                  </label>
+                </div>
+
+                {/* —— 数值（滚轮可调 + 单位可选） —— */}
+                <div className="tbl-sub-title">数值</div>
+                <div className="tbl-field-row">
+                  <label className="tbl-field small">
+                    <span>字号 <em>这一格的文字大小</em></span>
+                    <TblNum
+                      value={cellStyle.fontSize}
+                      placeholder="继承"
+                      min={FONT_MIN} max={FONT_MAX} precision={1}
+                      onStart={beginEdit}
+                      onEnd={endEdit}
+                      onCommit={(v) => setStyleOf(selNode.id, { fontSize: v || undefined })}
+                    />
+                  </label>
+                  <label className="tbl-field small">
+                    <span>内边距单位 <em>四边共用</em></span>
+                    <TblNum
+                      value={`1${padUnit}`}
+                      min={0} max={4}
+                      onStart={beginEdit}
+                      onEnd={endEdit}
+                      onCommit={(v) => {
+                        const n = parseFloat(v) || 1;
+                        applyPad({ ...pad }, `1${padUnit}`.replace(/[\d.]+/, String(n)));
+                      }}
+                    />
+                  </label>
+                </div>
                 <div className="tbl-field-row">
                   {(['top', 'right', 'bottom', 'left'] as const).map((side) => (
                     <label className="tbl-field tiny" key={side}>
-                      <span>边距 {PAD_NAME[side]}</span>
-                      <input
-                        type="number" min={0} max={PAD_MAX}
-                        value={pad[side]}
-                        title={`「${PAD_NAME[side]}」内边距（px）`}
-                        onFocus={beginEdit}
-                        onChange={(e) => applyPad({ ...pad, [side]: clampPad(parseFloat(e.target.value) || 0) })}
-                        onBlur={endEdit}
+                      <span>内边距 {PAD_NAME[side]}</span>
+                      <TblNum
+                        value={String(pad[side]) + padUnit}
+                        unit={padUnit}
+                        hideUnit
+                        min={0} max={PAD_MAX}
+                        title={`「${PAD_NAME[side]}」内边距（${padUnit}）：点一下可滚轮微调，Shift ×10`}
+                        onStart={beginEdit}
+                        onEnd={endEdit}
+                        onCommit={(v) => applyPad({ ...pad, [side]: clampPad(parseFloat(v) || 0) })}
                       />
                     </label>
                   ))}
                 </div>
 
-                {/* 颜色：点色块开调色盘（拖动过程只留一条 undo），旁边数值同样实时 */}
-                <div className="tbl-field-row">
-                  <label className="tbl-field small">
-                    <span>底色 <em>这一格的背景</em></span>
-                    <ColorPicker elementId={selNode.id} styleKey="backgroundColor" fallback="#ffffff" />
-                  </label>
-                  <label className="tbl-field small">
-                    <span>字色 <em>这一格的文字</em></span>
-                    <ColorPicker elementId={selNode.id} styleKey="color" fallback="#1f2328" />
-                  </label>
-                </div>
-
+                {/* —— 文本 —— */}
+                <div className="tbl-sub-title">文本</div>
                 <div className="tbl-field-row">
                   <label className="tbl-field small">
                     <span>水平对齐 <em>左右</em></span>
@@ -973,8 +966,15 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                     </select>
                   </label>
                 </div>
-
                 <div className="tbl-field-row">
+                  <label className="tbl-field small">
+                    <span>不换行 <em>长文不折行</em></span>
+                    <input
+                      type="checkbox"
+                      checked={cellStyle.whiteSpace === 'nowrap'}
+                      onChange={(e) => setStyleOf(selNode.id, { whiteSpace: e.target.checked ? 'nowrap' : '' })}
+                    />
+                  </label>
                   <label className="tbl-field small">
                     <span>类型 <em>th 表头 / td 数据</em></span>
                     <select value={selNode.type} onChange={(e) => runOp({ kind: 'setCellType', cellId: selNode.id, type: e.target.value as 'th' | 'td' })}>
@@ -982,8 +982,10 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                       <option value="th">th 表头格</option>
                     </select>
                   </label>
+                </div>
+                <div className="tbl-field-row">
                   <label className="tbl-field small">
-                    <span>scope <em>表头管哪片</em></span>
+                    <span>scope <em>表头管哪片（仅 th）</em></span>
                     <select
                       value={selNode.attrs?.scope ?? ''}
                       onChange={(e) => useScene.getState().setNodeAttr(selNode.id, 'scope', e.target.value || undefined)}
@@ -998,36 +1000,12 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                     </select>
                   </label>
                 </div>
-                <div className="tbl-field-row">
-                  <label className="tbl-field small">
-                    <span>colspan <em>跨几列</em></span>
-                    <input
-                      type="number" min={1}
-                      value={selNode.attrs?.colspan ?? '1'}
-                      title="1 = 只占一列；2 = 横跨两列（等于把右边那格并在自己身上）"
-                      onChange={(e) => useScene.getState().setNodeAttr(selNode.id, 'colspan', e.target.value)}
-                    />
-                  </label>
-                  <label className="tbl-field small">
-                    <span>rowspan <em>跨几行</em></span>
-                    <input
-                      type="number" min={1}
-                      value={selNode.attrs?.rowspan ?? '1'}
-                      title="1 = 只占一行；3 = 竖着跨三行（等于把下面两格并在自己身上）"
-                      onChange={(e) => useScene.getState().setNodeAttr(selNode.id, 'rowspan', e.target.value)}
-                    />
-                  </label>
-                </div>
-                <div className="tbl-field-row">
-                  <label className="tbl-field small">
-                    <span>不换行 <em>长文不折行</em></span>
-                    <input
-                      type="checkbox"
-                      checked={cellStyle.whiteSpace === 'nowrap'}
-                      onChange={(e) => setStyleOf(selNode.id, { whiteSpace: e.target.checked ? 'nowrap' : '' })}
-                    />
-                  </label>
-                </div>
+
+                <button
+                  className="btn-secondary tbl-apply-all"
+                  title="把这一格的样式（底色/字色/字号/内边距/对齐/不换行）复制给表格里所有单元格，一次撤销可回退"
+                  onClick={() => applyToAllCells()}
+                >⇥ 应用到全部单元格（{grid.cells.length} 格）</button>
               </>
             )}
           </div>
@@ -1076,9 +1054,9 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
           {/* 表格样式 */}
           <div className="tbl-card">
             <div className="tbl-card-head">
-              <div className="tbl-card-title">表格样式</div>
+              <div className="tbl-card-title">表格设置</div>
               <HelpButton
-                title="表格整体样式怎么调"
+                title="表格设置（整张表）怎么调"
                 content={'【预览】上面那块是"大致效果"预览（不是左边那张结构网格）：\n底色 / 字色 / 字号 / 外框线型粗细颜色 / 圆角 / 阴影 / 边框间距 / 标题位置 都会立刻画出来。\n⚠ 预览只画外观：宽度与布局算法（auto / fixed）影响的是真实排版与导出结果，预览里不体现。\n\n【宽度】整张表占容器多宽。100% = 撑满；写 480px 就是固定宽。\n\n【布局算法】\n· auto 自动：浏览器按内容自己分配列宽（内容长的列更宽）\n· fixed 固定：严格按第一行各列的宽度分，之后的列不会再被内容撑变 —— 数据对齐更整齐\n\n【边框合并】\n· collapse 合并：相邻格共用一条线，传统表格的样子\n· separate 分离：每格各自有边框，中间留缝（配合"边框间距"做卡片感）\n\n【边框间距】只在"分离"模式下生效：格子之间留多少空隙，例如 2px。\n\n【外框样式 / 粗细 / 颜色】整张表最外面那一圈边框。\n【圆角】表格四角切圆，配合"边框合并 = 分离"才看得出效果。\n【阴影】整张表底下的投影，例如 0 6px 20px rgba(15,23,42,.08)。\n\n⚠ 这里每改一项，左边表格与上面预览都会立刻跟着变；连续输入算一条撤销记录。'}
               />
             </div>
@@ -1275,6 +1253,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
             <div className="tbl-preset-grid">
               {TABLE_STYLE_PRESETS.map((p) => (
                 <button key={p.id} className="tbl-preset" title={p.desc} onClick={() => applyPreset(p.id)}>
+                  <PresetThumb preset={p} />
                   <b>{p.name}</b>
                   <span>{p.desc}</span>
                 </button>
@@ -1300,31 +1279,6 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
               ))}
             </div>
           </div>
-
-          {/* 导出前体检：表格默认不参与（td/th 一般不起类名、也不写 CSS，参与体检会报一堆"未命名元素"） */}
-          <div className="tbl-card">
-            <div className="tbl-card-head">
-              <div className="tbl-card-title">导出前体检</div>
-              <HelpButton
-                title="表格与「导出前体检」"
-                content={'「导出前体检」会统计未命名元素、重复 ID、同名样式不统一之类的问题。\n\n表格是一类特例：一格一个 <td>/<th>，正常做表格时既不给每个格子起类名，也不用 CSS 单独描述它们 ——\n参与体检只会刷出一大串"未命名元素"，把真正要处理的问题淹掉。\n\n所以**表格默认不参与体检**（这个开关默认关闭）。\n如果这张表你确实用类名 / 关系选择器管了样式，想把它的格子也纳入体检，把开关打开即可。\n\n开关只影响"体检清单"，不影响导出：表格该导出的标签、colspan/rowspan、scope 一个都不会少。'}
-              />
-            </div>
-            <label className="tbl-switch-row">
-              <input
-                type="checkbox"
-                checked={table.healthCheck === true}
-                onChange={(e) => useScene.getState().setHealthCheck(tableId, e.target.checked)}
-              />
-              <span className="tbl-switch-text">
-                <b>让这张表参与导出前体检</b>
-                <em>
-                  默认关闭 = 表格与它的所有单元格不出现在体检清单里
-                  （不再报「未命名元素 / 类名 ID 问题」）。打开后这张表重新纳入体检。
-                </em>
-              </span>
-            </label>
-          </div>
         </div>
       </div>
 
@@ -1343,6 +1297,141 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
 /** 统一的样式写入入口（都走 store.updateStyle → 有 undo） */
 function setStyleOf(id: string, patch: Partial<ElementStyle>) {
   useScene.getState().updateStyle(id, patch);
+}
+
+// ============================================================================
+// 面板统一的「数字 + 单位」输入
+// ----------------------------------------------------------------------------
+// 交互与编辑器外面的属性面板**完全一致**（复用 lib/wheelAdjust）：
+//   · 点一下输入框 → 正常打字；
+//   · 聚焦状态下滚轮 → 上下调数值，**按住 Shift 一次调 10**；
+//   · 单位用右边的下拉框选，默认 px。
+// 值一律存成 `8px` / `1.5rem` 这种带单位字符串；清空输入 = 删掉该属性（回继承）。
+// ============================================================================
+const TBL_UNITS = ['px', 'rem', 'em', '%', 'vw', 'vh', 'pt'];
+
+/** '8px' → { num: '8', unit: 'px' }；复杂值（calc 等）原样透传 */
+function splitValue(v: string | undefined, fallbackUnit = 'px'): { num: string; unit: string } {
+  const s = String(v ?? '').trim();
+  if (!s) return { num: '', unit: fallbackUnit };
+  const m = /^(-?[\d.]+)\s*([a-z%]*)$/i.exec(s);
+  if (!m) return { num: s, unit: fallbackUnit };
+  return { num: m[1], unit: m[2] || fallbackUnit };
+}
+
+/** 预设缩略图：用预设自己的样式画一张 3×3 小表 —— 不然光看名字不知道长什么样 */
+function PresetThumb({ preset }: { preset: TableStylePreset }) {
+  const t = preset.table ?? {};
+  const line = t.borderTopColor || '#d8dee6';
+  const wrap: React.CSSProperties = {
+    background: t.backgroundColor || '#fff',
+    border: `${t.borderTopWidth || '1px'} ${t.borderTopStyle || 'solid'} ${line}`,
+    borderRadius: t.borderTopLeftRadius || '5px',
+    boxShadow: t.boxShadow || undefined,
+    padding: '3px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: t.borderCollapse === 'separate' ? (t.borderSpacing || '2px') : '0px',
+    overflow: 'hidden'
+  };
+  const cell = (head: boolean, zebra: boolean): React.CSSProperties => ({
+    flex: '1 1 0',
+    minWidth: 0,
+    height: '9px',
+    padding: '2px 4px',
+    color: head ? (preset.headColor || '#ffffff') : '#9aa4b2',
+    background: head ? (preset.headBg || 'transparent') : (zebra ? (preset.zebra || 'transparent') : 'transparent'),
+    borderBottom: `1px solid ${line}`
+  });
+  return (
+    <div className="tbl-preset-thumb" style={wrap} aria-hidden="true">
+      <div className="tbl-preset-thumb-row">
+        {[0, 1, 2].map((i) => <span key={i} style={cell(true, false)} />)}
+      </div>
+      <div className="tbl-preset-thumb-row">
+        {[0, 1, 2].map((i) => <span key={i} style={cell(false, false)} />)}
+      </div>
+      <div className="tbl-preset-thumb-row">
+        {[0, 1, 2].map((i) => <span key={i} style={cell(false, true)} />)}
+      </div>
+    </div>
+  );
+}
+
+function TblNum(props: {
+  value: string | undefined;
+  /** 写入（单位已拼好）；传空字符串表示删除该属性 */
+  onCommit: (v: string) => void;
+  onStart?: () => void;
+  onEnd?: () => void;
+  unit?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  precision?: number;
+  placeholder?: string;
+  title?: string;
+  disabled?: boolean;
+  /** 不显示单位下拉（内边距四边共用单位时用，避免一排四个下拉框） */
+  hideUnit?: boolean;
+}) {
+  const { value, onCommit, onStart, onEnd, unit: defaultUnit = 'px', min, max, step = 1, precision = 0, hideUnit } = props;
+  const parsed = splitValue(value, defaultUnit);
+  const [num, setNum] = useState(parsed.num);
+  const [unit, setUnit] = useState(parsed.unit);
+  const focused = useRef(false);
+
+  // 外部值变化（换选中格 / 别的操作改了样式）→ 同步显示；正在打字时不要打断
+  useEffect(() => {
+    if (focused.current) return;
+    const p = splitValue(value, defaultUnit);
+    setNum(p.num);
+    setUnit(p.unit);
+  }, [value, defaultUnit]);
+
+  const commit = (n: string, u: string) => {
+    const t = n.trim();
+    if (!t) { onCommit(''); return; }
+    onCommit(t + u);
+  };
+
+  const wheel = useWheelAdjust({
+    getBase: () => parseFloat(num) || 0,
+    onStart: () => onStart?.(),
+    onPreview: (v) => { setNum(String(v)); commit(String(v), unit); },
+    onCommit: (v) => commit(String(v), unit),
+    min, max, step, precision,
+    disabled: props.disabled || !/^-?[\d.]*$/.test(num)
+  });
+
+  return (
+    <div className="tbl-num">
+      <input
+        ref={wheel.ref}
+        className="tbl-num-input"
+        type="text"
+        inputMode="decimal"
+        value={num}
+        placeholder={props.placeholder ?? '只填数字'}
+        title={props.title ?? '点一下输入框：滚动滚轮调数值（上滚增大 / 下滚减小），按住 Shift 一次调 10'}
+        disabled={props.disabled}
+        onFocus={() => { focused.current = true; onStart?.(); }}
+        onChange={(e) => { setNum(e.target.value); commit(e.target.value, unit); }}
+        onBlur={() => { focused.current = false; wheel.finish(); onEnd?.(); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+      />
+      <select
+        className="tbl-num-unit"
+        value={unit}
+        disabled={props.disabled}
+        title="单位（默认 px）"
+        style={hideUnit ? { display: 'none' } : undefined}
+        onChange={(e) => { const u = e.target.value; setUnit(u); commit(num, u); }}
+      >
+        {TBL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+      </select>
+    </div>
+  );
 }
 
 /** 找某节点的父容器 id（找不到就返回 null = 插到画布根） */

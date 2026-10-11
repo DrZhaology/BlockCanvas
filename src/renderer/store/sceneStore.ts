@@ -1337,8 +1337,9 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
-      if (on) node.healthCheck = true;
-      else delete node.healthCheck;
+      // v0.4.3 起"参与体检"是默认值，所以关掉时必须**显式写 false**：
+      // 删标记等于回到默认的"参与"，开关会立刻弹回去，看起来像点不动。
+      node.healthCheck = on;
       return { scene, history: pushPast(st.history, st.scene) };
     });
   },

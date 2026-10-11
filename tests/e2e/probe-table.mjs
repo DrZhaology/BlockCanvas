@@ -52,7 +52,7 @@ const READ_LAST_TABLE = `(() => {
     rows,
     rowCount: rows.length,
     visCols: rows.map(vis),
-    healthCheck: t.healthCheck === true,
+    healthCheck: t.healthCheck === false,   // true = 被显式排除在体检之外
     cls: t.attrs && t.attrs.className
   };
 })()`;
@@ -398,10 +398,10 @@ async function main() {
     afterSplit.rows[0].cells.every((c) => !c.cs) && afterUndo.rows[0].cells.some((c) => c.cs === '2'),
     `拆分后=${afterSplit.rows[0].cells.length}格 / 撤销后=${JSON.stringify(afterUndo.rows[0].cells.map((c) => c.cs ?? '1'))}`);
 
-  // ============ 18. 表格默认不参与「导出前体检」 ============
+  // ============ 18. 表格默认参与「导出前体检」（v0.4.3 改回来：复杂表格确实需要 CSS） ============
   const swDefault = await win.locator('.tbl-switch-row input[type="checkbox"]').isChecked();
-  ok('体检开关默认关闭（表格默认不参与体检）', swDefault === false, String(swDefault));
-  ok('数据层默认也没有 healthCheck 标记', (await readLast()).healthCheck === false);
+  ok('体检开关默认开启（表格默认参与体检）', swDefault === true, String(swDefault));
+  ok('数据层没有排除标记（healthCheck !== false）', (await readLast()).healthCheck === false);
 
   /** 直接读体检结果（测试钩子 window.__healthCheck），不刮向导 DOM */
   const healthIssues = () => win.evaluate(() =>
@@ -420,7 +420,9 @@ async function main() {
     const clean = (await win.locator('.hc-clean').count()) > 0;
     const n = await win.locator('.hc-list-item').count();
     await win.locator('.hc-modal .cp-close').click();
-    await sleep(300);
+    // 等退场动画彻底结束再往下走：模态遮罩还在时点其它按钮会被吞掉
+    await win.waitForSelector('.hc-modal', { state: 'detached', timeout: 4000 }).catch(() => {});
+    await sleep(400);
     return { clean, n };
   };
   const openTableEditor = async () => {
@@ -439,27 +441,47 @@ async function main() {
   const listOff = await healthIssues();
   const offCount = unnamedOf(listOff);
   const wizOff = await wizardOpens();
-  console.log('  · 表格不参与时：unnamed=' + offCount + ' 清单=' + JSON.stringify(listOff.map((i) => i.id)) + ' 向导=' + JSON.stringify(wizOff));
+  /** 最后那张表内部"还没有名字"的元素个数（用来验证"整棵子树一起跳过"） */
+  const innerUnnamed = () => win.evaluate(() => {
+    let t = null;
+    const find = (n) => { if (n.type === 'table') t = n; for (const c of n.children) find(c); };
+    find(window.__sceneStore.getState().scene.root);
+    if (!t) return -1;
+    let cnt = 0;
+    const walk = (n, inside) => {
+      for (const c of n.children) {
+        const isIn = inside || c.id === t.id;
+        const named = !!((c.attrs?.relSelector ?? '').trim() || (c.attrs?.className ?? '').trim() || (c.attrs?.id ?? '').trim());
+        if (isIn && !named) cnt += 1;
+        walk(c, isIn);
+      }
+    };
+    walk(window.__sceneStore.getState().scene.root, false);
+    return cnt;
+  });
+  const innerCnt = await innerUnnamed();
+  console.log('  · 表格参与时：unnamed=' + offCount + '（其中该表内部未命名 ' + innerCnt + ' 个）清单=' + JSON.stringify(listOff.map((i) => i.id)) + ' 向导=' + JSON.stringify(wizOff));
 
   await openTableEditor();
-  await win.locator('.tbl-switch-row input[type="checkbox"]').check();
+  await win.locator('.tbl-switch-row input[type="checkbox"]').uncheck();
   await sleep(500);
   const onFlag = (await readLast()).healthCheck;
   await backToEditor();
   const listOn = await healthIssues();
   const onCount = unnamedOf(listOn);
   const wizOn = await wizardOpens();
-  console.log('  · 表格参与时：healthCheck=' + onFlag + ' unnamed=' + onCount + ' 清单=' + JSON.stringify(listOn.map((i) => i.id)) + ' 向导=' + JSON.stringify(wizOn));
-  ok('打开开关 → 表格纳入体检（未命名元素数量变多）', onFlag === true && onCount > offCount, `${offCount} → ${onCount}`);
-  ok('向导里也能看到这条问题（不是只在数据层）', wizOn.n > wizOff.n || wizOn.n > 0, JSON.stringify([wizOff, wizOn]));
+  console.log('  · 表格被排除时：healthCheck=' + onFlag + ' unnamed=' + onCount + ' 清单=' + JSON.stringify(listOn.map((i) => i.id)));
+  ok('关掉开关 → 该表整棵子树被跳过（少算的正好是它内部的未命名元素数）',
+    onFlag === true && offCount - onCount === innerCnt, `少算 ${offCount - onCount} / 表内未命名 ${innerCnt}`);
+  ok('向导里也能看到这条问题（不是只在数据层）', wizOn.n > 0 || wizOff.n > 0, JSON.stringify([wizOff, wizOn]));
 
   await openTableEditor();
-  await win.locator('.tbl-switch-row input[type="checkbox"]').uncheck();
+  await win.locator('.tbl-switch-row input[type="checkbox"]').check();
   await sleep(400);
   const offFlag2 = (await readLast()).healthCheck;
   await backToEditor();
   const offCount2 = unnamedOf(await healthIssues());
-  ok('关回去 → 表格重新被跳过（数量回到原值）', offFlag2 === false && offCount2 === offCount, `${onCount} → ${offCount2}（原始 ${offCount}）`);
+  ok('再打开 → 表格重新纳入体检（数量回到原值）', offFlag2 === false && offCount2 === offCount, `${onCount} → ${offCount2}（原始 ${offCount}）`);
 
   // ============ 19. 体检徽标不再被工具栏容器裁掉 ============
   // 徽标只统计"非 info"问题，所以先放一个未命名元素（标题 → warn 级「未命名元素」）保证它出现
@@ -556,9 +578,22 @@ async function main() {
   const cssOf = (sel, prop) => win.locator(sel).first().evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
   const cellSel = (r, c) => `[data-cell="${r}-${c}"]`;
 
-  ok('右面板出现「单元格大预览」与「表格样式预览」',
+  // v0.4.3：面板不再自动选中第一格（可以完全取消选中），先自己点一格再看预览
+  await win.locator(cellSel(1, 1)).click({ position: { x: 6, y: 8 } });
+  await sleep(250);
+  ok('右面板出现「单元格预览」与「表格设置预览」',
     (await win.locator('.cpv-box').count()) === 1 && (await win.locator('.tpv-table').count()) === 1,
     `cpv=${await win.locator('.cpv-box').count()} tpv=${await win.locator('.tpv-table').count()}`);
+  ok('右面板是清晰的三区块（选择器与标识 / 单元格设置 / 表格设置 / 预设）',
+    (await win.locator('.tbl-card-title', { hasText: '选择器与标识' }).count()) === 1
+    && (await win.locator('.tbl-card-title', { hasText: '单元格设置' }).count()) === 1
+    && (await win.locator('.tbl-card-title', { hasText: '表格设置' }).count()) === 1
+    && (await win.locator('.tbl-card-title', { hasText: '一键预设样式' }).count()) === 1);
+  ok('单元格设置里已删除重复的 colspan / rowspan 输入',
+    (await win.locator('.tbl-field', { hasText: 'colspan' }).count()) === 0
+    && (await win.locator('.tbl-field', { hasText: 'rowspan' }).count()) === 0);
+  ok('预设卡片带缩略图（每套预设画一张小表）',
+    (await win.locator('.tbl-preset-thumb').count()) >= 4, `thumbs=${await win.locator('.tbl-preset-thumb').count()}`);
 
   // 20.1 表格级底色 → 左边结构网格必须实时跟着变（旧版编辑器页面完全不跟）
   const pastBeforeTableBg = await pastLen();
@@ -570,8 +605,6 @@ async function main() {
     (await cssOf('.tpv-table', 'background-color')) === 'rgb(255, 238, 221)', await cssOf('.tpv-table', 'background-color'));
 
   // 20.2 单元格底色/字号 → 左侧格子本体实时生效（选中态用半透明叠加，不再盖掉真实底色）
-  await win.locator(cellSel(1, 1)).click({ position: { x: 6, y: 8 } });
-  await sleep(250);
   const pastBeforeCell = await pastLen();
   await win.evaluate((sel) => {
     const st = window.__sceneStore.getState();
@@ -584,28 +617,48 @@ async function main() {
   const cellFs = await cssOf(cellSel(1, 1), 'font-size');
   ok('改单元格底色/字号 → 左侧格子实时生效（选中态也不盖底色）',
     cellBg === 'rgb(0, 128, 255)' && cellFs === '19px', `bg=${cellBg} fs=${cellFs}`);
+  ok('单元格预览同步显示底色与字号',
+    (await cssOf('.cpv-box', 'background-color')) === 'rgb(0, 128, 255)'
+    && (await cssOf('.cpv-content', 'font-size')) === '19px',
+    `box=${await cssOf('.cpv-box', 'background-color')} content=${await cssOf('.cpv-content', 'font-size')}`);
 
-  // 20.3 拖「大预览」的上边 → 内边距实时变，且整段拖动只压一条撤销记录
+  // 20.3 内边距：**输入框 + 滚轮**（v0.4.3 去掉了拖动把手，改成最朴素的输入框，但保留滚轮与 Shift×10）
   const padBefore = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
-  const pastBeforePadDrag = await pastLen();
-  const edge = await win.locator('.cpv-edge.is-top').first().boundingBox();
-  await win.mouse.move(edge.x + edge.width / 2, edge.y + 4);
-  await win.mouse.down();
-  await win.mouse.move(edge.x + edge.width / 2, edge.y + 4 + 24, { steps: 8 });
-  await win.mouse.up();
-  await sleep(350);
-  const padAfter = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
-  const pastAfterPadDrag = await pastLen();
-  ok('按住预览上边往下拖 → 单元格内边距实时变大',
-    Math.abs(padAfter - (padBefore + 24)) <= 2, `${padBefore} → ${padAfter}`);
-  ok('一次拖动只压一条撤销记录（不是几十条）',
-    pastAfterPadDrag - pastBeforePadDrag === 1, `${pastBeforePadDrag} → ${pastAfterPadDrag}`);
-  ok('拖动结束后编辑会话已收尾（不会卡住后续撤销）', (await pendingEdit()) === false);
+  const padInput = win.locator('.tbl-field', { hasText: '内边距 上' }).locator('.tbl-num-input').first();
+  const pastBeforePad = await pastLen();
+  await padInput.click();
+  await padInput.fill(String(padBefore + 7));
+  await sleep(300);
+  const padTyped = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
+  ok('内边距输入框直接输入 → 单元格实时生效', Math.abs(padTyped - (padBefore + 7)) <= 1, `${padBefore} → ${padTyped}`);
+  ok('输入过程只压一条撤销记录', (await pastLen()) - pastBeforePad === 1, `${pastBeforePad} → ${await pastLen()}`);
 
+  // 滚轮：**指针必须在输入框上**（wheel 事件按指针位置派发，不是按焦点）；
+  // 聚焦输入框后上滚 1 格 = +1；按住 Shift = +10。
+  const beforeWheel = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
+  const piBox = await padInput.boundingBox();
+  await win.mouse.move(piBox.x + piBox.width / 2, piBox.y + piBox.height / 2);
+  await padInput.click();
+  await win.mouse.wheel(0, -120);
+  await sleep(500);
+  const afterWheel = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
+  ok('聚焦输入框后滚动滚轮可调数值（上滚增大）', afterWheel === beforeWheel + 1, `${beforeWheel} → ${afterWheel}`);
+  await win.keyboard.down('Shift');
+  await win.mouse.wheel(0, -120);
+  await sleep(500);
+  await win.keyboard.up('Shift');
+  const afterShiftWheel = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
+  ok('按住 Shift 滚轮一次调 10', afterShiftWheel === afterWheel + 10, `${afterWheel} → ${afterShiftWheel}`);
+  // 失焦收尾：点预览框（不是 Tab —— Tab 会把焦点交给下一个 TblNum 输入框，
+  // 那个框的 onFocus 又会 beginStyleEdit，会话照样挂着）
+  await win.locator('.cpv-box').click({ position: { x: 10, y: 10 } });
+  await sleep(400);
+  ok('输入结束后编辑会话已收尾（不会卡住后续撤销）', (await pendingEdit()) === false);
+  // 聚焦输入框后的"打字 + 滚轮"属于同一次编辑会话（中途没失焦）→ 一次 Ctrl+Z 全部回到会话开始前
   await win.keyboard.press('Control+z');
-  await sleep(350);
+  await sleep(400);
   const padUndone = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
-  ok('Ctrl+Z 一次就把整段拖动撤销回去', Math.abs(padUndone - padBefore) <= 1, `${padAfter} → ${padUndone}`);
+  ok('输入+滚轮算一次编辑会话 → 一次 Ctrl+Z 全部回退', Math.abs(padUndone - padBefore) <= 1, `${afterShiftWheel} → ${padUndone}（会话前 ${padBefore}）`);
 
   // 20.4 颜色：开调色盘点一个色板 → 左边格子与预览都变，且只压一条记录（旧版 <input type=color> 会压几十条）
   const pastBeforeColor = await pastLen();
@@ -666,10 +719,10 @@ async function main() {
       clip: { x: Math.max(0, stageBox.x), y: Math.max(0, stageBox.y), width: stageBox.width, height: Math.min(stageBox.height, 520) }
     });
   }
-  // 「表格样式」卡片滚进视野，单独来一张（大致效果预览）
-  await win.locator('.tbl-card', { hasText: '表格样式' }).first().scrollIntoViewIfNeeded().catch(() => {});
+  // 「表格设置」卡片滚进视野，单独来一张（大致效果预览）
+  await win.locator('.tbl-card', { hasText: '表格设置' }).first().scrollIntoViewIfNeeded().catch(() => {});
   await sleep(300);
-  const styleCard = await win.locator('.tbl-card', { hasText: '表格样式' }).first().boundingBox();
+  const styleCard = await win.locator('.tbl-card', { hasText: '表格设置' }).first().boundingBox();
   if (styleCard) {
     const vp2 = await win.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }));
     const x2 = Math.max(0, styleCard.x);

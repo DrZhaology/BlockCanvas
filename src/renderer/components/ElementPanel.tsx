@@ -5,6 +5,7 @@ import { exportHTML } from '@lib/exporter';
 import { HelpButton } from './HelpButton';
 import { Collapse } from './Collapse';
 import { getPluginElements } from '@lib/pluginHost';
+import { TABLE_STYLE_PRESETS, applyTableStylePreset } from '@lib/tablePresets';
 
 // BlockCanvas · 元素面板
 // 阶段1：按类别分组，点击插入选中元素的父级（或根）
@@ -158,6 +159,16 @@ export function ElementPanel() {
   /** 插入元素：统一通知右侧属性面板滚动到新元素（面板顶部就是它的属性） */
   const insertElement = (type: ElementType) => {
     addElement(type, selectedId);
+    // 表格：新插的空表套上默认预设（跟表格编辑器里看到的样子一致）。
+    // 以前只给 table 一个 width/背景，插到画布上是"光板"表格，必须手动点一次预设才有样子。
+    if (type === 'table') {
+      const st = useScene.getState();
+      const id = st.scene.selectedId;
+      const node = id ? findNode(st.scene.root, id) : null;
+      if (node && node.type === 'table') {
+        st.replaceSubtree(node.id, applyTableStylePreset(node, TABLE_STYLE_PRESETS[0], 'data-table'));
+      }
+    }
     window.dispatchEvent(new CustomEvent('bc:element-added', { detail: type }));
   };
 

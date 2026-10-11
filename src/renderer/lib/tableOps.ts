@@ -640,6 +640,65 @@ export function createTableTree(rows: number, cols: number, opts: { header?: boo
 }
 
 
+/**
+ * 自动给表格内部元素起"精准的名字"：用**关系选择器**（relSelector），不再往格子里塞类名 / ID。
+ *
+ * 设计（用户定的方案）：整张表只需要最外层 `<table>` 有一个类名或 ID，
+ * 内部按结构序号生成选择器，例如：
+ *   `.data-table > tbody > tr:nth-child(2) > td:nth-child(1)`
+ * 导出的是干净、精准的 CSS；正常人做表格只会改文字，真需要单独描述某一格时程序已经准备好了。
+ * 表还没有名字时顺手给 table 一个默认类名 `data-table`（格子一个类名都不加）。
+ * 已有名字（类名 / ID / 关系选择器）的元素一律不动。
+ */
+export function autoNameTableInner(table: SceneElement): SceneElement {
+  const next = normalizeTable(clone(table));
+  if (!next.attrs) next.attrs = {};
+  const relOwn = (next.attrs.relSelector ?? '').trim();
+  const cls = (next.attrs.className ?? '').trim();
+  const idv = (next.attrs.id ?? '').trim();
+  let anchor = relOwn || (cls ? cls.split(/\s+/).map((t) => '.' + t).join('') : idv ? '#' + idv : '');
+  if (!anchor) {
+    next.attrs.className = cls || 'data-table';
+    anchor = '.' + next.attrs.className.split(/\s+/)[0];
+  }
+
+  const nameAt = (el: SceneElement, path: string) => {
+    if (!el.attrs) el.attrs = {};
+    if (!(el.attrs.relSelector ?? '').trim()) el.attrs.relSelector = `${anchor} > ${path}`;
+  };
+
+  for (const sec of next.children) {
+    if (sec.type === 'caption') { nameAt(sec, 'caption'); continue; }
+    if (sec.type !== 'thead' && sec.type !== 'tbody' && sec.type !== 'tfoot') continue;
+    nameAt(sec, sec.type);
+    sec.children.forEach((row, ri) => {
+      if (row.type !== 'tr') return;
+      const rowPath = `${sec.type} > tr:nth-child(${ri + 1})`;
+      nameAt(row, rowPath);
+      row.children.forEach((cell, ci) => {
+        if (cell.type !== 'td' && cell.type !== 'th') return;
+        nameAt(cell, `${rowPath} > ${cell.type}:nth-child(${ci + 1})`);
+      });
+    });
+  }
+  return next;
+}
+
+/** 表格内部还有多少元素没有名字（按钮上显示还差几个） */
+export function countUnnamedInner(table: SceneElement): number {
+  let n = 0;
+  const walk = (el: SceneElement, isRoot: boolean) => {
+    if (!isRoot) {
+      const named = !!((el.attrs?.relSelector ?? '').trim() || (el.attrs?.className ?? '').trim() || (el.attrs?.id ?? '').trim());
+      if (!named) n += 1;
+    }
+    for (const c of el.children) walk(c, false);
+  };
+  walk(table, true);
+  return n;
+}
+
+
 /** 向上找最近的 <table> 祖先（包含自身）—— 属性面板的"打开表格编辑器"入口用它 */
 export function findTableAncestor(root: SceneElement, id: string): SceneElement | null {
   const path: SceneElement[] = [];
