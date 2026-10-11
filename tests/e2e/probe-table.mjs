@@ -3,7 +3,7 @@
 import { createRequire } from 'module';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
-import { mkdirSync, rmSync, cpSync, existsSync } from 'fs';
+import { mkdirSync, rmSync, cpSync, existsSync, readFileSync } from 'fs';
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
 const { _electron: electron } = require('playwright');
@@ -52,18 +52,23 @@ const READ_LAST_TABLE = `(() => {
     rows,
     rowCount: rows.length,
     visCols: rows.map(vis),
-    healthCheck: t.healthCheck === true,
+    healthCheck: t.healthCheck === false,   // true = 被显式排除在体检之外
     cls: t.attrs && t.attrs.className
   };
 })()`;
 
 async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-table-probe');
-  rmSync(DATA_DIR, { recursive: true, force: true });
+  // 上一轮残留的 Electron 可能还锁着临时目录（Windows 会报 EBUSY）——
+  // 清不掉就沿用旧目录，别让清理动作把整轮测试打断。
+  try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
   const SRC = resolve(ROOT, 'extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  // 导出验证：命中 BC_AUTO_EXPORT_PATH 时主进程跳过保存对话框直接落盘
+  const EXPORT_PATH = resolve(ROOT, 'tests/e2e/tmp-table-export.html');
+  if (existsSync(EXPORT_PATH)) rmSync(EXPORT_PATH, { force: true });
+  const env = { ...process.env, BC_DATA_DIR: DATA_DIR, BC_AUTO_EXPORT_PATH: EXPORT_PATH };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -74,6 +79,18 @@ async function main() {
   await sleep(1200);
 
   const read = () => win.evaluate(READ_TABLE);
+
+  // ============ 0. 元素面板 hover 讲解卡：0.5s（原来 1 秒，体感太慢） ============
+  const eb0 = win.locator('.element-panel .element-btn').first();
+  await eb0.hover();
+  await sleep(260);
+  ok('元素按钮悬停未满 0.5s 不弹讲解卡',
+    (await win.locator('.ele-tip').count()) === 0,
+    `tip=${await win.locator('.ele-tip').count()}`);
+  await sleep(500);
+  ok('元素按钮悬停 0.5s 后浮出讲解卡', (await win.locator('.ele-tip').count()) === 1);
+  await win.mouse.move(4, 4);
+  await sleep(300);
 
   // ============ 1. 元素面板不再有"表格模板"按钮 + 入口 ============
   await win.locator('.element-btn', { hasText: '表格' }).first().click();
@@ -245,7 +262,7 @@ async function main() {
   mkdirSync(resolve(ROOT, 'tests/e2e/shots-v042'), { recursive: true });
     await win.locator('[data-cell="0-0"]').hover();
   await sleep(400);
-  await win.screenshot({ path: resolve(ROOT, 'tests/e2e/shots-v042/table-editor.png') });
+  await win.screenshot({ path: resolve(ROOT, 'tests/e2e/shots-v042/table-editor.png'), timeout: 5000 });
   const b00 = await win.locator('[data-cell="0-0"]').boundingBox();
   const b12 = await win.locator('[data-cell="1-2"]').boundingBox();
   if (b00 && b12) {
@@ -254,7 +271,7 @@ async function main() {
     await win.mouse.move(b12.x + b12.width / 2, b12.y + b12.height / 2, { steps: 8 });
     await win.mouse.up();
     await sleep(500);
-    await win.screenshot({ path: resolve(ROOT, 'tests/e2e/shots-v042/table-editor-select.png') });
+    await win.screenshot({ path: resolve(ROOT, 'tests/e2e/shots-v042/table-editor-select.png'), timeout: 5000 });
   }
 
   // ============ 11. 结构开关：表头行 / 表尾行 / 标题 ============
@@ -278,6 +295,32 @@ async function main() {
   // ============ 13. 帮助问号（每张卡都要有） ============
   const helps = await win.locator('.table-page .help-btn').count();
   ok('表格编辑器每张卡都有「?」帮助', helps >= 5, String(helps));
+
+  // v0.4.4 回归：悬停 0.5s 气泡必须真的浮出来
+  //（以前的 bug：定位 effect 只依赖 [open]，而 open=true 那一帧 Portal 还没挂载 →
+  //  popRef.current 为 null 直接 return，之后再也不重跑 → pos 永远 null →
+  //  气泡停在 left:-9999 + visibility:hidden，表现为"所有问号提示全部失效"。）
+  const hb = win.locator('.table-page .help-btn').first();
+  await hb.hover();
+  await sleep(250);
+  ok('「?」悬停未满 0.5s 时不弹（扫过不会乱冒）',
+    (await win.locator('.help-pop').count()) === 0,
+    `pop=${await win.locator('.help-pop').count()}`);
+  await sleep(600);
+  const hpBox = await win.locator('.help-pop').first().boundingBox().catch(() => null);
+  const vw = await win.evaluate(() => window.innerWidth);
+  ok('「?」悬停 0.5s 后气泡浮出、在视口内且尺寸合理',
+    !!hpBox && hpBox.width > 200 && hpBox.x > 0 && hpBox.x + hpBox.width <= vw + 1 && hpBox.height > 60,
+    JSON.stringify(hpBox));
+  const hpVis = await win.locator('.help-pop').first().evaluate((el) => getComputedStyle(el).visibility).catch(() => 'detached');
+  ok('气泡真实可见（不是 visibility:hidden 卡在屏幕外）', hpVis === 'visible', hpVis);
+  const hpParas = await win.locator('.help-pop-body p').evaluateAll((els) => els.map((e) => (e.textContent || '').trim()));
+  ok('气泡正文按行渲染，且没有空段落（以前空行会渲染成一个个空 <p>）',
+    hpParas.length >= 2 && hpParas.every((t) => t.length > 0),
+    JSON.stringify(hpParas.slice(0, 3)));
+  await win.mouse.move(4, 4);
+  await sleep(750);
+  ok('移开鼠标后气泡自动收起', (await win.locator('.help-pop').count()) === 0);
 
   // ============ 14. 结构模板仍可从编辑器插入新表 ============
   const tinfo = await win.evaluate(() => { let n = 0; const w = (x) => { if (x.type === 'table') n++; for (const c of x.children) w(c); }; w(window.__sceneStore.getState().scene.root); return n; });
@@ -398,10 +441,10 @@ async function main() {
     afterSplit.rows[0].cells.every((c) => !c.cs) && afterUndo.rows[0].cells.some((c) => c.cs === '2'),
     `拆分后=${afterSplit.rows[0].cells.length}格 / 撤销后=${JSON.stringify(afterUndo.rows[0].cells.map((c) => c.cs ?? '1'))}`);
 
-  // ============ 18. 表格默认不参与「导出前体检」 ============
+  // ============ 18. 表格默认参与「导出前体检」（v0.4.3 改回来：复杂表格确实需要 CSS） ============
   const swDefault = await win.locator('.tbl-switch-row input[type="checkbox"]').isChecked();
-  ok('体检开关默认关闭（表格默认不参与体检）', swDefault === false, String(swDefault));
-  ok('数据层默认也没有 healthCheck 标记', (await readLast()).healthCheck === false);
+  ok('体检开关默认开启（表格默认参与体检）', swDefault === true, String(swDefault));
+  ok('数据层没有排除标记（healthCheck !== false）', (await readLast()).healthCheck === false);
 
   /** 直接读体检结果（测试钩子 window.__healthCheck），不刮向导 DOM */
   const healthIssues = () => win.evaluate(() =>
@@ -420,7 +463,9 @@ async function main() {
     const clean = (await win.locator('.hc-clean').count()) > 0;
     const n = await win.locator('.hc-list-item').count();
     await win.locator('.hc-modal .cp-close').click();
-    await sleep(300);
+    // 等退场动画彻底结束再往下走：模态遮罩还在时点其它按钮会被吞掉
+    await win.waitForSelector('.hc-modal', { state: 'detached', timeout: 4000 }).catch(() => {});
+    await sleep(400);
     return { clean, n };
   };
   const openTableEditor = async () => {
@@ -439,27 +484,47 @@ async function main() {
   const listOff = await healthIssues();
   const offCount = unnamedOf(listOff);
   const wizOff = await wizardOpens();
-  console.log('  · 表格不参与时：unnamed=' + offCount + ' 清单=' + JSON.stringify(listOff.map((i) => i.id)) + ' 向导=' + JSON.stringify(wizOff));
+  /** 最后那张表内部"还没有名字"的元素个数（用来验证"整棵子树一起跳过"） */
+  const innerUnnamed = () => win.evaluate(() => {
+    let t = null;
+    const find = (n) => { if (n.type === 'table') t = n; for (const c of n.children) find(c); };
+    find(window.__sceneStore.getState().scene.root);
+    if (!t) return -1;
+    let cnt = 0;
+    const walk = (n, inside) => {
+      for (const c of n.children) {
+        const isIn = inside || c.id === t.id;
+        const named = !!((c.attrs?.relSelector ?? '').trim() || (c.attrs?.className ?? '').trim() || (c.attrs?.id ?? '').trim());
+        if (isIn && !named) cnt += 1;
+        walk(c, isIn);
+      }
+    };
+    walk(window.__sceneStore.getState().scene.root, false);
+    return cnt;
+  });
+  const innerCnt = await innerUnnamed();
+  console.log('  · 表格参与时：unnamed=' + offCount + '（其中该表内部未命名 ' + innerCnt + ' 个）清单=' + JSON.stringify(listOff.map((i) => i.id)) + ' 向导=' + JSON.stringify(wizOff));
 
   await openTableEditor();
-  await win.locator('.tbl-switch-row input[type="checkbox"]').check();
+  await win.locator('.tbl-switch-row input[type="checkbox"]').uncheck();
   await sleep(500);
   const onFlag = (await readLast()).healthCheck;
   await backToEditor();
   const listOn = await healthIssues();
   const onCount = unnamedOf(listOn);
   const wizOn = await wizardOpens();
-  console.log('  · 表格参与时：healthCheck=' + onFlag + ' unnamed=' + onCount + ' 清单=' + JSON.stringify(listOn.map((i) => i.id)) + ' 向导=' + JSON.stringify(wizOn));
-  ok('打开开关 → 表格纳入体检（未命名元素数量变多）', onFlag === true && onCount > offCount, `${offCount} → ${onCount}`);
-  ok('向导里也能看到这条问题（不是只在数据层）', wizOn.n > wizOff.n || wizOn.n > 0, JSON.stringify([wizOff, wizOn]));
+  console.log('  · 表格被排除时：healthCheck=' + onFlag + ' unnamed=' + onCount + ' 清单=' + JSON.stringify(listOn.map((i) => i.id)));
+  ok('关掉开关 → 该表整棵子树被跳过（少算的正好是它内部的未命名元素数）',
+    onFlag === true && offCount - onCount === innerCnt, `少算 ${offCount - onCount} / 表内未命名 ${innerCnt}`);
+  ok('向导里也能看到这条问题（不是只在数据层）', wizOn.n > 0 || wizOff.n > 0, JSON.stringify([wizOff, wizOn]));
 
   await openTableEditor();
-  await win.locator('.tbl-switch-row input[type="checkbox"]').uncheck();
+  await win.locator('.tbl-switch-row input[type="checkbox"]').check();
   await sleep(400);
   const offFlag2 = (await readLast()).healthCheck;
   await backToEditor();
   const offCount2 = unnamedOf(await healthIssues());
-  ok('关回去 → 表格重新被跳过（数量回到原值）', offFlag2 === false && offCount2 === offCount, `${onCount} → ${offCount2}（原始 ${offCount}）`);
+  ok('再打开 → 表格重新纳入体检（数量回到原值）', offFlag2 === false && offCount2 === offCount, `${onCount} → ${offCount2}（原始 ${offCount}）`);
 
   // ============ 19. 体检徽标不再被工具栏容器裁掉 ============
   // 徽标只统计"非 info"问题，所以先放一个未命名元素（标题 → warn 级「未命名元素」）保证它出现
@@ -530,6 +595,7 @@ async function main() {
   const btnBox = await win.locator('.tb-health-btn').first().boundingBox();
   if (btnBox) {
     await win.screenshot({
+      timeout: 5000,
       path: resolve(ROOT, 'tests/e2e/shots-v042/health-badge.png'),
       clip: { x: btnBox.x - 16, y: btnBox.y - 16, width: btnBox.width + 44, height: btnBox.height + 32 }
     });
@@ -556,9 +622,22 @@ async function main() {
   const cssOf = (sel, prop) => win.locator(sel).first().evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop);
   const cellSel = (r, c) => `[data-cell="${r}-${c}"]`;
 
-  ok('右面板出现「单元格大预览」与「表格样式预览」',
+  // v0.4.3：面板不再自动选中第一格（可以完全取消选中），先自己点一格再看预览
+  await win.locator(cellSel(1, 1)).click({ position: { x: 6, y: 8 } });
+  await sleep(250);
+  ok('右面板出现「单元格预览」与「表格设置预览」',
     (await win.locator('.cpv-box').count()) === 1 && (await win.locator('.tpv-table').count()) === 1,
     `cpv=${await win.locator('.cpv-box').count()} tpv=${await win.locator('.tpv-table').count()}`);
+  ok('右面板是清晰的三区块（选择器与标识 / 单元格设置 / 表格设置 / 预设）',
+    (await win.locator('.tbl-card-title', { hasText: '选择器与标识' }).count()) === 1
+    && (await win.locator('.tbl-card-title', { hasText: '单元格设置' }).count()) === 1
+    && (await win.locator('.tbl-card-title', { hasText: '表格设置' }).count()) === 1
+    && (await win.locator('.tbl-card-title', { hasText: '一键预设样式' }).count()) === 1);
+  ok('单元格设置里已删除重复的 colspan / rowspan 输入',
+    (await win.locator('.tbl-field', { hasText: 'colspan' }).count()) === 0
+    && (await win.locator('.tbl-field', { hasText: 'rowspan' }).count()) === 0);
+  ok('预设卡片带缩略图（每套预设画一张小表）',
+    (await win.locator('.tbl-preset-thumb').count()) >= 4, `thumbs=${await win.locator('.tbl-preset-thumb').count()}`);
 
   // 20.1 表格级底色 → 左边结构网格必须实时跟着变（旧版编辑器页面完全不跟）
   const pastBeforeTableBg = await pastLen();
@@ -570,8 +649,6 @@ async function main() {
     (await cssOf('.tpv-table', 'background-color')) === 'rgb(255, 238, 221)', await cssOf('.tpv-table', 'background-color'));
 
   // 20.2 单元格底色/字号 → 左侧格子本体实时生效（选中态用半透明叠加，不再盖掉真实底色）
-  await win.locator(cellSel(1, 1)).click({ position: { x: 6, y: 8 } });
-  await sleep(250);
   const pastBeforeCell = await pastLen();
   await win.evaluate((sel) => {
     const st = window.__sceneStore.getState();
@@ -584,28 +661,48 @@ async function main() {
   const cellFs = await cssOf(cellSel(1, 1), 'font-size');
   ok('改单元格底色/字号 → 左侧格子实时生效（选中态也不盖底色）',
     cellBg === 'rgb(0, 128, 255)' && cellFs === '19px', `bg=${cellBg} fs=${cellFs}`);
+  ok('单元格预览同步显示底色与字号',
+    (await cssOf('.cpv-box', 'background-color')) === 'rgb(0, 128, 255)'
+    && (await cssOf('.cpv-content', 'font-size')) === '19px',
+    `box=${await cssOf('.cpv-box', 'background-color')} content=${await cssOf('.cpv-content', 'font-size')}`);
 
-  // 20.3 拖「大预览」的上边 → 内边距实时变，且整段拖动只压一条撤销记录
+  // 20.3 内边距：**输入框 + 滚轮**（v0.4.3 去掉了拖动把手，改成最朴素的输入框，但保留滚轮与 Shift×10）
   const padBefore = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
-  const pastBeforePadDrag = await pastLen();
-  const edge = await win.locator('.cpv-edge.is-top').first().boundingBox();
-  await win.mouse.move(edge.x + edge.width / 2, edge.y + 4);
-  await win.mouse.down();
-  await win.mouse.move(edge.x + edge.width / 2, edge.y + 4 + 24, { steps: 8 });
-  await win.mouse.up();
-  await sleep(350);
-  const padAfter = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
-  const pastAfterPadDrag = await pastLen();
-  ok('按住预览上边往下拖 → 单元格内边距实时变大',
-    Math.abs(padAfter - (padBefore + 24)) <= 2, `${padBefore} → ${padAfter}`);
-  ok('一次拖动只压一条撤销记录（不是几十条）',
-    pastAfterPadDrag - pastBeforePadDrag === 1, `${pastBeforePadDrag} → ${pastAfterPadDrag}`);
-  ok('拖动结束后编辑会话已收尾（不会卡住后续撤销）', (await pendingEdit()) === false);
+  const padInput = win.locator('.tbl-field', { hasText: '内边距 上' }).locator('.tbl-num-input').first();
+  const pastBeforePad = await pastLen();
+  await padInput.click();
+  await padInput.fill(String(padBefore + 7));
+  await sleep(300);
+  const padTyped = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
+  ok('内边距输入框直接输入 → 单元格实时生效', Math.abs(padTyped - (padBefore + 7)) <= 1, `${padBefore} → ${padTyped}`);
+  ok('输入过程只压一条撤销记录', (await pastLen()) - pastBeforePad === 1, `${pastBeforePad} → ${await pastLen()}`);
 
+  // 滚轮：**指针必须在输入框上**（wheel 事件按指针位置派发，不是按焦点）；
+  // 聚焦输入框后上滚 1 格 = +1；按住 Shift = +10。
+  const beforeWheel = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
+  const piBox = await padInput.boundingBox();
+  await win.mouse.move(piBox.x + piBox.width / 2, piBox.y + piBox.height / 2);
+  await padInput.click();
+  await win.mouse.wheel(0, -120);
+  await sleep(500);
+  const afterWheel = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
+  ok('聚焦输入框后滚动滚轮可调数值（上滚增大）', afterWheel === beforeWheel + 1, `${beforeWheel} → ${afterWheel}`);
+  await win.keyboard.down('Shift');
+  await win.mouse.wheel(0, -120);
+  await sleep(500);
+  await win.keyboard.up('Shift');
+  const afterShiftWheel = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
+  ok('按住 Shift 滚轮一次调 10', afterShiftWheel === afterWheel + 10, `${afterWheel} → ${afterShiftWheel}`);
+  // 失焦收尾：点预览框（不是 Tab —— Tab 会把焦点交给下一个 TblNum 输入框，
+  // 那个框的 onFocus 又会 beginStyleEdit，会话照样挂着）
+  await win.locator('.cpv-box').click({ position: { x: 10, y: 10 } });
+  await sleep(400);
+  ok('输入结束后编辑会话已收尾（不会卡住后续撤销）', (await pendingEdit()) === false);
+  // 聚焦输入框后的"打字 + 滚轮"属于同一次编辑会话（中途没失焦）→ 一次 Ctrl+Z 全部回到会话开始前
   await win.keyboard.press('Control+z');
-  await sleep(350);
+  await sleep(400);
   const padUndone = parseFloat(await cssOf(cellSel(1, 1), 'padding-top')) || 0;
-  ok('Ctrl+Z 一次就把整段拖动撤销回去', Math.abs(padUndone - padBefore) <= 1, `${padAfter} → ${padUndone}`);
+  ok('输入+滚轮算一次编辑会话 → 一次 Ctrl+Z 全部回退', Math.abs(padUndone - padBefore) <= 1, `${afterShiftWheel} → ${padUndone}（会话前 ${padBefore}）`);
 
   // 20.4 颜色：开调色盘点一个色板 → 左边格子与预览都变，且只压一条记录（旧版 <input type=color> 会压几十条）
   const pastBeforeColor = await pastLen();
@@ -654,6 +751,7 @@ async function main() {
     const x = Math.max(0, sideBox.x);
     const y = Math.max(0, sideBox.y);
     await win.screenshot({
+      timeout: 5000,
       path: resolve(ROOT, 'tests/e2e/shots-v042/table-live.png'),
       clip: { x, y, width: Math.min(sideBox.width, vp.w - x), height: Math.min(sideBox.height, vp.h - y) }
     });
@@ -662,19 +760,21 @@ async function main() {
   const stageBox = await win.locator('.table-stage').first().boundingBox();
   if (stageBox) {
     await win.screenshot({
+      timeout: 5000,
       path: resolve(ROOT, 'tests/e2e/shots-v042/table-left-live.png'),
       clip: { x: Math.max(0, stageBox.x), y: Math.max(0, stageBox.y), width: stageBox.width, height: Math.min(stageBox.height, 520) }
     });
   }
-  // 「表格样式」卡片滚进视野，单独来一张（大致效果预览）
-  await win.locator('.tbl-card', { hasText: '表格样式' }).first().scrollIntoViewIfNeeded().catch(() => {});
+  // 「表格设置」卡片滚进视野，单独来一张（大致效果预览）
+  await win.locator('.tbl-card', { hasText: '表格设置' }).first().scrollIntoViewIfNeeded().catch(() => {});
   await sleep(300);
-  const styleCard = await win.locator('.tbl-card', { hasText: '表格样式' }).first().boundingBox();
+  const styleCard = await win.locator('.tbl-card', { hasText: '表格设置' }).first().boundingBox();
   if (styleCard) {
     const vp2 = await win.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }));
     const x2 = Math.max(0, styleCard.x);
     const y2 = Math.max(0, Math.min(styleCard.y, vp2.h - 200));
     await win.screenshot({
+      timeout: 5000,
       path: resolve(ROOT, 'tests/e2e/shots-v042/table-style-preview.png'),
       clip: { x: x2, y: y2, width: styleCard.width, height: Math.min(styleCard.height, vp2.h - y2) }
     });
@@ -682,6 +782,164 @@ async function main() {
 
   await win.locator('.fluent-back-btn').first().click();
   await sleep(500);
+
+  // ============ 16. 跨表唯一命名 / 不串味 / 每表独立 <style>（v0.4.4） ============
+  // 老 bug：元素面板插表时每张表都套默认类名 data-table → 自动取名给两张表生成
+  // 一模一样的关系选择器 → 导出互相覆盖 + syncClassmates 按同名选择器全量复制
+  // → "改表 A 的一格，表 B 的同一格跟着变"。
+  const mkTable = async () => {
+    await win.evaluate(() => window.__sceneStore.getState().selectElement(null));
+    await win.locator('.element-btn', { hasText: '表格' }).first().click();
+    await sleep(600);
+    await win.locator('.tab-btn', { hasText: '属性' }).first().click();
+    await sleep(400);
+    await win.locator('.tbl-entry button').first().click();
+    await win.waitForSelector('.table-page', { timeout: 8000 });
+    await sleep(500);
+    await win.locator('.tbl-empty-state .tbl-btn', { hasText: '加 3 行' }).first().click().catch(() => {});
+    await sleep(450);
+    await win.locator('.tbl-rail-col').last().click().catch(() => {});
+    await sleep(350);
+    await win.locator('.tbl-rail-col').last().click().catch(() => {});
+    await sleep(420);
+    await win.locator('.tbl-autoname-btn').first().click().catch(() => {});
+    await sleep(500);
+    await win.locator('.fluent-back-btn').first().click();
+    await sleep(600);
+  };
+  await mkTable();
+  await mkTable();
+
+  const dumpTables = () => win.evaluate(() => {
+    const tables = [];
+    const find = (n) => { if (n.type === 'table') tables.push(n); for (const c of n.children) find(c); };
+    find(window.__sceneStore.getState().scene.root);
+    const out = [];
+    for (const t of tables) {
+      const nodes = [];
+      const walk = (n, d) => {
+        nodes.push({ d, type: n.type, id: n.id,
+          rsel: (n.attrs && n.attrs.relSelector) || '',
+          style: Object.keys(n.style || {}).map((k) => k + '=' + n.style[k]).join(',') });
+        for (const c of n.children) walk(c, d + 1);
+      };
+      walk(t, 0);
+      out.push({ id: t.id, cls: (t.attrs && t.attrs.className) || '', nodes });
+    }
+    return out;
+  });
+
+  let allTables = await dumpTables();
+  const fresh = allTables.slice(-2); // 只校验本轮新插的这两张（文档里还有前面章节留下的表）
+  ok('两张表拿到互不相同的默认类名', fresh.length === 2 && fresh[0].cls !== fresh[1].cls,
+    JSON.stringify(fresh.map((t) => t.cls)));
+  const allRels = [];
+  for (const t of allTables) for (const n of t.nodes) if (n.rsel) allRels.push(n.rsel);
+  const dupRels = [...new Set(allRels.filter((r, i) => allRels.indexOf(r) !== i))];
+  ok('自动取名后**全文档**没有重复的关系选择器（每个元素都有自己的）',
+    dupRels.length === 0, `共 ${allRels.length} 条，重复 ${dupRels.length}`);
+  const unnamedInner = fresh.reduce((n, t) => n + t.nodes.filter((x) => x.d > 0 && !x.rsel).length, 0);
+  ok('新插的表格里每个元素都有独立选择器', unnamedInner === 0, `未命名 ${unnamedInner}`);
+
+  // 改表 2 第 2 行第 1 格 → 只能有 1 格变化
+  const pair = await win.evaluate(() => {
+    const tables = [];
+    const find = (n) => { if (n.type === 'table') tables.push(n); for (const c of n.children) find(c); };
+    find(window.__sceneStore.getState().scene.root);
+    const a = tables[0].children.find((c) => c.type === 'tbody');
+    const b = tables[1].children.find((c) => c.type === 'tbody');
+    return { aSame: a.children[1].children[0].id, b: b.children[1].children[0].id };
+  });
+  await win.evaluate((id) => window.__sceneStore.getState().updateStyle(id, { backgroundColor: '#ff0000' }), pair.b);
+  await sleep(400);
+  const red = [];
+  allTables = await dumpTables();
+  for (const t of allTables) for (const n of t.nodes) if (n.style.includes('#ff0000')) red.push(n.id);
+  ok('改表2的格子不会带动表1的同名格子（syncClassmates 不再跨表误伤）',
+    red.length === 1 && red[0] === pair.b, `变红 ${red.length} 格`);
+
+  // ============ 17. 表格编辑器 Ctrl+C（TSV / 整表 HTML） ============
+  await win.locator('.tab-btn', { hasText: '属性' }).first().click();
+  await sleep(400);
+  await win.locator('.tbl-entry button').first().click();
+  await win.waitForSelector('.table-page', { timeout: 8000 });
+  await sleep(500);
+  await win.locator('.tbl-cell[data-cell="0-0"]').first().click({ position: { x: 8, y: 10 } });
+  await sleep(350);
+  await win.keyboard.press('Control+c');
+  await sleep(500);
+  const toast1 = ((await win.locator('.tbl-toast').first().innerText().catch(() => '')) || '').trim();
+  ok('Ctrl+C 复制选中格 → 有结果提示且说明是 Tab 分隔',
+    toast1.includes('已复制') && toast1.includes('1 行'), toast1);
+
+  // 拖选一片再复制
+  await win.locator('.tbl-cell[data-cell="0-0"]').first().click({ position: { x: 8, y: 10 } });
+  await sleep(200);
+  const dragBox = await win.locator('.tbl-cell[data-cell="1-1"]').first().boundingBox();
+  if (dragBox) {
+    await win.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2);
+    await win.mouse.down();
+    await win.mouse.move(dragBox.x + dragBox.width / 2 + 4, dragBox.y + dragBox.height / 2 + 4);
+    await win.mouse.up();
+    await sleep(350);
+  }
+  await win.keyboard.press('Control+c');
+  await sleep(500);
+  const toast2 = ((await win.locator('.tbl-toast').first().innerText().catch(() => '')) || '').trim();
+  ok('Ctrl+C 复制选区 → 提示行数×列数', /已复制 \d+ 行 × \d+ 列/.test(toast2), toast2);
+
+  await win.keyboard.press('Control+Shift+c');
+  await sleep(500);
+  const toast3 = ((await win.locator('.tbl-toast').first().innerText().catch(() => '')) || '').trim();
+  ok('Ctrl+Shift+C 复制整张表 HTML', toast3.includes('HTML'), toast3);
+
+  // —— v0.4.4 修正：用户上一轮说的其实是「Ctrl+A 用不了」（不是 Ctrl+C）——
+  // Ctrl+A 必须全选所有单元格；且不能落到浏览器默认的"全选整页文字"。
+  await win.locator('.tbl-cell[data-cell="0-0"]').first().click({ position: { x: 8, y: 10 } });
+  await sleep(250);
+  await win.keyboard.press('Control+a');
+  await sleep(450);
+  const toastA = ((await win.locator('.tbl-toast').first().innerText().catch(() => '')) || '').trim();
+  ok('Ctrl+A 全选整张表 → 有反馈提示', toastA.includes('全选') || /\d+ 行 × \d+ 列/.test(toastA), toastA);
+  const selA = await win.evaluate(() => {
+    const picked = document.querySelectorAll('.tbl-cell.picked');
+    const total = document.querySelectorAll('.tbl-cell').length;
+    return {
+      picked: picked.length,
+      total,
+      textSelected: String(window.getSelection ? window.getSelection().toString() : '').length
+    };
+  });
+  ok('Ctrl+A 后所有单元格都进入选区', selA && selA.total > 0 && selA.picked >= selA.total, JSON.stringify(selA));
+  ok('Ctrl+A 不会落到浏览器默认的"全选文字"', selA && selA.textSelected < 20, JSON.stringify(selA));
+  // 复制这个"全选"结果 → 应当是整张表的 TSV
+  await win.keyboard.press('Control+c');
+  await sleep(450);
+  const toastA2 = ((await win.locator('.tbl-toast').first().innerText().catch(() => '')) || '').trim();
+  ok('全选后 Ctrl+C → 复制整张表内容', /已复制 \d+ 行 × \d+ 列/.test(toastA2), toastA2);
+
+  // ============ 18. 导出：每张表一个独立 <style> ============
+  await win.locator('.fluent-back-btn').first().click();
+  await win.waitForSelector('.toolbar', { timeout: 8000 });
+  await sleep(600);
+  await win.locator('button', { hasText: '导出 HTML' }).first().click();
+  for (let i = 0; i < 25 && !existsSync(EXPORT_PATH); i++) await sleep(300);
+  if (existsSync(EXPORT_PATH)) {
+    const html = readFileSync(EXPORT_PATH, 'utf-8');
+    const tableTags = [...html.matchAll(/<style data-bc-table="([^"]+)"/g)].map((m) => m[1]);
+    ok('导出里每张表一个 <style data-bc-table="…">', tableTags.length >= 2, JSON.stringify(tableTags));
+    // 每块只含自己那张表的选择器
+    const blocks = html.split(/<style[^>]*>/).slice(1).map((s) => s.split('</style>')[0]);
+    const tableBlocks = blocks.filter((b) => b.includes('这张表专属'));
+    const crossContaminated = tableBlocks.filter((b, i) => {
+      const others = tableTags.filter((_, j) => j !== i);
+      return others.some((o) => b.includes('.' + o + ' '));
+    });
+    ok('表格样式块之间没有互相混入别的表的选择器', crossContaminated.length === 0,
+      `被污染的块 ${crossContaminated.length}`);
+  } else {
+    ok('导出成功（BC_AUTO_EXPORT_PATH）', false, '没等到文件');
+  }
 
   ok('无 console 错误', errs.length === 0, errs.slice(0, 3).join(' | '));
   console.log(`\n===== 表格探针：${pass} 通过 / ${fail} 失败 =====`);

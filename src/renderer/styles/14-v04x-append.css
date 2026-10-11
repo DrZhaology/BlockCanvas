@@ -978,15 +978,24 @@ html[data-bc-dark] .fp-badge.lic-unknown { color: #94a3b8; border-color: #475569
 .grad-stop.is-drop-after { box-shadow: 0 2px 0 0 var(--accent); }
 
 .grad-stop-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* ⠿ 拖动柄：固定成一个小方框并裁切 —— 这个盲文字符本身比行高高，不裁就会"一直溢出" */
 .grad-stop-grip {
-  flex: 0 0 auto;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   color: var(--text-muted);
-  font-size: 12px;
-  letter-spacing: -1px;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: -2px;
   cursor: grab;
   user-select: none;
   opacity: 0.7;
 }
+.grad-stop-grip:hover { opacity: 1; color: var(--accent); }
 .grad-stop .color-text-input { flex: 1 1 auto; width: auto; min-width: 0; }
 .grad-stop .color-swatch-btn { flex: 0 0 24px; width: 24px; height: 24px; }
 .grad-stop-del { flex: 0 0 20px; }

@@ -6,6 +6,8 @@ import {
   angleHint,
   GRADIENT_PRESETS,
   GRADIENT_PRESET_GROUPS,
+  RADIAL_EXTENTS,
+  RADIAL_POSITIONS,
   type GradientSpec
 } from '@lib/gradient';
 import { ColorField } from './ColorPicker';
@@ -141,23 +143,33 @@ export function GradientEditor(props: Props) {
   };
 
   // —— 色标拖拽排序（HTML5 DnD，垂直方向；交换列表顺序，不影响渐变渲染位置） ——
+  // ⚠ 只有 ⠿ 握把（grad-stop-grip）能发起拖拽 —— 以前把 draggable 挂在整张卡片上，
+  //   结果在「位置」滑块上按住拖动会先触发卡片的 dragstart（移动色标），滑块根本拖不动。
+  //   现在：卡片只负责「接收落点」（dragover/drop），发起拖拽的只有握把。
   const [stopDrag, setStopDrag] = useState<number | null>(null);
   const [stopDrop, setStopDrop] = useState<number | null>(null);
   const [stopDropBefore, setStopDropBefore] = useState(false);
-  const stopDragProps = (i: number) => ({
+  const stopGripProps = (i: number) => ({
     draggable: true,
-    onDragStart: () => setStopDrag(i),
-    onDragEnd: () => { setStopDrag(null); setStopDrop(null); },
+    onDragStart: (e: React.DragEvent) => {
+      e.stopPropagation();
+      setStopDrag(i);
+    },
+    onDragEnd: () => { setStopDrag(null); setStopDrop(null); }
+  });
+  const stopDropProps = (i: number) => ({
     onDragOver: (e: React.DragEvent) => {
+      if (stopDrag === null) return; // 不是本编辑器发起的拖拽 → 不拦，交给浏览器默认行为
       e.preventDefault();
-      if (stopDrag === null || stopDrag === i) return;
+      if (stopDrag === i) return;
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
       setStopDrop(i);
       setStopDropBefore(e.clientY < r.top + r.height / 2);
     },
     onDrop: (e: React.DragEvent) => {
+      if (stopDrag === null) return;
       e.preventDefault();
-      if (stopDrag !== null && stopDrop !== null && stopDrag !== stopDrop) {
+      if (stopDrop !== null && stopDrag !== stopDrop) {
         push((() => {
           const next = [...spec.stops];
           const [moved] = next.splice(stopDrag, 1);
@@ -269,19 +281,55 @@ export function GradientEditor(props: Props) {
       )}
 
       {spec.type === 'radial' && (
-        <div className="grad-row grad-shape-row">
-          <span className="grad-label">形状</span>
-          <div className="grad-seg">
-            <button
-              className={'grad-seg-btn' + (spec.shape === 'circle' ? ' active' : '')}
-              onClick={() => { push({ ...spec, shape: 'circle' }); onCommit(); }}
-            >圆形</button>
-            <button
-              className={'grad-seg-btn' + (spec.shape === 'ellipse' ? ' active' : '')}
-              onClick={() => { push({ ...spec, shape: 'ellipse' }); onCommit(); }}
-            >椭圆</button>
+        <>
+          <div className="grad-row grad-shape-row">
+            <span className="grad-label">形状</span>
+            <div className="grad-seg">
+              <button
+                className={'grad-seg-btn' + (spec.shape === 'circle' ? ' active' : '')}
+                onClick={() => { push({ ...spec, shape: 'circle' }); onCommit(); }}
+                title="正圆：无论盒子多宽多扁，扩散都是正圆"
+              >圆形</button>
+              <button
+                className={'grad-seg-btn' + (spec.shape === 'ellipse' ? ' active' : '')}
+                onClick={() => { push({ ...spec, shape: 'ellipse' }); onCommit(); }}
+                title="椭圆：随盒子形状拉长，铺满更自然"
+              >椭圆</button>
+            </div>
           </div>
-        </div>
+          <div className="grad-row grad-shape-row">
+            <span className="grad-label">扩散范围</span>
+            <div className="grad-seg grad-seg-wrap">
+              {RADIAL_EXTENTS.map((e) => (
+                <button
+                  key={e.id}
+                  className={'grad-seg-btn' + ((spec.radialExtent ?? 'farthest-corner') === e.id ? ' active' : '')}
+                  onClick={() => { push({ ...spec, radialExtent: e.id }); onCommit(); }}
+                  title={e.hint}
+                >{e.label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="grad-row grad-shape-row">
+            <span className="grad-label">中心位置</span>
+            <select
+              className="grad-pos-select"
+              value={spec.radialPos && (RADIAL_POSITIONS as readonly string[]).includes(spec.radialPos) ? spec.radialPos : 'center'}
+              onChange={(e) => { push({ ...spec, radialPos: e.target.value }); onCommit(); }}
+              title="渐变从盒子的哪个位置向外扩散"
+            >
+              <option value="center">居中</option>
+              <option value="top">顶部</option>
+              <option value="bottom">底部</option>
+              <option value="left">左侧</option>
+              <option value="right">右侧</option>
+              <option value="top left">左上角</option>
+              <option value="top right">右上角</option>
+              <option value="bottom left">左下角</option>
+              <option value="bottom right">右下角</option>
+            </select>
+          </div>
+        </>
       )}
 
       {/* 色标列表（v0.4.5：两行卡片式 —— 上行=颜色，下行=位置；
@@ -299,11 +347,11 @@ export function GradientEditor(props: Props) {
               (stopDrag === i ? ' is-dragging' : '') +
               (stopDrop === i ? (stopDropBefore ? ' is-drop-before' : ' is-drop-after') : '')
             }
-            {...stopDragProps(i)}
-            title="按住 ⠿ 拖动可调整色标上下顺序"
+            {...stopDropProps(i)}
+            title="按住左侧 ⠿ 握把拖动可调整色标上下顺序"
           >
             <div className="grad-stop-top">
-              <span className="grad-stop-grip">⠿</span>
+              <span className="grad-stop-grip" {...stopGripProps(i)} title="按住拖动调整色标顺序">⠿</span>
               <ColorField
                 value={s.color}
                 fallback="#667eea"

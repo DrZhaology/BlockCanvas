@@ -3,6 +3,59 @@ import type { SceneElement, SceneGraph, ElementType, ElementStyle, Breakpoint } 
 import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS } from '@lib/types';
 import { SCHEMA } from '@lib/propertySchema';
 import type { TokenEntry } from '@lib/designTokens';
+import { cssTextToObject, styleToCssText } from '@lib/styleClass';
+
+// ============================================================================
+// 容器「子元素样式」（childStyles）与子元素自身样式的冲突消解（v0.4.4d）
+// ----------------------------------------------------------------------------
+// 背景：模板插入的元素（如 .cards-row 里的 .card-title）的样式是由**父容器的
+//   childStyles** 生成的规则 `.cards-row .card-title { margin: ... }` 提供的，
+//   而子元素自己的样式挂在 `.card-title { ... }` 上。
+//   CSS 特异性：`.cards-row .card-title`(0,2,0) > `.card-title`(0,1,0) →
+//   **用户选中子元素改样式，写进 .card-title 也不生效**（被容器规则盖住）。
+//   这正是"模板元素选中后里面的样式都不能修改"的根因。
+// 解决：当用户改动某元素的某几个 CSS 属性时，把同名的声明从**指向它的祖先
+//   childStyles** 里剔除 —— 于是子元素自己的样式重新生效（改得动）。
+//   只按"类名 token / 精确标签"匹配，且仅当子元素自身有类名时才处理，避免误伤。
+// ============================================================================
+
+/** 该 childStyles 选择器是否指向这个子节点（宽松匹配：类名 token 或精确标签） */
+function childSelectorTargets(sel: string, node: SceneElement): boolean {
+  const s = (sel ?? '').trim();
+  if (!s) return false;
+  const last = s.split(/[\s>+~]+/).filter(Boolean).pop() || '';
+  if (!last) return false;
+  const tokens = (node.attrs?.className ?? '').trim().split(/\s+/).filter(Boolean);
+  for (const t of tokens) {
+    if (last.includes('.' + t)) return true;
+  }
+  const tag = last.replace(/[.:#[].*$/, '').toLowerCase();
+  return !!tag && tag === node.type;
+}
+
+/** 把 keys 这些 CSS 属性从"路径上所有祖先的、指向 target 的 childStyles"里删掉 */
+function stripAncestorChildStyles(root: SceneElement, target: SceneElement, keys: string[]): void {
+  if (!target.attrs?.className) return; // 无类名的元素走行内样式，天然盖过 childStyles，无需处理
+  const walk = (n: SceneElement): boolean => {
+    let contains = false;
+    for (const c of n.children) {
+      if (c === target) { contains = true; break; }
+      if (walk(c)) { contains = true; break; }
+    }
+    // n 的子树里含 target → n 就是"祖先"，清掉它 childStyles 里命中 target 的同名声明
+    if (contains && n.childStyles?.length) {
+      for (const cs of n.childStyles) {
+        if (!childSelectorTargets(cs.sel, target)) continue;
+        const obj = cssTextToObject(cs.css);
+        let changed = false;
+        for (const k of keys) { if (k in obj) { delete obj[k]; changed = true; } }
+        if (changed) cs.css = styleToCssText(obj);
+      }
+    }
+    return contains;
+  };
+  walk(root);
+}
 
 // 把 schema 转成 key→item 映射，便于 removeVisibleProp 知道一条属性对应的 style 字段
 const SCHEMA_LOOKUP = new Map<string, (typeof SCHEMA)[number]>();
@@ -422,6 +475,9 @@ export interface SceneStore {
   endStyleEdit: () => void;
   // 改 HTML 原生属性 (class/id/src/alt/href 等)
   updateAttr: (id: string, key: string, value: string) => void;
+  // 富文本片段样式（v0.4.4d）：把文字里 [start, end) 这一段包成带内联样式的 run
+  //（导出成 `<span style="…">选中文字</span>`，**不走 CSS 选择器**，只影响这一段）
+  applyTextRunStyle: (id: string, start: number, end: number, patch: Partial<ElementStyle>) => void;
   // 页面级：用户全局 CSS（导出进 <style> 末尾，可覆盖自动样式类）
   setGlobalCss: (text: string) => void;
   // 页面快速设置（4-D）：合并更新 body/a 可视化项，导出顺序：自动样式 → 快速设置 → 高级 CSS
@@ -801,6 +857,8 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
+      // 先消解祖先 childStyles 的压制 —— 否则模板子元素"改了没反应"（特异性被盖住）
+      stripAncestorChildStyles(scene.root, node, Object.keys(partial).filter((k) => k !== 'src' && k !== 'alt'));
       const bp = breakpointOverride ?? st.activeBreakpoint;
       if (bp === 'desktop') {
         for (const [k, v] of Object.entries(partial)) {
@@ -842,6 +900,7 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
+      stripAncestorChildStyles(scene.root, node, Object.keys(partial).filter((k) => k !== 'src' && k !== 'alt'));
       const bp = breakpointOverride ?? st.activeBreakpoint;
       if (bp === 'desktop') {
         for (const [k, v] of Object.entries(partial)) {
@@ -1002,6 +1061,70 @@ export const useScene = create<SceneStore>((set) => ({
   // className 特殊协调（类名 = 一套衣服）：
   //  - 加入一个已存在的类名 → 立刻穿上该组的样式（数据与显示同时变，不留幽灵冲突）
   //  - 移除后不再有任何类名 → 把当前生效的组样式物化到元素自己（外观不变地"脱下来"）
+  // 富文本片段样式（v0.4.4d）：把文字里 [start, end) 这一段单独套样式。
+  // 做法：把整段文字归一化成 runs（无则整段一个 run）→ 在 start/end 处切开 → 给覆盖到的 run 打补丁。
+  // 导出成 `<span style="…">…</span>`（内联，不用选择器），画布与导出同源。
+  applyTextRunStyle: (id, start, end, patch) => {
+    set((st) => {
+      const scene = deepClone(st.scene);
+      const node = findNode(scene.root, id);
+      if (!node) return st;
+      const full = node.text ?? '';
+      const a = Math.max(0, Math.min(start, full.length));
+      const b = Math.max(a, Math.min(end, full.length));
+      if (a >= b) return st;
+
+      // 1. 归一化成 runs（保证拼接 == full，否则退回整段一个 run）
+      let runs: { text: string; style?: ElementStyle }[] =
+        node.runs && node.runs.length
+          ? node.runs.map((r) => ({ text: r.text, style: r.style ? { ...r.style } : undefined }))
+          : [{ text: full }];
+      if (runs.map((r) => r.text).join('') !== full) runs = [{ text: full }];
+
+      // 2. 在 at 处切开（保持每段样式不变）
+      const splitAt = (rs: typeof runs, at: number) => {
+        if (at <= 0) return rs;
+        const out: typeof runs = [];
+        let pos = 0;
+        for (const r of rs) {
+          const len = r.text.length;
+          if (at > pos && at < pos + len) {
+            out.push({ text: r.text.slice(0, at - pos), style: r.style ? { ...r.style } : undefined });
+            out.push({ text: r.text.slice(at - pos), style: r.style ? { ...r.style } : undefined });
+          } else {
+            out.push(r);
+          }
+          pos += len;
+        }
+        return out;
+      };
+      runs = splitAt(runs, a);
+      runs = splitAt(runs, b);
+
+      // 3. 给落在 [a,b) 内的 run 打补丁
+      let pos = 0;
+      for (const r of runs) {
+        const rs = pos;
+        const re = pos + r.text.length;
+        pos = re;
+        if (rs >= a && re <= b && re > rs) {
+          const next: Record<string, string | undefined> = { ...(r.style ?? {}) };
+          for (const [k, v] of Object.entries(patch)) {
+            if (v === undefined || v === '') delete next[k];
+            else next[k] = v;
+          }
+          r.style = Object.keys(next).length ? (next as ElementStyle) : undefined;
+        }
+      }
+
+      // 4. 落库：没有样式的 run 去掉 style 字段，保持数据干净
+      node.runs = runs.map((r) => (r.style && Object.keys(r.style).length ? r : { text: r.text }));
+      node.text = runs.map((r) => r.text).join('');
+      const push = !st.styleEditPending;
+      return { scene, history: push ? pushPast(st.history, st.scene) : st.history };
+    });
+  },
+
   updateAttr: (id, key, value) => {
     set((st) => {
       const scene = deepClone(st.scene);
@@ -1192,6 +1315,17 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
+      // 删属性时也要消解祖先 childStyles（否则容器规则会继续把值"补"回来，看起来删不掉）
+      const delKeys = (() => {
+        const item = SCHEMA_LOOKUP.get(key);
+        if (item) {
+          return (item.input === 'box4' || item.input === 'trbl') && item.sides
+            ? item.sides.map((s) => s.key)
+            : [item.key];
+        }
+        return [key];
+      })();
+      stripAncestorChildStyles(scene.root, node, delKeys);
       // 移出列表
       if (node.visibleProps) {
         node.visibleProps = node.visibleProps.filter((k) => k !== key);
@@ -1273,6 +1407,10 @@ export const useScene = create<SceneStore>((set) => ({
       const node = findNode(scene.root, id);
       if (!node) return st;
       node.text = text;
+      // 有富文本片段时：文本改了就无法保证片段仍然对齐 → 尽量保留，保不住就整段退回纯文本
+      if (node.runs && node.runs.length) {
+        if (node.runs.map((r) => r.text).join('') !== text) node.runs = undefined;
+      }
       return { scene, history: pushPast(st.history, st.scene) };
     });
   },
@@ -1337,8 +1475,9 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
-      if (on) node.healthCheck = true;
-      else delete node.healthCheck;
+      // v0.4.3 起"参与体检"是默认值，所以关掉时必须**显式写 false**：
+      // 删标记等于回到默认的"参与"，开关会立刻弹回去，看起来像点不动。
+      node.healthCheck = on;
       return { scene, history: pushPast(st.history, st.scene) };
     });
   },
@@ -1385,31 +1524,46 @@ function pushPast(h: History, snapshot: SceneGraph): History {
 // 「编辑即统一」：node 有类名(classString)或关系选择器(relSelector)时，
 // 把整棵树上所有同类名或同关系选择器的元素样式全量覆盖为 node 当前样式 —— 一改全改。
 // 无类名且无关系选择器的元素（或 root）不触发联动。
+/**
+ * 「编辑即统一」：把改好的样式同步给"同一个名字"的元素。
+ *
+ * · 同名**类名**：全文档同步（类 = 一种样子，用户明确的可复用单元）。
+ * · 同**关系选择器**：只在**同一个父容器下的兄弟**之间同步。
+ *
+ * ⚠ 为什么关系选择器要限定"同父"（v0.4.4 修）：
+ *   关系选择器是"结构定位"（`.data-table > tbody > tr:nth-child(2) > td:nth-child(1)`），
+ *   它长得一样**不代表是同一个元素** —— 文档里两张表都叫 `data-table` 时，
+ *   两张表的同位置格子会拿到完全相同的选择器字符串。旧实现按字符串全文同步，
+ *   于是"改表 A 的一格，表 B 的同一格跟着变"（用户报的"改第二行，第一行也被带动"）。
+ *   而真正需要"组同步"的场景（给容器内同类子元素统一设置选择器）本来就是同父兄弟，
+ *   所以限定同父既修掉误伤、又完整保留原本的组语义。
+ */
 function syncClassmates(root: SceneElement, node: SceneElement): void {
   const cls = (node.attrs?.className ?? '').trim();
   const rel = (node.attrs?.relSelector ?? '').trim();
   if ((!cls && !rel) || node === root) return;
+  const nodeParent = findParent(root, node.id);
   const targetStyle = deepClone(node.style);
   const targetVisible = node.visibleProps ? deepClone(node.visibleProps) : undefined;
   const targetPseudo = node.pseudoStyles ? deepClone(node.pseudoStyles) : undefined;
   const targetResponsive = node.responsive ? deepClone(node.responsive) : undefined;
-  const walk = (n: SceneElement): void => {
+  const copyTo = (n: SceneElement) => {
+    n.style = deepClone(targetStyle);
+    n.visibleProps = targetVisible ? deepClone(targetVisible) : undefined;
+    n.pseudoStyles = targetPseudo ? deepClone(targetPseudo) : undefined;
+    n.responsive = targetResponsive ? deepClone(targetResponsive) : undefined;
+  };
+  const walk = (n: SceneElement, parent: SceneElement | null): void => {
     if (n !== node) {
       if (cls && (n.attrs?.className ?? '').trim() === cls) {
-        n.style = deepClone(targetStyle);
-        n.visibleProps = targetVisible ? deepClone(targetVisible) : undefined;
-        n.pseudoStyles = targetPseudo ? deepClone(targetPseudo) : undefined;
-        n.responsive = targetResponsive ? deepClone(targetResponsive) : undefined;
-      } else if (rel && (n.attrs?.relSelector ?? '').trim() === rel) {
-        n.style = deepClone(targetStyle);
-        n.visibleProps = targetVisible ? deepClone(targetVisible) : undefined;
-        n.pseudoStyles = targetPseudo ? deepClone(targetPseudo) : undefined;
-        n.responsive = targetResponsive ? deepClone(targetResponsive) : undefined;
+        copyTo(n);
+      } else if (rel && parent === nodeParent && (n.attrs?.relSelector ?? '').trim() === rel) {
+        copyTo(n);
       }
     }
-    for (const c of n.children) walk(c);
+    for (const c of n.children) walk(c, n);
   };
-  walk(root);
+  walk(root, null);
 }
 
 // re-export for components

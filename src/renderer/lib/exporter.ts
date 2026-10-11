@@ -1,6 +1,7 @@
 import type { SceneGraph, SceneElement } from '@lib/types';
 import { SELF_CLOSING_TAGS } from '@lib/types';
-import { collectStyleClasses, buildStyleBlock, createStyleClassSet, type StyleClassSet } from '@lib/styleClass';
+import { collectStyleClasses, buildStyleBlock, createStyleClassSet, styleToCssText, simplifyStyle, type StyleClassSet } from '@lib/styleClass';
+import { collectTableSelectors } from '@lib/tableOps';
 import { applyExportPostHooks } from './pluginHost';
 
 // BlockCanvas · HTML 导出器
@@ -79,7 +80,16 @@ function nodeToHTML(node: SceneElement, ctx: StyleClassSet, indent = 2): string 
   }
 
   html += '>';
-  if (node.text) html += escapeText(node.text);
+  if (node.runs && node.runs.length > 0) {
+    // 富文本片段（v0.4.4d）：带样式的片段输出成 <span style="…">（内联，不用选择器）
+    html += node.runs.map((r) => {
+      const t = escapeTextBr(r.text);
+      const css = r.style ? styleToCssText(simplifyStyle(r.style)) : '';
+      return css ? `<span style="${escapeAttr(css)}">${t}</span>` : t;
+    }).join('');
+  } else if (node.text) {
+    html += escapeTextBr(node.text);
+  }
   if (node.children.length > 0) {
     const childrenHtml = node.children
       .map((c) => nodeToHTML(c, ctx, indent + 2))
@@ -92,6 +102,10 @@ function nodeToHTML(node: SceneElement, ctx: StyleClassSet, indent = 2): string 
 
 function escapeText(t: string): string {
   return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+/** 文本内容转义 + 换行转 <br>（v0.4.4e：编辑器里的换行导出成真正的换行标签） */
+function escapeTextBr(t: string): string {
+  return escapeText(t).replace(/\n/g, '<br>');
 }
 function escapeAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
@@ -112,7 +126,25 @@ export function exportHTML(scene: SceneGraph): ExportResult {
   const ctx: StyleClassSet = createStyleClassSet();
   for (const c of scene.root.children) collectStyleClasses(c, ctx);
 
-  const styleBlock = buildStyleBlock(ctx, scene.globalCss, scene.quickCss, scene.tokens);
+  // —— 表格：每张表单独成一个 <style> 标签（v0.4.4）——
+  // 理由：表格的 CSS 又多又"只服务这一张表"，混在通用样式里很难读、也容易和别的表互相覆盖。
+  // 做法：先把每张表会用到哪些选择器算出来，主块把它们排除，再逐表输出一块。
+  const tables: { label: string; selectors: Set<string> }[] = [];
+  const collectTables = (n: SceneElement): void => {
+    if (n.hidden) return;
+    if (n.type === 'table') {
+      const cls = (n.attrs?.className ?? '').trim().split(/\s+/)[0];
+      tables.push({
+        label: cls || `table-${tables.length + 1}`,
+        selectors: new Set(collectTableSelectors(n))
+      });
+    }
+    for (const c of n.children) collectTables(c);
+  };
+  for (const c of scene.root.children) collectTables(c);
+  const allTableSelectors = new Set<string>();
+  for (const t of tables) for (const s of t.selectors) allTableSelectors.add(s);
+
   // 基础重置默认【不】添加（用户可在「页面」页签按需勾选）：
   // ① 去白边：html,body 默认 8px 边距 ② 标题/段落默认间距：h1~h6、p、列表等 UA 外边距
   // （真实网站都有 CSS Reset；还原网站排版时勾上第二项即可对齐原站观感）
@@ -124,10 +156,42 @@ export function exportHTML(scene: SceneGraph): ExportResult {
   if (scene.quickCss?.resetHeadingMargin === '1') {
     resets.push('/* ==== 重置标题/段落/列表的浏览器默认外边距 ==== */\n' + RESET_TAGS + ' { margin: 0; }');
   }
-  const fullStyleBlock = [...resets, styleBlock].filter(Boolean).join('\n\n');
-  const styleHtml = fullStyleBlock
-    ? `  <style>\n${indentLines(fullStyleBlock, '    ')}\n  </style>\n`
-    : '';
+  const indentBlock = (css: string, attr = ''): string =>
+    css ? `  <style${attr}>\n${indentLines(css, '    ')}\n  </style>\n` : '';
+
+  let styleHtml: string;
+  if (tables.length === 0) {
+    // 没有表格：完全保持原来的单块输出（不打扰既有工程）
+    const full = [...resets, buildStyleBlock(ctx, scene.globalCss, scene.quickCss, scene.tokens)].filter(Boolean).join('\n\n');
+    styleHtml = indentBlock(full);
+  } else {
+    // ① 主块：重置 + 设计变量 + 非表格的自动规则 + 非表格响应式
+    const mainCss = [
+      ...resets,
+      buildStyleBlock(ctx, undefined, undefined, scene.tokens, {
+        excludeSelectors: allTableSelectors,
+        withPageCss: false
+      })
+    ].filter(Boolean).join('\n\n');
+    // ② 每张表一块：只放这张表自己的规则
+    const tableBlocks = tables.map((t, i) =>
+      indentBlock(
+        buildStyleBlock(ctx, undefined, undefined, undefined, {
+          onlySelectors: t.selectors,
+          withTokens: false,
+          withPageCss: false,
+          autoComment: `/* ==== 表 ${i + 1} · .${t.label} 的样式（这张表专属） ==== */`
+        }),
+        ` data-bc-table="${escapeAttr(t.label)}"`
+      )
+    ).join('');
+    // ③ 尾块：快速设置 + 用户全局 CSS（放最后 → 仍然可以覆盖表格样式）
+    const tailCss = buildStyleBlock(ctx, scene.globalCss, scene.quickCss, undefined, {
+      onlySelectors: new Set<string>(),
+      withTokens: false
+    });
+    styleHtml = indentBlock(mainCss) + tableBlocks + indentBlock(tailCss);
+  }
 
   const bodyInner = scene.root.children
     .map((c) => nodeToHTML(c, ctx, 2))
@@ -147,4 +211,9 @@ ${bodyInner}
 </html>`;
 
   return { html: applyExportPostHooks(html), warnings: ctx.warnings, unclassified: ctx.unclassified };
+}
+
+// 测试钩子：E2E 探针直接调导出器验证产物（与 sceneStore 的 window.__sceneStore 同一套做法）
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__bcExportHTML = exportHTML;
 }

@@ -8,9 +8,10 @@
 //
 // 本模块是纯逻辑（不 import React），工具栏 ⚠ 面板与「导出前体检」向导共用同一份结果。
 
-import { useScene } from '@store/sceneStore';
+import { useScene, findNode } from '@store/sceneStore';
 import { styleToCssText, simplifyStyle } from '@lib/styleClass';
 import { isValidClassToken } from '@lib/classColor';
+import { collectUsedNames, autoNameTableInner, findTableAncestor } from '@lib/tableOps';
 import type { SceneElement } from '@lib/types';
 
 export type Severity = 'critical' | 'warn' | 'info';
@@ -37,12 +38,14 @@ export interface HealthIssue {
 
 /**
  * 这张 <table> 是否参与体检。
- * 表格默认**不参与**：一格一个 td/th，正常做表格既不给格子起类名也不写 CSS，
- * 参与体检只会刷出一大串"未命名元素"，把真正要处理的问题淹掉。
- * 想纳入的表格，在表格编辑器右侧面板把「参与导出前体检」打开（node.healthCheck = true）。
+ * v0.4.3 起**默认参与**（用户要求改回来：表格里的复杂设置还是需要 CSS 的）——
+ * 编辑器「选择器与标识」里配了「自动取名表格内的元素」按钮：
+ * 一键给内部元素生成精准的关系选择器（`.cls > tbody > tr:nth-child(2) > td:nth-child(1)`），
+ * 所以体检报出来的"未命名元素"点一下就清干净了。
+ * 只有显式关掉（node.healthCheck === false）的表格才整棵子树跳过。
  */
 function tableInHealthCheck(n: SceneElement): boolean {
-  return n.type !== 'table' || n.healthCheck === true;
+  return n.type !== 'table' || n.healthCheck !== false;
 }
 
 /**
@@ -67,7 +70,7 @@ export function countSkippedTables(root: SceneElement): number {
   let n = 0;
   const walk = (node: SceneElement) => {
     for (const c of node.children) {
-      if (c.type === 'table' && c.healthCheck !== true) { n += 1; continue; }
+      if (c.type === 'table' && c.healthCheck === false) { n += 1; continue; }
       walk(c);
     }
   };
@@ -253,7 +256,57 @@ export function runHealthCheck(root: SceneElement): HealthIssue[] {
     });
   }
 
-  // ⑤ 非法类名 —— CSS 里根本选不中
+  // ⑤ 关系选择器重名 —— 关系选择器是"结构定位"，两张同名表会长得一模一样
+  // （v0.4.4：元素面板插表时每张都套默认类名 data-table，自动取名后两张表的
+  //  `.data-table > tbody > tr:nth-child(2) > td:nth-child(1)` 完全相同：
+  //   导出 CSS 互相覆盖 + 改一张表的一格、另一张表的同位置格子跟着变。）
+  const relOwners = new Map<string, string[]>();
+  for (const n of all) {
+    const rel = (n.attrs?.relSelector ?? '').trim();
+    if (!rel) continue;
+    const list = relOwners.get(rel) ?? [];
+    list.push(n.id);
+    relOwners.set(rel, list);
+  }
+  const dupRels = [...relOwners.entries()].filter(([, ids]) => ids.length > 1);
+  if (dupRels.length > 0) {
+    // 找出"受影响"的表（重名选择器所属的表）
+    const affectedIds: string[] = [];
+    for (const [, ids] of dupRels) {
+      for (const id of ids) {
+        const t = findTableAncestor(root, id);
+        if (t && !affectedIds.includes(t.id)) affectedIds.push(t.id);
+      }
+    }
+    issues.push({
+      id: 'dup-rel-selector',
+      severity: 'critical',
+      title: `${dupRels.length} 个关系选择器被多个元素共用`,
+      detail:
+        '关系选择器是按结构定位的，例如 `.data-table > tbody > tr:nth-child(2) > td:nth-child(1)`。\n' +
+        '两张表如果用了同一个类名，它们同位置的格子会算出一模一样的选择器 —— 导出的 CSS 互相覆盖，\n' +
+        '而且改一张表的格子，另一张表的格子也会跟着变。\n' +
+        '一键修复 = 给重名的表换一个独有的类名，并把内部选择器重排成各自专属的。',
+      fixLabel: '自动消歧',
+      fix: () => {
+        const st = useScene.getState();
+        st.beginStyleEdit();
+        for (const tid of affectedIds) {
+          // 每改一张表都重新取一次最新树：前面的改动会影响后面的查重结果
+          const cur = findNode(useScene.getState().scene.root, tid);
+          if (!cur || cur.type !== 'table') continue;
+          const { classes, selectors } = collectUsedNames(useScene.getState().scene.root, tid);
+          const r = autoNameTableInner(cur, { usedClasses: classes, usedSelectors: selectors });
+          if (r.renamedTo || r.fixed > 0 || r.named > 0) st.replaceSubtree(tid, r.table);
+        }
+        st.endStyleEdit();
+      },
+      locateId: dupRels[0][1][0],
+      goto: 'class'
+    });
+  }
+
+  // ⑥ 非法类名 —— CSS 里根本选不中
   const badNames = all.filter((n) => {
     const cls = (n.attrs?.className ?? '').trim();
     if (!cls) return false;
@@ -271,7 +324,7 @@ export function runHealthCheck(root: SceneElement): HealthIssue[] {
     });
   }
 
-  // ⑥ 图片缺 alt —— 可访问性与 SEO
+  // ⑦ 图片缺 alt —— 可访问性与 SEO
   const imgsNoAlt = all.filter((n) => n.type === 'img' && !(n.attrs?.alt ?? '').trim());
   if (imgsNoAlt.length > 0) {
     issues.push({
@@ -285,7 +338,7 @@ export function runHealthCheck(root: SceneElement): HealthIssue[] {
     });
   }
 
-  // ⑦ 空链接 —— a 标签没有 href，点击没反应
+  // ⑧ 空链接 —— a 标签没有 href，点击没反应
   const emptyLinks = all.filter((n) => n.type === 'a' && !(n.attrs?.href ?? '').trim());
   if (emptyLinks.length > 0) {
     issues.push({

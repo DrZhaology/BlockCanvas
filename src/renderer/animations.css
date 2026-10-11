@@ -44,6 +44,15 @@
   to   { opacity: 0; }
 }
 
+/* ---------- 纯淡入（不改 transform） ----------
+   给"位置靠内联 transform 决定"的浮层用（例如元素面板讲解卡：below 时靠
+   translateY(-100%) 翻转向上）。带 transform 的 bcPopIn 会用 fill 覆盖掉内联位移，
+   所以这类浮层只能淡入。 */
+@keyframes bcFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* ---------- 顶部提示条（toast，从上往下落） ---------- */
 @keyframes bcToastIn {
   from { opacity: 0; transform: translate(-50%, -10px); }
@@ -90,6 +99,15 @@
 @keyframes bcSpin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+
+/* ---------- 撞"墙"提示（Alt 拖动到边界时橙色闪 2 下就停，不无限闪） ---------- */
+@keyframes bcWallFlash {
+  0%   { opacity: 0; }
+  18%  { opacity: 1; }
+  50%  { opacity: 0.25; }
+  72%  { opacity: 1; }
+  100% { opacity: 0.55; }
 }
 
 /* ---------- 无障碍：系统开启「减少动态效果」时全部动画瞬时完成 ----------

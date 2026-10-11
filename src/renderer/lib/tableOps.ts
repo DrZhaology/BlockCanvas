@@ -640,6 +640,220 @@ export function createTableTree(rows: number, cols: number, opts: { header?: boo
 }
 
 
+/**
+ * 扫全树，收集"已经被别的元素占用"的类名 token 与元素级选择器。
+ *
+ * 用途：表格自动命名前先问一句"这个名字有没有别人在用" ——
+ *   · 类名被占用 → 表锚点要换一个唯一的名字（否则两张表的选择器字符串会一模一样）；
+ *   · 选择器被占用 → 内部元素的关系选择器要重写成这张表专属的。
+ *
+ * @param skipSubtreeId 跳过这棵子树（通常就是"正在命名的那张表"），
+ *                      这样它自己已有的名字不算"被别人占用"。
+ */
+export function collectUsedNames(root: SceneElement, skipSubtreeId?: string): {
+  classes: Set<string>;
+  selectors: Set<string>;
+} {
+  const classes = new Set<string>();
+  const selectors = new Set<string>();
+  const walk = (n: SceneElement): void => {
+    if (skipSubtreeId && n.id === skipSubtreeId) return;
+    for (const t of (n.attrs?.className ?? '').trim().split(/\s+/)) if (t) classes.add(t);
+    const idv = (n.attrs?.id ?? '').trim();
+    if (idv) selectors.add('#' + idv);
+    const rel = (n.attrs?.relSelector ?? '').trim();
+    if (rel) selectors.add(rel);
+    for (const c of n.children) walk(c);
+  };
+  for (const c of root.children) walk(c);
+  return { classes, selectors };
+}
+
+/**
+ * 列出"这张表会用到"的全部选择器（表自己 + 内部每个元素 + 子元素规则 + 伪类 + 响应式）。
+ * 导出时用来把这个表的 CSS 单独归到一块（一张表一个 <style>）。
+ * ⚠ 计算方式必须与 lib/styleClass 的 collectStyleClasses 完全一致，否则规则会被漏掉。
+ */
+export function collectTableSelectors(table: SceneElement): string[] {
+  const out: string[] = [];
+  const selOf = (n: SceneElement): string => {
+    const rel = (n.attrs?.relSelector ?? '').trim();
+    if (rel) return rel;
+    const cls = (n.attrs?.className ?? '').trim();
+    if (cls) return cls.split(/\s+/).map((t) => '.' + t.replace(/[^a-zA-Z0-9_-]/g, '-')).join('');
+    const idv = (n.attrs?.id ?? '').trim();
+    if (idv) return '#' + idv.replace(/[^a-zA-Z0-9_-]/g, '-');
+    return '';
+  };
+  const walk = (n: SceneElement): void => {
+    const sel = selOf(n);
+    if (sel) {
+      out.push(sel);
+      for (const cs of n.childStyles ?? []) {
+        const s = (cs.sel ?? '').trim();
+        if (s) out.push(`${sel} ${s}`);
+      }
+      for (const p of Object.keys(n.pseudoStyles ?? {})) out.push(`${sel}:${p}`);
+    }
+    for (const c of n.children) walk(c);
+  };
+  walk(table);
+  return out;
+}
+
+/** 取一个"文档内唯一"的默认表类名（data-table / data-table-2 / data-table-3 …） */
+export function uniqueTableClassName(root: SceneElement, skipSubtreeId?: string, base = 'data-table'): string {
+  const { classes } = collectUsedNames(root, skipSubtreeId);
+  let name = base;
+  let n = 1;
+  while (classes.has(name)) { n += 1; name = `${base}-${n}`; }
+  return name;
+}
+
+export interface AutoNameResult {
+  table: SceneElement;
+  /** 实际使用的表锚点（选择器前缀），如 `.data-table-2` */
+  anchor: string;
+  /** 表锚点因为重名被改成了什么（没改则为 null） */
+  renamedTo: string | null;
+  /** 本次新命名的元素个数 */
+  named: number;
+  /** 因为"老锚点失效 / 与别的元素撞名"而被改写的个数 */
+  fixed: number;
+}
+
+export interface AutoNameOptions {
+  /** 文档里已被别的元素占用的类名（用 collectUsedNames 拿） */
+  usedClasses?: Set<string>;
+  /** 文档里已被别的元素占用的选择器（用 collectUsedNames 拿） */
+  usedSelectors?: Set<string>;
+}
+
+/**
+ * 自动给表格内部元素起"精准且**全局唯一**"的名字：用关系选择器（relSelector），
+ * 不往格子里塞类名 / ID。
+ *
+ * 设计（用户定的方案）：整张表只需要最外层 `<table>` 有一个类名或 ID，
+ * 内部按结构序号生成选择器，例如：
+ *   `.data-table > tbody > tr:nth-child(2) > td:nth-child(1)`
+ *
+ * ⚠ v0.4.4 修掉的老 bug：
+ *   元素面板插表时会套默认预设，**每张表都自动拿到 `data-table`**。文档里有两张表时，
+ *   自动命名会给两张表生成**一模一样**的 13 条选择器，于是
+ *     ① 导出时同名选择器只保留第一条（第二张表渲染成第一张表的样子）；
+ *     ② `syncClassmates` 按相同 relSelector 全量复制样式 —— 改表 A 的一格，表 B 的格子跟着变。
+ *   现在：表锚点先在文档里查重，重名就自动改成 `data-table-2` / `-3` …，
+ *   并把内部已经生成过的老锚点选择器一并改写到新锚点上。
+ *
+ * 约定：
+ *   · 元素已经有类名 / ID → 一律不动（用户自己命的名，自成一个选择器）；
+ *   · 元素已有关系选择器：
+ *       - 是上一次自动命名留下的（老锚点前缀）→ 跟着新锚点重写；
+ *       - 与文档里别的元素撞名 → 重写成本表专属的；
+ *       - 其余（用户自己设的、也不冲突）→ 原样保留。
+ */
+export function autoNameTableInner(table: SceneElement, opts: AutoNameOptions = {}): AutoNameResult {
+  const next = normalizeTable(clone(table));
+  if (!next.attrs) next.attrs = {};
+  const usedClasses = opts.usedClasses ?? new Set<string>();
+  const usedSelectors = opts.usedSelectors ?? new Set<string>();
+
+  const relOwn = (next.attrs.relSelector ?? '').trim();
+  const clsRaw = (next.attrs.className ?? '').trim();
+  const idv = (next.attrs.id ?? '').trim();
+
+  /** 改动前的老锚点：用来认出"这些选择器是上一次自动命名写的" */
+  const prevAnchor = relOwn
+    || (clsRaw ? '.' + clsRaw.split(/\s+/)[0] : idv ? '#' + idv : '');
+
+  let anchor = relOwn;
+  let renamedTo: string | null = null;
+
+  if (!anchor) {
+    const tokens = clsRaw.split(/\s+/).filter(Boolean);
+    // ① 表上已经有"文档里没人用过"的类名 → 直接当锚点
+    const uniqueToken = tokens.find((t) => !usedClasses.has(t));
+    if (uniqueToken) {
+      anchor = '.' + uniqueToken;
+    } else {
+      // ② 没有可用类名（或全部重名）→ 补一个文档内唯一的类名
+      const base = tokens[0] || 'data-table';
+      let name = base;
+      let i = 1;
+      while (usedClasses.has(name)) { i += 1; name = `${base}-${i}`; }
+      next.attrs.className = clsRaw ? `${clsRaw} ${name}` : name;
+      anchor = '.' + name;
+      renamedTo = name;
+    }
+  }
+
+  let named = 0;
+  let fixed = 0;
+
+  const assign = (el: SceneElement, path: string): void => {
+    if (!el.attrs) el.attrs = {};
+    // 用户已经用类名 / ID 命名过 → 尊重它，不再叠一层关系选择器
+    if ((el.attrs.className ?? '').trim() || (el.attrs.id ?? '').trim()) return;
+    const want = `${anchor} > ${path}`;
+    const cur = (el.attrs.relSelector ?? '').trim();
+    if (!cur) { el.attrs.relSelector = want; named += 1; return; }
+    if (cur === want) return;
+    // 上一次自动命名写的（老锚点前缀）→ 锚点变了就跟着改
+    if (prevAnchor && (cur === prevAnchor || cur.startsWith(prevAnchor + ' >'))) {
+      el.attrs.relSelector = want; fixed += 1; return;
+    }
+    // 和文档里别的元素撞名 → 改成本表专属的
+    if (usedSelectors.has(cur) || cur === relOwn) {
+      el.attrs.relSelector = want; fixed += 1;
+    }
+  };
+
+  for (const sec of next.children) {
+    if (sec.type === 'caption') { assign(sec, 'caption'); continue; }
+    if (sec.type !== 'thead' && sec.type !== 'tbody' && sec.type !== 'tfoot') continue;
+    assign(sec, sec.type);
+    sec.children.forEach((row, ri) => {
+      if (row.type !== 'tr') return;
+      const rowPath = `${sec.type} > tr:nth-child(${ri + 1})`;
+      assign(row, rowPath);
+      row.children.forEach((cell, ci) => {
+        if (cell.type !== 'td' && cell.type !== 'th') return;
+        assign(cell, `${rowPath} > ${cell.type}:nth-child(${ci + 1})`);
+      });
+    });
+  }
+  return { table: next, anchor, renamedTo, named, fixed };
+}
+
+/** 表格内部还有多少元素没有名字（按钮上显示还差几个） */
+export function countUnnamedInner(table: SceneElement): number {
+  let n = 0;
+  const walk = (el: SceneElement, isRoot: boolean) => {
+    if (!isRoot) {
+      const named = !!((el.attrs?.relSelector ?? '').trim() || (el.attrs?.className ?? '').trim() || (el.attrs?.id ?? '').trim());
+      if (!named) n += 1;
+    }
+    for (const c of el.children) walk(c, false);
+  };
+  walk(table, true);
+  return n;
+}
+
+/** 表格内部已经用到的关系选择器（用于"有没有和别的元素撞名"的体检） */
+export function collectInnerRelSelectors(table: SceneElement): string[] {
+  const out: string[] = [];
+  const walk = (el: SceneElement, isRoot: boolean) => {
+    if (!isRoot) {
+      const rel = (el.attrs?.relSelector ?? '').trim();
+      if (rel) out.push(rel);
+    }
+    for (const c of el.children) walk(c, false);
+  };
+  walk(table, true);
+  return out;
+}
+
+
 /** 向上找最近的 <table> 祖先（包含自身）—— 属性面板的"打开表格编辑器"入口用它 */
 export function findTableAncestor(root: SceneElement, id: string): SceneElement | null {
   const path: SceneElement[] = [];

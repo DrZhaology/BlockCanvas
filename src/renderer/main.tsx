@@ -20,6 +20,12 @@ import './styles/15-v042-ui.css'; // v0.4.2：细滚动条 / 工具栏左右滚�
 import './styles/16-v042b-ui.css'; // 第二批：更新中心重写 / 工具栏预览 / 表格编辑页 / 布局溢出
 import './styles/17-v043-table.css'; // v0.4.3：体检徽标不再被裁切 / 表格体检开关 / 向导说明
 import './styles/18-v044-table-ui.css'; // v0.4.4：表格编辑器所见即所得（实时渲染 / 双击改字 / 预览拖动）
+import './styles/19-v043-ui.css'; // v0.4.3：全局按钮基线 / 面板去嵌套 / 渐变色标行修复
+import './styles/20-v044-ui.css'; // v0.4.4：更新中心（下载进度/发行说明/板块标题）/ 表格面板数值单位 / 工具栏＋插入按钮
+import './styles/21-v044b-ui.css'; // v0.4.4b：表格自动命名提示 + Ctrl+C 复制反馈 + 编辑器与画布一致的微调
+import './styles/22-v044c-ui.css'; // v0.4.4c：工具栏「任务」按钮 / 帮助中心（README+Markdown）/ 更新任务总览
+import './styles/23-v044d-ui.css'; // v0.4.4d：UI 统一（动效/选择器）+ 画布 Alt 缩放移动 + 文字快捷调整 + 渐变扩散
+import './styles/24-v044h-ui.css'; // v0.4.4h：Alt 墙提示 + 拖到墙外改父子关系 + 中键属性搜索两态 + 删除项目三步防护
 import './animations.css'; // 统一动画体系：token + 全部 keyframes（分片里只写引用）
 
 createRoot(document.getElementById('root')!).render(

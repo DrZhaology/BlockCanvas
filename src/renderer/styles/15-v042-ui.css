@@ -140,6 +140,8 @@
   transform-origin: top left;
 }
 .tb-anchor-pos.above .tb-anchored-panel { transform-origin: bottom left; }
+/* 退场动画：与进场同一套 token（bcPopOut 比 bcPopIn 短，走比来快） */
+.toolbar.tb-anchored-panel.is-closing { animation: bcPopOut var(--dur-pop-exit) var(--ease-exit) both; }
 
 /* 工具组面板：标题 + 组内工具（自动换行，放不下可横向滚） */
 .tb-grp-panel { min-width: 210px; }

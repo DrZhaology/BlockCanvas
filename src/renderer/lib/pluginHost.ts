@@ -84,6 +84,9 @@ function makeBc(pluginId: string) {
     icon?: string;
     title?: string;
     onClick: () => void;
+    /** @deprecated v0.4.4 起**不再生效**：插件按钮一律先进「⋯更多」，由用户在
+     *  「设置 → 工具栏管理」里自己把它插到主区 / 右侧。留着只为兼容老插件的类型。 */
+    dock?: 'main' | 'right' | 'more';
   }) => {
     const item: ToolbarItem = {
       id: 'plg.' + pluginId + '.' + cmd.id,
@@ -92,7 +95,10 @@ function makeBc(pluginId: string) {
       title: cmd.title,
       onClick: cmd.onClick,
       order: 1000,
-      defaultVisible: false
+      // v0.4.4：插件**不能**把自己直接塞到工具栏上 —— 一律默认收进「⋯更多」。
+      // （cmd.dock 以前会被采纳，插件因此可以"劫持"工具栏；现在入口只有一处：
+      //   设置 → 工具栏管理 → 目标区域右端的「＋ 插入按钮」）
+      defaultDock: 'more'
     };
     useToolbar.getState().addItem(item);
   };

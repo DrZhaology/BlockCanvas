@@ -1,0 +1,120 @@
+/* ==========================================================================
+   BlockCanvas · 21-v044b-ui.css —— v0.4.4 第二批（表格命名/复制/渲染统一）
+   --------------------------------------------------------------------------
+   ① 表格编辑器：「自动取名」的结果提示 + 「Ctrl+C 复制」的结果 toast
+   ② 表格编辑器与画布一致性相关的小样式
+   分片顺序 = 级联顺序，本片在 20 之后 import。
+   ========================================================================== */
+
+/* —— 自动命名的结果提示（在自动命名按钮下方一条，6 秒后淡出） —— */
+.tbl-autoname-result {
+  margin: 6px 0 0;
+  padding: 6px 9px;
+  border: 1px solid #86d29a;
+  border-radius: 7px;
+  background: var(--ok-bg, #eefaf1);
+  color: #15803d;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* —— 自动命名按钮下方的说明（讲清"每个元素都有独立选择器"） —— */
+.tbl-autoname-tip {
+  margin-top: 5px;
+  line-height: 1.65;
+}
+.tbl-autoname-tip b { color: var(--text); }
+.tbl-autoname-tip code {
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-soft);
+  font-family: "Consolas", monospace;
+  font-size: 10px;
+  word-break: break-all;
+}
+
+/* —— 复制结果 toast（fixed 底部居中，不占布局、不影响点击） —— */
+.tbl-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  z-index: 1200;
+  transform: translateX(-50%);
+  max-width: min(560px, 86vw);
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: rgba(24, 30, 40, 0.92);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+}
+
+/* ==========================================================================
+   表格编辑器：让"格子没写底色"时也跟画布一致
+   --------------------------------------------------------------------------
+   画布里没写 background 的 td/th 是**透明**的（露出表格自己的底色）；
+   而编辑器以前一律刷成 --bg-panel 白底 —— 表格底色改成浅蓝之类时两边就不一样了。
+   现在：格子默认透明，纸面交给 .tbl-grid（表格设了底色时 inline 会覆盖这里的默认值）。
+   ========================================================================== */
+.tbl-grid { background: var(--bg-panel); }
+.tbl-cell { background: var(--cell-bg, transparent); }
+.tbl-cell.is-th { background: var(--cell-bg, transparent); }
+
+/* ==========================================================================
+   更新中心：让"文字超出"时能正常上下滚动
+   --------------------------------------------------------------------------
+   上一轮给发行说明加了 `max-height: 320px` 的内嵌滚动框，本意是别让一条长说明
+   把页面撑到天上去，但实际体验是：鼠标停在说明框里滚轮只滚框、页面纹丝不动，
+   看上去就像"文字超出但页面滚不动"。
+   现在改成两段式：
+     · 「可更新 / 重新安装」卡片里的说明 → **不限高**，跟着页面一起滚（这是主内容）；
+     · 「历史版本」列表里的说明 → 仍然限高（一列几十条不能无限展开），
+       但放宽到 55vh / 440px，并且明确允许滚动链传到页面。
+   顺带把所有"长单词 / 长代码行不换行"的地方修成可换行 —— 那才是真正的"文字超出"。
+   ========================================================================== */
+
+.update-body {
+  /* flex 子项要能滚，必须允许收缩到内容高度以下（overflow 非 visible 时浏览器
+     本来会给 0，这里显式写一遍，免得将来有人改了 overflow 就默默失效） */
+  min-height: 0;
+}
+
+.update-notes-inline {
+  max-height: none;
+  overflow: visible;
+}
+
+.update-history-notes {
+  max-height: min(55vh, 440px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: auto;
+}
+
+/* 说明里的长内容一律可换行，别撑出横向滚动条 */
+.md-body { overflow-wrap: anywhere; }
+.md-code {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: hidden;
+}
+/* 版本名 / 标题行过长时换行显示，不再用省略号把内容吃掉 */
+.update-history-name {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.update-release-head { flex-wrap: wrap; }
+.update-history-main { flex-wrap: wrap; }
+.update-release-meta { overflow-wrap: anywhere; }
+
+/* 底部提示：告诉用户说明区可以滚（只有历史版本那个限高框需要） */
+.update-history-notes::after {
+  content: '';
+  display: block;
+  height: 1px;
+}

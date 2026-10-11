@@ -760,7 +760,9 @@ html[data-bc-dark] .pc-cover-badge {
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+  /* 全屏遮罩一律「纯淡入」——绝不能用 bcPopIn（它带 translateY，会让 fixed 遮罩整体上移，
+     顶部露出一条缝，用户实测能看到"上方缺一块"）。卡片本身的入场动画交给内部 .modal-card。 */
+  animation: bcMaskIn var(--dur-pop) ease both;
 }
 .double-delete-modal {
   width: 440px;

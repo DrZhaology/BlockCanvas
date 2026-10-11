@@ -199,3 +199,60 @@ body.bc-style-dragging * { cursor: nwse-resize; }
 .tpv-table { border-radius: 6px; transition: background 0.12s ease, border-color 0.12s ease; }
 .tpv-cell { color: inherit; }
 .tpv-cell.is-head { font-weight: 600; }
+
+/* ==========================================================================
+   ⑤ 面板分板块的标题（颜色 / 数值 / 文本 …）
+   ========================================================================== */
+.tbl-sub-title {
+  margin: 8px 0 5px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.2px;
+}
+.tbl-sub-title:first-of-type { margin-top: 4px; border-top: none; padding-top: 0; }
+
+/* 选择器与标识：自动命名按钮 + 说明 */
+.tbl-name-row { align-items: center; margin-top: 6px; }
+.tbl-autoname-btn { flex: 0 0 auto; }
+.tbl-hint { flex: 1 1 auto; min-width: 0; font-size: 10.5px; color: var(--text-muted); line-height: 1.5; }
+
+/* 应用到全部单元格 */
+.tbl-apply-all { margin-top: 9px; width: 100%; }
+
+/* ==========================================================================
+   ⑥ 面板统一的「数字 + 单位」输入（滚轮可调 + 单位下拉）
+   ========================================================================== */
+.tbl-num { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.tbl-num-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+.tbl-num-input:focus { border-color: var(--accent); outline: none; }
+.tbl-num-unit {
+  flex: 0 0 58px;
+  height: 28px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+/* ==========================================================================
+   ⑦ 预设缩略图：一张 3×3 小表，一眼看出预设长什么样
+   ========================================================================== */
+.tbl-preset-thumb { display: flex; flex-direction: column; margin-bottom: 6px; }
+.tbl-preset-thumb-row { display: flex; gap: 1px; }

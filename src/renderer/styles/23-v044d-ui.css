@@ -1,0 +1,468 @@
+/* ==========================================================================
+   BlockCanvas · v0.4.4d UI 统一批（样式选择器统一 / 交互增强 / 帮助中心多文档）
+   --------------------------------------------------------------------------
+   本分片只做「新增与统一」，不重定义既有语义分片里的东西。约定：
+     · 所有新增浮层一律复用 animations.css 的 token 与 keyframes（只写引用）；
+     · 交互类新增（画布 Alt 缩放/移动、文字快捷字号、右键菜单）的选择器统一加
+       bc- 前缀，方便后续插件按统一规则接管/扩展。
+   ========================================================================== */
+
+/* ---------- 渐变编辑器：径向「扩散范围」分段换行 + 「中心位置」下拉 ---------- */
+.grad-seg-wrap { flex-wrap: wrap; }
+.grad-pos-select {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.grad-pos-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* 色标握把：明确的可拖拽手型，提示"这里才能拖" */
+.grad-stop-grip { cursor: grab; user-select: none; }
+.grad-stop-grip:active { cursor: grabbing; }
+
+/* ==========================================================================
+   全屏遮罩 / 弹窗的「退场动画」（统一走 bcMaskOut + bcPopOut）
+   以前只有进场、关闭时"啪"一下没了；这里给遮罩与内部卡片补退场。
+   ========================================================================== */
+.modal-mask.is-closing { animation: bcMaskOut var(--dur-pop-exit) ease both; }
+.modal-mask.is-closing > * { animation: bcPopOut var(--dur-pop-exit) var(--ease-exit) both; }
+
+/* ==========================================================================
+   画布就地编辑文案（v0.4.4d：由单行 input 改成多行 textarea）
+   以前用 <input type="text">：长文本会被压成一条、只看到最后几个字，多行根本没法编辑。
+   现在换成自动撑高的 textarea（宽 100%、不换行滚动、随内容长高），点别处即保存。
+   ========================================================================== */
+textarea.canvas-inline-text-input {
+  display: block;
+  width: 100%;
+  min-width: 80px;
+  min-height: 24px;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+  vertical-align: top;
+}
+html[data-bc-dark] .canvas-inline-text-input {
+  background: rgba(30, 34, 42, 0.96);
+  color: var(--text);
+}
+
+/* 就地编辑：包裹层 + 「显示 <br>」叠加层 + 切换按钮 */
+.bc-inline-edit-wrap { position: relative; display: block; width: 100%; }
+
+.bc-inline-br-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 2px 6px;                 /* 与 textarea 的 padding 完全一致 */
+  border: 2px solid transparent;    /* 与 textarea 的 border 宽度一致 */
+  font: inherit;
+  line-height: 1.4;
+  color: transparent;               /* 文字透明：只显示 <br> 标记，避免和 textarea 双影 */
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: none;
+}
+/* 零宽度标记：不参与折行，内容从右侧溢出显示 —— 于是它精确落在"上一行末尾" */
+.bc-br-mark {
+  display: inline-block;
+  width: 0;
+  overflow: visible;
+  white-space: nowrap;
+  color: #b3b3b3;
+  font-size: 10px;
+  vertical-align: baseline;
+}
+html[data-bc-dark] .bc-br-mark { color: #6b7280; }
+
+/* ==========================================================================
+   画布「中键搜索属性」（v0.4.4g）
+   ========================================================================== */
+.bc-prop-search {
+  position: fixed;
+  z-index: 520;
+  width: 264px;
+  padding: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22);
+  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+  transform-origin: top left;
+}
+.bc-prop-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-soft);
+}
+.bc-prop-search-row:focus-within { border-color: var(--accent); background: var(--bg-panel); }
+.bc-prop-search-ico { font-size: 11px; opacity: 0.7; }
+.bc-prop-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+.bc-prop-search-list { margin-top: 6px; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.bc-prop-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.bc-prop-search-item:hover { background: var(--hover); }
+.bc-prop-search-item.is-best { background: var(--hover-accent); }
+.bc-prop-search-label { font-size: 12px; color: var(--text); }
+.bc-prop-search-key { font-size: 10.5px; color: var(--text-muted); font-family: 'Consolas', monospace; }
+.bc-prop-search-empty { padding: 8px; font-size: 11px; color: var(--text-muted); text-align: center; }
+.bc-prop-search-hint { margin-top: 6px; font-size: 10px; color: var(--text-muted); text-align: center; }
+
+/* 中键定位到的那条属性行：橙色闪烁（复用撞墙动画） */
+.prop-row.flash { border-color: #f97316; box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.35); animation: bcWallFlash 0.9s ease-out 2; }
+
+/* 「+ 添加属性」里按"属性值"命中的蓝色插入条目 */
+.add-prop-value-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  margin-bottom: 3px;
+  border: 1px solid var(--accent);
+  background: var(--hover-accent);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.add-prop-value-item:hover { background: var(--accent); }
+.add-prop-value-item:hover .add-prop-value-label,
+.add-prop-value-item:hover .add-prop-value-sep,
+.add-prop-value-item:hover .add-prop-value-val,
+.add-prop-value-item:hover .add-prop-value-plus { color: #fff; }
+.add-prop-value-label { font-size: 12px; color: var(--text); }
+.add-prop-value-sep { color: var(--text-muted); font-size: 11px; }
+.add-prop-value-val { font-size: 11px; font-family: 'Consolas', monospace; color: var(--accent); }
+.add-prop-value-plus { margin-left: auto; font-size: 10.5px; color: var(--accent); font-weight: 600; white-space: nowrap; }
+
+.bc-br-inspector-toggle {
+  margin-top: 6px;
+  width: 100%;
+  height: 26px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.bc-br-inspector-toggle:hover { color: var(--text); border-color: var(--accent); }
+.bc-br-inspector-toggle.active { color: var(--accent); border-color: var(--accent); background: var(--hover-accent); font-weight: 600; }
+
+/* ==========================================================================
+   画布元素光标（统一由 CSS 控制，不再写内联 —— 内联会盖过样式表规则）
+   ========================================================================== */
+.canvas [data-bc-id] { cursor: pointer; }
+.canvas [data-bc-locked="1"] { cursor: default; }
+/* Alt 悬停：按命中模式切换光标（属性由 Canvas 在 pointermove 时挂上） */
+.canvas [data-bc-alt="x"] { cursor: ew-resize; }
+.canvas [data-bc-alt="y"] { cursor: ns-resize; }
+/* 两种对角要分开：左上-右下 = nwse；右上-左下 = nesw（以前都写成 nwse，所以左下/右上光标是反的） */
+.canvas [data-bc-alt="nwse"] { cursor: nwse-resize; }
+.canvas [data-bc-alt="nesw"] { cursor: nesw-resize; }
+.canvas [data-bc-alt="move"] { cursor: move; }
+.canvas [data-bc-alt="font"] { cursor: ew-resize; }
+
+/* Alt 交互进行中：文字拖动时隐藏光标（用户要求"鼠标消失"），全局禁选避免拖出蓝色选区。
+   ⚠ 必须带 .canvas [data-bc-id] 提高特异性，否则会被上面 [data-bc-alt] 的 cursor 盖掉。 */
+body.bc-alt-dragging { user-select: none; }
+body.bc-alt-fonting, body.bc-alt-fonting *,
+body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
+
+/* Alt 悬停高亮框（fixed，跟随元素 client rect） */
+.bc-alt-box {
+  position: fixed;
+  z-index: 88;
+  pointer-events: none;
+  border: 1.5px dashed var(--accent);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(30, 136, 229, 0.25) inset;
+}
+.bc-alt-box.mode-font { border-color: #f59e0b; border-style: solid; }
+.bc-alt-box.mode-move { border-color: #10b981; border-style: solid; }
+/* 命中边的加粗提示（8 条边） */
+.bc-alt-edge { position: absolute; background: var(--accent); border-radius: 2px; }
+.bc-alt-edge.e-l { left: -3px; top: 0; width: 6px; height: 100%; }
+.bc-alt-edge.e-r { right: -3px; top: 0; width: 6px; height: 100%; }
+.bc-alt-edge.e-t { top: -3px; left: 0; height: 6px; width: 100%; }
+.bc-alt-edge.e-b { bottom: -3px; left: 0; height: 6px; width: 100%; }
+.bc-alt-edge.e-tl { left: -3px; top: -3px; width: 10px; height: 10px; }
+.bc-alt-edge.e-tr { right: -3px; top: -3px; width: 10px; height: 10px; }
+.bc-alt-edge.e-bl { left: -3px; bottom: -3px; width: 10px; height: 10px; }
+.bc-alt-edge.e-br { right: -3px; bottom: -3px; width: 10px; height: 10px; }
+
+/* Alt 拖拽实时数值气泡 */.bc-alt-badge {
+  position: fixed;
+  z-index: 400;
+  pointer-events: none;
+  transform: translate(0, 0);
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  background: rgba(17, 24, 39, 0.92);
+  border-radius: 5px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
+}
+
+/* 撞"墙"提示：橙色闪烁的边界线（说明是限制，不是 BUG） */
+.bc-wall-flash {
+  position: fixed;
+  z-index: 402;
+  pointer-events: none;
+  background: #f97316;
+  border-radius: 3px;
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.9);
+  animation: bcWallFlash 0.6s ease-out both;
+}
+
+/* Alt 移动时的吸附对齐参考线（PowerPoint 风格：粉红细线） */
+.bc-align-guide {
+  position: fixed;
+  z-index: 401;
+  pointer-events: none;
+  background: #ff3b81;
+  box-shadow: 0 0 4px rgba(255, 59, 129, 0.8);
+}
+.bc-align-v { width: 1px; }
+.bc-align-h { height: 1px; }
+
+/* ==========================================================================
+   画布文字「右键快捷菜单」（v0.4.4d）
+   ========================================================================== */
+.bc-text-menu {
+  position: fixed;
+  z-index: 500;
+  width: 244px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.2);
+  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+  transform-origin: top left;
+}
+.bc-text-menu-head { display: flex; align-items: center; gap: 6px; }
+.bc-text-menu-tag {
+  font-family: 'Consolas', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--hover-accent);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.bc-text-menu-tip { font-size: 10px; color: var(--text-muted); line-height: 1.35; }
+.bc-text-menu-row { display: flex; align-items: center; gap: 8px; }
+.bc-text-menu-row-col { flex-direction: column; align-items: stretch; gap: 5px; }
+.bc-text-menu-label { font-size: 11px; font-weight: 600; color: var(--text-muted); min-width: 26px; }
+.bc-text-menu-hint { font-size: 10px; color: var(--text-muted); }
+
+.bc-text-size { display: flex; align-items: center; gap: 2px; }
+.bc-ts-btn {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.bc-ts-btn:hover { border-color: var(--accent); color: var(--accent); }
+.bc-ts-val {
+  min-width: 44px; text-align: center;
+  font-size: 12px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.bc-weight-seg { display: flex; gap: 2px; flex: 1; }
+.bc-weight-btn {
+  flex: 1;
+  height: 24px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.bc-weight-btn:hover { color: var(--text); background: var(--hover); }
+.bc-weight-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+/* 下划线 / 删除线 / 斜体 */
+.bc-style-seg { display: flex; gap: 2px; flex: 1; }
+.bc-style-btn {
+  flex: 1;
+  height: 24px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.bc-style-btn:hover { color: var(--text); background: var(--hover); }
+.bc-style-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+.bc-style-i { font-style: italic; }
+
+.bc-color-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.bc-color-swatch {
+  position: relative;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+.bc-color-swatch.active { box-shadow: 0 0 0 2px var(--accent); border-color: var(--accent); }
+.bc-color-custom {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--panel-soft);
+  color: var(--text-muted);
+  font-size: 12px; font-weight: 700;
+  overflow: hidden;
+}
+.bc-color-custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+.bc-text-menu-hintfoot {
+  font-size: 10px;
+  color: var(--text-muted);
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+/* ==========================================================================
+   帮助中心 v0.4.4d：文档切换页签 + 权重搜索结果下拉框
+   ========================================================================== */
+.help-doc-tabs {
+  display: inline-flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 2px;
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.help-doc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.help-doc-tab:hover { color: var(--text); background: var(--hover); }
+.help-doc-tab.active { color: #fff; background: var(--accent); font-weight: 600; }
+.help-doc-tab-ico { font-size: 12px; }
+
+/* 搜索结果下拉框：吸附在搜索框正下方 */
+.help-search { position: relative; }
+.help-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+  transform-origin: top center;
+}
+.help-results-empty { padding: 12px 10px; font-size: 12px; color: var(--text-muted); text-align: center; }
+.help-result {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.help-result:hover { background: var(--hover-accent); }
+.help-result-top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+.help-result-doc {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--hover-accent);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.help-result-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.help-result-title.lv3 { font-weight: 500; color: var(--text-muted); }
+.help-result-snippet {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+
+

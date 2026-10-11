@@ -186,10 +186,22 @@ export interface ElementStyle {
   [key: string]: string | undefined;
 }
 
+/** 富文本片段（v0.4.4d）：一段文字 + 它自己的内联样式；用于"只给选中的一小段文字加粗/改色" */
+export interface TextRun {
+  text: string;
+  /** 该片段的内联样式（会输出成 <span style="…">…</span>，不走 CSS 选择器） */
+  style?: ElementStyle;
+}
+
 export interface SceneElement {
   id: string; // UUID，稳定
   type: ElementType;
   text?: string; // 文本内容（h1/p/button 等用）
+  /**
+   * 富文本片段（v0.4.4d）：非空时优先于 text 渲染 —— 每段可带自己的内联样式。
+   * 约束：`runs.map(r => r.text).join('') === text`（始终保持 text 是拼接结果，便于搜索/编辑）。
+   */
+  runs?: TextRun[];
   children: SceneElement[]; // 流式布局：子元素按数组顺序堆叠
   style: ElementStyle; // 内联样式
   attrs?: {

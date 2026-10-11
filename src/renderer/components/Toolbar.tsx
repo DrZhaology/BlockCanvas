@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useMemo, Fragment } from 'react';
-import { createPortal } from 'react-dom';
 import { useScene } from '@store/sceneStore';
 import { exportHTML, type ExportResult } from '@lib/exporter';
 import type { SceneElement } from '@lib/types';
@@ -8,9 +7,12 @@ import {
   type ToolbarItem, type ToolbarDock, type ToolbarGroup
 } from '@store/toolbarStore';
 import { dragSteps } from '@lib/drag';
-import { widthLabel, widthToDevice, DEVICE_LIST, requestDevice } from '@lib/device';
+import { useHoverPop } from '@lib/hoverPop';
+import { widthLabel, widthToDevice, DEVICE_LIST, requestDevice, type DeviceId } from '@lib/device';
 import { runHealthCheck, hasBlocking } from '@lib/healthCheck';
 import { HealthWizard } from './HealthWizard';
+import { AnchoredPanel } from './AnchoredPanel';
+import { TaskButton } from './TaskButton';
 
 // BlockCanvas · 顶部工具栏（全按钮自由池 + 二级工具组）
 //
@@ -84,6 +86,9 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   const groups = useToolbar((s) => s.groups);
   const pct = Math.round(zoom * 100);
   const device = widthToDevice(canvasWidth);
+  // 「设备」按钮的图标要按**画布实际宽度**实时显示：自适应时窗口一变窄，
+  // 画布跟着变窄 → 图标应变成平板 / 手机（而不是永远显示电脑）。
+  const liveDevice = useEffectiveDevice(canvasWidth);
   // 「⋯ 更多」按钮锚点（弹出面板走 Portal，不会被工具栏横向滚动区裁切）
   const moreWrapRef = useRef<HTMLDivElement>(null);
 
@@ -430,7 +435,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
       done.add(g.id);
       const members = list.filter((x) => groupByItem.get(x.id)?.id === g.id);
       if (members.length === 0) continue;
-      nodes.push(<ToolbarGroupButton key={g.id} group={g} members={members} renderItem={renderItem} />);
+      nodes.push(<ToolbarGroupButton key={g.id} group={g} members={members} renderItem={renderItem} canvasWidth={canvasWidth} liveDevice={liveDevice} />);
     }
     return nodes;
   };
@@ -458,6 +463,9 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
       {/* —— 右侧固定区：常驻手边工具（空间不够时同样可左右滚动） —— */}
       <div className="tb-right bc-hscroll">
         {renderArea(rightItems)}
+
+        {/* 后台任务按钮：常驻在「⋯更多」的**左边**（下载 / 更新都有进度，可暂停 / 继续 / 取消） */}
+        <TaskButton />
 
         {/* 「⋯ 更多」：收纳停靠为 more 的按钮 */}
         {moreItems.length > 0 && (
@@ -498,71 +506,6 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   );
 }
 
-// ============ 通用「锚点弹出面板」 ============
-// 弹出内容 Portal 到 body 用 fixed 定位，因此不受工具栏横向滚动区 overflow 裁切；
-// 统一处理：外部点击 / Esc / 滚动 / 缩放 关闭，并在靠近屏幕底部时自动向上翻转。
-function AnchoredPanel(props: {
-  open: boolean;
-  anchorRef: React.RefObject<HTMLElement | null>;
-  onClose: () => void;
-  className?: string;
-  align?: 'left' | 'right';
-  onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
-  children: React.ReactNode;
-}) {
-  const { open, anchorRef, onClose, className, align = 'left', onMouseEnter, onMouseLeave, children } = props;
-  const [pos, setPos] = useState<{ left: number; top: number; below: boolean } | null>(null);
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-
-  useEffect(() => {
-    if (!open) { setPos(null); return; }
-    const place = () => {
-      const el = anchorRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const panelW = 360;
-      const rawLeft = align === 'right' ? r.right - panelW : r.left;
-      const left = Math.min(Math.max(8, rawLeft), Math.max(8, window.innerWidth - panelW - 8));
-      const below = r.bottom + 240 < window.innerHeight;
-      setPos({ left, top: below ? r.bottom + 6 : r.top - 6, below });
-    };
-    place();
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target;
-      if (t instanceof Element && (anchorRef.current?.contains(t) || t.closest('.tb-anchored-panel'))) return;
-      closeRef.current();
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current(); };
-    const onScroll = () => closeRef.current();
-    window.addEventListener('mousedown', onDoc);
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', place);
-    return () => {
-      window.removeEventListener('mousedown', onDoc);
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', place);
-    };
-  }, [open, anchorRef, align]);
-
-  if (!open || !pos) return null;
-  return createPortal(
-    <div
-      className={'tb-anchor-pos' + (pos.below ? '' : ' above')}
-      style={{ left: pos.left, top: pos.top }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      {/* 带上 toolbar 类名 → 复用工具栏里那套按钮语言（ghost/soft/primary/icon 与设备分段等） */}
-      <div className={'toolbar tb-anchored-panel ' + (className ?? '')}>{children}</div>
-    </div>,
-    document.body
-  );
-}
-
 // ============ 二级工具组：悬浮展开组内工具 ============
 // 组按钮本身只占一个位置；鼠标浮上去弹出组内工具（走 AnchoredPanel → Portal 到 body）。
 // 带开合延迟，避免鼠标扫过时乱闪。
@@ -570,37 +513,30 @@ function ToolbarGroupButton(props: {
   group: ToolbarGroup;
   members: ToolbarItem[];
   renderItem: (it: ToolbarItem) => React.ReactNode;
+  canvasWidth: string;
+  liveDevice: DeviceId;
 }) {
-  const { group, members, renderItem } = props;
-  const [open, setOpen] = useState(false);
+  const { group, members, renderItem, canvasWidth, liveDevice } = props;
+  // 悬停节奏统一走 lib/hoverPop（500ms 弹出 / 300ms 收起），与 ? 气泡、元素面板一致
+  const { open, setOpen, scheduleOpen, scheduleClose, cancel, toggle } = useHoverPop();
   const btnRef = useRef<HTMLButtonElement>(null);
-  const openTimer = useRef(0);
-  const closeTimer = useRef(0);
 
-  const clearTimers = () => {
-    window.clearTimeout(openTimer.current);
-    window.clearTimeout(closeTimer.current);
-  };
-  const scheduleOpen = () => {
-    clearTimers();
-    openTimer.current = window.setTimeout(() => setOpen(true), 80);
-  };
-  const scheduleClose = () => {
-    clearTimers();
-    closeTimer.current = window.setTimeout(() => setOpen(false), 220);
-  };
-
-  useEffect(() => () => clearTimers(), []);
+  // 「设备」组：图标跟着当前设备走（自适应时按画布**实际**宽度落回最近的设备）
+  const isDevice = group.id === 'grp.device';
+  const deviceId = canvasWidth === 'auto' ? liveDevice : widthToDevice(canvasWidth);
+  const deviceDef = DEVICE_LIST.find((d) => d.id === deviceId) ?? DEVICE_LIST[0];
+  const icon = isDevice ? deviceDef.icon : (group.icon ?? '▦');
+  const nowLabel = canvasWidth === 'auto' ? `自适应 · ${deviceDef.label}` : `${deviceDef.label} · ${widthLabel(canvasWidth)}`;
 
   return (
     <div className="tb-grp" onMouseEnter={scheduleOpen} onMouseLeave={scheduleClose}>
       <button
         ref={btnRef}
         className={'tb-grp-btn' + (open ? ' open' : '')}
-        title={`${group.label}：鼠标浮上来展开组内 ${members.length} 个工具`}
-        onClick={() => setOpen((o) => !o)}
+        title={isDevice ? `设备：当前 ${nowLabel}（鼠标浮上来切换）` : `${group.label}：鼠标浮上来展开组内 ${members.length} 个工具`}
+        onClick={toggle}
       >
-        <span className="tb-grp-ico">{group.icon ?? '▦'}</span>
+        <span className="tb-grp-ico">{icon}</span>
         <span className="tb-grp-label">{group.label}</span>
         <span className="tb-grp-caret">▾</span>
       </button>
@@ -609,17 +545,42 @@ function ToolbarGroupButton(props: {
         anchorRef={btnRef}
         onClose={() => setOpen(false)}
         className="tb-grp-panel"
-        onMouseEnter={clearTimers}
+        onMouseEnter={cancel}
         onMouseLeave={scheduleClose}
       >
         <div className="tb-grp-pop-title">
-          <span className="tb-grp-ico">{group.icon ?? '▦'}</span>{group.label}
-          <span className="tb-grp-pop-count">{members.length} 个工具</span>
+          <span className="tb-grp-ico">{icon}</span>{group.label}
+          <span className="tb-grp-pop-count">{isDevice ? `当前：${nowLabel}` : `${members.length} 个工具`}</span>
         </div>
         <div className="tb-grp-pop-body bc-hscroll">{members.map(renderItem)}</div>
       </AnchoredPanel>
     </div>
   );
+}
+
+/**
+ * 「设备」按钮图标的实时依据（v0.4.4g）：
+ *   · 画布宽度是固定像素值 → 直接用宽度落回设备；
+ *   · 画布宽度是「自适应」 → 观察画布**实际渲染宽度**（窗口变窄它就变窄），
+ *     实时算出应显示成电脑 / 平板 / 手机。
+ */
+function useEffectiveDevice(canvasWidth: string): DeviceId {
+  const [dev, setDev] = useState<DeviceId>(() => widthToDevice(canvasWidth));
+  useEffect(() => {
+    if (canvasWidth !== 'auto') {
+      setDev(widthToDevice(canvasWidth));
+      return;
+    }
+    const el = document.querySelector('.canvas') as HTMLElement | null;
+    if (!el) { setDev('desktop'); return; }
+    const update = () => setDev(widthToDevice(el.clientWidth + 'px'));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    window.addEventListener('resize', update);
+    return () => { ro.disconnect(); window.removeEventListener('resize', update); };
+  }, [canvasWidth]);
+  return dev;
 }
 
 function findNodeBy(root: SceneElement, id: string): SceneElement | null {

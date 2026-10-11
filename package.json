@@ -1,6 +1,6 @@
 {
   "name": "blockcanvas",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "bcStage": "阶段 4 · 响应式与打磨（阶段测试版）",
   "description": "BlockCanvas 积木画布 - 可视化静态网页构建工具",
   "main": "out/main/main.js",
@@ -10,6 +10,7 @@
   "scripts": {
     "version:sync": "node tools/sync-version.mjs",
     "version:check": "node tools/sync-version.mjs --check",
+    "git:doctor": "node tools/git-ignore-doctor.mjs",
     "prebuild": "node tools/sync-version.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -17,7 +18,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:e2e": "pnpm build && node tests/e2e/gui.mjs",
     "test:e2e:fast": "node tests/e2e/gui.mjs --no-shots",
-    "test:probe": "node tests/e2e/probe-table.mjs && node tests/e2e/probe-v042.mjs"
+    "test:probe": "node tests/e2e/probe-table.mjs && node tests/e2e/probe-table-settings.mjs && node tests/e2e/probe-help.mjs && node tests/e2e/probe-v042.mjs && node tests/e2e/probe-template-style.mjs && node tests/e2e/probe-text-edit.mjs && node tests/e2e/probe-alt-interact.mjs && node tests/e2e/probe-prop-search.mjs && node tests/e2e/probe-undo-granular.mjs && node tests/e2e/probe-delete-guard.mjs && node tests/e2e/probe-update.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
@@ -32,6 +33,7 @@
     "vite": "^6.0.3"
   },
   "dependencies": {
+    "marked": "^18.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.2"

@@ -5,6 +5,9 @@ import { exportHTML } from '@lib/exporter';
 import { HelpButton } from './HelpButton';
 import { Collapse } from './Collapse';
 import { getPluginElements } from '@lib/pluginHost';
+import { TABLE_STYLE_PRESETS, applyTableStylePreset } from '@lib/tablePresets';
+import { uniqueTableClassName } from '@lib/tableOps';
+import { HOVER_OPEN_MS } from '@lib/hoverPop';
 
 // BlockCanvas · 元素面板
 // 阶段1：按类别分组，点击插入选中元素的父级（或根）
@@ -158,6 +161,20 @@ export function ElementPanel() {
   /** 插入元素：统一通知右侧属性面板滚动到新元素（面板顶部就是它的属性） */
   const insertElement = (type: ElementType) => {
     addElement(type, selectedId);
+    // 表格：新插的空表套上默认预设（跟表格编辑器里看到的样子一致）。
+    // 以前只给 table 一个 width/背景，插到画布上是"光板"表格，必须手动点一次预设才有样子。
+    // ⚠ v0.4.4：默认类名必须**文档内唯一**（data-table / data-table-2 / …）。
+    //   以前每张表都叫 data-table，两张表时"自动取名"会生成完全一样的关系选择器，
+    //   于是导出互相覆盖、改一张表的格子另一张表跟着变。
+    if (type === 'table') {
+      const st = useScene.getState();
+      const id = st.scene.selectedId;
+      const node = id ? findNode(st.scene.root, id) : null;
+      if (node && node.type === 'table') {
+        const cls = uniqueTableClassName(st.scene.root, node.id);
+        st.replaceSubtree(node.id, applyTableStylePreset(node, TABLE_STYLE_PRESETS[0], cls));
+      }
+    }
     window.dispatchEvent(new CustomEvent('bc:element-added', { detail: type }));
   };
 
@@ -272,7 +289,7 @@ export function ElementPanel() {
                               y: r.top,
                               below: r.top < 190
                             });
-                          }, 1000); // 1秒延迟
+                          }, HOVER_OPEN_MS); // 悬停 0.5 秒（统一走 lib/hoverPop，与「?」气泡一致）
                         }}
                         onMouseLeave={() => {
                           clearHoverTimer();
@@ -298,7 +315,7 @@ export function ElementPanel() {
                           const vw = window.innerWidth;
                           hoverTimer.current = window.setTimeout(() => {
                             setTip({ def: it as any, x: Math.min(Math.max(8, r.left), Math.max(8, vw - 288)), y: r.top, below: r.top < 190 });
-                          }, 1000);
+                          }, HOVER_OPEN_MS); // 悬停 0.5 秒（同上，统一走 lib/hoverPop）
                         }}
                         onMouseLeave={() => { clearHoverTimer(); setTip(null); }}
                       >

@@ -12,10 +12,12 @@ import { Settings, type SettingsSection } from '@comp/Settings';
 import { TableEditor } from '@comp/TableEditor';
 import { ProjectTabBar } from '@comp/ProjectTabBar';
 import { AboutModal } from '@comp/About';
+import { HelpCenter, type DocKey } from '@comp/HelpCenter';
 import { ShortcutsModal } from '@comp/ShortcutsModal';
 import { useScene, findNode } from '@store/sceneStore';
 import { useTabStore } from '@store/tabStore';
 import { useUpdateBusy } from '@store/updateStore';
+import { useTasks, subscribeTasks } from '@store/taskStore';
 import { refreshPlugins } from '@lib/pluginHost';
 import { withViewTransition } from '@lib/viewTransition';
 import { useHorizontalWheel } from '@lib/hScroll';
@@ -42,7 +44,7 @@ const BOTTOM_HEIGHT_MIN = 175;
 const RIGHT_WIDTH_DEFAULT = 416;
 const RIGHT_WIDTH_MIN = 340;
 
-export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table';
+export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 'help';
 
 export default function App() {
   // v0.4.2：全局「横向滚动区直接滚轮」桥接（容器加 .bc-hscroll 即生效）
@@ -64,6 +66,8 @@ export default function App() {
   useEffect(() => { viewRef.current = view; }, [view]);
   // v0.4.3 表格编辑器：记录"要编辑哪张表"，由 bc:open-table-editor 事件带入
   const [tableEditId, setTableEditId] = useState<string>('');
+  // 帮助中心默认打开哪份文档（菜单「使用手册」→ manual；别处要开特定文档可先 setHelpDoc）
+  const [helpDoc, setHelpDoc] = useState<DocKey>('manual');
   // 所有「整页切换」都走原生视图过渡：旧页面淡出 + 新页面淡入
   // （不重挂载视图、不丢状态；宿主不支持或系统开了"减少动态效果"时自动降级为直接切换）
   const switchView = useCallback((next: AppView) => {
@@ -96,6 +100,12 @@ export default function App() {
   }, []);
 
   useKeyboardShortcuts(switchView, () => setShowShortcuts(true), viewRef);
+
+  // 0. 后台任务：主进程是唯一真相，这里挂一次订阅（工具栏「任务」按钮与更新中心共用同一份数据）
+  useEffect(() => subscribeTasks(), []);
+
+  // 0.1 「更新任务进入替换阶段」→ 才锁死编辑器（下载阶段不锁，用户可以继续干活）
+  useUpdateTaskBridge();
 
   // 0. 设备 / 断点 / 画布宽度 三合一同步
   //    - 画布宽度变化 → 自动推导当前编辑断点（电脑 / 平板 / 手机）
@@ -226,6 +236,17 @@ export default function App() {
       window.dispatchEvent(new CustomEvent('bc:open-class'));
     };
     const openAbout = () => setShowAbout(true);
+    // 「使用手册」入口统一打开《使用手册》文档（不是项目介绍）
+    const openHelp = (doc: DocKey = 'manual') => {
+      if (useUpdateBusy.getState().busy) return;
+      setHelpDoc(doc);
+      setView('help');
+    };
+    // 事件回调：允许携带 detail 指定文档（默认 manual）
+    const onOpenHelpEvent = (e: Event) => {
+      const d = (e as CustomEvent).detail as DocKey | undefined;
+      openHelp(d === 'intro' || d === 'history' || d === 'manual' ? d : 'manual');
+    };
 
     const onNewTab = () => {
       if (blocked()) return;
@@ -294,6 +315,9 @@ export default function App() {
     window.addEventListener('menu:settings', () => openSettings());
     window.addEventListener('menu:class-manager', openClass);
     window.addEventListener('menu:about', openAbout);
+    window.addEventListener('menu:help', onOpenHelpEvent);
+    window.addEventListener('bc:open-help', onOpenHelpEvent);
+    window.addEventListener('menu:shortcuts', () => setShowShortcuts(true));
     window.addEventListener('menu:check-update', openUpdateCenter);
     const onOpenTable = (e: Event) => {
       if (blocked()) return;
@@ -303,6 +327,9 @@ export default function App() {
       switchView('table');
     };
     window.addEventListener('bc:open-table-editor', onOpenTable);
+    // 中键搜索属性 → 切到「属性」页签并回到编辑器（定位/高亮由 Inspector 负责）
+    const onFocusProp = () => { setRightTab('inspector'); switchView('editor'); };
+    window.addEventListener('bc:focus-prop', onFocusProp);
     window.addEventListener('menu:new-tab', onNewTab);
     window.addEventListener('menu:save-project', onSaveProject);
     window.addEventListener('menu:save-project-as', onSaveProjectAs);
@@ -318,6 +345,8 @@ export default function App() {
       window.bc.onMenu('menu:settings', () => openSettings()),
       window.bc.onMenu('menu:class-manager', openClass),
       window.bc.onMenu('menu:about', openAbout),
+      window.bc.onMenu('menu:help', () => openHelp()),
+      window.bc.onMenu('menu:shortcuts', () => setShowShortcuts(true)),
       window.bc.onMenu('menu:check-update', openUpdateCenter),
       window.bc.onMenu('menu:new-tab', onNewTab),
       window.bc.onMenu('menu:save-project', onSaveProject),
@@ -339,8 +368,11 @@ export default function App() {
       window.removeEventListener('menu:settings', () => openSettings());
       window.removeEventListener('menu:class-manager', openClass);
       window.removeEventListener('menu:about', openAbout);
+      window.removeEventListener('menu:help', onOpenHelpEvent);
+      window.removeEventListener('bc:open-help', onOpenHelpEvent);
       window.removeEventListener('menu:check-update', openUpdateCenter);
       window.removeEventListener('bc:open-table-editor', onOpenTable);
+      window.removeEventListener('bc:focus-prop', onFocusProp);
       window.removeEventListener('menu:new-tab', onNewTab);
       window.removeEventListener('menu:save-project', onSaveProject);
       window.removeEventListener('menu:save-project-as', onSaveProjectAs);
@@ -361,6 +393,8 @@ export default function App() {
         <ProjectsCenter
           onBack={() => switchView('editor')}
         />
+      ) : view === 'help' ? (
+        <HelpCenter initialDoc={helpDoc} onBack={() => switchView('editor')} />
       ) : view === 'settings' ? (
         <Settings
           onBack={() => switchView('editor')}
@@ -492,12 +526,34 @@ function UpdateBusyOverlay() {
           <div className="bc-update-blocker-fill" style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
         </div>
         <div className="bc-update-blocker-hint">
-          更新期间已锁定编辑器操作。完成后程序会自动重启，
-          <b>data/ 里的全部工程与快照都会保留</b>。
+          正在替换程序本体，这期间锁定编辑器操作。完成后程序会自动重启，
+          <b>data/ 里的全部工程与快照都会保留</b>；
+          程序文件夹还会自动改名带上新版本号（必要时会弹出一次系统授权框）。
         </div>
       </div>
     </div>
   );
+}
+
+// ============ 「更新任务 → 全屏遮罩」桥接（v0.4.4） ============
+// 以前一发起更新就立刻锁编辑器；现在**下载阶段不锁**（进度在版本卡片与工具栏「任务」按钮里），
+// 只有任务进入 `applying`（解压 / 替换 / 重启）才盖遮罩 —— 这是真正不能动数据的时刻。
+function useUpdateTaskBridge() {
+  const tasks = useTasks((s) => s.tasks);
+  const start = useUpdateBusy((s) => s.start);
+  const setProgress = useUpdateBusy((s) => s.progress);
+  const finish = useUpdateBusy((s) => s.finish);
+  useEffect(() => {
+    const applying = tasks.find((t) => t.kind === 'update' && t.status === 'applying');
+    const st = useUpdateBusy.getState();
+    if (applying) {
+      if (!st.busy) start(applying.detail);
+      else setProgress(applying.detail, applying.pct);
+    } else if (st.busy) {
+      // 任务失败 / 被取消 / 已完成（已完成时程序马上会退出）→ 解锁
+      finish();
+    }
+  }, [tasks, start, setProgress, finish]);
 }
 
 function startResize(
@@ -613,9 +669,24 @@ function useKeyboardShortcuts(
       // 更新进行中：全局快捷键全部失效（连撤销都不允许，避免半途改数据）
       if (useUpdateBusy.getState().busy) return;
       const t = e.target as HTMLElement;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const inField = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      // 多行文本框 / 可编辑区：正在打字时用户要的是"撤销我刚敲的字" → 让原生撤销优先。
+      // 单行 <input>（属性面板那些数值/颜色框）原生撤销没有意义 → 照样走应用撤销。
+      const inTextEditor = !!t && (t.tagName === 'TEXTAREA' || t.isContentEditable);
 
       const mod = e.ctrlKey || e.metaKey;
+      const view = viewRef?.current;
+      const canvasView = !viewRef || view === 'editor';
+      const undoable = canvasView || view === 'table';
+
+      // ——— 撤销 / 重做：编辑器视图 **和表格编辑页** 都要能用 ———
+      // 放在"输入框守卫"之前：否则在右侧属性面板的输入框里按 Ctrl+Z 会完全没反应
+      //（用户反馈"选中元素后 Ctrl+Z / Ctrl+Y 用不了"就是被这个守卫吃掉的）。
+      // 表格编辑页改的是同一棵场景树、走的是同一条撤销栈（applyTableOp → replaceSubtree）。
+      if (undoable && !inTextEditor && mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); triggerUndo(); return; }
+      if (undoable && !inTextEditor && mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); triggerRedo(); return; }
+
+      if (inField) return;
 
       // ——— 应用级快捷键：任何视图都生效（不碰画布数据）———
       if (mod && e.key === ',') { e.preventDefault(); setView('settings'); return; }
@@ -646,15 +717,6 @@ function useKeyboardShortcuts(
         onOpenShortcuts?.();
         return;
       }
-
-      // ——— 撤销 / 重做：编辑器视图 **和表格编辑页** 都要能用 ———
-      // 表格编辑页改的是同一棵场景树、走的是同一条撤销栈（applyTableOp → replaceSubtree），
-      // 但以前这里一刀切"非 editor 视图全部 return"，导致表格编辑器里 Ctrl+Z 完全没反应。
-      const view = viewRef?.current;
-      const canvasView = !viewRef || view === 'editor';
-      const undoable = canvasView || view === 'table';
-      if (undoable && mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); triggerUndo(); return; }
-      if (undoable && mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); triggerRedo(); return; }
 
       // ——— 以下都是"对画布动手"的快捷键：只在编辑器视图里生效 ———
       // 表格编辑器 / 设置 / 项目中心 / 更新页各有自己的键位；在这里放行，Del、Ctrl+A

@@ -174,6 +174,7 @@ export function ProjectTabBar() {
         ＋
       </button>
 
+      {/* 帮助入口统一收进菜单「帮助 → 使用手册」(F1)，标签栏不再重复放一个「?」 */}
       {/* 小技巧轮播条：标签再多也常驻右端（自身允许收窄省略，绝不把标签挤没） */}
       <TipsTicker variant="tabbar" />
     </div>
