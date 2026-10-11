@@ -84,7 +84,8 @@ function makeBc(pluginId: string) {
     icon?: string;
     title?: string;
     onClick: () => void;
-    /** 插件可以自己指定停靠区（main / right / more）；不写就默认收进「⋯更多」 */
+    /** @deprecated v0.4.4 起**不再生效**：插件按钮一律先进「⋯更多」，由用户在
+     *  「设置 → 工具栏管理」里自己把它插到主区 / 右侧。留着只为兼容老插件的类型。 */
     dock?: 'main' | 'right' | 'more';
   }) => {
     const item: ToolbarItem = {
@@ -94,10 +95,10 @@ function makeBc(pluginId: string) {
       title: cmd.title,
       onClick: cmd.onClick,
       order: 1000,
-      // v0.4.3：插件按钮**默认收进「⋯更多」**（以前是 defaultVisible:false 的隐式行为，
-      // 现在显式写成 defaultDock='more'，"更多"本身也就是一个可自由拖拽的工具组）。
-      // 插件想直接放到主工具栏 / 右侧，就自己传 dock: 'main' | 'right'。
-      defaultDock: cmd.dock ?? 'more'
+      // v0.4.4：插件**不能**把自己直接塞到工具栏上 —— 一律默认收进「⋯更多」。
+      // （cmd.dock 以前会被采纳，插件因此可以"劫持"工具栏；现在入口只有一处：
+      //   设置 → 工具栏管理 → 目标区域右端的「＋ 插入按钮」）
+      defaultDock: 'more'
     };
     useToolbar.getState().addItem(item);
   };

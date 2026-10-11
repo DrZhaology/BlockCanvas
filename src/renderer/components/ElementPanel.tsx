@@ -283,7 +283,7 @@ export function ElementPanel() {
                               y: r.top,
                               below: r.top < 190
                             });
-                          }, 1000); // 1秒延迟
+                          }, 500); // 悬停 0.5 秒（与右侧面板的「?」气泡一致，原来 1 秒太慢）
                         }}
                         onMouseLeave={() => {
                           clearHoverTimer();
@@ -309,7 +309,7 @@ export function ElementPanel() {
                           const vw = window.innerWidth;
                           hoverTimer.current = window.setTimeout(() => {
                             setTip({ def: it as any, x: Math.min(Math.max(8, r.left), Math.max(8, vw - 288)), y: r.top, below: r.top < 190 });
-                          }, 1000);
+                          }, 500); // 悬停 0.5 秒（同上）
                         }}
                         onMouseLeave={() => { clearHoverTimer(); setTip(null); }}
                       >

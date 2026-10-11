@@ -21,6 +21,7 @@ import './styles/16-v042b-ui.css'; // 第二批：更新中心重写 / 工具栏
 import './styles/17-v043-table.css'; // v0.4.3：体检徽标不再被裁切 / 表格体检开关 / 向导说明
 import './styles/18-v044-table-ui.css'; // v0.4.4：表格编辑器所见即所得（实时渲染 / 双击改字 / 预览拖动）
 import './styles/19-v043-ui.css'; // v0.4.3：全局按钮基线 / 面板去嵌套 / 渐变色标行修复
+import './styles/20-v044-ui.css'; // v0.4.4：更新中心（下载进度/发行说明/板块标题）/ 表格面板数值单位 / 工具栏＋插入按钮
 import './animations.css'; // 统一动画体系：token + 全部 keyframes（分片里只写引用）
 
 createRoot(document.getElementById('root')!).render(

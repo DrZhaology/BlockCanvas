@@ -89,8 +89,12 @@ export function HelpButton(props: Props) {
   }, [open]);
 
   // 打开后计算绝对定位与方向
+  // ⚠ 依赖里必须带 mounted：open=true 那一帧 mounted 还是 false（useClosing 要等它自己的
+  //    effect 跑完才把 mounted 置真），此时 Portal 尚未渲染 → popRef.current 为 null →
+  //    这个 effect 直接 return；若只依赖 [open]，之后再也不会重跑，
+  //    pos 永远是 null → 气泡停在 left:-9999 + visibility:hidden（= "所有问号提示全部失效"）。
   useEffect(() => {
-    if (!open || !popRef.current || !btnRef.current) return;
+    if (!open || !mounted || !popRef.current || !btnRef.current) return;
     const btn = btnRef.current.getBoundingClientRect();
     const pop = popRef.current;
     const w = pop.offsetWidth;
@@ -104,7 +108,7 @@ export function HelpButton(props: Props) {
       : Math.max(margin, btn.top - h - gap);
     const left = Math.min(Math.max(margin, btn.left), window.innerWidth - w - margin);
     setPos({ top, left, dir });
-  }, [open]);
+  }, [open, mounted]);
 
   useEffect(() => () => clearTimers(), []);
 
@@ -142,9 +146,14 @@ export function HelpButton(props: Props) {
             <button className="help-pop-close" onClick={(e) => { e.stopPropagation(); setOpen(false); }}>×</button>
           </div>
           <div className="help-pop-body">
-            {props.content.split('\n').map((line, i) => (
-              <p key={i}>{line}</p>
-            ))}
+            {props.content
+              .split('\n')
+              .map((line) => line.replace(/\s+$/, ''))
+              // 空行只用来分段，不再渲染成一个个空 <p>（否则气泡里到处是空隙）
+              .filter((line) => line.trim() !== '')
+              .map((line, i) => (
+                <p key={i} className={/^[·•\-*]\s?/.test(line.trim()) ? 'help-pop-li' : undefined}>{line}</p>
+              ))}
           </div>
           <div className="help-pop-footer">
             <button className="help-pop-ok" onClick={(e) => { e.stopPropagation(); setOpen(false); }}>知道了</button>

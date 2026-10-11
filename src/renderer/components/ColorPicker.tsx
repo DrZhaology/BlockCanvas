@@ -355,7 +355,8 @@ export function ColorField(props: ColorFieldProps) {
         type="text"
         className={'color-text-input' + (inputClassName ? ' ' + inputClassName : '')}
         value={value}
-        placeholder={fallback + ' / 例：#1e88e5 / rgb(30,136,229) / red'}
+        placeholder={fallback + ' 或 #1e88e5'}
+        title={'直接写任意 CSS 颜色：' + fallback + ' / #1e88e5 / rgb(30,136,229) / red\n点右侧色块打开调色盘'}
         onClick={(e) => e.stopPropagation()}
         onFocus={() => { if (!modalOpen) props.onInputFocus?.(); }}
         onChange={(e) => {

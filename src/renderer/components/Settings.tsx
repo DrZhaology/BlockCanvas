@@ -965,6 +965,73 @@ const DOCK_HINT: Record<ToolbarDock, string> = {
   more: '收进「⋯更多」，不占工具栏位置'
 };
 
+/** 取按钮展示名（label 可能是动态函数） */
+function tbName(it: ToolbarItem): string {
+  return typeof it.label === 'function' ? it.label() : (it.label ?? it.id);
+}
+
+/**
+ * 「＋ 插入按钮」选择器（v0.4.4）
+ * ----------------------------------------------------------------------------
+ * 停在目标区域（主区 / 右侧 / ⋯更多）右端的 ＋ 打开：列出"当前不在这个区域"的
+ * 全部按钮，点一条即把它插到这个区域末尾。
+ * 插件按钮也走这里 —— 插件自己再也不能把自己直接塞到工具栏上（见 lib/pluginHost.ts）。
+ */
+function InsertPicker(props: {
+  area: ToolbarDock;
+  candidates: ToolbarItem[];
+  groupOf: (id: string) => string;
+  onPick: (id: string) => void;
+  onClose: () => void;
+}) {
+  const { area, candidates, groupOf, onPick, onClose } = props;
+  const [q, setQ] = useState('');
+  const kw = q.trim().toLowerCase();
+  const list = kw
+    ? candidates.filter((it) => tbName(it).toLowerCase().includes(kw) || it.id.toLowerCase().includes(kw))
+    : candidates;
+
+  return (
+    <div className="tbman-picker" onClick={(e) => e.stopPropagation()}>
+      <div className="tbman-picker-head">
+        <span className="tbman-picker-title">插入到「{DOCK_LABEL[area]}」</span>
+        <input
+          className="tbman-picker-search"
+          value={q}
+          autoFocus
+          spellCheck={false}
+          placeholder="搜索按钮名…"
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+        />
+        <button className="tbman-picker-x" onClick={onClose} title="收起（Esc）">×</button>
+      </div>
+      <div className="tbman-picker-list">
+        {list.length === 0 && (
+          <span className="tbman-empty">
+            {candidates.length === 0 ? '没有可插入的按钮 —— 这个区域已经放满全部按钮了。' : '没有匹配「' + q + '」的按钮。'}
+          </span>
+        )}
+        {list.map((it) => (
+          <button
+            key={it.id}
+            className="tbman-picker-item"
+            title={it.title || `插入「${tbName(it)}」到${DOCK_LABEL[area]}`}
+            onClick={() => onPick(it.id)}
+          >
+            {it.icon && <span className="tbman-picker-ico">{it.icon}</span>}
+            <span className="tbman-picker-name">{tbName(it)}</span>
+            {it.id.startsWith('plg.') && <span className="tbman-tag">插件</span>}
+            <span className="tbman-picker-where">{groupOf(it.id) || '未分组'}</span>
+            <span className="tbman-picker-plus">＋</span>
+          </button>
+        ))}
+      </div>
+      <div className="tbman-picker-foot">点一下就插到「{DOCK_LABEL[area]}」末尾；插入后可直接在上面的预览里拖动调顺序。</div>
+    </div>
+  );
+}
+
 function ToolbarManagerSection(props: { resetToolbar: () => void }) {
   const { resetToolbar } = props;
   const items = useToolbar((s) => s.items);
@@ -992,6 +1059,85 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
   const moreRows = ordered.filter((it) => placeOf(it) === 'more');
   // 还没被收进任何组的按钮（供「加入按钮…」下拉选择）
   const ungrouped = ordered.filter((it) => !groupOfItem(it.id, groups));
+
+  // —— 「＋ 插入按钮」：往某个区域（主区 / 右侧 / 更多）里插一个按钮 ——
+  const [insertArea, setInsertArea] = useState<ToolbarDock | null>(null);
+  // 点别处 / Esc 收起选择器
+  useEffect(() => {
+    if (!insertArea) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Element | null;
+      if (t && t.closest('.tbman-picker')) return;
+      if (t && t.closest('.tbman-insert-btn')) return;
+      setInsertArea(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setInsertArea(null); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [insertArea]);
+
+  /**
+   * 把某按钮插到目标区域末尾。
+   * ⚠ 组内成员的停靠跟随「组」，所以必须先移出组，否则 setDock 完全不生效
+   *   —— 这就是"插件按钮 / 组内按钮改不动停靠区"的根因。
+   */
+  const insertInto = (id: string, area: ToolbarDock) => {
+    if (groupOfItem(id, groups)) removeFromGroup(id);
+    setDock(id, area);
+    const seq = ordered.map((it) => it.id).filter((x) => x !== id);
+    const placeWith = (it: ToolbarItem): ToolbarDock => {
+      if (it.id === id) return area;
+      const g = groupOfItem(it.id, groups);
+      return g ? g.dock : dockOf(it, docks);
+    };
+    let at = -1;
+    seq.forEach((x, i) => {
+      const it = items.find((m) => m.id === x);
+      if (it && placeWith(it) === area) at = i;
+    });
+    seq.splice(at + 1, 0, id);
+    setOrder(seq);
+  };
+
+  const whereOf = (id: string): string => {
+    const g = groupOfItem(id, groups);
+    if (g) return '组·' + g.label;
+    const it = items.find((m) => m.id === id);
+    return it ? DOCK_LABEL[dockOf(it, docks)] : '未知';
+  };
+
+  /** 某个区域右端的「＋ 插入按钮」+ 展开后的选择器 */
+  const renderInsertRow = (area: ToolbarDock) => (
+    <>
+      <div className="tbman-preview-head">
+        <span className="tbman-preview-label">
+          {area === 'main'
+            ? '主区（放不下时横向滚动，滚轮可直接左右滚）'
+            : area === 'right'
+              ? '右侧固定区（贴着工具栏右端，空间不够时同样可横向滚动）'
+              : '「⋯ 更多」收纳（不占工具栏位置，点右端「⋯」才可见）'}
+        </span>
+        <button
+          className={'tbman-insert-btn' + (insertArea === area ? ' is-open' : '')}
+          onClick={() => setInsertArea(insertArea === area ? null : area)}
+          title={`往「${DOCK_LABEL[area]}」插入一个按钮：会列出当前不在这个区域的全部按钮（含插件注册的）`}
+        >＋ 插入按钮</button>
+      </div>
+      {insertArea === area && (
+        <InsertPicker
+          area={area}
+          candidates={ordered.filter((it) => placeOf(it) !== area)}
+          groupOf={whereOf}
+          onPick={(id) => insertInto(id, area)}
+          onClose={() => setInsertArea(null)}
+        />
+      )}
+    </>
+  );
 
   // —— 拖拽状态（列表行与预览 chips 共用同一套逻辑）——
   const [drag, setDrag] = useState<TbDrag>(null);
@@ -1177,24 +1323,28 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
 
       <div className="fluent-group-title">工具栏预览（与编辑器里的工具栏一致，可直接拖动调整顺序）</div>
       <div className="fluent-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
-        <div className="tbman-preview-label">主区（放不下时横向滚动，滚轮可直接左右滚）</div>
+        {renderInsertRow('main')}
         <div className="tbman-preview bc-hscroll">
-          {mainRows.length === 0 && <span className="tbman-empty">主区没有按钮 —— 到下方把停靠切到「主区」</span>}
+          {mainRows.length === 0 && <span className="tbman-empty">主区没有按钮 —— 点右上「＋ 插入按钮」加一个</span>}
           {previewChips(mainRows, 'main')}
+          <button className="tbman-chip-add" onClick={() => setInsertArea('main')} title="往主区末尾插入一个按钮">＋</button>
         </div>
-        <div className="tbman-preview-label">右侧固定区（贴着工具栏右端，空间不够时同样可横向滚动）</div>
+        {renderInsertRow('right')}
         <div className="tbman-preview bc-hscroll">
-          {rightRows.length === 0 && <span className="tbman-empty">右区没有按钮</span>}
+          {rightRows.length === 0 && <span className="tbman-empty">右区没有按钮 —— 点右上「＋ 插入按钮」加一个</span>}
           {previewChips(rightRows, 'right')}
+          <button className="tbman-chip-add" onClick={() => setInsertArea('right')} title="往右侧固定区末尾插入一个按钮">＋</button>
         </div>
-        <div className="tbman-preview-label">「⋯ 更多」收纳（不占工具栏位置，点右端「⋯」才可见）</div>
+        {renderInsertRow('more')}
         <div className="tbman-preview bc-hscroll">
           {moreRows.length === 0 && <span className="tbman-empty">没有隐藏的按钮</span>}
           {previewChips(moreRows, 'more')}
+          <button className="tbman-chip-add" onClick={() => setInsertArea('more')} title="把一个按钮收进「⋯更多」">＋</button>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            虚线框 chip = 工具组（鼠标悬浮在组按钮上即展开组内工具）；灰色 chip = 收进「⋯更多」的按钮。
+            虚线框 chip = 工具组（鼠标悬浮在组按钮上即展开组内工具）；灰色 chip = 收进「⋯更多」的按钮；
+            插件注册的按钮默认就在这里，想放到工具栏上就点「＋ 插入按钮」。
           </span>
           <button
             className="btn-mini"

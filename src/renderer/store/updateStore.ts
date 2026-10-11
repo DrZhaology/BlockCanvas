@@ -21,6 +21,10 @@ export const useUpdateBusy = create<UpdateBusyState>((set) => ({
   message: '',
   pct: 0,
   start: (msg = '正在准备更新…') => set({ busy: true, message: msg, pct: 0 }),
-  progress: (msg, pct) => set((st) => ({ busy: true, message: msg, pct: pct ?? st.pct })),
+  // ⚠ 这里**不能**把 busy 置真：进度通道是和「下载 zip」共用的（update:progress），
+  //    而下载 zip 不替换程序、也不该锁编辑器。以前一行 `busy: true` 的副作用是：
+  //    只要点了历史版本的「下载 zip」，全屏遮罩就会弹出来并**永远卡在最后那一帧**
+  //   （没有任何 finish() 调用）。busy 只由 start() 开启、finish() 结束。
+  progress: (msg, pct) => set((st) => ({ message: msg, pct: pct ?? st.pct })),
   finish: () => set({ busy: false, message: '', pct: 0 })
 }));

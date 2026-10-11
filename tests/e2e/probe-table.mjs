@@ -75,6 +75,18 @@ async function main() {
 
   const read = () => win.evaluate(READ_TABLE);
 
+  // ============ 0. 元素面板 hover 讲解卡：0.5s（原来 1 秒，体感太慢） ============
+  const eb0 = win.locator('.element-panel .element-btn').first();
+  await eb0.hover();
+  await sleep(260);
+  ok('元素按钮悬停未满 0.5s 不弹讲解卡',
+    (await win.locator('.ele-tip').count()) === 0,
+    `tip=${await win.locator('.ele-tip').count()}`);
+  await sleep(500);
+  ok('元素按钮悬停 0.5s 后浮出讲解卡', (await win.locator('.ele-tip').count()) === 1);
+  await win.mouse.move(4, 4);
+  await sleep(300);
+
   // ============ 1. 元素面板不再有"表格模板"按钮 + 入口 ============
   await win.locator('.element-btn', { hasText: '表格' }).first().click();
   await sleep(500);
@@ -278,6 +290,32 @@ async function main() {
   // ============ 13. 帮助问号（每张卡都要有） ============
   const helps = await win.locator('.table-page .help-btn').count();
   ok('表格编辑器每张卡都有「?」帮助', helps >= 5, String(helps));
+
+  // v0.4.4 回归：悬停 0.5s 气泡必须真的浮出来
+  //（以前的 bug：定位 effect 只依赖 [open]，而 open=true 那一帧 Portal 还没挂载 →
+  //  popRef.current 为 null 直接 return，之后再也不重跑 → pos 永远 null →
+  //  气泡停在 left:-9999 + visibility:hidden，表现为"所有问号提示全部失效"。）
+  const hb = win.locator('.table-page .help-btn').first();
+  await hb.hover();
+  await sleep(250);
+  ok('「?」悬停未满 0.5s 时不弹（扫过不会乱冒）',
+    (await win.locator('.help-pop').count()) === 0,
+    `pop=${await win.locator('.help-pop').count()}`);
+  await sleep(600);
+  const hpBox = await win.locator('.help-pop').first().boundingBox().catch(() => null);
+  const vw = await win.evaluate(() => window.innerWidth);
+  ok('「?」悬停 0.5s 后气泡浮出、在视口内且尺寸合理',
+    !!hpBox && hpBox.width > 200 && hpBox.x > 0 && hpBox.x + hpBox.width <= vw + 1 && hpBox.height > 60,
+    JSON.stringify(hpBox));
+  const hpVis = await win.locator('.help-pop').first().evaluate((el) => getComputedStyle(el).visibility).catch(() => 'detached');
+  ok('气泡真实可见（不是 visibility:hidden 卡在屏幕外）', hpVis === 'visible', hpVis);
+  const hpParas = await win.locator('.help-pop-body p').evaluateAll((els) => els.map((e) => (e.textContent || '').trim()));
+  ok('气泡正文按行渲染，且没有空段落（以前空行会渲染成一个个空 <p>）',
+    hpParas.length >= 2 && hpParas.every((t) => t.length > 0),
+    JSON.stringify(hpParas.slice(0, 3)));
+  await win.mouse.move(4, 4);
+  await sleep(750);
+  ok('移开鼠标后气泡自动收起', (await win.locator('.help-pop').count()) === 0);
 
   // ============ 14. 结构模板仍可从编辑器插入新表 ============
   const tinfo = await win.evaluate(() => { let n = 0; const w = (x) => { if (x.type === 'table') n++; for (const c of x.children) w(c); }; w(window.__sceneStore.getState().scene.root); return n; });

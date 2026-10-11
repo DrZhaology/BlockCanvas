@@ -174,9 +174,38 @@ async function main() {
   ok('工具栏管理出现「工具组」编辑区', (await win.locator('.tbman-grp-row').count()) >= 2,
     String(await win.locator('.tbman-grp-row').count()));
 
+  // —— v0.4.4：插件按钮**不能**直接停到工具栏上，唯一入口是各区域右端的「＋ 插入按钮」 ——
+  const PLG = '深色模式';
+  ok('插件注册的命令出现在「全部按钮」列表里',
+    (await win.locator('.tbman-row', { hasText: '插件' }).count()) >= 1,
+    String(await win.locator('.tbman-row', { hasText: '插件' }).count()));
+  const rowIndexWith = (kw) => win.evaluate((k) => {
+    const areas = Array.from(document.querySelectorAll('.tbman-preview'));
+    return areas.findIndex((el) => (el.textContent || '').includes(k));
+  }, kw);
+  ok('插件按钮默认收在「⋯更多」，不会自己跑到工具栏上', (await rowIndexWith(PLG)) === 2,
+    `row=${await rowIndexWith(PLG)}`);
+  ok('「＋ 插入按钮」入口在每个停靠区右侧', (await win.locator('.tbman-insert-btn').count()) === 3,
+    String(await win.locator('.tbman-insert-btn').count()));
+
+  await win.locator('.tbman-insert-btn').first().click();
+  await sleep(400);
+  ok('点「＋ 插入按钮」展开选择器', (await win.locator('.tbman-picker').count()) === 1);
+  const plgItem = win.locator('.tbman-picker-item', { hasText: PLG }).first();
+  ok('选择器里能挑到插件按钮', (await plgItem.count()) === 1);
+  await plgItem.click();
+  await sleep(500);
+  ok('插入后插件按钮出现在「主区」预览里', (await rowIndexWith(PLG)) === 0,
+    `row=${await rowIndexWith(PLG)}`);
+  await win.locator('.tbman-picker-x').first().click().catch(() => {});
+  await sleep(250);
+
   await win.locator('.fluent-back-btn').first().click();
   await win.waitForSelector('.toolbar', { timeout: 8000 });
   await sleep(700);
+  ok('回到编辑器：插件按钮真的落在工具栏主区（停靠/顺序即时生效）',
+    (await win.locator('.toolbar .tb-main button').filter({ hasText: PLG }).count()) >= 1,
+    String(await win.locator('.toolbar button').filter({ hasText: PLG }).count()));
 
   // ============ 4. 全局滚动条变细 ============
   const sbSize = await win.evaluate(() => {

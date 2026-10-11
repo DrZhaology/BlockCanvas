@@ -1,0 +1,447 @@
+/* ==========================================================================
+   BlockCanvas · 20-v044-ui.css —— v0.4.4 UI 打磨轮
+   --------------------------------------------------------------------------
+   ① 更新中心：板块标题（右侧数量角标 + 手型光标）/ 检测详情按钮 / 历史版本行
+      / 「下载 zip」进度条（贴在版本卡片下方，不弹全屏遮罩）/ 发行说明排版
+   ② 表格编辑器右侧面板：字段行对齐、颜色行不再折行、数值与单位分离
+   ③ 设置 · 工具栏管理：「＋ 插入按钮」入口与选择器（插件按钮的唯一投放口）
+
+   分片顺序 = 级联顺序，本片最后 import，用来统一覆盖前面分片的旧规则。
+   项目铁律：不写 !important。
+   ========================================================================== */
+
+/* ==========================================================================
+   ① 更新中心
+   ========================================================================== */
+
+/* —— 板块标题：整行就是按钮（手型光标），数量角标钉在行的最右端 —— */
+.update-sec {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 14px 0 2px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard),
+              border-color var(--dur-fast) var(--ease-standard);
+}
+.update-sec:hover { background: var(--panel-soft); border-color: var(--border); }
+.update-sec-caret {
+  flex: 0 0 auto;
+  width: 12px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+.update-sec.is-open .update-sec-caret { color: var(--accent); }
+.update-sec-name { flex: 1 1 auto; min-width: 0; }
+/* 数量角标：以前紧贴在标题文字后面，看着像标题的一部分；现在独占行尾 */
+.update-sec-count {
+  flex: 0 0 auto;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.update-sec.is-open .update-sec-count {
+  border-color: var(--accent);
+  background: var(--seg-active);
+  color: var(--accent);
+}
+
+/* —— 当前版本卡：「检测详情」是标准按钮长相（以前是浏览器默认的方灰框，
+      文字还会溢出盖住旁边的内容） —— */
+.update-head-card { display: flex; flex-direction: column; gap: 6px; }
+.update-head-ver { flex: 0 0 auto; }
+.update-head-card .update-card-row { align-items: center; }
+.update-recheck-btn { flex: 0 0 auto; height: 32px; padding: 0 16px; font-size: 12.5px; }
+
+.update-detail-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  max-width: 100%;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard),
+              border-color var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard);
+}
+.update-detail-toggle:hover {
+  border-color: var(--accent);
+  background: var(--hover-accent);
+  color: var(--accent);
+}
+.update-detail-toggle.is-open {
+  border-color: var(--accent);
+  background: var(--seg-active);
+  color: var(--accent);
+}
+.update-detail-toggle .update-sec-caret { width: 10px; color: currentColor; }
+.update-detail-sub { color: var(--text-muted); font-size: 10.5px; }
+.update-detail-toggle:hover .update-detail-sub,
+.update-detail-toggle.is-open .update-detail-sub { color: inherit; opacity: 0.75; }
+
+/* —— 历史版本行：两列（信息 | 操作），进度 / 说明各自独占整行 —— */
+.update-history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 10px 12px;
+}
+.update-history-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.update-history-main .update-history-name { flex: 0 1 auto; min-width: 0; }
+.update-history-main .update-history-date { flex: 0 0 auto; }
+.update-history-acts { display: flex; align-items: center; gap: 8px; }
+.update-dl-strip,
+.update-history-notes { grid-column: 1 / -1; }
+
+/* 「下载 zip」进度条：**只贴在对应版本卡片下方**。
+   下载不替换程序 → 不弹全屏遮罩、不锁编辑器，进度条上方也写清楚这一点。 */
+.update-dl-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+.update-dl-strip.is-error { border-color: #f0c36d; background: var(--amber-bg, #fff8e6); }
+.update-dl-strip.is-done {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  border-color: #86d29a;
+  background: var(--ok-bg, #eefaf1);
+}
+.update-dl-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.update-dl-msg { flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: var(--text); }
+.update-dl-pct {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.update-dl-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.update-dl-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), #64b5f6);
+  transition: width 0.2s var(--ease-standard);
+}
+.update-dl-hint { font-size: 10.5px; color: var(--text-muted); line-height: 1.55; }
+.update-dl-done { flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: #15803d; }
+.update-dl-done b { color: inherit; font-family: "Consolas", monospace; }
+
+/* 历史版本行：发行说明的开关做成"文字的按钮"，但必须是小手图标 */
+.update-notes-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.update-notes-toggle:hover { text-decoration: underline; }
+.update-dl-btn { flex: 0 0 auto; }
+.update-history-saved {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--ok-bg, #eefaf1);
+  border: 1px solid #86d29a;
+  color: #15803d;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* —— 发行说明（Markdown）排版 ——
+   以前这些类一个样式都没有：标题跟正文一样大、列表贴边、分隔线到处拉，
+   看着像没渲染过的纯文本。这里补一套克制的文档排版。 */
+.update-notes-inline,
+.update-history-notes {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  scrollbar-gutter: stable;
+}
+.md-body { font-size: 12px; line-height: 1.75; color: var(--text); }
+.md-body > *:first-child { margin-top: 0; }
+.md-body > *:last-child { margin-bottom: 0; }
+.md-h {
+  margin: 14px 0 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.2px;
+}
+.md-body > .md-h:first-child { margin-top: 0; }
+.md-body h6.md-h {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.md-list {
+  margin: 4px 0 8px;
+  padding-left: 19px;
+}
+.md-list li { margin: 3px 0; }
+.md-list li.md-li-sub { margin-left: 12px; list-style: circle; }
+.md-p { margin: 4px 0 8px; }
+.md-code {
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  font-family: "Consolas", monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+}
+.md-quote {
+  margin: 6px 0 10px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+}
+.md-hr { margin: 12px 0; border: none; border-top: 1px solid var(--border); }
+.md-body a { color: var(--accent); }
+.md-body strong { color: var(--text); font-weight: 700; }
+.md-body code {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  font-family: "Consolas", monospace;
+  font-size: 11px;
+}
+.md-empty { font-size: 11.5px; color: var(--text-muted); }
+
+/* ==========================================================================
+   ② 表格编辑器右侧面板
+   --------------------------------------------------------------------------
+   两个毛病：
+   ① 「边框颜色」这类字段是"输入框 + 色块"两个子元素，而 .tbl-field 是纵向 flex，
+      结果色块被挤到下一行，整行高度不一致 → 一张卡里几行看起来歪歪扭扭；
+   ② 数值字段（宽度 / 边框粗细 / 边框间距 / 圆角）以前是纯文本输入或固定档位下拉，
+      数值跟单位分不开、也没法滚轮微调。现在统一成「数字框 + 单位下拉」。
+   ========================================================================== */
+
+/* 字段行：顶部对齐，且行内各字段固定成两列 / 四列，不再靠内容宽窄随机换行 */
+.tbl-field-row { align-items: flex-start; }
+.tbl-field-row .tbl-field.small { flex: 1 1 calc(50% - 4px); min-width: 146px; }
+.tbl-field-row .tbl-field.tiny { flex: 1 1 calc(25% - 6px); min-width: 58px; }
+.tbl-field-row > .tbl-field:not(.small):not(.tiny) { flex: 1 1 100%; }
+
+/* 颜色行：输入框 + 色块（+ var）排在一行，输入框吃掉剩余宽度 */
+.tbl-field .color-picker-row,
+.tbl-color-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+}
+.tbl-field .color-picker-row .color-text-input,
+.tbl-color-row .color-text-input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  height: 28px;
+  font-size: 11px;
+}
+.tbl-field .color-picker-row .color-swatch-btn,
+.tbl-color-row .color-swatch-btn {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 28px;
+}
+.tbl-field .color-picker-row .color-var-btn,
+.tbl-color-row .color-var-btn { flex: 0 0 auto; }
+
+/* 数字 + 单位：数字框吃满剩余宽度，单位下拉固定窄一点 */
+.tbl-field .tbl-num { width: 100%; }
+.tbl-field .tbl-num-input { flex: 1 1 auto; }
+.tbl-field .tbl-num-unit { flex: 0 0 54px; }
+
+/* ==========================================================================
+   ③ 设置 · 工具栏管理：「＋ 插入按钮」
+   --------------------------------------------------------------------------
+   插件再也不能把自己直接塞到工具栏上（见 lib/pluginHost.ts），
+   唯一入口就是每个停靠区右端的这个 ＋。
+   ========================================================================== */
+.tbman-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.tbman-preview-head .tbman-preview-label { flex: 1 1 auto; min-width: 0; padding: 0; }
+.tbman-insert-btn {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 11px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-standard),
+              background var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard);
+}
+.tbman-insert-btn:hover {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--hover-accent);
+  color: var(--accent);
+}
+.tbman-insert-btn.is-open {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+/* 预览行末尾的 ＋ 方块（"往这个区域末尾插一个"） */
+.tbman-chip-add {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
+}
+.tbman-chip-add:hover { border-style: solid; border-color: var(--accent); color: var(--accent); }
+
+/* 选择器面板（内联展开，不遮挡、不抢焦点） */
+.tbman-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.07);
+}
+.tbman-picker-head { display: flex; align-items: center; gap: 8px; }
+.tbman-picker-title { flex: 0 0 auto; font-size: 11.5px; font-weight: 700; color: var(--text); }
+.tbman-picker-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+}
+.tbman-picker-search:focus { border-color: var(--accent); outline: none; }
+.tbman-picker-x {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tbman-picker-x:hover { background: var(--hover); color: var(--text); }
+.tbman-picker-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.tbman-picker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
+}
+.tbman-picker-item:hover { border-color: var(--accent); background: var(--hover-accent); }
+.tbman-picker-ico { font-size: 11px; }
+.tbman-picker-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tbman-picker-where { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+.tbman-picker-plus { color: var(--accent); font-weight: 700; }
+.tbman-picker-foot { font-size: 10.5px; color: var(--text-muted); line-height: 1.55; }

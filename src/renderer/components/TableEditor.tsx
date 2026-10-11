@@ -131,7 +131,8 @@ function cellLiveStyle(cell: ElementStyle | undefined, table: ElementStyle | und
   return out as React.CSSProperties;
 }
 
-const TABLE_FONTS = ['12px', '12.5px', '13px', '14px', '15px', '16px', '18px'];
+// 整表默认字号不再用"挑几档"的下拉：改成「数值 + 单位」输入（可自由输入 + 滚轮微调），
+// 与右侧属性面板的手感保持一致。
 const ALIGN = [['', '默认'], ['left', '左'], ['center', '中'], ['right', '右']] as const;
 const VALIGN = [['', '默认'], ['top', '上'], ['middle', '中'], ['bottom', '下']] as const;
 const BORDER_STYLES = [['solid', '实线'], ['dashed', '虚线'], ['dotted', '点线'], ['double', '双线']] as const;
@@ -920,16 +921,13 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                   </label>
                   <label className="tbl-field small">
                     <span>内边距单位 <em>四边共用</em></span>
-                    <TblNum
-                      value={`1${padUnit}`}
-                      min={0} max={4}
-                      onStart={beginEdit}
-                      onEnd={endEdit}
-                      onCommit={(v) => {
-                        const n = parseFloat(v) || 1;
-                        applyPad({ ...pad }, `1${padUnit}`.replace(/[\d.]+/, String(n)));
-                      }}
-                    />
+                    <select
+                      value={padUnit}
+                      title="四个方向的内边距共用这个单位"
+                      onChange={(e) => applyPad({ ...pad }, e.target.value)}
+                    >
+                      {['px', 'rem', 'em', '%'].map((u) => <option key={u} value={u}>{u}</option>)}
+                    </select>
                   </label>
                 </div>
                 <div className="tbl-field-row">
@@ -1113,12 +1111,14 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
             <div className="tbl-field-row">
               <label className="tbl-field small">
                 <span>宽度 <em>整表占多宽</em></span>
-                <input
-                  value={table.style.width ?? ''}
-                  placeholder="100%"
-                  onFocus={beginEdit}
-                  onBlur={endEdit}
-                  onChange={(e) => setStyleOf(tableId, { width: e.target.value })}
+                <TblNum
+                  value={table.style.width}
+                  placeholder="100"
+                  min={0}
+                  units={['%', 'px', 'vw', 'rem', 'em']}
+                  onStart={beginEdit}
+                  onEnd={endEdit}
+                  onCommit={(v) => setStyleOf(tableId, { width: v || undefined })}
                 />
               </label>
               <label className="tbl-field small">
@@ -1140,12 +1140,14 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
               </label>
               <label className="tbl-field small">
                 <span>边框间距 <em>分离时的缝</em></span>
-                <input
-                  value={table.style.borderSpacing ?? ''}
-                  placeholder="如 2px"
-                  onFocus={beginEdit}
-                  onBlur={endEdit}
-                  onChange={(e) => setStyleOf(tableId, { borderSpacing: e.target.value })}
+                <TblNum
+                  value={table.style.borderSpacing}
+                  placeholder="2"
+                  min={0} max={40}
+                  units={['px', 'rem', 'em']}
+                  onStart={beginEdit}
+                  onEnd={endEdit}
+                  onCommit={(v) => setStyleOf(tableId, { borderSpacing: v || undefined })}
                 />
               </label>
             </div>
@@ -1162,53 +1164,63 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
               </label>
               <label className="tbl-field small">
                 <span>边框粗细 <em>多少像素</em></span>
-                <select value={table.style.borderTopWidth ?? ''} onChange={(e) => {
-                  const v = e.target.value;
-                  setStyleOf(tableId, { borderTopWidth: v, borderRightWidth: v, borderBottomWidth: v, borderLeftWidth: v });
-                }}>
-                  <option value="">无</option>
-                  <option value="1px">1px</option>
-                  <option value="2px">2px</option>
-                  <option value="3px">3px</option>
-                </select>
-              </label>
-              <label className="tbl-field small">
-                <span>边框颜色</span>
-                {/* 用 ColorField 自己管会话：色盘里拖一下 = 一条 undo，且四边颜色一起写 */}
-                <ColorField
-                  value={table.style.borderTopColor ?? ''}
-                  fallback="#d0d7de"
-                  inputClassName="tbl-color-input"
-                  onInputFocus={beginEdit}
-                  onChange={(v) => setStyleOf(tableId, { borderTopColor: v, borderRightColor: v, borderBottomColor: v, borderLeftColor: v })}
-                  onInputBlur={endEdit}
-                  onModalOpen={beginEdit}
-                  onModalClose={endEdit}
+                <TblNum
+                  value={table.style.borderTopWidth}
+                  placeholder="1"
+                  min={0} max={20}
+                  units={['px', 'rem', 'em']}
+                  onStart={beginEdit}
+                  onEnd={endEdit}
+                  onCommit={(v) => setStyleOf(tableId, {
+                    borderTopWidth: v || undefined, borderRightWidth: v || undefined,
+                    borderBottomWidth: v || undefined, borderLeftWidth: v || undefined
+                  })}
                 />
               </label>
             </div>
             <div className="tbl-field-row">
               <label className="tbl-field small">
-                <span>圆角 <em>表格四角</em></span>
-                <input
-                  value={table.style.borderTopLeftRadius ?? ''}
-                  placeholder="如 10px"
-                  onFocus={beginEdit}
-                  onBlur={endEdit}
-                  onChange={(e) => {
-                    const v = e.target.value.trim();
-                    setStyleOf(tableId, {
-                      borderTopLeftRadius: v, borderTopRightRadius: v, borderBottomRightRadius: v, borderBottomLeftRadius: v
-                    });
-                  }}
-                />
+                <span>边框颜色 <em>四条边一起</em></span>
+                <div className="tbl-color-row">
+                  <ColorField
+                    value={table.style.borderTopColor ?? ''}
+                    fallback="#d0d7de"
+                    inputClassName="tbl-color-input"
+                    onInputFocus={beginEdit}
+                    onChange={(v) => setStyleOf(tableId, { borderTopColor: v, borderRightColor: v, borderBottomColor: v, borderLeftColor: v })}
+                    onInputBlur={endEdit}
+                    onModalOpen={beginEdit}
+                    onModalClose={endEdit}
+                  />
+                </div>
               </label>
               <label className="tbl-field small">
+                <span>圆角 <em>表格四角</em></span>
+                <TblNum
+                  value={table.style.borderTopLeftRadius}
+                  placeholder="0"
+                  min={0} max={60}
+                  units={['px', 'rem', 'em', '%']}
+                  onStart={beginEdit}
+                  onEnd={endEdit}
+                  onCommit={(v) => setStyleOf(tableId, {
+                    borderTopLeftRadius: v || undefined, borderTopRightRadius: v || undefined,
+                    borderBottomRightRadius: v || undefined, borderBottomLeftRadius: v || undefined
+                  })}
+                />
+              </label>
+            </div>
+            <div className="tbl-field-row">
+              <label className="tbl-field small">
                 <span>字号 <em>整表默认</em></span>
-                <select value={table.style.fontSize ?? ''} onChange={(e) => setStyleOf(tableId, { fontSize: e.target.value })}>
-                  <option value="">默认</option>
-                  {TABLE_FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
-                </select>
+                <TblNum
+                  value={table.style.fontSize}
+                  placeholder="继承"
+                  min={FONT_MIN} max={FONT_MAX} precision={1}
+                  onStart={beginEdit}
+                  onEnd={endEdit}
+                  onCommit={(v) => setStyleOf(tableId, { fontSize: v || undefined })}
+                />
               </label>
               <label className="tbl-field small">
                 <span>标题位置 <em>caption 放哪</em></span>
@@ -1228,8 +1240,10 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                 <span>底色 <em>整表默认</em></span>
                 <ColorPicker elementId={tableId} styleKey="backgroundColor" fallback="#ffffff" />
               </label>
-              <label className="tbl-field small">
-                <span>阴影 <em>eg 0 6px 20px</em></span>
+            </div>
+            <div className="tbl-field-row">
+              <label className="tbl-field">
+                <span>阴影 <em>例如 0 6px 20px rgba(15,23,42,.08)</em></span>
                 <input
                   value={table.style.boxShadow ?? ''}
                   placeholder="可留空"
@@ -1374,8 +1388,11 @@ function TblNum(props: {
   disabled?: boolean;
   /** 不显示单位下拉（内边距四边共用单位时用，避免一排四个下拉框） */
   hideUnit?: boolean;
+  /** 自定义单位候选（默认 TBL_UNITS） */
+  units?: string[];
 }) {
   const { value, onCommit, onStart, onEnd, unit: defaultUnit = 'px', min, max, step = 1, precision = 0, hideUnit } = props;
+  const unitList = props.units ?? TBL_UNITS;
   const parsed = splitValue(value, defaultUnit);
   const [num, setNum] = useState(parsed.num);
   const [unit, setUnit] = useState(parsed.unit);
@@ -1428,7 +1445,9 @@ function TblNum(props: {
         style={hideUnit ? { display: 'none' } : undefined}
         onChange={(e) => { const u = e.target.value; setUnit(u); commit(num, u); }}
       >
-        {TBL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+        {/* 当前值带了一个不在候选里的单位（老数据 / 手改过）→ 临时补一条，避免下拉显示错位 */}
+        {unit && !unitList.includes(unit) && <option value={unit}>{unit}</option>}
+        {unitList.map((u) => <option key={u} value={u}>{u}</option>)}
       </select>
     </div>
   );
