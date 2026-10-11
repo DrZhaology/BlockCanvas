@@ -3,6 +3,59 @@ import type { SceneElement, SceneGraph, ElementType, ElementStyle, Breakpoint } 
 import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS } from '@lib/types';
 import { SCHEMA } from '@lib/propertySchema';
 import type { TokenEntry } from '@lib/designTokens';
+import { cssTextToObject, styleToCssText } from '@lib/styleClass';
+
+// ============================================================================
+// 容器「子元素样式」（childStyles）与子元素自身样式的冲突消解（v0.4.4d）
+// ----------------------------------------------------------------------------
+// 背景：模板插入的元素（如 .cards-row 里的 .card-title）的样式是由**父容器的
+//   childStyles** 生成的规则 `.cards-row .card-title { margin: ... }` 提供的，
+//   而子元素自己的样式挂在 `.card-title { ... }` 上。
+//   CSS 特异性：`.cards-row .card-title`(0,2,0) > `.card-title`(0,1,0) →
+//   **用户选中子元素改样式，写进 .card-title 也不生效**（被容器规则盖住）。
+//   这正是"模板元素选中后里面的样式都不能修改"的根因。
+// 解决：当用户改动某元素的某几个 CSS 属性时，把同名的声明从**指向它的祖先
+//   childStyles** 里剔除 —— 于是子元素自己的样式重新生效（改得动）。
+//   只按"类名 token / 精确标签"匹配，且仅当子元素自身有类名时才处理，避免误伤。
+// ============================================================================
+
+/** 该 childStyles 选择器是否指向这个子节点（宽松匹配：类名 token 或精确标签） */
+function childSelectorTargets(sel: string, node: SceneElement): boolean {
+  const s = (sel ?? '').trim();
+  if (!s) return false;
+  const last = s.split(/[\s>+~]+/).filter(Boolean).pop() || '';
+  if (!last) return false;
+  const tokens = (node.attrs?.className ?? '').trim().split(/\s+/).filter(Boolean);
+  for (const t of tokens) {
+    if (last.includes('.' + t)) return true;
+  }
+  const tag = last.replace(/[.:#[].*$/, '').toLowerCase();
+  return !!tag && tag === node.type;
+}
+
+/** 把 keys 这些 CSS 属性从"路径上所有祖先的、指向 target 的 childStyles"里删掉 */
+function stripAncestorChildStyles(root: SceneElement, target: SceneElement, keys: string[]): void {
+  if (!target.attrs?.className) return; // 无类名的元素走行内样式，天然盖过 childStyles，无需处理
+  const walk = (n: SceneElement): boolean => {
+    let contains = false;
+    for (const c of n.children) {
+      if (c === target) { contains = true; break; }
+      if (walk(c)) { contains = true; break; }
+    }
+    // n 的子树里含 target → n 就是"祖先"，清掉它 childStyles 里命中 target 的同名声明
+    if (contains && n.childStyles?.length) {
+      for (const cs of n.childStyles) {
+        if (!childSelectorTargets(cs.sel, target)) continue;
+        const obj = cssTextToObject(cs.css);
+        let changed = false;
+        for (const k of keys) { if (k in obj) { delete obj[k]; changed = true; } }
+        if (changed) cs.css = styleToCssText(obj);
+      }
+    }
+    return contains;
+  };
+  walk(root);
+}
 
 // 把 schema 转成 key→item 映射，便于 removeVisibleProp 知道一条属性对应的 style 字段
 const SCHEMA_LOOKUP = new Map<string, (typeof SCHEMA)[number]>();
@@ -805,6 +858,8 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
+      // 先消解祖先 childStyles 的压制 —— 否则模板子元素"改了没反应"（特异性被盖住）
+      stripAncestorChildStyles(scene.root, node, Object.keys(partial).filter((k) => k !== 'src' && k !== 'alt'));
       const bp = breakpointOverride ?? st.activeBreakpoint;
       if (bp === 'desktop') {
         for (const [k, v] of Object.entries(partial)) {
@@ -846,6 +901,7 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
+      stripAncestorChildStyles(scene.root, node, Object.keys(partial).filter((k) => k !== 'src' && k !== 'alt'));
       const bp = breakpointOverride ?? st.activeBreakpoint;
       if (bp === 'desktop') {
         for (const [k, v] of Object.entries(partial)) {
@@ -1214,6 +1270,17 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
+      // 删属性时也要消解祖先 childStyles（否则容器规则会继续把值"补"回来，看起来删不掉）
+      const delKeys = (() => {
+        const item = SCHEMA_LOOKUP.get(key);
+        if (item) {
+          return (item.input === 'box4' || item.input === 'trbl') && item.sides
+            ? item.sides.map((s) => s.key)
+            : [item.key];
+        }
+        return [key];
+      })();
+      stripAncestorChildStyles(scene.root, node, delKeys);
       // 移出列表
       if (node.visibleProps) {
         node.visibleProps = node.visibleProps.filter((k) => k !== key);
