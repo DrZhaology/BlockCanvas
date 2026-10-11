@@ -10,6 +10,7 @@ import { getPluginProperties } from '@lib/pluginHost';
 import { AddPropertyMenu } from './AddPropertyMenu';
 import { HelpButton } from './HelpButton';
 import { Box4Input } from './Box4Input';
+import { useShowBr } from '@lib/showBr';
 import { TrblInput } from './TrblInput';
 import { ColorPicker, ColorField } from './ColorPicker';
 import { NumberUnitInput } from './NumberUnitInput';
@@ -420,6 +421,8 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   const { selected, justAddedKey, onJustAdded } = props;
   const updateStyle = useScene((s) => s.updateStyle);
   const setText = useScene((s) => s.setText);
+  // 「显示 <br>」开关：与画布就地编辑框共用同一份状态（见 lib/showBr.ts）
+  const [showBr, setShowBr] = useShowBr();
   const addVisibleProp = useScene((s) => s.addVisibleProp);
   const removeVisibleProp = useScene((s) => s.removeVisibleProp);
   const updatePseudoStyleStore = useScene((s) => s.updatePseudoStyle);
@@ -650,11 +653,14 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   }
 
   // ============ "添加属性"回调 ============
-  const onAddProperty = (key: string) => {
+  const onAddProperty = (key: string, value?: string) => {
     const item = getSchemaItem(key);
     if (!item) return;
     const patch: Record<string, string> = {};
-    if ((item.input === 'box4' || item.input === 'trbl') && item.sides) {
+    if (value !== undefined) {
+      // 来自"搜索属性值 → 一键插入"：属性名 + 属性值一起写入
+      patch[item.key] = value;
+    } else if ((item.input === 'box4' || item.input === 'trbl') && item.sides) {
       for (const s of item.sides) patch[s.key] = '';
     } else if (item.input === 'number' && item.unit) {
       patch[item.key] = '0' + item.unit;
@@ -665,6 +671,26 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
     addVisibleProp(elementId, key);
     onJustAdded(key);
   };
+
+  // ============ 中键搜索：定位到某条 CSS 属性（橙色高亮）============
+  // 画布上对元素按中键 → 敲属性名 → Enter → 这里展开「CSS 样式属性」、确保该行存在、滚动并闪烁高亮。
+  const [flashKey, setFlashKey] = useState<string | null>(null);
+  useEffect(() => {
+    const onFocusProp = (e: Event) => {
+      const key = (e as CustomEvent).detail?.key as string | undefined;
+      if (!key) return;
+      setSecOpen((p) => ({ ...p, css: true }));
+      addVisibleProp(elementId, key);
+      setFlashKey(key);
+      window.setTimeout(() => {
+        const row = document.querySelector(`[data-prop-key="${CSS.escape(key)}"]`) as HTMLElement | null;
+        row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 140);
+      window.setTimeout(() => setFlashKey(null), 2000);
+    };
+    window.addEventListener('bc:focus-prop', onFocusProp);
+    return () => window.removeEventListener('bc:focus-prop', onFocusProp);
+  }, [elementId, addVisibleProp]);
 
   // ============ "删除属性"回调 ============
   const onRemoveProperty = (key: string) => {
@@ -828,10 +854,17 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
           <textarea
             className="inspector-text-textarea"
             value={selected.text ?? ''}
-            placeholder="在此直接输入文本内容（画布也将同步更新）…"
-            rows={2}
+            placeholder="在此直接输入文本内容（画布也将同步更新）…换行会导出成 <br>"
+            rows={5}
             onChange={(e) => setText(elementId, e.target.value)}
           />
+          <button
+            className={'bc-br-inspector-toggle' + (showBr ? ' active' : '')}
+            onClick={() => setShowBr(!showBr)}
+            title="开启后，画布的就地编辑框里会用淡灰色标出换行位置（<br>）；换行本来就会自动生成 <br>"
+          >
+            {showBr ? '✓ 已显示 <br> 换行标记' : '显示 <br> 换行标记'}
+          </button>
         </div>
       )}
 
@@ -1194,6 +1227,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
                   elementType={elementType}
                   onRemove={() => onRemoveProperty(s.key)}
                   highlight={justAddedKey === s.key}
+                  flash={flashKey === s.key}
                   onEdited={() => { if (justAddedKey === s.key) onJustAdded(null); }}
                 />
               ))}
@@ -1604,10 +1638,12 @@ function PropertyRow(props: {
   onRemove: () => void;
   /** 刚添加的高亮蓝框（编辑过就取消） */
   highlight?: boolean;
+  /** 中键搜索定位到本行时的橙色闪烁高亮 */
+  flash?: boolean;
   /** 用户开始编辑这个属性（focus）时回调，用于取消高亮 */
   onEdited?: () => void;
 }) {
-  const { schemaItem, elementId, elementType, onRemove, highlight, onEdited } = props;
+  const { schemaItem, elementId, elementType, onRemove, highlight, flash, onEdited } = props;
   const scene = useScene((s) => s.scene);
   const beginStyleEdit = useScene((s) => s.beginStyleEdit);
   const endStyleEdit = useScene((s) => s.endStyleEdit);
@@ -1653,9 +1689,11 @@ function PropertyRow(props: {
 
   return (
     <div
-      className={'prop-row' + (highlight ? ' highlight' : '') + (!app.applicable ? ' is-inapplicable' : '')}
+      className={'prop-row' + (highlight ? ' highlight' : '') + (flash ? ' flash' : '') + (!app.applicable ? ' is-inapplicable' : '')}
       // 分类配色：CSS 用 data-cat 给每类属性一条不同颜色的左边线，密集列表也能一眼分清
       data-cat={schemaItem.category}
+      // 中键搜索定位用：找到这一行并滚动/高亮
+      data-prop-key={schemaItem.key}
       // React 合成 onFocus 会冒泡：任何子输入框聚焦都会视为开始编辑
       onFocus={onEdited}
     >

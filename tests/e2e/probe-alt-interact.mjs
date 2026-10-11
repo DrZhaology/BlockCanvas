@@ -125,6 +125,29 @@ async function main() {
   }, fid);
   ok('fixed 元素被关在画布内（不会飘到面板上）', confined.inside === true, JSON.stringify(confined));
 
+  // ============ 4b. 外边距/内边距也算进"墙"里 ============
+  const mid = await win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    st.insertTemplate({ id: 'm1', type: 'div', style: { width: '100px', height: '40px', marginLeft: '30px', marginTop: '10px', backgroundColor: '#dff2e6' }, children: [] }, null);
+    return window.__sceneStore.getState().scene.selectedId;
+  });
+  await sleep(400);
+  const rm = await rectOf(mid);
+  await win.mouse.move(rm.x + rm.w / 2, rm.y + rm.h / 2);
+  await sleep(150);
+  await win.mouse.down();
+  await win.mouse.move(rm.x - 900, rm.y - 600, { steps: 14 }); // 往左上猛拖
+  await win.mouse.up();
+  await sleep(300);
+  const mv = await win.evaluate((eid) => {
+    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
+    const el = document.querySelector(`.canvas [data-bc-id="${eid}"]`);
+    const pr = el.parentElement.getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    return { ml: parseFloat(n.style.marginLeft || '0'), mt: parseFloat(n.style.marginTop || '0'), insideLeft: er.left >= pr.left - 2, insideTop: er.top >= pr.top - 2 };
+  }, mid);
+  ok('margin 被算进墙里（不会拖出父容器）', mv.insideLeft && mv.insideTop && mv.ml >= -1 && mv.mt >= -1, JSON.stringify(mv));
+
   await win.keyboard.up('Alt');
 
   // ============ 5. Alt + 滚轮 = 缩放 ============

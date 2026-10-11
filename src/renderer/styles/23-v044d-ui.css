@@ -87,23 +87,102 @@ html[data-bc-dark] .canvas-inline-text-input {
 }
 html[data-bc-dark] .bc-br-mark { color: #6b7280; }
 
-.bc-inline-br-toggle {
-  position: absolute;
-  top: -23px;
-  right: 0;
-  z-index: 2;
-  height: 20px;
-  padding: 0 8px;
-  font-size: 10.5px;
-  white-space: nowrap;
-  color: var(--text-muted);
+/* ==========================================================================
+   画布「中键搜索属性」（v0.4.4g）
+   ========================================================================== */
+.bc-prop-search {
+  position: fixed;
+  z-index: 520;
+  width: 264px;
+  padding: 8px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 10px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22);
+  animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
+  transform-origin: top left;
+}
+.bc-prop-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-soft);
+}
+.bc-prop-search-row:focus-within { border-color: var(--accent); background: var(--bg-panel); }
+.bc-prop-search-ico { font-size: 11px; opacity: 0.7; }
+.bc-prop-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+.bc-prop-search-list { margin-top: 6px; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.bc-prop-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.bc-prop-search-item:hover { background: var(--hover); }
+.bc-prop-search-item.is-best { background: var(--hover-accent); }
+.bc-prop-search-label { font-size: 12px; color: var(--text); }
+.bc-prop-search-key { font-size: 10.5px; color: var(--text-muted); font-family: 'Consolas', monospace; }
+.bc-prop-search-empty { padding: 8px; font-size: 11px; color: var(--text-muted); text-align: center; }
+.bc-prop-search-hint { margin-top: 6px; font-size: 10px; color: var(--text-muted); text-align: center; }
+
+/* 中键定位到的那条属性行：橙色闪烁（复用撞墙动画） */
+.prop-row.flash { border-color: #f97316; box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.35); animation: bcWallFlash 0.9s ease-out 2; }
+
+/* 「+ 添加属性」里按"属性值"命中的蓝色插入条目 */
+.add-prop-value-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  margin-bottom: 3px;
+  border: 1px solid var(--accent);
+  background: var(--hover-accent);
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+.add-prop-value-item:hover { background: var(--accent); }
+.add-prop-value-item:hover .add-prop-value-label,
+.add-prop-value-item:hover .add-prop-value-sep,
+.add-prop-value-item:hover .add-prop-value-val,
+.add-prop-value-item:hover .add-prop-value-plus { color: #fff; }
+.add-prop-value-label { font-size: 12px; color: var(--text); }
+.add-prop-value-sep { color: var(--text-muted); font-size: 11px; }
+.add-prop-value-val { font-size: 11px; font-family: 'Consolas', monospace; color: var(--accent); }
+.add-prop-value-plus { margin-left: auto; font-size: 10.5px; color: var(--accent); font-weight: 600; white-space: nowrap; }
+
+.bc-br-inspector-toggle {
+  margin-top: 6px;
+  width: 100%;
+  height: 26px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
   cursor: pointer;
 }
-.bc-inline-br-toggle:hover { color: var(--accent); border-color: var(--accent); }
-.bc-inline-br-toggle.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+.bc-br-inspector-toggle:hover { color: var(--text); border-color: var(--accent); }
+.bc-br-inspector-toggle.active { color: var(--accent); border-color: var(--accent); background: var(--hover-accent); font-weight: 600; }
 
 /* ==========================================================================
    画布元素光标（统一由 CSS 控制，不再写内联 —— 内联会盖过样式表规则）
@@ -173,6 +252,17 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   box-shadow: 0 0 10px rgba(249, 115, 22, 0.9);
   animation: bcWallFlash 0.6s ease-out both;
 }
+
+/* Alt 移动时的吸附对齐参考线（PowerPoint 风格：粉红细线） */
+.bc-align-guide {
+  position: fixed;
+  z-index: 401;
+  pointer-events: none;
+  background: #ff3b81;
+  box-shadow: 0 0 4px rgba(255, 59, 129, 0.8);
+}
+.bc-align-v { width: 1px; }
+.bc-align-h { height: 1px; }
 
 /* ==========================================================================
    画布文字「右键快捷菜单」（v0.4.4d）

@@ -8,7 +8,7 @@ import {
 } from '@store/toolbarStore';
 import { dragSteps } from '@lib/drag';
 import { useHoverPop } from '@lib/hoverPop';
-import { widthLabel, widthToDevice, DEVICE_LIST, requestDevice } from '@lib/device';
+import { widthLabel, widthToDevice, DEVICE_LIST, requestDevice, type DeviceId } from '@lib/device';
 import { runHealthCheck, hasBlocking } from '@lib/healthCheck';
 import { HealthWizard } from './HealthWizard';
 import { AnchoredPanel } from './AnchoredPanel';
@@ -86,6 +86,9 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   const groups = useToolbar((s) => s.groups);
   const pct = Math.round(zoom * 100);
   const device = widthToDevice(canvasWidth);
+  // 「设备」按钮的图标要按**画布实际宽度**实时显示：自适应时窗口一变窄，
+  // 画布跟着变窄 → 图标应变成平板 / 手机（而不是永远显示电脑）。
+  const liveDevice = useEffectiveDevice(canvasWidth);
   // 「⋯ 更多」按钮锚点（弹出面板走 Portal，不会被工具栏横向滚动区裁切）
   const moreWrapRef = useRef<HTMLDivElement>(null);
 
@@ -432,7 +435,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
       done.add(g.id);
       const members = list.filter((x) => groupByItem.get(x.id)?.id === g.id);
       if (members.length === 0) continue;
-      nodes.push(<ToolbarGroupButton key={g.id} group={g} members={members} renderItem={renderItem} canvasWidth={canvasWidth} />);
+      nodes.push(<ToolbarGroupButton key={g.id} group={g} members={members} renderItem={renderItem} canvasWidth={canvasWidth} liveDevice={liveDevice} />);
     }
     return nodes;
   };
@@ -511,15 +514,16 @@ function ToolbarGroupButton(props: {
   members: ToolbarItem[];
   renderItem: (it: ToolbarItem) => React.ReactNode;
   canvasWidth: string;
+  liveDevice: DeviceId;
 }) {
-  const { group, members, renderItem, canvasWidth } = props;
+  const { group, members, renderItem, canvasWidth, liveDevice } = props;
   // 悬停节奏统一走 lib/hoverPop（500ms 弹出 / 300ms 收起），与 ? 气泡、元素面板一致
   const { open, setOpen, scheduleOpen, scheduleClose, cancel, toggle } = useHoverPop();
   const btnRef = useRef<HTMLButtonElement>(null);
 
-  // 「设备」组：图标跟着当前设备走（自适应 / 像素值都按宽度落回最近的设备）
+  // 「设备」组：图标跟着当前设备走（自适应时按画布**实际**宽度落回最近的设备）
   const isDevice = group.id === 'grp.device';
-  const deviceId = widthToDevice(canvasWidth);
+  const deviceId = canvasWidth === 'auto' ? liveDevice : widthToDevice(canvasWidth);
   const deviceDef = DEVICE_LIST.find((d) => d.id === deviceId) ?? DEVICE_LIST[0];
   const icon = isDevice ? deviceDef.icon : (group.icon ?? '▦');
   const nowLabel = canvasWidth === 'auto' ? `自适应 · ${deviceDef.label}` : `${deviceDef.label} · ${widthLabel(canvasWidth)}`;
@@ -552,6 +556,31 @@ function ToolbarGroupButton(props: {
       </AnchoredPanel>
     </div>
   );
+}
+
+/**
+ * 「设备」按钮图标的实时依据（v0.4.4g）：
+ *   · 画布宽度是固定像素值 → 直接用宽度落回设备；
+ *   · 画布宽度是「自适应」 → 观察画布**实际渲染宽度**（窗口变窄它就变窄），
+ *     实时算出应显示成电脑 / 平板 / 手机。
+ */
+function useEffectiveDevice(canvasWidth: string): DeviceId {
+  const [dev, setDev] = useState<DeviceId>(() => widthToDevice(canvasWidth));
+  useEffect(() => {
+    if (canvasWidth !== 'auto') {
+      setDev(widthToDevice(canvasWidth));
+      return;
+    }
+    const el = document.querySelector('.canvas') as HTMLElement | null;
+    if (!el) { setDev('desktop'); return; }
+    const update = () => setDev(widthToDevice(el.clientWidth + 'px'));
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    window.addEventListener('resize', update);
+    return () => { ro.disconnect(); window.removeEventListener('resize', update); };
+  }, [canvasWidth]);
+  return dev;
 }
 
 function findNodeBy(root: SceneElement, id: string): SceneElement | null {

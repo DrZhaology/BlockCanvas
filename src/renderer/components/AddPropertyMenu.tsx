@@ -13,7 +13,8 @@ interface Props {
   type: ElementType;
   elementStyle?: Record<string, string | undefined>;
   visibleKeys: string[];      // 已显示的属性 key 列表
-  onAdd: (key: string) => void;
+  /** 添加属性；带 value 时同时写入该值（用于"搜索属性值 → 一键插入 属性名+属性值"） */
+  onAdd: (key: string, value?: string) => void;
 }
 
 const CATEGORY_ORDER: PropertyCategory[] = [
@@ -124,25 +125,72 @@ export function AddPropertyMenu(props: Props) {
 
   const q = search.trim().toLowerCase();
 
-  const matches = (s: PropertySchema): boolean => {
-    if (!q) return true;
+  /** 该属性的检索用"干草堆"（标签 / key / 连字符 key / 别名 / 4 边 key / 类别） */
+  const hayOf = (s: PropertySchema): string => {
     const camelDash = s.key.replace(/([A-Z])/g, (m) => '-' + m.toLowerCase());
     const sideKeys = (s.sides ?? []).map((sd) => sd.key).join(' ');
     const aliases = (SEARCH_ALIASES[s.key] ?? []).join(' ');
-    const hay = `${s.label} ${s.key} ${camelDash} ${sideKeys} ${s.category} ${s.placeholder ?? ''} ${aliases}`.toLowerCase();
-    
-    // 支持按空格分词搜索（例如 "文字 居中"、"bg tm"）
+    return `${s.label} ${s.key} ${camelDash} ${sideKeys} ${s.category} ${s.placeholder ?? ''} ${aliases}`.toLowerCase();
+  };
+
+  /** 按"权重"给属性名打分（精确 > 前缀 > 包含 > 别名 > 类别；支持空格分词） */
+  const scoreProp = (s: PropertySchema): number => {
+    if (!q) return 1;
+    const label = s.label.toLowerCase();
+    const key = s.key.toLowerCase();
+    const camelDash = key.replace(/([A-Z])/g, (m) => '-' + m.toLowerCase());
+    const aliases = (SEARCH_ALIASES[s.key] ?? []).join(' ').toLowerCase();
+    let score = 0;
+    if (label === q || key === q) score = 1000;
+    else if (label.startsWith(q) || key.startsWith(q)) score = 780;
+    else if (label.includes(q)) score = 640;
+    else if (key.includes(q) || camelDash.includes(q)) score = 600;
+    else if (aliases.includes(q)) score = 480;
+    else if (s.category.toLowerCase().includes(q)) score = 220;
     const tokens = q.split(/\s+/).filter(Boolean);
-    return tokens.every((token) => hay.includes(token));
+    if (tokens.length > 1) {
+      const hay = hayOf(s);
+      if (tokens.every((t) => hay.includes(t))) score = Math.max(score, 430);
+    }
+    return score;
   };
 
   // 候选 = 该元素还没显示的属性（含插件扩展属性）
   const allSchema = [...SCHEMA, ...getPluginProperties()];
   const baseCandidates = allSchema.filter((s) => !props.visibleKeys.includes(s.key));
-  // 搜索过滤后的展示列表
-  const candidates = q ? baseCandidates.filter(matches) : baseCandidates;
+  // 搜索：按权重排序（不再只是"过滤后按原顺序"）
+  const nameHits = q
+    ? baseCandidates.map((s) => ({ s, score: scoreProp(s) })).filter((x) => x.score > 0).sort((a, b) => b.score - a.score)
+    : [];
+  const candidates = q ? nameHits.map((x) => x.s) : baseCandidates;
 
-  // 按类别分组
+  /** 搜索"属性值"：从 schema 的选项 + 元素当前值里找 —— 点蓝色条目可直接"插入 属性名+属性值" */
+  const valueHits = (() => {
+    if (!q) return [] as { key: string; label: string; value: string; score: number }[];
+    const out: { key: string; label: string; value: string; score: number }[] = [];
+    const seen = new Set<string>();
+    for (const s of allSchema) {
+      const cands = new Set<string>();
+      if (s.options) for (const o of s.options) cands.add(o);
+      const cur = props.elementStyle?.[s.key];
+      if (cur) for (const part of String(cur).split(/[\s,]+/)) if (part) cands.add(part);
+      for (const c of cands) {
+        const n = c.toLowerCase();
+        let sc = 0;
+        if (n === q) sc = 900;
+        else if (n.startsWith(q)) sc = 700;
+        else if (n.includes(q)) sc = 520;
+        if (sc <= 0) continue;
+        const dedup = s.key + '=' + c;
+        if (seen.has(dedup)) continue;
+        seen.add(dedup);
+        out.push({ key: s.key, label: s.label, value: c, score: sc });
+      }
+    }
+    return out.sort((a, b) => b.score - a.score).slice(0, 8);
+  })();
+
+  // 按类别分组（仅"未搜索"时用）
   const grouped: Record<PropertyCategory, PropertySchema[]> = {
     '盒模型': [], '颜色': [], '字体与排版': [], '边框与阴影': [], '列表': [], '多媒体': [], '定位': [], 'Flex & Grid 布局': [], '其他': []
   };
@@ -151,8 +199,8 @@ export function AddPropertyMenu(props: Props) {
     else (grouped['其他'] = grouped['其他'] || []).push(c);
   }
 
-  const addAndClose = (key: string) => {
-    props.onAdd(key);
+  const addAndClose = (key: string, value?: string) => {
+    props.onAdd(key, value);
     setSearch('');
     closeMenu();
   };
@@ -210,11 +258,36 @@ export function AddPropertyMenu(props: Props) {
               )}
             </div>
             <div className="add-prop-scroll">
-              {candidates.length === 0 && (
-                <div className="add-prop-empty">没有匹配的属性</div>
-              )}
               {q ? (
-                candidates.map((s) => renderItem(s))
+                <>
+                  {nameHits.length === 0 && valueHits.length === 0 && (
+                    <div className="add-prop-empty">没有匹配「{search.trim()}」的属性或属性值</div>
+                  )}
+                  {valueHits.length > 0 && (
+                    <div className="add-prop-group">
+                      <div className="add-prop-group-title">属性值（点蓝色条目直接插入「属性名 + 属性值」）</div>
+                      {valueHits.map((v) => (
+                        <button
+                          key={v.key + '=' + v.value}
+                          className="add-prop-value-item"
+                          onClick={() => addAndClose(v.key, v.value)}
+                          title={`插入 ${v.label} = ${v.value}`}
+                        >
+                          <span className="add-prop-value-label">{v.label}</span>
+                          <span className="add-prop-value-sep">=</span>
+                          <span className="add-prop-value-val">{v.value}</span>
+                          <span className="add-prop-value-plus">＋ 插入</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {nameHits.length > 0 && (
+                    <div className="add-prop-group">
+                      <div className="add-prop-group-title">属性名（按匹配度排序）</div>
+                      {nameHits.map((x) => renderItem(x.s))}
+                    </div>
+                  )}
+                </>
               ) : (
                 CATEGORY_ORDER.map((cat) => {
                   if (!grouped[cat] || grouped[cat].length === 0) return null;

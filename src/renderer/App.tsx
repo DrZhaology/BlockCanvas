@@ -327,6 +327,9 @@ export default function App() {
       switchView('table');
     };
     window.addEventListener('bc:open-table-editor', onOpenTable);
+    // 中键搜索属性 → 切到「属性」页签并回到编辑器（定位/高亮由 Inspector 负责）
+    const onFocusProp = () => { setRightTab('inspector'); switchView('editor'); };
+    window.addEventListener('bc:focus-prop', onFocusProp);
     window.addEventListener('menu:new-tab', onNewTab);
     window.addEventListener('menu:save-project', onSaveProject);
     window.addEventListener('menu:save-project-as', onSaveProjectAs);
@@ -369,6 +372,7 @@ export default function App() {
       window.removeEventListener('bc:open-help', onOpenHelpEvent);
       window.removeEventListener('menu:check-update', openUpdateCenter);
       window.removeEventListener('bc:open-table-editor', onOpenTable);
+      window.removeEventListener('bc:focus-prop', onFocusProp);
       window.removeEventListener('menu:new-tab', onNewTab);
       window.removeEventListener('menu:save-project', onSaveProject);
       window.removeEventListener('menu:save-project-as', onSaveProjectAs);

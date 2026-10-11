@@ -4,8 +4,9 @@ import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS, TEXT_TAGS } from '@l
 import type { SceneElement } from '@lib/types';
 import { selectorForNode, collectStyleClasses, buildStyleBlock, createStyleClassSet, quickCssToCss, cssTextToObject, simplifyStyle } from '@lib/styleClass';
 import { classColor } from '@lib/classColor';
-import { usePersistedBool } from '@lib/usePersisted';
+import { useShowBr } from '@lib/showBr';
 import { CanvasTextMenu, isTextStylable, type TextMenuPayload } from './CanvasTextMenu';
+import { CanvasPropSearch } from './CanvasPropSearch';
 
 // BlockCanvas · 画布
 // 阶段1：递归渲染 scene graph。
@@ -99,6 +100,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   // 滚轮缩放要用到"当前缩放"，但 wheel 回调里读 prop 会拿到旧值 → 用 ref 跟住
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
+  // Alt+滚轮的"缩放锚点"（transform-origin）：默认左上，Alt 滚轮时设到光标处
+  const [zoomOrigin, setZoomOrigin] = useState('left top');
 
   // 拖框选中状态（**内容坐标系**：起点钉在画布内容上，容器滚动时选框跟着内容走，
   // 于是可以把画布滚出去的部分也框进来；绘制时再换算回 client 坐标）。
@@ -125,15 +128,19 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   // 不按 Alt 时行为完全不变；Alt+单击（不拖）= 选中父级（沿用旧行为）。
   type AltEdge = 'l' | 'r' | 't' | 'b' | 'tl' | 'tr' | 'bl' | 'br';
   type AltMode = 'resize' | 'font' | 'move';
+  type Bar = { x: number; y: number; w: number; h: number };
   const [altHover, setAltHover] = useState<{ id: string; edge: AltEdge | null; mode: AltMode; rect: { x: number; y: number; w: number; h: number } } | null>(null);
   const altHoverRef = useRef<typeof altHover>(null);
   altHoverRef.current = altHover;
   const [altBadge, setAltBadge] = useState<{ x: number; y: number; text: string } | null>(null);
   // 撞到"墙"时闪一下的那条边（橙色），告诉用户"这是限制不是 BUG"
   const [wallFlash, setWallFlash] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  // Alt 移动时的"吸附对齐参考线"（PowerPoint 风格）
+  const [guides, setGuides] = useState<{ x: number | null; y: number | null; box: { left: number; top: number; right: number; bottom: number } | null } | null>(null);
   const wallFlashTimer = useRef(0);
-  const flashWall = (bar: { x: number; y: number; w: number; h: number }) => {
-    setWallFlash(bar);
+  const flashWall = (b: Bar | null) => {
+    if (!b) return;
+    setWallFlash(b);
     window.clearTimeout(wallFlashTimer.current);
     wallFlashTimer.current = window.setTimeout(() => setWallFlash(null), 620);
   };
@@ -146,47 +153,102 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     positioned: boolean; isFixed: boolean;
     startLeft: number; startTop: number;
     startMarginL: number; startMarginT: number;
-    /** 允许移动/缩放的 client 坐标范围（"墙"）+ 墙所在的矩形（用于整面高亮） */
-    bounds: { minX: number; maxX: number; minY: number; maxY: number; wall: { left: number; top: number; right: number; bottom: number }; fixed: boolean };
+    /** 允许移动/缩放的 client 坐标范围（"墙"）+ 每面墙要画的整条边 + 吸附参考线 */
+    bounds: {
+      minX: number; maxX: number; minY: number; maxY: number;
+      barL: Bar | null; barR: Bar | null; barT: Bar | null; barB: Bar | null;
+      snapX: number[]; snapY: number[];
+    };
     startFont: number;
     engaged: boolean;
   }>(null);
 
-  /** 计算某个元素"能动到哪儿"的边界（client 坐标）。不同定位状态给不同的墙。 */
+  /**
+   * 计算元素"能动到哪儿"的边界（client 坐标）+ 每面墙要画的位置。
+   *
+   * 规则（v0.4.4g 重做）：
+   *   · 墙基准取父容器的**内容盒**（去掉 padding/border），并**把元素自己的 margin 算进去** ——
+   *     所以"碰到内边距/外边距"就停，不会无视 margin 直接突破。
+   *   · **元素与元素的碰撞**：定位元素（absolute/relative/fixed）会把邻近兄弟的边缘当成墙，
+   *     墙就画在那个兄弟的边上；只有没有兄弟可撞时才退回父容器/画布。
+   *   · `fixed` 额外受**画布四边**限制（画布 = 浏览器视口）。
+   *   · 常规流元素纵向不设底（可以一直往下拖，把画布撑长）。
+   */
   const boundsFor = (el: HTMLElement, rect: DOMRect) => {
     const canvasEl = el.closest('.canvas') as HTMLElement | null;
+    const cs = getComputedStyle(el);
+    const pos = cs.position;
+    const isFixed = pos === 'fixed';
+    const positioned = pos === 'absolute' || pos === 'relative' || pos === 'fixed';
+    const m = {
+      top: parseFloat(cs.marginTop) || 0,
+      right: parseFloat(cs.marginRight) || 0,
+      bottom: parseFloat(cs.marginBottom) || 0,
+      left: parseFloat(cs.marginLeft) || 0
+    };
+    const boxOf = (n: HTMLElement) => {
+      const r = n.getBoundingClientRect();
+      const cw = n.clientWidth || r.width;
+      const ch = n.clientHeight || r.height;
+      const left = r.left + n.clientLeft;
+      const top = r.top + n.clientTop;
+      return { left, top, right: left + cw, bottom: top + ch };
+    };
     const parentEl = el.parentElement;
-    const pos = getComputedStyle(el).position;
-    // 父容器用「内容盒」（content box，= 去掉 padding/border）作为墙 —— 用户要求墙在"内边距"上
-    const boxOf = (node: HTMLElement) => {
-      const r = node.getBoundingClientRect();
-      const left = r.left + node.clientLeft;
-      const top = r.top + node.clientTop;
-      return { left, top, right: left + node.clientWidth, bottom: top + node.clientHeight };
-    };
-    if (pos === 'fixed') {
-      // fixed 在编辑器里被 .canvas 关成了"视口" → 只能在画布这 4 堵墙里
-      const b = boxOf(canvasEl ?? el);
-      return {
-        minX: b.left, maxX: b.right - rect.width,
-        minY: b.top, maxY: b.bottom - rect.height,
-        wall: b, fixed: true
-      };
+    const pb = boxOf(parentEl && parentEl !== canvasEl ? parentEl : (canvasEl ?? el));
+
+    // 墙的"整面"高亮条
+    const vBar = (x: number, top: number, bottom: number) => ({ x: x - 3, y: top, w: 3, h: Math.max(2, bottom - top) });
+    const hBar = (y: number, left: number, right: number) => ({ x: left, y: y - 3, w: Math.max(2, right - left), h: 3 });
+
+    // 定位元素的 margin 是固定的 → 墙要把它算进去；常规流元素的 margin 本身就是被调的量 → 不算
+    const addM = positioned;
+    let minX = pb.left + (addM ? m.left : 0);
+    let maxX = pb.right - (addM ? m.right : 0) - rect.width;
+    let minY = pb.top + (addM ? m.top : 0);
+    let maxY = isFixed ? pb.bottom - (addM ? m.bottom : 0) - rect.height : Infinity;
+    let barL: { x: number; y: number; w: number; h: number } | null = vBar(pb.left, pb.top, pb.bottom);
+    let barR: { x: number; y: number; w: number; h: number } | null = vBar(pb.right, pb.top, pb.bottom);
+    let barT: { x: number; y: number; w: number; h: number } | null = hBar(pb.top, pb.left, pb.right);
+    let barB: { x: number; y: number; w: number; h: number } | null = isFixed ? hBar(pb.bottom, pb.left, pb.right) : null;
+
+    // 元素与元素的碰撞（只对定位元素生效 —— 常规流的兄弟永远紧挨着，谈不上"撞"）
+    if (positioned && parentEl) {
+      for (const sib of Array.from(parentEl.children) as HTMLElement[]) {
+        if (sib === el || !sib.hasAttribute?.('data-bc-id')) continue;
+        const sr = sib.getBoundingClientRect();
+        const vOverlap = Math.min(rect.bottom, sr.bottom) - Math.max(rect.top, sr.top) > 1;
+        const hOverlap = Math.min(rect.right, sr.right) - Math.max(rect.left, sr.left) > 1;
+        if (vOverlap) {
+          if (sr.right <= rect.left + 1 && sr.right + m.left > minX) { minX = sr.right + m.left; barL = vBar(sr.right, sr.top, sr.bottom); }
+          if (sr.left >= rect.right - 1 && sr.left - m.right - rect.width < maxX) { maxX = sr.left - m.right - rect.width; barR = vBar(sr.left, sr.top, sr.bottom); }
+        }
+        if (hOverlap) {
+          if (sr.bottom <= rect.top + 1 && sr.bottom + m.top > minY) { minY = sr.bottom + m.top; barT = hBar(sr.bottom, sr.left, sr.right); }
+          if (sr.top >= rect.bottom - 1 && sr.top - m.bottom - rect.height < maxY) { maxY = sr.top - m.bottom - rect.height; barB = hBar(sr.top, sr.left, sr.right); }
+        }
+      }
     }
-    const pb = parentEl && parentEl !== canvasEl ? boxOf(parentEl) : boxOf(canvasEl ?? el);
-    // 非 fixed：**只受父容器横向限制**；纵向允许一直往下拖（把画布拉长），
-    // 常规流再叠加"不能越过上一个兄弟"（往下拖会自然把后面的内容推下去，无需限制）。
-    let minY = pb.top;
-    if (pos !== 'absolute' && pos !== 'relative') {
-      const prev = el.previousElementSibling as HTMLElement | null;
-      if (prev && prev.hasAttribute('data-bc-id')) minY = Math.max(minY, prev.getBoundingClientRect().bottom);
+    // 兜底：范围别反转
+    if (maxX < minX) maxX = minX;
+    if (Number.isFinite(maxY) && maxY < minY) maxY = minY;
+    // 允许至少停在原地
+    minY = Math.min(minY, rect.top);
+    if (Number.isFinite(maxY)) maxY = Math.max(maxY, rect.bottom - rect.height);
+
+    // —— 吸附对齐参考线（PowerPoint 风格）：父容器 + 所有兄弟的 左/中/右、上/中/下 ——
+    const snapX: number[] = [pb.left, (pb.left + pb.right) / 2, pb.right];
+    const snapY: number[] = [pb.top, (pb.top + pb.bottom) / 2, pb.bottom];
+    if (parentEl) {
+      for (const sib of Array.from(parentEl.children) as HTMLElement[]) {
+        if (sib === el || !sib.hasAttribute?.('data-bc-id')) continue;
+        const sr = sib.getBoundingClientRect();
+        snapX.push(sr.left, (sr.left + sr.right) / 2, sr.right);
+        snapY.push(sr.top, (sr.top + sr.bottom) / 2, sr.bottom);
+      }
     }
-    minY = Math.min(minY, rect.top); // 至少允许停在原地
-    return {
-      minX: pb.left, maxX: Math.max(pb.left, pb.right - rect.width),
-      minY, maxY: Infinity,
-      wall: pb, fixed: false
-    };
+
+    return { minX, maxX, minY, maxY, barL, barR, barT, barB, snapX, snapY };
   };
 
   const EDGE_PX = 7; // 边缘热区宽度（按住 Alt 后才生效）
@@ -265,6 +327,17 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     if (!t0?.classList?.contains('canvas-inline-text-input')) {
       window.dispatchEvent(new CustomEvent('bc:commit-inline'));
     }
+    // 鼠标中键 = 打开"属性搜索"框（敲属性名 → Enter → 右侧面板定位高亮）
+    if (e.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+      const el = t0?.closest?.('.canvas [data-bc-id]') as HTMLElement | null;
+      if (el) {
+        select(el.getAttribute('data-bc-id')!);
+        setPropSearch({ x: e.clientX, y: e.clientY });
+      }
+      return;
+    }
     if (!e.altKey || e.button !== 0) return;
     const h = altHoverRef.current;
     if (!h) return;
@@ -312,13 +385,9 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     }
     const node = findNode(st.scene.root, d.id);
     if (!node) return;
-    // 撞墙时高亮"整面墙"（而不是元素与墙接触的那一小段）
-    const w = d.bounds.wall;
-    const wallBar = (side: 'l' | 'r' | 't' | 'b') => side === 'l'
-      ? { x: w.left - 3, y: w.top, w: 3, h: w.bottom - w.top }
-      : side === 'r' ? { x: w.right, y: w.top, w: 3, h: w.bottom - w.top }
-        : side === 't' ? { x: w.left, y: w.top - 3, w: w.right - w.left, h: 3 }
-          : { x: w.left, y: w.bottom, w: w.right - w.left, h: 3 };
+    // 撞墙时高亮"整面墙"（元素边/外边距 ↔ 另一个元素的边，或父容器内边距）
+    const bar = (side: 'l' | 'r' | 't' | 'b'): Bar | null =>
+      side === 'l' ? d.bounds.barL : side === 'r' ? d.bounds.barR : side === 't' ? d.bounds.barT : d.bounds.barB;
 
     if (d.mode === 'resize') {
       // 贴哪条边改哪条；贴左/上边时同时把元素"推"回去 → 对侧边保持不动
@@ -336,11 +405,11 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       const parentBottom = Number.isFinite(d.bounds.maxY) ? d.bounds.maxY + d.startH : Infinity;
       if (hasR && nw > parentRight - d.rect.left) {
         nw = Math.max(8, parentRight - d.rect.left);
-        flashWall(wallBar('r'));
+        flashWall(bar('r'));
       }
       if (hasB && nh > parentBottom - d.rect.top) {
         nh = Math.max(8, parentBottom - d.rect.top);
-        flashWall(wallBar('b'));
+        flashWall(bar('b'));
       }
       // 墙：左 / 上边不能超出父容器（对侧边固定）
       let shiftX = hasL ? dx : 0;
@@ -348,12 +417,12 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       if (hasL && d.rect.right - nw < d.bounds.minX) {
         nw = Math.max(8, d.rect.right - d.bounds.minX);
         shiftX = d.bounds.minX - d.rect.left;
-        flashWall(wallBar('l'));
+        flashWall(bar('l'));
       }
       if (hasT && d.rect.bottom - nh < d.bounds.minY) {
         nh = Math.max(8, d.rect.bottom - d.bounds.minY);
         shiftY = d.bounds.minY - d.rect.top;
-        flashWall(wallBar('t'));
+        flashWall(bar('t'));
       }
       const patch: Record<string, string> = { width: Math.round(nw) + 'px' };
       if (hasT || hasB) patch.height = Math.round(nh) + 'px';
@@ -370,11 +439,39 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       // 都受"墙"限制 —— 横向不出父容器、纵向不越过上一个兄弟；撞墙闪"整面墙"
       let targetLeft = d.rect.left + dx;
       let targetTop = d.rect.top + dy;
+
+      // —— 吸附对齐（PowerPoint 风格）：左/中/右、上/中/下 靠近参考线时吸过去并画参考线 ——
+      const SNAP = 6;
+      const trySnap = (edges: number[], targets: number[]) => {
+        let best: { delta: number; line: number } | null = null;
+        for (const e of edges) {
+          for (const t of targets) {
+            const delta = t - e;
+            if (Math.abs(delta) <= SNAP && (!best || Math.abs(delta) < Math.abs(best.delta))) best = { delta, line: t };
+          }
+        }
+        return best;
+      };
+      const sx = trySnap([targetLeft, targetLeft + d.rect.width / 2, targetLeft + d.rect.width], d.bounds.snapX);
+      if (sx) targetLeft += sx.delta;
+      const sy = trySnap([targetTop, targetTop + d.rect.height / 2, targetTop + d.rect.height], d.bounds.snapY);
+      if (sy) targetTop += sy.delta;
+      if (sx || sy) {
+        const cr = canvasRef.current?.getBoundingClientRect();
+        setGuides({
+          x: sx ? sx.line : null,
+          y: sy ? sy.line : null,
+          box: cr ? { left: cr.left, top: cr.top, right: cr.right, bottom: cr.bottom } : null
+        });
+      } else {
+        setGuides(null);
+      }
+
       let hit: { x: number; y: number; w: number; h: number } | null = null;
-      if (targetLeft < d.bounds.minX) { targetLeft = d.bounds.minX; hit = wallBar('l'); }
-      if (targetLeft > d.bounds.maxX) { targetLeft = d.bounds.maxX; hit = wallBar('r'); }
-      if (targetTop < d.bounds.minY) { targetTop = d.bounds.minY; hit = wallBar('t'); }
-      if (Number.isFinite(d.bounds.maxY) && targetTop > d.bounds.maxY) { targetTop = d.bounds.maxY; hit = wallBar('b'); }
+      if (targetLeft < d.bounds.minX) { targetLeft = d.bounds.minX; hit = bar('l'); }
+      if (targetLeft > d.bounds.maxX) { targetLeft = d.bounds.maxX; hit = bar('r'); }
+      if (targetTop < d.bounds.minY) { targetTop = d.bounds.minY; hit = bar('t'); }
+      if (Number.isFinite(d.bounds.maxY) && targetTop > d.bounds.maxY) { targetTop = d.bounds.maxY; hit = bar('b'); }
       const ax = targetLeft - d.rect.left;
       const ay = targetTop - d.rect.top;
       const patch: Record<string, string> = {};
@@ -399,6 +496,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     document.body.classList.remove('bc-alt-dragging');
     document.body.classList.remove('bc-alt-fonting');
     setAltBadge(null);
+    setGuides(null);
     if (!d) return;
     if (d.engaged) {
       useScene.getState().endStyleEdit();
@@ -420,33 +518,30 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   }, []);
 
   const onCanvasWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    // 滚轮时先收掉 Alt 悬停高亮（避免缩放时还挂着"可编辑"虚线框与光标）
+    if (altHover) setAltHover(null);
+    tagAltCursor(null, '');
     // Ctrl+滚轮 / Alt+滚轮 都是缩放；Alt 额外做"以鼠标位置为锚点"的精准缩放
     if (!e.ctrlKey && !e.altKey) return;
     e.preventDefault();
-    const wrap = canvasRef.current?.closest('.canvas-wrap') as HTMLElement | null;
     const canvasEl = canvasRef.current;
-    if (!wrap || !canvasEl) return;
+    if (!canvasEl) return;
     const oldZoom = zoomRef.current;
     // 分度更细（4%/格，以前 10%/格）：滚起来"费力一点"但精度更高
     const dir = e.deltaY < 0 ? 1 : -1;
     const next = Math.min(2, Math.max(0.5, Math.round(oldZoom * (1 + dir * 0.04) * 100) / 100));
     if (next === oldZoom) return;
-    const wantCursorAnchor = e.altKey;
-    const canvasRect = canvasEl.getBoundingClientRect();
-    const localX = (e.clientX - canvasRect.left) / oldZoom;
-    const localY = (e.clientY - canvasRect.top) / oldZoom;
-    const newLeft = e.clientX - localX * next;
-    const newTop = e.clientY - localY * next;
-    const dLeft = newLeft - canvasRect.left;
-    const dTop = newTop - canvasRect.top;
-    onZoomChange?.(() => next);
-    if (wantCursorAnchor) {
-      // 等缩放落地后再补偿滚动，让鼠标下的那个点保持不动
-      requestAnimationFrame(() => {
-        wrap.scrollLeft += dLeft;
-        wrap.scrollTop += dTop;
-      });
+    if (e.altKey && next !== 1) {
+      // 以鼠标位置为缩放锚点：把 transform-origin 设到光标处（相对画布百分比），
+      // 缩放时该点保持不动 —— 比"补偿滚动"更可靠（画布居中时滚动是无效的）。
+      const r = canvasEl.getBoundingClientRect();
+      const ox = r.width ? ((e.clientX - r.left) / r.width) * 100 : 0;
+      const oy = r.height ? ((e.clientY - r.top) / r.height) * 100 : 0;
+      setZoomOrigin(`${Math.max(0, Math.min(100, ox)).toFixed(2)}% ${Math.max(0, Math.min(100, oy)).toFixed(2)}%`);
+    } else {
+      setZoomOrigin('left top');
     }
+    onZoomChange?.(() => next);
   };
 
   const selectParent = (id: string) => {
@@ -646,6 +741,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
 
   // 右键：命中文字元素 → 弹「单独调整这段文字」菜单（不按 Alt；块级容器不弹）
   const [textMenu, setTextMenu] = useState<TextMenuPayload | null>(null);
+  // 中键：属性搜索框
+  const [propSearch, setPropSearch] = useState<{ x: number; y: number } | null>(null);
   const onWrapContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
     const el = (e.target as HTMLElement)?.closest?.('.canvas [data-bc-id]') as HTMLElement | null;
     if (!el) return;
@@ -726,7 +823,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           // 于是画布里的 position:fixed 元素被关在画布内（相当于浏览器视口），
           // 不会跑到编辑器面板上乱盖。zoom=1 时 scale(1) 视觉上无差别。
           transform: `scale(${zoom})`,
-          transformOrigin: 'left top',
+          transformOrigin: zoomOrigin,
           // 拖拽调宽时关掉过渡（否则 1:1 跟手会变成"追不上"）
           ...(wDrag ? { transition: 'none' } : undefined)
         }}
@@ -783,8 +880,17 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           style={{ left: wallFlash.x, top: wallFlash.y, width: wallFlash.w, height: wallFlash.h }}
         />
       )}
+      {/* Alt 移动时的吸附对齐参考线 */}
+      {guides && guides.box && guides.x !== null && (
+        <div className="bc-align-guide bc-align-v" style={{ left: guides.x, top: guides.box.top, height: guides.box.bottom - guides.box.top }} />
+      )}
+      {guides && guides.box && guides.y !== null && (
+        <div className="bc-align-guide bc-align-h" style={{ top: guides.y, left: guides.box.left, width: guides.box.right - guides.box.left }} />
+      )}
       {/* 右键文字样式菜单（Portal 到 body） */}
       {textMenu && <CanvasTextMenu payload={textMenu} onClose={() => setTextMenu(null)} />}
+      {/* 中键属性搜索（Portal 到 body） */}
+      {propSearch && <CanvasPropSearch x={propSearch.x} y={propSearch.y} onClose={() => setPropSearch(null)} />}
     </div>
   );
 }
@@ -814,8 +920,8 @@ const CanvasNode = React.memo(function CanvasNode(props: {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const editingRef = useRef(false);
   editingRef.current = editingText;
-  // 「显示 <br>」：编辑时在框上叠一层淡灰换行标记（不影响内容；记住开关状态）
-  const [showBr, setShowBr] = usePersistedBool('canvas-show-br', false);
+  // 「显示 <br>」：与属性面板共用同一份开关（见 lib/showBr.ts）
+  const [showBr] = useShowBr();
 
   // 选中态测量：display:inline 的元素跨行时 outline 会按行盒拆成多个框。
   // 行内选中元素不再自画 outline（由 Canvas 的 .canvas-inline-sel 合并外框负责）。
@@ -917,14 +1023,14 @@ const CanvasNode = React.memo(function CanvasNode(props: {
     return node.text ? withBreaks(node.text, 'p') : null;
   };
 
-  /** 「显示 <br>」开关：在编辑框上叠一层透明文本 + 淡灰 <br> 标记（不影响内容） */
+  /** 叠加层内容：透明文字（用来定位下划线/删除线）+（开关开启时）淡灰 <br> 标记 */
   const brOverlayNodes = (() => {
     const parts = inlineDraft.split('\n');
     const out: React.ReactNode[] = [];
     parts.forEach((p, i) => {
       if (p) out.push(<span key={`t${i}`}>{p}</span>);
       if (i < parts.length - 1) {
-        out.push(<span key={`m${i}`} className="bc-br-mark">{'<br>'}</span>);
+        if (showBr) out.push(<span key={`m${i}`} className="bc-br-mark">{'<br>'}</span>);
         out.push(<br key={`b${i}`} />);
       }
     });
@@ -968,6 +1074,23 @@ const CanvasNode = React.memo(function CanvasNode(props: {
       ? `inset 0 0 0 1.5px #ffffff, ${ownShadow}`
       : 'inset 0 0 0 1.5px #ffffff';
   }
+
+  /** 就地编辑时的"文字观感"：把元素生效的排版样式套到编辑框（含叠加层）上，
+   *  让编辑框里的预览与画布一致 —— 字号 / 粗细 / 斜体 / 颜色直接生效；
+   *  下划线 / 删除线由叠加层用"透明文字 + 显式 decoration-color"画出（textarea 自身不支持）。 */
+  const effForEdit = getEffectiveStyle(node, activeBreakpoint) as Record<string, string | undefined>;
+  const pick = (k: string): string => String((node.style as Record<string, string | undefined>)[k] ?? effForEdit[k] ?? '');
+  const editTextStyle: React.CSSProperties = {
+    fontSize: pick('fontSize') || undefined,
+    fontWeight: pick('fontWeight') || undefined,
+    fontStyle: pick('fontStyle') || undefined,
+    color: pick('color') || undefined,
+    lineHeight: pick('lineHeight') || undefined,
+    fontFamily: pick('fontFamily') || undefined,
+    letterSpacing: pick('letterSpacing') || undefined,
+    textAlign: (pick('textAlign') || undefined) as React.CSSProperties['textAlign']
+  };
+  const editDeco = pick('textDecoration');
 
   const commonProps = {
     'data-bc-id': node.id,
@@ -1044,7 +1167,13 @@ const CanvasNode = React.memo(function CanvasNode(props: {
     >
       {/* 文本直接作为文本节点；双击进入就地编辑（多行 textarea，点别处 / Esc 都保存） */}
       {editingText ? (
-        <span className="bc-inline-edit-wrap" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+        <span
+          className="bc-inline-edit-wrap"
+          style={editTextStyle}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           <textarea
             ref={inputRef}
             className="canvas-inline-text-input"
@@ -1077,13 +1206,13 @@ const CanvasNode = React.memo(function CanvasNode(props: {
               }
             }}
           />
-          {showBr && <div className="bc-inline-br-overlay" aria-hidden="true">{brOverlayNodes}</div>}
-          <button
-            className={'bc-inline-br-toggle' + (showBr ? ' active' : '')}
-            title="显示 / 隐藏换行标记（换行导出时会自动变成 <br>）"
-            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
-            onClick={(e) => { e.stopPropagation(); setShowBr((v) => !v); }}
-          >{showBr ? '隐藏 <br>' : '显示 <br>'}</button>
+          {/* 叠加层：文字透明，只负责画「下划线 / 删除线」和（开关开启时的）淡灰 <br> 标记。
+              textarea 本身不渲染 text-decoration，所以用这一层补上，位置与输入文字逐字对齐。 */}
+          <div
+            className="bc-inline-br-overlay"
+            aria-hidden="true"
+            style={{ textDecoration: editDeco || undefined, textDecorationColor: editTextStyle.color as string | undefined }}
+          >{brOverlayNodes}</div>
         </span>
       ) : (
         renderTextContent()
