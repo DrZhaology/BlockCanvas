@@ -419,8 +419,6 @@ function PageAddProp(props: { items: PagePropDef[]; onAdd: (key: PageQuickKey) =
 function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string | null; onJustAdded: (k: string | null) => void }) {
   const { selected, justAddedKey, onJustAdded } = props;
   const updateStyle = useScene((s) => s.updateStyle);
-  const removeElement = useScene((s) => s.removeElement);
-  const duplicateElement = useScene((s) => s.duplicateElement);
   const setText = useScene((s) => s.setText);
   const addVisibleProp = useScene((s) => s.addVisibleProp);
   const removeVisibleProp = useScene((s) => s.removeVisibleProp);
@@ -494,15 +492,18 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
     return 'bc-inspector-sec-id-' + elementId;
   })();
 
+  // 面板板块开合：**默认只展开「选择器与标识」**（新插入的元素先让人看到"叫什么名字"这件事），
+  // 其余板块（布局 / CSS 属性 / 交互状态）默认折叠；用户手动开合后按元素/选择器记忆。
+  // 不提供"默认展开哪个板块"的设置项 —— 就这一套默认值。
   const [secOpen, setSecOpen] = useState<{ identity: boolean; layout: boolean; css: boolean; pseudo: boolean }>(() => {
     try {
       const saved = localStorage.getItem(secStorageKey) || localStorage.getItem('bc-inspector-sec-' + elementId);
       if (saved) {
         const p = JSON.parse(saved);
-        return { identity: p.identity ?? false, layout: p.layout ?? false, css: p.css ?? false, pseudo: p.pseudo ?? false };
+        return { identity: p.identity ?? true, layout: p.layout ?? false, css: p.css ?? false, pseudo: p.pseudo ?? false };
       }
     } catch {}
-    return { identity: false, layout: false, css: false, pseudo: false };
+    return { identity: true, layout: false, css: false, pseudo: false };
   });
 
   // 折叠状态变更时持久化到共享 key
@@ -532,7 +533,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
       }
       if (saved) {
         const p = JSON.parse(saved);
-        setSecOpen({ identity: p.identity ?? false, layout: p.layout ?? false, css: p.css ?? false, pseudo: p.pseudo ?? false });
+        setSecOpen({ identity: p.identity ?? true, layout: p.layout ?? false, css: p.css ?? false, pseudo: p.pseudo ?? false });
       }
     } catch {}
   }, [secStorageKey, elementId]);
@@ -1199,12 +1200,6 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
             </div>
           </div>
         </Collapse>
-      </div>
-
-      {/* ——— 操作区 ——— */}
-      <div className="inspector-actions">
-        <button className="btn-secondary" onClick={() => duplicateElement(elementId)}>复制元素</button>
-        <button className="btn-danger" onClick={() => removeElement(elementId)}>删除元素</button>
       </div>
     </>
   );

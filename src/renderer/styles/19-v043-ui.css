@@ -1,0 +1,141 @@
+/* ==========================================================================
+   BlockCanvas · 19-v043-ui.css —— v0.4.3 全局 UI 统一轮
+   --------------------------------------------------------------------------
+   ① 按钮基线：`.btn-primary` 以前**只在 `.toolbar` 作用域里定义过**，于是组件里
+      20 多处 `className="btn-primary"` 全是系统默认长相（方灰框、无内边距）。
+      这里补齐一套全局按钮语言；工具栏里的旧规则（`.toolbar .btn-primary` 等）
+      特异性更高，仍然优先，不受影响。
+   ② 面板去嵌套：卡片里的小块不再各画一圈边框（区块之间靠留白 + 浅底分隔）。
+   ③ 渐变色标行拖动柄溢出修复。
+
+   分片顺序 = 级联顺序，本片最后 import，用来统一覆盖前面分片的旧规则。
+   ========================================================================== */
+
+/* ==========================================================================
+   ① 按钮基线（全局）
+   ========================================================================== */
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.btn-mini,
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: auto;
+  height: 28px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard),
+              border-color var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard);
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover, var(--accent));
+  border-color: var(--accent-hover, var(--accent));
+}
+.btn-secondary {
+  background: var(--bg-panel);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn-danger {
+  background: var(--bg-panel);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.btn-mini {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-size: 11px;
+}
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-danger:disabled,
+.btn-mini:disabled,
+.btn-ghost:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ==========================================================================
+   ② 面板去嵌套：一层套一层、一堆边框线
+   --------------------------------------------------------------------------
+   .inspector-sec 本身已经是带框卡片，里面的 .prop-row 再画一圈就是"框中框"。
+   改成：去掉内层边框，用浅底 + 圆角分区；告警态保留底色并加一条左侧色条。
+   ========================================================================== */
+.inspector-sec-body .prop-row,
+.prop-row {
+  border: none;
+  border-radius: 6px;
+  background: var(--panel-soft);
+}
+.prop-row:hover { background: var(--hover-accent); }
+.prop-row.is-inapplicable {
+  background: #fffdf5;
+  box-shadow: inset 2px 0 0 0 #f0b429;
+}
+/* 渐变卡片内部的色标行同理：不再各画一圈边框 */
+.grad-stops .grad-stop,
+.grad-stop {
+  border-color: transparent;
+  background: var(--panel-soft);
+}
+.grad-stop:hover { border-color: var(--accent); }
+/* 色标行的输入框也去掉多余描边，靠底色区分即可 */
+.grad-stop .color-text-input { border-color: transparent; background: var(--bg-panel); }
+.grad-stop .color-text-input:focus { border-color: var(--accent); }
+
+/* ==========================================================================
+   ③ 渐变色标行拖动柄溢出（⠿ 这个盲文字符比行高还高，不裁就往外冒）
+   ========================================================================== */
+.grad-stop-grip {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: -2px;
+  opacity: 0.7;
+}
+.grad-stop-grip:hover { opacity: 1; color: var(--accent); }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, Fragment } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useMemo, Fragment } from 'react';
 import { createPortal } from 'react-dom';
 import { useScene } from '@store/sceneStore';
 import { exportHTML, type ExportResult } from '@lib/exporter';
@@ -513,20 +513,30 @@ function AnchoredPanel(props: {
 }) {
   const { open, anchorRef, onClose, className, align = 'left', onMouseEnter, onMouseLeave, children } = props;
   const [pos, setPos] = useState<{ left: number; top: number; below: boolean } | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
-  useEffect(() => {
+  // 定位：**按面板真实宽高算**（以前硬编码 360 宽，"⋯更多"这种窄面板会被推到很左边，
+  // 看起来就是"菜单飘到左边去了"）。首帧先以 visibility:hidden 渲染出来量尺寸，
+  // useLayoutEffect 里量完立刻定位 —— 在绘制前完成，所以不会闪一下。
+  useLayoutEffect(() => {
     if (!open) { setPos(null); return; }
     const place = () => {
       const el = anchorRef.current;
-      if (!el) return;
+      const panel = panelRef.current;
+      if (!el || !panel) return;
       const r = el.getBoundingClientRect();
-      const panelW = 360;
-      const rawLeft = align === 'right' ? r.right - panelW : r.left;
-      const left = Math.min(Math.max(8, rawLeft), Math.max(8, window.innerWidth - panelW - 8));
-      const below = r.bottom + 240 < window.innerHeight;
-      setPos({ left, top: below ? r.bottom + 6 : r.top - 6, below });
+      const w = panel.offsetWidth;
+      const h = panel.offsetHeight;
+      if (!w || !h) return;
+      const margin = 8;
+      const gap = 6;
+      const rawLeft = align === 'right' ? r.right - w : r.left;
+      const left = Math.min(Math.max(margin, rawLeft), Math.max(margin, window.innerWidth - w - margin));
+      const below = r.bottom + gap + h <= window.innerHeight - margin;
+      const top = below ? r.bottom + gap : Math.max(margin, r.top - gap - h);
+      setPos((cur) => (cur && cur.left === left && cur.top === top && cur.below === below ? cur : { left, top, below }));
     };
     place();
     const onDoc = (e: MouseEvent) => {
@@ -548,11 +558,12 @@ function AnchoredPanel(props: {
     };
   }, [open, anchorRef, align]);
 
-  if (!open || !pos) return null;
+  if (!open) return null;
   return createPortal(
     <div
-      className={'tb-anchor-pos' + (pos.below ? '' : ' above')}
-      style={{ left: pos.left, top: pos.top }}
+      ref={panelRef}
+      className={'tb-anchor-pos' + (pos && !pos.below ? ' above' : '')}
+      style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: 0, visibility: 'hidden' }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >

@@ -895,6 +895,11 @@
 .help-pop.fade-in {
   animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
 }
+/* 关闭：淡出 + 轻微缩小（原来直接卸载，看起来"啪一下没了"） */
+.help-pop.is-closing {
+  animation: bcPopOut var(--dur-pop) var(--ease-standard) both;
+  pointer-events: none;
+}
 
 /* 帮助气泡：就在问号旁边弹出（不是全屏遮罩）
    实际位置由固定定位 inline style 控制（见 HelpButton） */

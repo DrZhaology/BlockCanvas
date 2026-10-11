@@ -111,6 +111,8 @@ declare global {
       getLocalVersion: () => Promise<string>;
       /** 阶段展示文案（version.json → package.json.bcStage） */
       getAppStage: () => Promise<string>;
+      /** 单独下载发行版资产到 data/downloads/（不替换程序） */
+      downloadReleaseAsset: (assetUrl: string, fileName: string) => Promise<{ ok: boolean; path?: string; error?: string; mirror?: string }>;
 
       // 扩展与插件
       scanExtensions: () => Promise<ScanResult>;

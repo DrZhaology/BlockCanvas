@@ -4,6 +4,7 @@ import {
   existsSync, mkdirSync, readdirSync, rmSync, writeFileSync, chmodSync, readFileSync,
   openSync, readSync, closeSync, createWriteStream
 } from 'node:fs';
+import { dataRoot } from './userData';
 
 // ============================================================================
 // BlockCanvas · 自动更新中枢（v0.4.3 重写）
@@ -266,8 +267,8 @@ export interface UpdateListResult {
   source: string;
 }
 
-/** 历史版本（当前版本之前）最多展示几条 —— 纯信息展示，不带更新按钮 */
-const OLDER_LIMIT = 5;
+/** 历史版本（当前版本之前）最多返回几条 —— 列表默认只显示前几条，靠「查看更多」逐段展开 */
+const OLDER_LIMIT = 30;
 
 export function buildUpdateList(localVersion: string, releases: LatestReleaseInfo[], source: string): UpdateListResult {
   const sorted = [...releases].sort((a, b) => compareVersion(b.version, a.version)); // 新 → 旧
@@ -381,6 +382,27 @@ export async function downloadUpdateAsset(
     }
   }
   return { ok: false, error: errors.join('；') || '全部镜像均下载失败' };
+}
+
+/**
+ * 单独下载某个发行版资产（更新中心「下载 zip」按钮用）。
+ * 与自动更新不同：**只落盘、不替换程序**，存到 `data/downloads/` 下。
+ * 放 data/ 里有两个好处：便携版升级时 data/ 永远保留；E2E 可用 BC_DATA_DIR 隔离。
+ */
+export async function downloadReleaseAsset(
+  url: string,
+  fileName: string,
+  onProgress?: (msg: string, pct?: number) => void
+): Promise<{ ok: boolean; path?: string; error?: string; mirror?: string }> {
+  if (!url) return { ok: false, error: '缺少下载地址' };
+  const safe = (fileName || 'BlockCanvas-asset.zip').replace(/[\\/:*?"<>|]/g, '_');
+  const dest = join(dataRoot(), 'downloads', safe);
+  const r = await downloadUpdateAsset(url, dest, {
+    onNotice: (msg) => onProgress?.(msg),
+    onProgress: (pct, mb, totalMb) => onProgress?.(`已下载 ${mb} / ${totalMb} MB`, pct)
+  });
+  if (!r.ok) return { ok: false, error: r.error };
+  return { ok: true, path: dest, mirror: r.mirror };
 }
 
 // ============ 解压 / 替换 ============

@@ -55,7 +55,11 @@ async function waitUntil(fn, timeout = 8000, msg = 'condition') {
   }
   throw new Error(`waitUntil timeout: ${msg}`);
 }
-const doc = (win, sel) => win.locator(sel);
+// ⚠ doc 必须透传第三参数（Playwright 的 locator 选项）：
+//    以前写成 `(win, sel) => win.locator(sel)`，doc(win, '.prop-row', { hasText: '宽度' }) 里的
+//    选项被静默丢掉 → 变成"取第一个 .prop-row"。以前「选择器与标识」默认折叠、第一个 prop-row
+//    恰好是宽度行，所以一直没暴露；v0.4.3 把它改成默认展开后立刻踩中（S8 卡在 selectOption）。
+const doc = (win, sel, opts) => win.locator(sel, opts);
 const elHas = (win, sel, text) => doc(win, sel).filter({ hasText: text });
 
 async function ensurePropSection(win) {

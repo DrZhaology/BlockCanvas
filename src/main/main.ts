@@ -9,7 +9,8 @@ import {
   readSession, writeSession, getStorageStats, clearAppCache, clearOrphanBackups
 } from './userData';
 import {
-  getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo, applyUpdate
+  getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo, applyUpdate,
+  downloadReleaseAsset
 } from './updater';
 
 // 启动最优先：初始化纯便携数据区 data/，隔离系统盘
@@ -207,6 +208,14 @@ ipcMain.handle('update:apply', async (evt, assetUrl: string) => {
   }
   // 进度推送到发起更新的窗口（渲染层在更新页面里展示）
   return await applyUpdate(assetUrl, (msg, pct) => {
+    try { evt.sender.send('update:progress', { msg, pct }); } catch { /* 窗口可能已关闭 */ }
+  });
+});
+
+// 「下载 zip」：只落盘到 data/downloads/，不替换程序（进度复用 update:progress 通道）
+ipcMain.handle('update:download-asset', async (evt, assetUrl: string, fileName: string) => {
+  if (!assetUrl) return { ok: false, error: '缺少下载地址' };
+  return await downloadReleaseAsset(assetUrl, fileName, (msg, pct) => {
     try { evt.sender.send('update:progress', { msg, pct }); } catch { /* 窗口可能已关闭 */ }
   });
 });

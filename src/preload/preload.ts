@@ -61,6 +61,9 @@ contextBridge.exposeInMainWorld('bc', {
     ipcRenderer.invoke('update:apply', assetUrl),
   getLocalVersion: () =>
     ipcRenderer.invoke('update:get-version'),
+  /** 单独下载某个发行版资产到 data/downloads/（更新中心「下载 zip」） */
+  downloadReleaseAsset: (assetUrl: string, fileName: string) =>
+    ipcRenderer.invoke('update:download-asset', assetUrl, fileName),
   /** 阶段展示文案（version.json → package.json.bcStage） */
   getAppStage: () =>
     ipcRenderer.invoke('app:get-stage'),

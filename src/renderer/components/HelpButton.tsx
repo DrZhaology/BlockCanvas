@@ -1,10 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useClosing } from '@lib/useClosing';
 
-// BlockCanvas · "?" 帮助按钮 + 悬停 1s 缓入与点击通用组件
-// - 鼠标悬停 1 秒后自动平滑淡入气泡，无需强制点击；也可直接点击瞬间开关
+// BlockCanvas · "?" 帮助按钮 + 悬停 0.5s 缓入与点击通用组件
+// - 鼠标悬停 0.5 秒后自动平滑淡入气泡，无需强制点击；也可直接点击瞬间开关
 // - Portal 挂载到 document.body + fixed 定位，自动检测视口边界向上/向下翻转
-// - 滚动 / Esc / 移开鼠标 自动平滑关闭
+// - 滚动 / Esc / 移开鼠标 自动平滑关闭（带退场动画，不再是"啪一下没了"）
+// - ⚠ 故意不写原生 title：否则悬停会同时冒出"长方形系统提示 + 我们的气泡"两层，重复又难看。
+//   （工具栏那些按钮没有自定义气泡，继续用原生 title，悬停即时显示。）
 
 interface Props {
   title: string;
@@ -20,6 +23,8 @@ interface Pos {
 export function HelpButton(props: Props) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<Pos | null>(null);
+  // 退场动画：关闭时先挂 is-closing 播动画，再真正卸载
+  const { mounted, closing } = useClosing(open, 160);
   const btnRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const hoverTimer = useRef<number>(0);
@@ -36,7 +41,7 @@ export function HelpButton(props: Props) {
       hoverTimer.current = window.setTimeout(() => {
         setPos(null);
         setOpen(true);
-      }, 1000); // 悬停 1 秒后缓入
+      }, 500); // 悬停 0.5 秒后缓入（原来 1 秒，体感太慢）
     }
   };
 
@@ -114,13 +119,17 @@ export function HelpButton(props: Props) {
           ref={btnRef}
           className="help-btn"
           onClick={handleClick}
-          title={props.title + '（悬停1秒查看或点击开启）'}
+          aria-label={props.title}
         >?</button>
       </span>
-      {open && createPortal(
+      {mounted && createPortal(
         <div
           ref={popRef}
-          className={'help-pop help-pop-fixed' + (pos ? ' ' + pos.dir + ' fade-in' : '')}
+          className={
+            'help-pop help-pop-fixed'
+            + (pos ? ' ' + pos.dir : '')
+            + (closing ? ' is-closing' : ' fade-in')
+          }
           style={pos
             ? { top: pos.top, left: pos.left }
             : { top: 0, left: -9999, visibility: 'hidden' }}
