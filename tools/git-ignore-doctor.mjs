@@ -154,13 +154,17 @@ exit 0
   process.exit(0);
 }
 
-if (!hasBlock || !GUARD_PATTERNS.filter((l) => l && !l.startsWith('#')).every((p) => normalized.includes(p))) {
-  if (FIX) {
-    writeBlock();
-    pass('已按清单重写 .git/info/exclude 兜底段');
-  } else {
-    fail(`.git/info/exclude 缺少跨分支兜底规则（当前分支 ${branch}）→ 跑 \`node tools/git-ignore-doctor.mjs --fix\` 修复`);
-  }
+const missing = GUARD_PATTERNS.filter((l) => l && !l.startsWith('#') && !normalized.includes(l));
+if (FIX) {
+  // ⚠ 总是重写（而不是"只在缺规则时才写"）：这样兜底段里的**多余、过期**行
+  //   也会一并被清掉，本文件与 GUARD_PATTERNS 永远严格一致，可反复执行。
+  writeBlock();
+  pass('已按 GUARD_PATTERNS 重写 .git/info/exclude 兜底段（多余/过期的行已清除）');
+} else if (!hasBlock || missing.length > 0) {
+  fail(
+    `.git/info/exclude ${hasBlock ? '缺少规则' : '没有兜底段'}（当前分支 ${branch}）：${missing.join(' / ') || '(整段缺失)'}`
+    + ' → 跑 `node tools/git-ignore-doctor.mjs --fix` 修复'
+  );
 } else {
   pass('.git/info/exclude 兜底规则齐全（对所有分支生效，切分支不会再冒生成物）');
 }
