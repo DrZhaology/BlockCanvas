@@ -29,6 +29,35 @@
 .grad-stop-grip:active { cursor: grabbing; }
 
 /* ==========================================================================
+   全屏遮罩 / 弹窗的「退场动画」（统一走 bcMaskOut + bcPopOut）
+   以前只有进场、关闭时"啪"一下没了；这里给遮罩与内部卡片补退场。
+   ========================================================================== */
+.modal-mask.is-closing { animation: bcMaskOut var(--dur-pop-exit) ease both; }
+.modal-mask.is-closing > * { animation: bcPopOut var(--dur-pop-exit) var(--ease-exit) both; }
+
+/* ==========================================================================
+   画布就地编辑文案（v0.4.4d：由单行 input 改成多行 textarea）
+   以前用 <input type="text">：长文本会被压成一条、只看到最后几个字，多行根本没法编辑。
+   现在换成自动撑高的 textarea（宽 100%、不换行滚动、随内容长高），点别处即保存。
+   ========================================================================== */
+textarea.canvas-inline-text-input {
+  display: block;
+  width: 100%;
+  min-width: 80px;
+  min-height: 24px;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.4;
+  vertical-align: top;
+}
+html[data-bc-dark] .canvas-inline-text-input {
+  background: rgba(30, 34, 42, 0.96);
+  color: var(--text);
+}
+
+/* ==========================================================================
    画布元素光标（统一由 CSS 控制，不再写内联 —— 内联会盖过样式表规则）
    ========================================================================== */
 .canvas [data-bc-id] { cursor: pointer; }
@@ -66,8 +95,7 @@ body.bc-alt-fonting, body.bc-alt-fonting * { cursor: none; }
 .bc-alt-edge.e-bl { left: -3px; bottom: -3px; width: 10px; height: 10px; }
 .bc-alt-edge.e-br { right: -3px; bottom: -3px; width: 10px; height: 10px; }
 
-/* Alt 拖拽实时数值气泡 */
-.bc-alt-badge {
+/* Alt 拖拽实时数值气泡 */.bc-alt-badge {
   position: fixed;
   z-index: 400;
   pointer-events: none;
@@ -81,6 +109,17 @@ body.bc-alt-fonting, body.bc-alt-fonting * { cursor: none; }
   border-radius: 5px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   white-space: nowrap;
+}
+
+/* 撞"墙"提示：橙色闪烁的边界线（说明是限制，不是 BUG） */
+.bc-wall-flash {
+  position: fixed;
+  z-index: 402;
+  pointer-events: none;
+  background: #f97316;
+  border-radius: 3px;
+  box-shadow: 0 0 10px rgba(249, 115, 22, 0.9);
+  animation: bcWallFlash 0.6s ease-out both;
 }
 
 /* ==========================================================================
@@ -169,11 +208,12 @@ body.bc-alt-fonting, body.bc-alt-fonting * { cursor: none; }
 }
 .bc-color-custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 
-.bc-text-menu-foot {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 6px;
-  padding-top: 8px;
+.bc-text-menu-hintfoot {
+  font-size: 10px;
+  color: var(--text-muted);
+  padding-top: 6px;
   border-top: 1px solid var(--border);
+  text-align: center;
 }
 
 /* ==========================================================================

@@ -25,10 +25,7 @@ function buildAttrsString(node: SceneElement, ctx: StyleClassSet): { attrsStr: s
   if (get('id')) out.push(`id="${escapeAttr(get('id'))}"`);
 
   // 无类名无 ID 的元素 → 行内 style 属性（与画布内联渲染同一文本）
-  // 内联样式覆盖（v0.4.4d，右键文字微调）→ 无论有没有类名都额外拼一份，放最后 → 覆盖类规则
-  const inlineBase = ctx.inlineCss.get(node.id) || '';
-  const override = node.inlineStyle ? styleToCssText(simplifyStyle(node.inlineStyle)) : '';
-  const inline = [inlineBase, override].filter((s) => s && s.trim()).join('; ');
+  const inline = ctx.inlineCss.get(node.id);
   if (inline) out.push(`style="${escapeAttr(inline)}"`);
 
   // 元素专属属性
@@ -83,7 +80,16 @@ function nodeToHTML(node: SceneElement, ctx: StyleClassSet, indent = 2): string 
   }
 
   html += '>';
-  if (node.text) html += escapeText(node.text);
+  if (node.runs && node.runs.length > 0) {
+    // 富文本片段（v0.4.4d）：带样式的片段输出成 <span style="…">（内联，不用选择器）
+    html += node.runs.map((r) => {
+      const t = escapeText(r.text);
+      const css = r.style ? styleToCssText(simplifyStyle(r.style)) : '';
+      return css ? `<span style="${escapeAttr(css)}">${t}</span>` : t;
+    }).join('');
+  } else if (node.text) {
+    html += escapeText(node.text);
+  }
   if (node.children.length > 0) {
     const childrenHtml = node.children
       .map((c) => nodeToHTML(c, ctx, indent + 2))
@@ -201,4 +207,9 @@ ${bodyInner}
 </html>`;
 
   return { html: applyExportPostHooks(html), warnings: ctx.warnings, unclassified: ctx.unclassified };
+}
+
+// 测试钩子：E2E 探针直接调导出器验证产物（与 sceneStore 的 window.__sceneStore 同一套做法）
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__bcExportHTML = exportHTML;
 }

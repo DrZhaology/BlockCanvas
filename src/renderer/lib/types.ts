@@ -186,18 +186,24 @@ export interface ElementStyle {
   [key: string]: string | undefined;
 }
 
+/** 富文本片段（v0.4.4d）：一段文字 + 它自己的内联样式；用于"只给选中的一小段文字加粗/改色" */
+export interface TextRun {
+  text: string;
+  /** 该片段的内联样式（会输出成 <span style="…">…</span>，不走 CSS 选择器） */
+  style?: ElementStyle;
+}
+
 export interface SceneElement {
   id: string; // UUID，稳定
   type: ElementType;
   text?: string; // 文本内容（h1/p/button 等用）
+  /**
+   * 富文本片段（v0.4.4d）：非空时优先于 text 渲染 —— 每段可带自己的内联样式。
+   * 约束：`runs.map(r => r.text).join('') === text`（始终保持 text 是拼接结果，便于搜索/编辑）。
+   */
+  runs?: TextRun[];
   children: SceneElement[]; // 流式布局：子元素按数组顺序堆叠
   style: ElementStyle; // 内联样式
-  /**
-   * 内联样式覆盖（v0.4.4d）：直接输出到该元素的 `style` 属性，永远不抽成类/选择器规则。
-   * 用于「右键选中一段文字 → 单独加粗 / 改色 / 改字号」这种一次性微调 ——
-   * 有类名的元素也会额外带一份内联 style（在类规则之后生效 → 只覆盖这一个元素）。
-   */
-  inlineStyle?: ElementStyle;
   attrs?: {
     // HTML 原生属性（非 CSS）
     className?: string;

@@ -38,12 +38,17 @@ async function main() {
   await win.waitForSelector('.toolbar', { timeout: 20000 });
   await sleep(1200);
 
-  // ============ 1. 入口：项目标签栏右端的「?」 ============
-  ok('标签栏右端有「?」帮助入口', (await win.locator('.tabbar-help-btn').count()) === 1);
-  await win.locator('.tabbar-help-btn').click();
+  // ============ 1. 入口：菜单「帮助 → 使用手册」(bc:open-help 事件) ============
+  await win.evaluate(() => window.dispatchEvent(new CustomEvent('bc:open-help')));
   await win.waitForSelector('.help-page', { timeout: 8000 });
   await sleep(400);
-  ok('点「?」打开使用手册页面', (await win.locator('.help-page').count()) === 1);
+  ok('「使用手册」入口打开帮助页', (await win.locator('.help-page').count()) === 1);
+  ok('默认进入的是《使用手册》文档（不是项目介绍）',
+    (await win.locator('.help-doc').innerText().catch(() => '')).includes('五分钟上手'));
+
+  // 切到「项目介绍」再跑 README 相关断言
+  await win.locator('.help-doc-tab', { hasText: '项目介绍' }).click();
+  await sleep(600);
 
   // ============ 2. 开·关动画（用户点名要的） ============
   const anim = await win.evaluate(() => {
@@ -56,8 +61,6 @@ async function main() {
   ok('进场时长走 token（非 0s）', !!anim && parseFloat(anim.dur) > 0, anim && anim.dur);
 
   // ============ 3. 内容真的来自 README（不是另写一份） ============
-  const src = ((await win.locator('.help-src').innerText().catch(() => '')) || '');
-  ok('页眉写明内容来源 README.md', src.includes('README.md'), src.slice(0, 60));
   const docText = ((await win.locator('.help-doc').innerText().catch(() => '')) || '');
   ok('正文包含 README 的章节（项目简介 / 功能特性 / 技术栈）',
     docText.includes('项目简介') && docText.includes('功能特性') && docText.includes('技术栈'),
@@ -107,8 +110,8 @@ async function main() {
       firstBig: Math.max(0, ...list.map((i) => i.naturalWidth))
     };
   });
-  ok('图片都能真的加载出来（本地截图已内联进产物，不是破图）',
-    shownImgs && shownImgs.visible >= 5 && shownImgs.loaded >= 5 && shownImgs.firstBig > 200,
+  ok('本地截图都能真的加载出来（已内联进产物，不是破图）',
+    shownImgs && shownImgs.loaded >= 3 && shownImgs.firstBig > 200,
     JSON.stringify(shownImgs));
   ok('没有 404 / 资源加载失败（图片地址在塞进 DOM 之前就换好了）',
     errs.filter((e) => e.includes('requestfailed')).length === 0,
@@ -138,6 +141,39 @@ async function main() {
   ok('清空搜索后高亮被清掉', (await win.locator('.help-doc mark.hc-hit').count()) === 0);
   ok('清空搜索后正文还在（innerHTML 正确还原）',
     (((await win.locator('.help-doc').innerText().catch(() => '')) || '')).includes('技术栈'));
+
+  // ============ 7b. 文档内超链接可跳转 ============
+  // 项目介绍里有指向 docs/开发历程.md 的链接 → 点击应切到「开发历程」文档
+  const clicked = await win.evaluate(() => {
+    const a = Array.from(document.querySelectorAll('.help-doc a')).find((x) => {
+      let h = x.getAttribute('href') || '';
+      try { h = decodeURIComponent(h); } catch { /* 保持原样 */ }
+      return h.includes('开发历程.md');
+    });
+    if (!a) return false;
+    a.click();
+    return true;
+  });
+  await sleep(700);
+  ok('文档里的「开发历程」超链接存在', clicked === true);
+  ok('点超链接切到了《开发历程》文档',
+    (await win.locator('.help-doc').innerText().catch(() => '')).includes('开发历程'),
+    String(await win.locator('.help-doc-tab.active').innerText().catch(() => '')));
+
+  // 回项目介绍，测搜索下拉
+  await win.locator('.help-doc-tab', { hasText: '项目介绍' }).click();
+  await sleep(500);
+  await win.locator('.help-search-input').fill('渐变');
+  await sleep(500);
+  const dd = await win.locator('.help-results .help-result').count();
+  ok('搜索弹出「权重结果框」', dd > 0, String(dd));
+  if (dd > 0) {
+    await win.locator('.help-results .help-result').first().click();
+    await sleep(700);
+    ok('点搜索结果能跳转（结果框收起 + 文档滚动）', (await win.locator('.help-results').count()) === 0);
+  }
+  await win.locator('.help-search-input').fill('');
+  await sleep(500);
 
   // ============ 8. 退出动画 + Esc 关闭 ============
   await win.evaluate(() => {

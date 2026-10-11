@@ -27,7 +27,7 @@ import shotLayout from '../../../docs/screenshots/layout-底部模板页.png';
 //   · 弹出一个结果框，点某条 → 自动切到对应文档并**跳到具体段落**（同时高亮命中词）。
 // ============================================================================
 
-type DocKey = 'intro' | 'manual' | 'history';
+export type DocKey = 'intro' | 'manual' | 'history';
 
 interface DocDef { key: DocKey; label: string; icon: string; bundled: string; fileName: string }
 
@@ -36,6 +36,17 @@ const DOCS: DocDef[] = [
   { key: 'manual', label: '使用手册', icon: '📖', bundled: MANUAL_BUNDLED, fileName: 'docs/使用手册.md' },
   { key: 'history', label: '开发历程', icon: '🕘', bundled: HISTORY_BUNDLED, fileName: 'docs/开发历程.md' }
 ];
+
+/** 文档内部超链接 → 本帮助中心里的哪份文档（无法映射的返回 null，走"在 GitHub 查看"提示） */
+function resolveDocLink(href: string): DocKey | null {
+  let h = href;
+  try { h = decodeURIComponent(href); } catch { /* 保持原样 */ }
+  h = h.replace(/^\.\.?\//, '').replace(/^\.\//, '');
+  if (/(^|\/)README\.md$/i.test(h)) return 'intro';
+  if (/使用手册\.md$/.test(h)) return 'manual';
+  if (/开发历程\.md$/.test(h)) return 'history';
+  return null;
+}
 
 interface TocItem { id: string; text: string; level: number }
 interface Section { doc: DocKey; id: string; title: string; level: number; text: string }
@@ -154,12 +165,11 @@ function searchDocs(index: Section[], rawQuery: string): Hit[] {
   return hits.sort((a, b) => b.score - a.score).slice(0, 14);
 }
 
-export function HelpCenter({ onBack }: { onBack: () => void }) {
-  const [docKey, setDocKey] = useState<DocKey>('intro');
+export function HelpCenter({ initialDoc = 'manual', onBack }: { initialDoc?: DocKey; onBack: () => void }) {
+  const [docKey, setDocKey] = useState<DocKey>(initialDoc);
   const [mdMap, setMdMap] = useState<Record<DocKey, string>>(() => ({
     intro: README_BUNDLED, manual: MANUAL_BUNDLED, history: HISTORY_BUNDLED
   }));
-  const [srcLabel, setSrcLabel] = useState<string>('随程序打包（构建时内联）');
   const [toc, setToc] = useState<TocItem[]>([]);
   const [activeId, setActiveId] = useState<string>('');
   const [queryInput, setQueryInput] = useState('');
@@ -176,6 +186,9 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
   const md = mdMap[docKey];
   const docDef = DOCS.find((d) => d.key === docKey)!;
 
+  // 外部（菜单/事件）再次要求打开某份文档时同步切换
+  useEffect(() => { setDocKey(initialDoc); }, [initialDoc]);
+
   // 关闭：先播退场动画，再真正切回编辑器（用户要的"开启退出动画"）
   const close = () => {
     if (closing) return;
@@ -191,7 +204,6 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
         .then((r) => {
           if (!alive || !r?.ok || !r.text) return;
           setMdMap((prev) => ({ ...prev, [d.key]: r.text as string }));
-          setSrcLabel(r.source === 'disk' ? '开发态实时读盘（改完文档刷新即见）' : '随程序打包（构建时内联）');
         })
         .catch(() => { /* 保持内联版本 */ });
     });
@@ -317,9 +329,12 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
           if (target && scroller) scroller.scrollTo({ top: Math.max(0, target.offsetTop - 24), behavior: 'smooth' });
         });
       } else if (href) {
-        // 仓库内的相对文件（docs/xxx.md）—— 提示在 GitHub 上查看
+        // 仓库内的相对文档链接：能在帮助中心里切过去的就直接切（README / 使用手册 / 开发历程），
+        // 其余的（扩展规范、功能规划…）不随软件分发 → 给个明确反馈
+        const target = resolveDocLink(href);
         a.addEventListener('click', (e) => {
           e.preventDefault();
+          if (target) { switchDoc(target); return; }
           flashDocHint(root, `「${href}」在仓库 docs/ 目录里（不随软件分发），可在 GitHub 上查看。`);
         });
       }
@@ -455,7 +470,7 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
               key={d.key}
               className={'help-doc-tab' + (d.key === docKey ? ' active' : '')}
               onClick={() => switchDoc(d.key)}
-              title={`查看《${d.label}》（${d.fileName}）`}
+              title={`查看《${d.label}》`}
             >
               <span className="help-doc-tab-ico">{d.icon}</span>{d.label}
             </button>
@@ -499,9 +514,6 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
             </div>
           )}
         </div>
-        <span className="help-src" title={`帮助内容直接取自仓库里的 ${docDef.fileName}`}>
-          来源：{docDef.fileName} · {srcLabel}
-        </span>
       </div>
 
       <div className="help-body">
@@ -520,10 +532,6 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
 
         <div className="help-scroll bc-scroll" ref={scrollRef}>
           <div className="help-doc" ref={docRef} dangerouslySetInnerHTML={{ __html: html }} />
-          <div className="help-foot">
-            这一页的内容就是仓库里的 <code>{docDef.fileName}</code> —— 想改内容，直接改那个文件即可。
-            顶部可切换「项目介绍 / 使用手册 / 开发历程」三份文档。
-          </div>
         </div>
       </div>
     </div>

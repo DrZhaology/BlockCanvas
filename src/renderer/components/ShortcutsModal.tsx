@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useClosing } from '@lib/useClosing';
 
 interface Props {
   open: boolean;
@@ -39,8 +40,19 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     items: [
       { key: '↑ / ↓ / ← / →', desc: '按方向微调 1px 外边距或定位坐标' },
       { key: 'Shift + 方向键', desc: '按方向加速微调 10px' },
-      { key: '双击文字元素', desc: '原地直接编辑文案（Enter提交/Esc取消）' },
-      { key: '画布空白处拖框', desc: 'Windows 桌面式多选元素（支持框选）' }
+      { key: '双击文字元素', desc: '就地编辑文案（点别处保存 / Esc 取消）' },
+      { key: '画布空白处拖框', desc: '批量多选元素（拖到画布边缘会自动滚动）' }
+    ]
+  },
+  {
+    category: '画布直接改（按住 Alt）',
+    items: [
+      { key: 'Alt + 贴边拖动', desc: '快捷调整元素宽 / 高（贴到哪条边就改哪条）' },
+      { key: 'Alt + 按住文字左右拖', desc: '快捷改字号：往左变小、往右变大（拖动时鼠标隐藏）' },
+      { key: 'Alt + 按住元素中间拖', desc: '快捷移动位置（定位元素改 left/top，常规流元素改外边距）' },
+      { key: 'Alt + 点击元素', desc: '选中它的父级容器' },
+      { key: '右键文字元素', desc: '单独调整这段文字的字号 / 字重 / 颜色' },
+      { key: '双击文字元素', desc: '就地编辑文案（点别处即保存，Esc 取消）' }
     ]
   },
   {
@@ -55,6 +67,9 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
 ];
 
 export function ShortcutsModal({ open, onClose }: Props) {
+  // 退场动画：关闭时先播 is-closing，动画结束再卸载（以前是"啪"一下没了）
+  const { mounted, closing } = useClosing(open, 170);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -64,10 +79,10 @@ export function ShortcutsModal({ open, onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   return (
-    <div className="modal-mask" onClick={onClose}>
+    <div className={'modal-mask' + (closing ? ' is-closing' : '')} onClick={onClose}>
       <div className="shortcuts-modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="shortcuts-modal-header">
           <div className="shortcuts-modal-title">

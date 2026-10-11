@@ -475,10 +475,9 @@ export interface SceneStore {
   endStyleEdit: () => void;
   // 改 HTML 原生属性 (class/id/src/alt/href 等)
   updateAttr: (id: string, key: string, value: string) => void;
-  // 内联样式覆盖（v0.4.4d）：写进元素的 `style` 属性（而不是抽成类/选择器规则）。
-  // 用于「右键选中一段文字 → 单独改字号/字重/颜色」这种一次性微调场景 —— 用选择器反而麻烦。
-  // 有类名的元素也会额外输出一份内联 style（在类规则之后生效 → 覆盖类规则，只影响这一个元素）。
-  setInlineStyle: (id: string, partial: Partial<ElementStyle>, remove?: boolean) => void;
+  // 富文本片段样式（v0.4.4d）：把文字里 [start, end) 这一段包成带内联样式的 run
+  //（导出成 `<span style="…">选中文字</span>`，**不走 CSS 选择器**，只影响这一段）
+  applyTextRunStyle: (id: string, start: number, end: number, patch: Partial<ElementStyle>) => void;
   // 页面级：用户全局 CSS（导出进 <style> 末尾，可覆盖自动样式类）
   setGlobalCss: (text: string) => void;
   // 页面快速设置（4-D）：合并更新 body/a 可视化项，导出顺序：自动样式 → 快速设置 → 高级 CSS
@@ -1062,19 +1061,65 @@ export const useScene = create<SceneStore>((set) => ({
   // className 特殊协调（类名 = 一套衣服）：
   //  - 加入一个已存在的类名 → 立刻穿上该组的样式（数据与显示同时变，不留幽灵冲突）
   //  - 移除后不再有任何类名 → 把当前生效的组样式物化到元素自己（外观不变地"脱下来"）
-  // 内联样式覆盖（v0.4.4d）：直接写进元素的 inlineStyle 字段，导出/画布都作为 style 属性输出，
-  // 永远不抽成类（因此不会连带影响同选择器的其它元素）—— 一次性文字微调专用。
-  setInlineStyle: (id, partial, remove) => {
+  // 富文本片段样式（v0.4.4d）：把文字里 [start, end) 这一段单独套样式。
+  // 做法：把整段文字归一化成 runs（无则整段一个 run）→ 在 start/end 处切开 → 给覆盖到的 run 打补丁。
+  // 导出成 `<span style="…">…</span>`（内联，不用选择器），画布与导出同源。
+  applyTextRunStyle: (id, start, end, patch) => {
     set((st) => {
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
-      if (!node.inlineStyle) node.inlineStyle = {};
-      for (const [k, v] of Object.entries(partial)) {
-        if (remove || v === undefined || v === '') delete (node.inlineStyle as Record<string, string | undefined>)[k];
-        else (node.inlineStyle as Record<string, string | undefined>)[k] = v;
+      const full = node.text ?? '';
+      const a = Math.max(0, Math.min(start, full.length));
+      const b = Math.max(a, Math.min(end, full.length));
+      if (a >= b) return st;
+
+      // 1. 归一化成 runs（保证拼接 == full，否则退回整段一个 run）
+      let runs: { text: string; style?: ElementStyle }[] =
+        node.runs && node.runs.length
+          ? node.runs.map((r) => ({ text: r.text, style: r.style ? { ...r.style } : undefined }))
+          : [{ text: full }];
+      if (runs.map((r) => r.text).join('') !== full) runs = [{ text: full }];
+
+      // 2. 在 at 处切开（保持每段样式不变）
+      const splitAt = (rs: typeof runs, at: number) => {
+        if (at <= 0) return rs;
+        const out: typeof runs = [];
+        let pos = 0;
+        for (const r of rs) {
+          const len = r.text.length;
+          if (at > pos && at < pos + len) {
+            out.push({ text: r.text.slice(0, at - pos), style: r.style ? { ...r.style } : undefined });
+            out.push({ text: r.text.slice(at - pos), style: r.style ? { ...r.style } : undefined });
+          } else {
+            out.push(r);
+          }
+          pos += len;
+        }
+        return out;
+      };
+      runs = splitAt(runs, a);
+      runs = splitAt(runs, b);
+
+      // 3. 给落在 [a,b) 内的 run 打补丁
+      let pos = 0;
+      for (const r of runs) {
+        const rs = pos;
+        const re = pos + r.text.length;
+        pos = re;
+        if (rs >= a && re <= b && re > rs) {
+          const next: Record<string, string | undefined> = { ...(r.style ?? {}) };
+          for (const [k, v] of Object.entries(patch)) {
+            if (v === undefined || v === '') delete next[k];
+            else next[k] = v;
+          }
+          r.style = Object.keys(next).length ? (next as ElementStyle) : undefined;
+        }
       }
-      if (Object.keys(node.inlineStyle).length === 0) node.inlineStyle = undefined;
+
+      // 4. 落库：没有样式的 run 去掉 style 字段，保持数据干净
+      node.runs = runs.map((r) => (r.style && Object.keys(r.style).length ? r : { text: r.text }));
+      node.text = runs.map((r) => r.text).join('');
       const push = !st.styleEditPending;
       return { scene, history: push ? pushPast(st.history, st.scene) : st.history };
     });
@@ -1362,6 +1407,10 @@ export const useScene = create<SceneStore>((set) => ({
       const node = findNode(scene.root, id);
       if (!node) return st;
       node.text = text;
+      // 有富文本片段时：文本改了就无法保证片段仍然对齐 → 尽量保留，保不住就整段退回纯文本
+      if (node.runs && node.runs.length) {
+        if (node.runs.map((r) => r.text).join('') !== text) node.runs = undefined;
+      }
       return { scene, history: pushPast(st.history, st.scene) };
     });
   },

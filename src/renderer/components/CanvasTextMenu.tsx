@@ -6,15 +6,14 @@ import { TEXT_TAGS } from '@lib/types';
 // ============================================================================
 // BlockCanvas · 画布文字「右键快捷菜单」（v0.4.4d）
 // ----------------------------------------------------------------------------
-// 场景：像 Word 那样，偶尔需要把某一段文字单独加粗 / 换个颜色 / 调个字号。
-//   · 不需要按 Alt（这是"选中文字"的常规操作）；
-//   · 只对**文字元素**出现（div/section 等块级容器不弹，避免误操作）；
-//   · 改的是**内联样式**（写进元素的 style 属性），不抽类、不生成选择器 ——
-//     这种一次性微调用选择器反而麻烦，且不会连累同选择器的其它元素。
-// 目前只支持：字号 / 字重 / 颜色（不做渐变、不做字体 —— 只服务"加粗某段文字"这类场景）。
+// 两种模式：
+//   · element —— 右键一个文字元素（不进入编辑）→ 调整**整个元素**的字号/字重/颜色。
+//     写进元素的 node.style（**和右侧属性面板同一份数据 → 完全互通**）。
+//   · range   —— 在就地编辑态里选中一段文字后右键 → 只调整**选中的那一小段**。
+//     包成带内联样式的富文本片段（导出成 `<span style="…">…</span>`，不用选择器）。
+// 只对**文字元素**出现（块级容器不弹）。面板点击别处即关；调整实时生效（无需"完成"按钮）。
 // ============================================================================
 
-/** 常用文字色（点一下就换，不用开调色盘） */
 const TEXT_COLORS = [
   '#111827', '#374151', '#6b7280', '#9ca3af',
   '#dc2626', '#ea580c', '#d97706', '#16a34a',
@@ -28,25 +27,19 @@ const WEIGHTS: { v: string; label: string }[] = [
   { v: '900', label: '特粗' }
 ];
 
-export function CanvasTextMenu({ id, x, y, onClose }: { id: string; x: number; y: number; onClose: () => void }) {
+export type TextMenuPayload =
+  | { mode: 'element'; id: string; x: number; y: number }
+  | { mode: 'range'; id: string; x: number; y: number; start: number; end: number; text: string };
+
+export function CanvasTextMenu({ payload, onClose }: { payload: TextMenuPayload; onClose: () => void }) {
+  const { id, x, y } = payload;
   const node = useScene((s) => findNode(s.scene.root, id));
-  const setInlineStyle = useScene((s) => s.setInlineStyle);
+  const updateStyle = useScene((s) => s.updateStyle);
+  const applyTextRunStyle = useScene((s) => s.applyTextRunStyle);
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: x, top: y });
-  // 拖动滑块/连续点击时先压一个检查点，整段操作算一条撤销
-  const sessionRef = useRef(false);
-  const beginSession = () => {
-    if (sessionRef.current) return;
-    sessionRef.current = true;
-    useScene.getState().beginStyleEdit();
-  };
-  const endSession = () => {
-    if (!sessionRef.current) return;
-    sessionRef.current = false;
-    useScene.getState().endStyleEdit();
-  };
 
-  // 位置：贴近光标，超出视口就翻转/夹紧
+  // 位置：贴近光标，超出视口就夹紧
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -60,11 +53,10 @@ export function CanvasTextMenu({ id, x, y, onClose }: { id: string; x: number; y
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (ref.current?.contains(e.target as Node)) return;
-      endSession();
       onClose();
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { endSession(); onClose(); } };
-    const onScroll = () => { endSession(); onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onScroll = () => onClose();
     window.addEventListener('mousedown', onDoc, true);
     window.addEventListener('keydown', onKey);
     window.addEventListener('scroll', onScroll, true);
@@ -74,40 +66,30 @@ export function CanvasTextMenu({ id, x, y, onClose }: { id: string; x: number; y
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onScroll);
-      endSession();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!node) return null;
-  const inline = node.inlineStyle ?? {};
-  // 当前字号：优先内联，其次元素自身样式
-  const curSize = parseFloat(inline.fontSize || node.style.fontSize || '') || 0;
-  const curWeight = String(inline.fontWeight || node.style.fontWeight || '');
-  const curColor = (inline.color || node.style.color || '').toLowerCase();
-  const tagLabel = `<${node.type}>`;
+  const isRange = payload.mode === 'range';
+  const curSize = parseFloat(node.style.fontSize || '') || 0;
+  const curWeight = String(node.style.fontWeight || '');
+  const curColor = (node.style.color || '').toLowerCase();
+  const selLen = isRange ? (payload.end - payload.start) : 0;
 
   const setSize = (delta: number) => {
     const base = curSize || 16;
     const next = Math.max(6, Math.min(400, Math.round(base + delta)));
-    beginSession();
-    setInlineStyle(id, { fontSize: next + 'px' });
+    if (isRange) applyTextRunStyle(id, payload.start, payload.end, { fontSize: next + 'px' });
+    else updateStyle(id, { fontSize: next + 'px' });
   };
   const setWeight = (v: string) => {
-    beginSession();
-    setInlineStyle(id, { fontWeight: v });
-    endSession();
+    if (isRange) applyTextRunStyle(id, payload.start, payload.end, { fontWeight: v });
+    else updateStyle(id, { fontWeight: v });
   };
   const setColor = (c: string) => {
-    beginSession();
-    setInlineStyle(id, { color: c });
-    endSession();
-  };
-  const clearAll = () => {
-    beginSession();
-    setInlineStyle(id, { fontSize: '', fontWeight: '', color: '' }, true);
-    endSession();
-    onClose();
+    if (isRange) applyTextRunStyle(id, payload.start, payload.end, { color: c });
+    else updateStyle(id, { color: c });
   };
 
   return createPortal(
@@ -118,8 +100,12 @@ export function CanvasTextMenu({ id, x, y, onClose }: { id: string; x: number; y
       onContextMenu={(e) => e.preventDefault()}
     >
       <div className="bc-text-menu-head">
-        <span className="bc-text-menu-tag">{tagLabel}</span>
-        <span className="bc-text-menu-tip">单独调整这段文字（内联样式，不影响同类元素）</span>
+        <span className="bc-text-menu-tag">&lt;{node.type}&gt;</span>
+        <span className="bc-text-menu-tip">
+          {isRange
+            ? `只调整选中的 ${selLen} 个字（内联样式，不影响其它文字）`
+            : '调整这段文字（与右侧「CSS 样式属性」互通）'}
+        </span>
       </div>
 
       <div className="bc-text-menu-row">
@@ -169,10 +155,7 @@ export function CanvasTextMenu({ id, x, y, onClose }: { id: string; x: number; y
         </div>
       </div>
 
-      <div className="bc-text-menu-foot">
-        <button className="btn-mini" onClick={clearAll} title="清除这段文字的内联字号/字重/颜色">清除</button>
-        <button className="btn-mini btn-primary" onClick={() => { endSession(); onClose(); }}>完成</button>
-      </div>
+      <div className="bc-text-menu-hintfoot">点别处即关闭；改错了按 Ctrl+Z 撤销</div>
     </div>,
     document.body
   );
