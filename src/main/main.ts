@@ -157,6 +157,21 @@ async function createWindow() {
 
   Menu.setApplicationMenu(buildMenu(win));
 
+  // —— 阻止"应用内导航"（v0.4.4e）——
+  // 帮助文档里的超链接（相对路径 / 锚点）若交给浏览器默认行为，会真的把整个窗口导航走
+  //（dev 下就会跳到 http://localhost/...，用户看到的正是这个）。这里统一拦掉：
+  // 需要打开外链的地方一律走 shell:open-external（只放行 http/https，用系统浏览器打开）。
+  win.webContents.on('will-navigate', (e, url) => {
+    const dev = devServerUrl;
+    if (dev && url.startsWith(dev)) return;   // 开发态热更新允许
+    if (url.startsWith('file://')) return;    // 本地文件（打包态页面）允许
+    e.preventDefault();
+  });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
   ipcMain.on('theme:set-source', (_evt, source: unknown) => {
     nativeTheme.themeSource = source === 'dark' || source === 'light' ? source : 'system';
   });

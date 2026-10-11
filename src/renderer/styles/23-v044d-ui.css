@@ -57,6 +57,54 @@ html[data-bc-dark] .canvas-inline-text-input {
   color: var(--text);
 }
 
+/* 就地编辑：包裹层 + 「显示 <br>」叠加层 + 切换按钮 */
+.bc-inline-edit-wrap { position: relative; display: block; width: 100%; }
+
+.bc-inline-br-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 2px 6px;                 /* 与 textarea 的 padding 完全一致 */
+  border: 2px solid transparent;    /* 与 textarea 的 border 宽度一致 */
+  font: inherit;
+  line-height: 1.4;
+  color: transparent;               /* 文字透明：只显示 <br> 标记，避免和 textarea 双影 */
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: none;
+}
+/* 零宽度标记：不参与折行，内容从右侧溢出显示 —— 于是它精确落在"上一行末尾" */
+.bc-br-mark {
+  display: inline-block;
+  width: 0;
+  overflow: visible;
+  white-space: nowrap;
+  color: #b3b3b3;
+  font-size: 10px;
+  vertical-align: baseline;
+}
+html[data-bc-dark] .bc-br-mark { color: #6b7280; }
+
+.bc-inline-br-toggle {
+  position: absolute;
+  top: -23px;
+  right: 0;
+  z-index: 2;
+  height: 20px;
+  padding: 0 8px;
+  font-size: 10.5px;
+  white-space: nowrap;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.bc-inline-br-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.bc-inline-br-toggle.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
 /* ==========================================================================
    画布元素光标（统一由 CSS 控制，不再写内联 —— 内联会盖过样式表规则）
    ========================================================================== */
@@ -65,13 +113,17 @@ html[data-bc-dark] .canvas-inline-text-input {
 /* Alt 悬停：按命中模式切换光标（属性由 Canvas 在 pointermove 时挂上） */
 .canvas [data-bc-alt="x"] { cursor: ew-resize; }
 .canvas [data-bc-alt="y"] { cursor: ns-resize; }
-.canvas [data-bc-alt="xy"] { cursor: nwse-resize; }
+/* 两种对角要分开：左上-右下 = nwse；右上-左下 = nesw（以前都写成 nwse，所以左下/右上光标是反的） */
+.canvas [data-bc-alt="nwse"] { cursor: nwse-resize; }
+.canvas [data-bc-alt="nesw"] { cursor: nesw-resize; }
 .canvas [data-bc-alt="move"] { cursor: move; }
-.canvas [data-bc-alt="font"] { cursor: pointer; }
+.canvas [data-bc-alt="font"] { cursor: ew-resize; }
 
-/* Alt 交互进行中：文字拖动时隐藏光标（用户要求"鼠标消失"），全局禁选避免拖出蓝色选区 */
+/* Alt 交互进行中：文字拖动时隐藏光标（用户要求"鼠标消失"），全局禁选避免拖出蓝色选区。
+   ⚠ 必须带 .canvas [data-bc-id] 提高特异性，否则会被上面 [data-bc-alt] 的 cursor 盖掉。 */
 body.bc-alt-dragging { user-select: none; }
-body.bc-alt-fonting, body.bc-alt-fonting * { cursor: none; }
+body.bc-alt-fonting, body.bc-alt-fonting *,
+body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
 
 /* Alt 悬停高亮框（fixed，跟随元素 client rect） */
 .bc-alt-box {
@@ -188,6 +240,23 @@ body.bc-alt-fonting, body.bc-alt-fonting * { cursor: none; }
 }
 .bc-weight-btn:hover { color: var(--text); background: var(--hover); }
 .bc-weight-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+/* 下划线 / 删除线 / 斜体 */
+.bc-style-seg { display: flex; gap: 2px; flex: 1; }
+.bc-style-btn {
+  flex: 1;
+  height: 24px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.bc-style-btn:hover { color: var(--text); background: var(--hover); }
+.bc-style-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+.bc-style-i { font-style: italic; }
 
 .bc-color-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
 .bc-color-swatch {

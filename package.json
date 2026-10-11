@@ -18,7 +18,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:e2e": "pnpm build && node tests/e2e/gui.mjs",
     "test:e2e:fast": "node tests/e2e/gui.mjs --no-shots",
-    "test:probe": "node tests/e2e/probe-table.mjs && node tests/e2e/probe-table-settings.mjs && node tests/e2e/probe-help.mjs && node tests/e2e/probe-v042.mjs && node tests/e2e/probe-template-style.mjs && node tests/e2e/probe-text-edit.mjs && node tests/e2e/probe-update.mjs"
+    "test:probe": "node tests/e2e/probe-table.mjs && node tests/e2e/probe-table-settings.mjs && node tests/e2e/probe-help.mjs && node tests/e2e/probe-v042.mjs && node tests/e2e/probe-template-style.mjs && node tests/e2e/probe-text-edit.mjs && node tests/e2e/probe-alt-interact.mjs && node tests/e2e/probe-update.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -83,12 +83,12 @@ function nodeToHTML(node: SceneElement, ctx: StyleClassSet, indent = 2): string 
   if (node.runs && node.runs.length > 0) {
     // 富文本片段（v0.4.4d）：带样式的片段输出成 <span style="…">（内联，不用选择器）
     html += node.runs.map((r) => {
-      const t = escapeText(r.text);
+      const t = escapeTextBr(r.text);
       const css = r.style ? styleToCssText(simplifyStyle(r.style)) : '';
       return css ? `<span style="${escapeAttr(css)}">${t}</span>` : t;
     }).join('');
   } else if (node.text) {
-    html += escapeText(node.text);
+    html += escapeTextBr(node.text);
   }
   if (node.children.length > 0) {
     const childrenHtml = node.children
@@ -102,6 +102,10 @@ function nodeToHTML(node: SceneElement, ctx: StyleClassSet, indent = 2): string 
 
 function escapeText(t: string): string {
   return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+/** 文本内容转义 + 换行转 <br>（v0.4.4e：编辑器里的换行导出成真正的换行标签） */
+function escapeTextBr(t: string): string {
+  return escapeText(t).replace(/\n/g, '<br>');
 }
 function escapeAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');

@@ -131,6 +131,65 @@ async function main() {
   }, id);
   ok('导出 HTML 含内联 <span style="…font-weight…">', /<span style="[^"]*font-weight/i.test(exported), exported ? 'len=' + exported.length : 'no-hook');
 
+  // ============ 5. Enter = 换行（自动生成 <br>）、Esc = 保存 ============
+  await win.keyboard.press('Escape');
+  await sleep(250);
+  await win.dblclick(`.canvas [data-bc-id="${id}"]`);
+  await sleep(300);
+  await win.fill('.canvas textarea.canvas-inline-text-input', '第一行');
+  await win.locator('.canvas textarea.canvas-inline-text-input').press('Enter');
+  await win.locator('.canvas textarea.canvas-inline-text-input').type('第二行');
+  ok('Enter 不退出编辑（用于换行）', (await win.locator('.canvas textarea.canvas-inline-text-input').count()) === 1);
+  await win.keyboard.press('Escape');
+  await sleep(350);
+  const t2 = await win.evaluate((eid) => {
+    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
+    return n ? n.text : null;
+  }, id);
+  ok('Esc 也会保存（不再是取消）', t2 === '第一行\n第二行', JSON.stringify(t2));
+  ok('编辑框已退出', (await win.locator('.canvas textarea.canvas-inline-text-input').count()) === 0);
+  const exported2 = await win.evaluate((eid) => {
+    const st = window.__sceneStore.getState();
+    const n = st.scene.root.children.find((c) => c.id === eid);
+    const fn = window.__bcExportHTML;
+    return fn ? fn({ ...st.scene, root: { ...st.scene.root, id: 'root', children: [n] } }).html : '';
+  }, id);
+  ok('换行导出成 <br>', /第一行<br>第二行/.test(exported2), exported2 ? 'ok' : 'no-hook');
+
+  // ============ 6. 选中"整段"→ 走整段 CSS（不生成 runs） ============
+  const id2 = await win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    st.insertTemplate({ id: 'seed-p2', type: 'p', text: '整段测试文字', style: {}, children: [] }, null);
+    return window.__sceneStore.getState().scene.selectedId;
+  });
+  await sleep(300);
+  await win.dblclick(`.canvas [data-bc-id="${id2}"]`);
+  await sleep(300);
+  await win.evaluate(() => {
+    const ta = document.querySelector('.canvas textarea.canvas-inline-text-input');
+    ta.focus();
+    ta.setSelectionRange(0, ta.value.length); // 选中全部
+    const r = ta.getBoundingClientRect();
+    ta.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 10, clientY: r.top + 10 }));
+  });
+  await sleep(300);
+  await win.click('.bc-text-menu .bc-weight-btn:has-text("加粗")');
+  await sleep(300);
+  const whole = await win.evaluate((eid) => {
+    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
+    return { runs: n.runs, fw: n.style.fontWeight };
+  }, id2);
+  ok('选中整段 → 走整段 CSS（不生成 runs）', (!whole.runs || whole.runs.length === 0) && whole.fw === '700', JSON.stringify(whole));
+
+  // 下划线 / 删除线 / 斜体
+  await win.click('.bc-text-menu .bc-style-btn[title="下划线"]');
+  await sleep(200);
+  const deco = await win.evaluate((eid) => {
+    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
+    return n.style.textDecoration;
+  }, id2);
+  ok('下划线写进 textDecoration', /underline/.test(String(deco)), String(deco));
+
   ok('无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));
 
   await app.close();

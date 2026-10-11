@@ -86,6 +86,18 @@ function headingId(doc: DocKey, i: number, text: string): string {
   return `hc-${doc}-${i}-${slugOf(text)}`;
 }
 
+/**
+ * GitHub 风格的标题锚点（用于把文档里 `[xx](#某标题)` 的锚点链接对上）。
+ * 例："13. 快捷键速查" → "13-快捷键速查"；"0. 五分钟上手" → "0-五分钟上手"。
+ */
+function anchorSlug(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\u4e00-\u9fa5\s-]/g, '')
+    .replace(/\s+/g, '-');
+}
+
 /** 把 markdown 按标题切成"段落块"（用于建搜索索引）；先剥掉围栏代码块避免误判标题 */
 function parseSections(md: string, doc: DocKey): Section[] {
   const withoutCode = md.replace(/```[\s\S]*?```/g, '');
@@ -182,6 +194,8 @@ export function HelpCenter({ initialDoc = 'manual', onBack }: { initialDoc?: Doc
   const searchRef = useRef<HTMLDivElement>(null);
   const tocJson = useRef('');
   const pendingJump = useRef<string>('');
+  /** 标题锚点 slug → 元素 id（文档里的 `[x](#锚点)` 靠它跳转） */
+  const slugMap = useRef<Map<string, string>>(new Map());
 
   const md = mdMap[docKey];
   const docDef = DOCS.find((d) => d.key === docKey)!;
@@ -282,15 +296,20 @@ export function HelpCenter({ initialDoc = 'manual', onBack }: { initialDoc?: Doc
   const postProcess = (root: HTMLElement) => {
     const heads = Array.from(root.querySelectorAll('h1, h2, h3, h4')) as HTMLElement[];
     const items: TocItem[] = [];
+    const slugs = new Map<string, string>();
     heads.forEach((h, i) => {
       const text = (h.textContent || '').trim();
       // 与搜索索引同一套 id 公式 → 点搜索结果能精确落到这一节
       h.id = headingId(docKey, i, text);
+      // 额外记一份"GitHub 风格锚点" → 文档里的 #锚点 链接也能跳
+      const slug = anchorSlug(text);
+      if (slug && !slugs.has(slug)) slugs.set(slug, h.id);
       const level = Number(h.tagName.slice(1));
       if (level <= 3 && !TOC_SKIP.some((s) => text.includes(s))) {
         items.push({ id: h.id, text, level });
       }
     });
+    slugMap.current = slugs;
     const next = JSON.stringify(items);
     if (next !== tocJson.current) {
       tocJson.current = next;
@@ -321,12 +340,20 @@ export function HelpCenter({ initialDoc = 'manual', onBack }: { initialDoc?: Doc
           void window.bc.openExternal(href);
         });
       } else if (href.startsWith('#')) {
-        // 文档内锚点：跳到对应标题
+        // 文档内锚点：先按 GitHub 风格 slug 找，找不到再按原样找
         a.addEventListener('click', (e) => {
           e.preventDefault();
-          const target = root.querySelector('#' + CSS.escape(href.slice(1))) as HTMLElement | null;
+          let raw = href.slice(1);
+          try { raw = decodeURIComponent(raw); } catch { /* 保持原样 */ }
+          const mapped = slugMap.current.get(anchorSlug(raw)) || slugMap.current.get(raw) || raw;
+          const target = root.querySelector('#' + CSS.escape(mapped)) as HTMLElement | null;
           const scroller = scrollRef.current;
-          if (target && scroller) scroller.scrollTo({ top: Math.max(0, target.offsetTop - 24), behavior: 'smooth' });
+          if (target && scroller) {
+            scroller.scrollTo({ top: Math.max(0, target.offsetTop - 24), behavior: 'smooth' });
+            setActiveId(target.id);
+          } else {
+            flashDocHint(root, `没找到「${raw}」对应的章节。`);
+          }
         });
       } else if (href) {
         // 仓库内的相对文档链接：能在帮助中心里切过去的就直接切（README / 使用手册 / 开发历程），

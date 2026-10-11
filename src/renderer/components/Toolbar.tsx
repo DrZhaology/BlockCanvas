@@ -432,7 +432,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
       done.add(g.id);
       const members = list.filter((x) => groupByItem.get(x.id)?.id === g.id);
       if (members.length === 0) continue;
-      nodes.push(<ToolbarGroupButton key={g.id} group={g} members={members} renderItem={renderItem} />);
+      nodes.push(<ToolbarGroupButton key={g.id} group={g} members={members} renderItem={renderItem} canvasWidth={canvasWidth} />);
     }
     return nodes;
   };
@@ -510,21 +510,29 @@ function ToolbarGroupButton(props: {
   group: ToolbarGroup;
   members: ToolbarItem[];
   renderItem: (it: ToolbarItem) => React.ReactNode;
+  canvasWidth: string;
 }) {
-  const { group, members, renderItem } = props;
+  const { group, members, renderItem, canvasWidth } = props;
   // 悬停节奏统一走 lib/hoverPop（500ms 弹出 / 300ms 收起），与 ? 气泡、元素面板一致
   const { open, setOpen, scheduleOpen, scheduleClose, cancel, toggle } = useHoverPop();
   const btnRef = useRef<HTMLButtonElement>(null);
+
+  // 「设备」组：图标跟着当前设备走（自适应 / 像素值都按宽度落回最近的设备）
+  const isDevice = group.id === 'grp.device';
+  const deviceId = widthToDevice(canvasWidth);
+  const deviceDef = DEVICE_LIST.find((d) => d.id === deviceId) ?? DEVICE_LIST[0];
+  const icon = isDevice ? deviceDef.icon : (group.icon ?? '▦');
+  const nowLabel = canvasWidth === 'auto' ? `自适应 · ${deviceDef.label}` : `${deviceDef.label} · ${widthLabel(canvasWidth)}`;
 
   return (
     <div className="tb-grp" onMouseEnter={scheduleOpen} onMouseLeave={scheduleClose}>
       <button
         ref={btnRef}
         className={'tb-grp-btn' + (open ? ' open' : '')}
-        title={`${group.label}：鼠标浮上来展开组内 ${members.length} 个工具`}
+        title={isDevice ? `设备：当前 ${nowLabel}（鼠标浮上来切换）` : `${group.label}：鼠标浮上来展开组内 ${members.length} 个工具`}
         onClick={toggle}
       >
-        <span className="tb-grp-ico">{group.icon ?? '▦'}</span>
+        <span className="tb-grp-ico">{icon}</span>
         <span className="tb-grp-label">{group.label}</span>
         <span className="tb-grp-caret">▾</span>
       </button>
@@ -537,8 +545,8 @@ function ToolbarGroupButton(props: {
         onMouseLeave={scheduleClose}
       >
         <div className="tb-grp-pop-title">
-          <span className="tb-grp-ico">{group.icon ?? '▦'}</span>{group.label}
-          <span className="tb-grp-pop-count">{members.length} 个工具</span>
+          <span className="tb-grp-ico">{icon}</span>{group.label}
+          <span className="tb-grp-pop-count">{isDevice ? `当前：${nowLabel}` : `${members.length} 个工具`}</span>
         </div>
         <div className="tb-grp-pop-body bc-hscroll">{members.map(renderItem)}</div>
       </AnchoredPanel>
