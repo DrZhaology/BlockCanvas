@@ -310,28 +310,59 @@ git diff alpha main                           # ④ 验证：与 alpha 内容一
 **Q：在 alpha 时改动列表是空的，一切到 main 就"突然冒出一堆文件"，切回去又没了 —— 谁动了我的暂存区？**
 A：**没有人动你的暂存区，那批文件一直都在磁盘上；变的是 `.gitignore`。**
 
-`.gitignore` 本身也是被 Git 跟踪的文件，**它跟着分支走**。本仓库真实发生过一次
-（2026-10-10 实测复现）：
+`.gitignore` 本身也是被 Git 跟踪的文件，**它跟着分支走**。而本仓库两条长期分支
+`alpha`（天天提交）与 `main`（发布台账，一个小版本才动一次）**天生是错开的** ——
+于是"alpha 上刚加的一条忽略规则，main 上还没有"会长期并存。
 
-| | alpha | 旧的 main（v0.4.1） |
+本仓库已经发生过两次（2026-10-10 一次，2026-10-11 又发生一次）：
+
+| | alpha | main（发布台账，停在上一个版本） |
 |---|---|---|
-| `.gitignore` 里 shots 规则条数 | **4** 条（含 `tests/e2e/shots-v042/`） | **3** 条（没有 shots-v042 那行） |
-| `tests/e2e/shots-v042/` 那 8 张探针截图 | 被忽略 → 改动列表里看不见 | 没人忽略 → 显示成 **未跟踪文件** |
+| `.gitignore` 里的 shots 规则 | 一直在加（`shots-v042/`、`shots-v044/` …） | 只保留发布那一刻的旧副本 |
+| 那批探针截图（如 `tests/e2e/shots-v044/`） | 被忽略 → 改动列表里看不见 | 没人忽略 → 显示成 **未跟踪文件** |
 
 切过去时 git 的输出就是这一行：
 
 ```
-?? tests/e2e/shots-v042/
+?? tests/e2e/shots-v044/
 ```
 
 要点三条：
 
 1. **它们没有被暂存**。`??` 是"未跟踪"，GitHub Desktop 的改动列表会把未跟踪文件也列出来，
-   前面给你一个勾选框——**你不勾，它就不进暂存区**（这也是"看着像暂存区多了东西"的错觉来源）。
+   前面给你一个勾选框——**你不勾，它就不进暂存区**（这就是"看着像暂存区多了几张图片"的错觉来源）。
+   想确认到底是不是暂存：`git diff --cached --name-only`，**有输出才是真暂存**。
 2. **切分支不会凭空生成文件**。切过去时 git 只是"按那个分支的规则重新判断哪些文件算改动"。
 3. **提示来自 GitHub Desktop 自己的"带着改动切分支"流程**：它认为工作区有改动时会先自动
    `stash` 再在目标分支 `apply`（`git stash list` 里能看到 `On main: !!GitHub_Desktop<main>` 这种条目）。
-   apply 一旦撞冲突，就会出现你上次遇到的那种"文件像被删了"的场面。
+   apply 一旦撞冲突，就会出现"文件像被删了"的场面。
+
+### 为什么"让两个分支的 .gitignore 保持一致"治不了本
+
+因为 `main` 是**发布台账**：它只在发版那一刻被对齐到 alpha，之后必然落后。
+只要以后再有"新开一个生成物目录"这种事（新一版截图目录、新的报告文件……），
+alpha 的 `.gitignore` 就又多一条、main 就又少一条 —— **同一个毛病必然第三次、第四次复发**。
+（上一轮就是这么"修"的，所以又犯了。）
+
+### 现在的根治方案（三层，2026-10-11 落地）
+
+| 层 | 做法 | 作用 |
+|---|---|---|
+| ① 分支无关的兜底 | 规则写进 **`.git/info/exclude`**（在 `.git/` 里、**不进版本控制**） | 切到**任何**分支（main / backup-* / rescue-*）都生效，从机制上不可能再漂 |
+| ② 源头不再增长 | `.gitignore` 里的 shots 规则收敛成一条通配 **`tests/e2e/shots*/`** | 以后加版本目录**不必再改这个文件**，也就不会再制造分支差异 |
+| ③ 自动体检 | `tools/git-ignore-doctor.mjs` + `post-checkout` 钩子 | 每次切分支自动查一遍；**只在有问题时喊一声**，平时完全静默 |
+
+任何时候都可以自己跑：
+
+```bash
+pnpm git:doctor                            # 体检：兜底在不在 / 有没有未跟踪文件 / 哪些分支还没通配化
+node tools/git-ignore-doctor.mjs --fix     # 兜底丢了或不全 → 按清单重写 .git/info/exclude
+node tools/git-ignore-doctor.mjs --install-hook     # 装「切分支自动体检」（已装）
+node tools/git-ignore-doctor.mjs --uninstall-hook   # 不想要就卸掉
+```
+
+以后又多了新的生成物目录怎么办：把通配规则加进 `tools/git-ignore-doctor.mjs` 顶部的
+`GUARD_PATTERNS`（唯一真相来源）→ 跑一次 `--fix` → 再顺手写进 `.gitignore` 兜底。
 
 **那看到提示该选哪个？**
 
@@ -345,16 +376,12 @@ A：**没有人动你的暂存区，那批文件一直都在磁盘上；变的�
 **自查命令（切之前跑一遍最稳）**
 
 ```bash
-git status                  # 空 = 随便切，任何提示都不会出现
-git status --short -uall    # 看看那些未跟踪文件到底是啥
-git check-ignore -v <路径>   # 这个文件被哪条规则忽略（换分支后会"现形"的就是它）
-git show main:.gitignore | findstr shots   # 对比两个分支的忽略规则（Windows 用 findstr）
-git stash list              # GitHub Desktop 有没有偷偷替你 stash
+pnpm git:doctor              # 一条命令体检（推荐）
+git status                   # 空 = 随便切，任何提示都不会出现
+git status --short -uall     # 看看那些未跟踪文件到底是啥
+git diff --cached --name-only  # 有输出才是"真的暂存了"
+git check-ignore -v <路径>    # 这个文件被哪条规则忽略（换分支后会"现形"的就是它）
 ```
-
-**根治**：让 `.gitignore` 在各分支保持一致（本仓库：新 main 已与 alpha 完全一致，
-所以这个问题现在不会再出现了——实测切到新 main，`git status` 是干净的）；
-生成物目录一律事先写进 `.gitignore`。
 
 **Q：切到 main 之后，我在 alpha 上提交的东西还在吗？**
 A：在。它属于 alpha 那条历史，main 看不到而已。切回 alpha 就都在。

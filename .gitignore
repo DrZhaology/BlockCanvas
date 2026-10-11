@@ -26,11 +26,13 @@ yarn-error.log*
 electron.vite.config.*.mjs
 
 # ---- e2e 生成物（保留 *.mjs 测试脚本，剔除自动生成的截图/检查文件/报告）----
-tests/e2e/shots/
-tests/e2e/shots-mc/
-tests/e2e/shots-v041/
-tests/e2e/shots-v042/
-tests/e2e/shots-v044/
+# ⚠ 这里**只写通配规则，不再逐个列目录**：
+#   以前写成 shots/ + shots-v041/ + shots-v042/ + shots-v044/ …，每加一版截图目录就要改一次这个文件，
+#   而 main（发布台账）天生落后于 alpha —— 于是每加一条规则，切到 main 就会从"被忽略"变成
+#   "未跟踪"，GitHub Desktop 里看着像"暂存区突然多出几张图片"。
+#   shots*/ 一次覆盖 shots / shots-mc / shots-v041 / shots-v042 / shots-v044 / 未来所有版本目录。
+#   （另外 .git/info/exclude 里还有一份同样的兜底，切到任何分支都不会冒出生成物）
+tests/e2e/shots*/
 tests/e2e/*.html
 tests/e2e/report*.txt
 tests/e2e/last-run.log

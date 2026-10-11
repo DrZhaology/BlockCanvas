@@ -118,6 +118,9 @@ pnpm test:e2e       # 构建 + 跑 Playwright 端到端测试（含逐步截图�
 pnpm test:e2e:fast  # 同一个套件但不拍截图，约 1 分钟（日常回归用这个）
 pnpm test:probe     # 三个专项探针（表格编辑器 77 项 + UI 交互 43 项 + 更新中心 24 项）
 node tests/unit/table-ops.test.mjs   # 表格结构单测（37 项，秒级，改 tableOps 后先跑这个）
+
+# Git 忽略规则体检：确保"切到任何分支都不会冒出生成物"（详见 docs/Git分支使用说明.md 第九节）
+pnpm git:doctor
 ```
 
 > 截图只是"给人看的旁证"：单张限时 5s、失败不中断判定；`--no-shots` / `BC_E2E_SHOTS=0` 可整轮跳过。
