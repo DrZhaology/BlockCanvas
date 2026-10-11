@@ -307,6 +307,55 @@ git diff alpha main                           # ④ 验证：与 alpha 内容一
 
 ## 九、几个容易搞混的问题（自问自答）
 
+**Q：在 alpha 时改动列表是空的，一切到 main 就"突然冒出一堆文件"，切回去又没了 —— 谁动了我的暂存区？**
+A：**没有人动你的暂存区，那批文件一直都在磁盘上；变的是 `.gitignore`。**
+
+`.gitignore` 本身也是被 Git 跟踪的文件，**它跟着分支走**。本仓库真实发生过一次
+（2026-10-10 实测复现）：
+
+| | alpha | 旧的 main（v0.4.1） |
+|---|---|---|
+| `.gitignore` 里 shots 规则条数 | **4** 条（含 `tests/e2e/shots-v042/`） | **3** 条（没有 shots-v042 那行） |
+| `tests/e2e/shots-v042/` 那 8 张探针截图 | 被忽略 → 改动列表里看不见 | 没人忽略 → 显示成 **未跟踪文件** |
+
+切过去时 git 的输出就是这一行：
+
+```
+?? tests/e2e/shots-v042/
+```
+
+要点三条：
+
+1. **它们没有被暂存**。`??` 是"未跟踪"，GitHub Desktop 的改动列表会把未跟踪文件也列出来，
+   前面给你一个勾选框——**你不勾，它就不进暂存区**（这也是"看着像暂存区多了东西"的错觉来源）。
+2. **切分支不会凭空生成文件**。切过去时 git 只是"按那个分支的规则重新判断哪些文件算改动"。
+3. **提示来自 GitHub Desktop 自己的"带着改动切分支"流程**：它认为工作区有改动时会先自动
+   `stash` 再在目标分支 `apply`（`git stash list` 里能看到 `On main: !!GitHub_Desktop<main>` 这种条目）。
+   apply 一旦撞冲突，就会出现你上次遇到的那种"文件像被删了"的场面。
+
+**那看到提示该选哪个？**
+
+- 提示是「是否把改动带到目标分支 / Carry changes」→ **生成物（截图、日志、`report*.txt`、`out/`）可以放心丢弃**；
+  **代码改动一律别丢**，选**取消**。
+- 提示是「Your local changes would be overwritten」这类**错误**（不是选择框）→ 说明根本切不过去，
+  取消即可，然后**先 commit** 再切。
+- 任何写着 **Discard / 丢弃改动** 的按钮：只在你能确定那是生成物时才点。
+- **拿不准就选"取消/留在当前分支"** —— 取消永远不丢东西；丢东西的都是那些"继续"。
+
+**自查命令（切之前跑一遍最稳）**
+
+```bash
+git status                  # 空 = 随便切，任何提示都不会出现
+git status --short -uall    # 看看那些未跟踪文件到底是啥
+git check-ignore -v <路径>   # 这个文件被哪条规则忽略（换分支后会"现形"的就是它）
+git show main:.gitignore | findstr shots   # 对比两个分支的忽略规则（Windows 用 findstr）
+git stash list              # GitHub Desktop 有没有偷偷替你 stash
+```
+
+**根治**：让 `.gitignore` 在各分支保持一致（本仓库：新 main 已与 alpha 完全一致，
+所以这个问题现在不会再出现了——实测切到新 main，`git status` 是干净的）；
+生成物目录一律事先写进 `.gitignore`。
+
 **Q：切到 main 之后，我在 alpha 上提交的东西还在吗？**
 A：在。它属于 alpha 那条历史，main 看不到而已。切回 alpha 就都在。
 
