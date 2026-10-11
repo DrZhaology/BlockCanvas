@@ -84,6 +84,8 @@ function makeBc(pluginId: string) {
     icon?: string;
     title?: string;
     onClick: () => void;
+    /** 插件可以自己指定停靠区（main / right / more）；不写就默认收进「⋯更多」 */
+    dock?: 'main' | 'right' | 'more';
   }) => {
     const item: ToolbarItem = {
       id: 'plg.' + pluginId + '.' + cmd.id,
@@ -92,7 +94,10 @@ function makeBc(pluginId: string) {
       title: cmd.title,
       onClick: cmd.onClick,
       order: 1000,
-      defaultVisible: false
+      // v0.4.3：插件按钮**默认收进「⋯更多」**（以前是 defaultVisible:false 的隐式行为，
+      // 现在显式写成 defaultDock='more'，"更多"本身也就是一个可自由拖拽的工具组）。
+      // 插件想直接放到主工具栏 / 右侧，就自己传 dock: 'main' | 'right'。
+      defaultDock: cmd.dock ?? 'more'
     };
     useToolbar.getState().addItem(item);
   };
