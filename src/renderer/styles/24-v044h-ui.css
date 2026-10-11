@@ -1,0 +1,241 @@
+/* ==========================================================================
+   v0.4.4h（0.4.3 收尾轮）· 画布 Alt 拖动的"墙"提示 + 拖到墙外改父子关系
+                + 中键属性搜索（已添加/未添加）+ 删除项目三步防护
+   --------------------------------------------------------------------------
+   命名约定（见 docs/设计语言.md 第十节）：
+     · 交互态统一 bc- 前缀；画布元素属性统一 data-bc-*
+     · 动画只在 animations.css 定义 keyframes，这里只写引用
+   ========================================================================== */
+
+/* ---------- Alt 拖动时常显的"可达边界"提示线（橙色细线） ---------- */
+.bc-wall-hint {
+  position: fixed;
+  z-index: 401;
+  pointer-events: none;
+  background: rgba(249, 115, 22, 0.5);
+  border-radius: 2px;
+}
+
+/* ---------- 撞到墙 + 继续往外拖 → 改父子关系 ---------- */
+/* 被拖元素淡化（说明"它正在被搬走"） */
+.canvas [data-bc-drag-src="1"] {
+  opacity: 0.4;
+  outline: 1.5px dashed #f97316;
+  outline-offset: 1px;
+}
+/* 鼠标下的块级元素：蓝色高亮 + 标签提示"松开就放进去" */
+.bc-drop-into {
+  position: fixed;
+  z-index: 403;
+  pointer-events: none;
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+  background: rgba(30, 136, 229, 0.12);
+  box-shadow: 0 0 0 2px rgba(30, 136, 229, 0.25) inset;
+}
+.bc-drop-into-tag {
+  position: absolute;
+  top: -20px;
+  left: -2px;
+  height: 18px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 4px;
+}
+body.bc-reparenting { cursor: copy; }
+
+/* ---------- 中键属性搜索：结果项的"已添加 / 未添加"两态 ---------- */
+/* 退场动画（与进场同一套 token；bcPopOut 比 bcPopIn 短 —— 走比来快） */
+.bc-prop-search.is-closing {
+  animation: bcPopOut var(--dur-pop-exit) var(--ease-exit) both;
+  pointer-events: none;
+}
+.bc-prop-search-item.is-added {
+  color: var(--accent);
+  background: rgba(30, 136, 229, 0.09);
+}
+/* 三项布局：标签占满 → key 与"已添加/未添加"靠右 */
+.bc-prop-search-item { justify-content: flex-start; gap: 6px; }
+.bc-prop-search-item .bc-prop-search-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc-prop-search-item .bc-prop-search-key { flex: none; }
+.bc-prop-search-item.is-added .bc-prop-search-label { color: var(--accent); }
+.bc-prop-search-item.is-added .bc-prop-search-key { color: var(--accent); opacity: 0.85; }
+.bc-prop-search-item.is-added:hover { background: rgba(30, 136, 229, 0.16); }
+.bc-prop-search-item.is-added.is-best { background: rgba(30, 136, 229, 0.2); }
+.bc-prop-search-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.bc-prop-search-item.is-missing .bc-prop-search-badge { color: var(--text-muted); font-weight: 500; }
+.bc-prop-search-hint-ctr {
+  margin-top: 6px;
+  padding: 5px 8px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  background: var(--hover);
+  border-radius: 5px;
+}
+.bc-prop-search-hint-ctr kbd {
+  padding: 0 4px;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.bc-prop-search-msg {
+  margin-top: 6px;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.1);
+  border-radius: 5px;
+}
+
+/* ---------- 删除项目：三步安全防护（输入名 → 三滑块 → 最后确认） ---------- */
+.dd-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px 0;
+}
+.dd-step-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.dd-step-dot .dd-step-no {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--hover);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+}
+.dd-step-dot.active { color: var(--accent); }
+.dd-step-dot.active .dd-step-no { color: #fff; background: var(--accent); border-color: var(--accent); }
+.dd-step-dot.done { color: #16a34a; }
+.dd-step-dot.done .dd-step-no { color: #fff; background: #16a34a; border-color: #16a34a; }
+.dd-step-line { flex: 1; height: 1px; background: var(--border); }
+
+/* 滑块关卡 */
+.dd-slider-hint {
+  margin: 10px 0 4px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+.dd-slider-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.dd-slider-item { display: flex; align-items: center; gap: 10px; }
+.dd-slider-item.is-locked { opacity: 0.55; }
+.dd-slider-no {
+  width: 18px;
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.dd-slider-item.is-active .dd-slider-no { color: var(--accent); }
+.dd-slider-item.is-done .dd-slider-no { color: #16a34a; }
+.dd-slider-track {
+  position: relative;
+  flex: 1;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--hover);
+  border: 1px solid var(--border);
+  cursor: not-allowed;
+  touch-action: none;
+}
+.dd-slider-item.is-active .dd-slider-track { cursor: pointer; border-color: var(--accent); }
+.dd-slider-target {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--text-muted);
+  opacity: 0.55;
+}
+.dd-slider-item.is-done .dd-slider-target { background: #16a34a; opacity: 1; }
+.dd-slider-knob {
+  position: absolute;
+  top: 2px;
+  width: 20px;
+  height: 20px;
+  margin-left: -10px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.dd-slider-item.is-active .dd-slider-knob { border-color: var(--accent); }
+.dd-slider-item.is-done .dd-slider-knob { border-color: #16a34a; background: #16a34a; }
+.dd-slider-state { width: 46px; flex: none; font-size: 11px; text-align: right; color: var(--text-muted); }
+.dd-slider-item.is-done .dd-slider-state { color: #16a34a; font-weight: 600; }
+
+/* 最后一步确认 */
+.dd-final-warn {
+  margin: 10px 0;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #b91c1c;
+  background: rgba(220, 38, 38, 0.09);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 6px;
+}
+.dd-final-list { margin: 8px 0 0; padding-left: 18px; font-size: 11.5px; line-height: 1.8; color: var(--text-muted); }
+.dd-final-list li { list-style: disc; }
+
+/* 取消按钮加大（用户要求：这条流程只能主动取消，点遮罩不关闭） */
+.dd-cancel-btn {
+  min-width: 108px;
+  height: 34px;
+  padding: 0 20px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.dd-modal-footer .btn-danger { height: 34px; padding: 0 18px; font-size: 13px; }
+.dd-modal-footer .btn-primary { height: 34px; padding: 0 18px; font-size: 13px; }
+
+/* 卡片退场动画（遮罩的退场由 .modal-mask.is-closing 负责，见 23 分片） */
+.double-delete-modal.is-closing { animation: bcPopOut var(--dur-pop-exit) var(--ease-exit) both; }
+
+/* 步骤 2 的滑块可能较高 → 内容区自己滚，卡片不超屏 */
+.dd-modal-body { max-height: 58vh; overflow-y: auto; }
+
+/* 需要用户手动输入的项目全名：等宽 + 强调，但**不可点击填入** */
+.dd-modal-label b {
+  font-family: 'Consolas', monospace;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--panel-soft);
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  user-select: text;
+}
+
+/* 遮罩：点击不关闭（只做视觉），整条流程用同一个遮罩 */
+.dd-mask-static { cursor: default; }

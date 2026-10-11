@@ -115,6 +115,65 @@ async function main() {
   }, id);
   ok('滚轮调值一次 Ctrl+Z 整体还原', wAfter === '160px', String(wAfter));
 
+  // ============ 3. 选中元素 + 焦点在属性输入框里，Ctrl+Z / Ctrl+Y 也要能用（v0.4.4h）============
+  // 用户反馈的 bug：点画布选中元素后，焦点留在右侧输入框 → 全局快捷键被输入框守卫吃掉。
+  const w0 = await win.evaluate((eid) => {
+    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
+    return n.style.width;
+  }, id);
+
+  // 点进宽度输入框（焦点停在输入框里），再用滚轮连续调值（模拟用户连续操作）
+  await win.locator('[data-prop-key="width"] input').first().click();
+  await sleep(250);
+  const focusTag = await win.evaluate(() => document.activeElement?.tagName || 'BODY');
+  ok('焦点确实在属性输入框里', focusTag === 'INPUT', focusTag);
+
+  await win.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('[data-prop-key="width"] input'));
+    const input = rows.find((i) => i.type !== 'range');
+    for (let i = 0; i < 6; i += 1) {
+      input.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 100 }));
+    }
+  });
+  await sleep(600);
+  const wChanged = await win.evaluate((eid) => {
+    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
+    return n.style.width;
+  }, id);
+  ok('滚轮已改变宽度', wChanged !== w0, `${w0} → ${wChanged}`);
+
+  // 焦点仍在输入框里 → 按 Ctrl+Z 应该整体还原（而不是被输入框吃掉）
+  const focusStill = await win.evaluate(() => document.activeElement?.tagName || 'BODY');
+  ok('按 Ctrl+Z 之前焦点仍在输入框里', focusStill === 'INPUT', focusStill);
+  await win.keyboard.press('Control+z');
+  await sleep(500);
+  const wUndo = await win.evaluate((eid) => {
+    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
+    return n.style.width;
+  }, id);
+  ok('焦点在输入框里时 Ctrl+Z 仍然生效', wUndo === w0, `${wChanged} → ${wUndo}`);
+
+  await win.keyboard.press('Control+y');
+  await sleep(500);
+  const wRedo = await win.evaluate((eid) => {
+    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
+    return n.style.width;
+  }, id);
+  ok('Ctrl+Y 重做也生效', wRedo === wChanged, String(wRedo));
+
+  // 点画布 → 焦点主动离开输入框（这样后续快捷键不会被吃掉）
+  await win.locator('[data-prop-key="width"] input').first().click();
+  await sleep(200);
+  const r = await win.evaluate((eid) => {
+    const el = document.querySelector(`.canvas [data-bc-id="${eid}"]`);
+    const b = el.getBoundingClientRect();
+    return { x: b.x, y: b.y, w: b.width, h: b.height };
+  }, id);
+  await win.mouse.click(r.x + r.w / 2, r.y + r.h / 2);
+  await sleep(350);
+  const focusAfter = await win.evaluate(() => document.activeElement?.tagName || 'BODY');
+  ok('点画布后焦点主动离开输入框', focusAfter !== 'INPUT' && focusAfter !== 'TEXTAREA', focusAfter);
+
   ok('无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));
 
   await app.close();

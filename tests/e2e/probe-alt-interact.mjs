@@ -150,6 +150,72 @@ async function main() {
 
   await win.keyboard.up('Alt');
 
+  // ============ 4c. 拖动时显示"可达边界"提示线（v0.4.4h）============
+  await win.keyboard.down('Alt');
+  // 前面的用例把元素拖到画布很下面了 → 先滚回可视区，否则鼠标移不过去
+  await win.evaluate((eid) => {
+    document.querySelector(`.canvas [data-bc-id="${eid}"]`)?.scrollIntoView({ block: 'center' });
+  }, id);
+  await sleep(400);
+  const r3 = await rectOf(id);
+  await win.mouse.move(r3.x + r3.w / 2, r3.y + r3.h / 2);
+  await sleep(200);
+  await win.mouse.down();
+  await win.mouse.move(r3.x + r3.w / 2 - 8, r3.y + r3.h / 2 + 40, { steps: 6 });
+  await sleep(220);
+  const hints = await win.locator('.bc-wall-hint').count();
+  ok('Alt 拖动时显示"可达边界"提示线（内边距/外边距）', hints > 0, 'count=' + hints);
+  await win.mouse.up();
+  await sleep(250);
+  const hintsGone = await win.locator('.bc-wall-hint').count();
+  ok('松手后边界提示线消失', hintsGone === 0, 'count=' + hintsGone);
+
+  // ============ 4d. 撞墙后继续往外拖 → 快速改父子关系（v0.4.4h）============
+  const cid = await win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    st.insertTemplate({ id: 'c1', type: 'div', style: { width: '320px', height: '160px', padding: '20px', backgroundColor: '#eef7ff' }, children: [] }, null);
+    return window.__sceneStore.getState().scene.selectedId;
+  });
+  await sleep(350);
+  const e2 = await win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    st.insertTemplate({ id: 'e2', type: 'div', text: '待搬运', style: { width: '100px', height: '40px', backgroundColor: '#ffe9c9' }, children: [] }, null);
+    return window.__sceneStore.getState().scene.selectedId;
+  });
+  await sleep(400);
+  await win.evaluate((c) => {
+    document.querySelector(`.canvas [data-bc-id="${c}"]`)?.scrollIntoView({ block: 'center' });
+  }, cid);
+  await sleep(400);
+  const rc = await rectOf(cid);
+  const re2 = await rectOf(e2);
+  console.log('   [diag] viewport=' + JSON.stringify(win.viewportSize()) + ' c1=' + JSON.stringify(rc) + ' e2=' + JSON.stringify(re2));
+  await win.mouse.move(re2.x + re2.w / 2, re2.y + re2.h / 2);
+  await sleep(200);
+  await win.mouse.down();
+  await win.mouse.move(re2.x + re2.w / 2 - 130, re2.y + re2.h / 2, { steps: 8 }); // 撞墙后继续往外
+  await sleep(250);
+  const reparenting = await win.evaluate(() => document.body.classList.contains('bc-reparenting'));
+  ok('撞墙后继续往外拖 → 进入"改父子关系"模式', reparenting === true, String(reparenting));
+  const faded = await win.evaluate((eid) => !!document.querySelector(`.canvas [data-bc-id="${eid}"][data-bc-drag-src="1"]`), e2);
+  ok('被拖元素进入淡化态', faded === true, String(faded));
+
+  await win.mouse.move(rc.x + rc.w / 2, rc.y + rc.h / 2, { steps: 8 });
+  await sleep(300);
+  const dropBox = await win.locator('.bc-drop-into').count();
+  ok('移到块级元素上方 → 出现"放入此元素"高亮', dropBox === 1, 'count=' + dropBox);
+
+  await win.mouse.up();
+  await sleep(450);
+  const parentOk = await win.evaluate(([eid, c]) => {
+    const st = window.__sceneStore.getState();
+    const find = (n, id) => (n.id === id ? n : (n.children || []).reduce((a, k) => a || find(k, id), null));
+    const container = find(st.scene.root, c);
+    return !!container && container.children.some((k) => k.id === eid);
+  }, [e2, cid]);
+  ok('松开后元素真的被放进该容器', parentOk === true, String(parentOk));
+  await win.keyboard.up('Alt');
+
   // ============ 5. Alt + 滚轮 = 缩放 ============
   const z0 = await win.evaluate(() => document.querySelector('.canvas').getBoundingClientRect().width);
   await win.keyboard.down('Alt');

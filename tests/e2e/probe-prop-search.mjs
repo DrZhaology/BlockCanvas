@@ -62,10 +62,11 @@ async function main() {
   const best2 = await win.locator('.bc-prop-search-item.is-best .bc-prop-search-key').innerText().catch(() => '');
   ok('拼错也能命中 fontSize', best2 === 'fontSize', best2);
 
-  // 回车 → 定位到右侧属性行并高亮
+  // Ctrl+Enter → 添加并定位到右侧属性行并高亮
+  //（v0.4.4h：fontSize 原本没添加，直接 Enter 只提示"没有添加"，不会偷偷加 → 用 Ctrl+Enter）
   await win.locator('.bc-prop-search-input').fill('字号');
   await sleep(250);
-  await win.locator('.bc-prop-search-input').press('Enter');
+  await win.locator('.bc-prop-search-input').press('Control+Enter');
   await sleep(700);
   const located = await win.evaluate(() => {
     const row = document.querySelector('[data-prop-key="fontSize"]');
@@ -75,7 +76,7 @@ async function main() {
       inCss: !!row && !!row.closest('.inspector-sec')
     };
   });
-  ok('回车后定位到 fontSize 属性行', located.exists === true, JSON.stringify(located));
+  ok('回车（Ctrl+Enter）后定位到 fontSize 属性行', located.exists === true, JSON.stringify(located));
   ok('该行带橙色高亮（flash）', located.flash === true, JSON.stringify(located));
 
   // ============ 2. 「+ 添加属性」按值搜索 ============
@@ -107,6 +108,64 @@ async function main() {
   ok('搜不到时显示"没有匹配"且不列随机结果', empty === 1 && items === 0, `empty=${empty} items=${items}`);
   await win.keyboard.press('Escape');
   await sleep(300);
+
+  // ============ 4. 已添加 / 未添加 两态 + Enter / Ctrl+Enter（v0.4.4h）============
+  // 重新打开中键搜索
+  await win.mouse.click(rect.x + rect.w / 2, rect.y + rect.h / 2, { button: 'middle' });
+  await sleep(400);
+  ok('中键再次弹出属性搜索框', (await win.locator('.bc-prop-search').count()) === 1);
+
+  // backgroundColor 已设置过 → 应显示"已添加"（蓝色）
+  await win.locator('.bc-prop-search-input').fill('backgroundcolor');
+  await sleep(300);
+  const bgItem = await win.evaluate(() => {
+    const el = document.querySelector('.bc-prop-search-item.is-best');
+    return el ? { cls: el.className, badge: el.querySelector('.bc-prop-search-badge')?.textContent || '' } : null;
+  });
+  ok('已添加的属性显示为蓝色 + 「已添加」', !!bgItem && /is-added/.test(bgItem.cls) && bgItem.badge === '已添加', JSON.stringify(bgItem));
+
+  // lineHeight（文本行高）没设置过 → 白色 + 「未添加」 + 小字 Ctrl 提示
+  await win.locator('.bc-prop-search-input').fill('行高');
+  await sleep(300);
+  const fsItem = await win.evaluate(() => {
+    const el = document.querySelector('.bc-prop-search-item.is-best');
+    return el ? { cls: el.className, badge: el.querySelector('.bc-prop-search-badge')?.textContent || '', key: el.querySelector('.bc-prop-search-key')?.textContent || '' } : null;
+  });
+  ok('未添加的属性显示为白色 + 「未添加」', !!fsItem && /is-missing/.test(fsItem.cls) && fsItem.badge === '未添加', JSON.stringify(fsItem));
+  ok('权重第一项未添加时显示 Ctrl+Enter 小字提示', (await win.locator('.bc-prop-search-hint-ctr').count()) === 1);
+
+  // 直接 Enter → 只提示"没有添加"，不写样式
+  await win.locator('.bc-prop-search-input').press('Enter');
+  await sleep(350);
+  const stillOpen = await win.locator('.bc-prop-search').count();
+  const msgTxt = await win.locator('.bc-prop-search-msg').innerText().catch(() => '');
+  const fsAfter = await win.evaluate((eid) => {
+    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
+    return n?.style?.lineHeight ?? '';
+  }, id);
+  ok('未添加时按 Enter 只提示"没有添加"（框不关、不写样式）', stillOpen === 1 && /没有添加/.test(msgTxt) && fsAfter === '', `open=${stillOpen} msg=${msgTxt} lh=${fsAfter}`);
+
+  // Ctrl+Enter → 快捷添加并定位
+  await win.locator('.bc-prop-search-input').press('Control+Enter');
+  await sleep(700);
+  const added = await win.evaluate(() => {
+    const row = document.querySelector('[data-prop-key="lineHeight"]');
+    return { exists: !!row, flash: !!row && row.className.includes('flash') };
+  });
+  ok('Ctrl+Enter 快捷添加并定位到该属性行', added.exists === true && added.flash === true, JSON.stringify(added));
+
+  // ============ 5. 点别处关闭 + 退场动画（v0.4.4h）============
+  await win.mouse.click(rect.x + rect.w / 2, rect.y + rect.h / 2, { button: 'middle' });
+  await sleep(400);
+  ok('中键弹出搜索框（第 3 次）', (await win.locator('.bc-prop-search').count()) === 1);
+  // 点击远处空白（窗口左下角，肯定在搜索框之外）→ 应关闭
+  const vp = win.viewportSize() || { width: 1200, height: 800 };
+  await win.mouse.click(6, vp.height - 6);
+  await sleep(60);
+  const closing = await win.locator('.bc-prop-search.is-closing').count();
+  await sleep(300);
+  const gone = await win.locator('.bc-prop-search').count();
+  ok('点击别处即关闭（不只是 Esc）', gone === 0, `gone=${gone} closingClass=${closing}`);
 
   ok('无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));
 

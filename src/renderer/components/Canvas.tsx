@@ -22,6 +22,36 @@ import { CanvasPropSearch } from './CanvasPropSearch';
 //  - Alt+点击元素 = 选中它的父级；Ctrl+点击 = 加/减选中；空白拖框 = 框选
 // 4-B/4-F：Ctrl+滚轮缩放画布；zoom 状态由 App 持有（归位按钮在工具栏）
 
+/**
+ * 「拖到墙外 → 改父子关系」：从鼠标下的 DOM 往上找第一个可作为新父级的**块级容器**。
+ * 排除：被拖元素自身及其后代、当前父级（避免误重排）、自闭合元素、锁定元素、纯 inline 元素。
+ */
+function pickDropTarget(
+  under: HTMLElement | null,
+  draggedEl: HTMLElement,
+  currentParentId: string | null,
+  root: SceneElement
+): { id: string; rect: { x: number; y: number; w: number; h: number } } | null {
+  let cur: HTMLElement | null = under;
+  while (cur && cur !== document.body) {
+    if (cur.hasAttribute?.('data-bc-id')) {
+      const id = cur.getAttribute('data-bc-id')!;
+      if (cur !== draggedEl && !draggedEl.contains(cur)) {
+        const node = findNode(root, id);
+        const cs = getComputedStyle(cur);
+        const isBlock = cs.display !== 'inline' && cs.display !== 'contents';
+        if (node && isBlock && !SELF_CLOSING_TAGS.has(node.type)
+          && id !== currentParentId && cur.getAttribute('data-bc-locked') !== '1') {
+          const r = cur.getBoundingClientRect();
+          return { id, rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
+        }
+      }
+    }
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
 export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserResize }: {
   canvasWidth?: string;
   zoom?: number;
@@ -135,6 +165,11 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   const [altBadge, setAltBadge] = useState<{ x: number; y: number; text: string } | null>(null);
   // 撞到"墙"时闪一下的那条边（橙色），告诉用户"这是限制不是 BUG"
   const [wallFlash, setWallFlash] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  // Alt 拖动中"当前可达边界"的常显提示线（橙色细线）——
+  // 用户反馈：只剩视口边界线了，内边距/外边距的界限看不见 → 拖动时把四面墙都画出来。
+  const [wallHints, setWallHints] = useState<Bar[]>([]);
+  // 撞墙后继续往墙外拖 → 进入"改父子关系"模式：被拖元素淡化，鼠标下的块级元素高亮
+  const [dropTarget, setDropTarget] = useState<{ id: string; rect: { x: number; y: number; w: number; h: number } } | null>(null);
   // Alt 移动时的"吸附对齐参考线"（PowerPoint 风格）
   const [guides, setGuides] = useState<{ x: number | null; y: number | null; box: { left: number; top: number; right: number; bottom: number } | null } | null>(null);
   const wallFlashTimer = useRef(0);
@@ -159,6 +194,12 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       barL: Bar | null; barR: Bar | null; barT: Bar | null; barB: Bar | null;
       snapX: number[]; snapY: number[];
     };
+    /** 拖动时常显的"可达边界"提示线（橙色） */
+    walls: Bar[];
+    /** 撞墙后继续往外拖 → 进入"改父子关系"模式（被拖元素淡化、鼠标下元素高亮） */
+    reparent: boolean;
+    dropId: string | null;
+    parentId: string | null;
     startFont: number;
     engaged: boolean;
   }>(null);
@@ -198,19 +239,22 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const pb = boxOf(parentEl && parentEl !== canvasEl ? parentEl : (canvasEl ?? el));
 
     // 墙的"整面"高亮条
-    const vBar = (x: number, top: number, bottom: number) => ({ x: x - 3, y: top, w: 3, h: Math.max(2, bottom - top) });
-    const hBar = (y: number, left: number, right: number) => ({ x: left, y: y - 3, w: Math.max(2, right - left), h: 3 });
+    const vBar = (x: number, top: number, bottom: number) => ({ x: x - 2, y: top, w: 4, h: Math.max(2, bottom - top) });
+    const hBar = (y: number, left: number, right: number) => ({ x: left, y: y - 2, w: Math.max(2, right - left), h: 4 });
 
     // 定位元素的 margin 是固定的 → 墙要把它算进去；常规流元素的 margin 本身就是被调的量 → 不算
     const addM = positioned;
-    let minX = pb.left + (addM ? m.left : 0);
-    let maxX = pb.right - (addM ? m.right : 0) - rect.width;
-    let minY = pb.top + (addM ? m.top : 0);
-    let maxY = isFixed ? pb.bottom - (addM ? m.bottom : 0) - rect.height : Infinity;
-    let barL: { x: number; y: number; w: number; h: number } | null = vBar(pb.left, pb.top, pb.bottom);
-    let barR: { x: number; y: number; w: number; h: number } | null = vBar(pb.right, pb.top, pb.bottom);
-    let barT: { x: number; y: number; w: number; h: number } | null = hBar(pb.top, pb.left, pb.right);
-    let barB: { x: number; y: number; w: number; h: number } | null = isFixed ? hBar(pb.bottom, pb.left, pb.right) : null;
+    // 四面墙的"真实位置"（client 坐标）：元素的边缘最终会被挡在这条线上。
+    // 注意：画在**墙的位置**（父容器内容盒内侧 ± 元素外边距），不是父容器的边框 —— 用户明确要求。
+    let wallLeft = pb.left + (addM ? m.left : 0);
+    let wallRight = pb.right - (addM ? m.right : 0);
+    let wallTop = pb.top + (addM ? m.top : 0);
+    let wallBottom = isFixed ? pb.bottom - (addM ? m.bottom : 0) : Infinity;
+    // 每面墙要画的"整面"（默认铺满父容器内容盒；被兄弟元素挡住时改成画在那个兄弟的边上）
+    let barL: Bar | null = vBar(wallLeft, pb.top, pb.bottom);
+    let barR: Bar | null = vBar(wallRight, pb.top, pb.bottom);
+    let barT: Bar | null = hBar(wallTop, pb.left, pb.right);
+    let barB: Bar | null = Number.isFinite(wallBottom) ? hBar(wallBottom, pb.left, pb.right) : null;
 
     // 元素与元素的碰撞（只对定位元素生效 —— 常规流的兄弟永远紧挨着，谈不上"撞"）
     if (positioned && parentEl) {
@@ -220,15 +264,20 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
         const vOverlap = Math.min(rect.bottom, sr.bottom) - Math.max(rect.top, sr.top) > 1;
         const hOverlap = Math.min(rect.right, sr.right) - Math.max(rect.left, sr.left) > 1;
         if (vOverlap) {
-          if (sr.right <= rect.left + 1 && sr.right + m.left > minX) { minX = sr.right + m.left; barL = vBar(sr.right, sr.top, sr.bottom); }
-          if (sr.left >= rect.right - 1 && sr.left - m.right - rect.width < maxX) { maxX = sr.left - m.right - rect.width; barR = vBar(sr.left, sr.top, sr.bottom); }
+          if (sr.right <= rect.left + 1 && sr.right + m.left > wallLeft) { wallLeft = sr.right + m.left; barL = vBar(wallLeft, sr.top, sr.bottom); }
+          if (sr.left >= rect.right - 1 && sr.left - m.right < wallRight) { wallRight = sr.left - m.right; barR = vBar(wallRight, sr.top, sr.bottom); }
         }
         if (hOverlap) {
-          if (sr.bottom <= rect.top + 1 && sr.bottom + m.top > minY) { minY = sr.bottom + m.top; barT = hBar(sr.bottom, sr.left, sr.right); }
-          if (sr.top >= rect.bottom - 1 && sr.top - m.bottom - rect.height < maxY) { maxY = sr.top - m.bottom - rect.height; barB = hBar(sr.top, sr.left, sr.right); }
+          if (sr.bottom <= rect.top + 1 && sr.bottom + m.top > wallTop) { wallTop = sr.bottom + m.top; barT = hBar(wallTop, sr.left, sr.right); }
+          if (sr.top >= rect.bottom - 1 && sr.top - m.bottom < wallBottom) { wallBottom = sr.top - m.bottom; barB = hBar(wallBottom, sr.left, sr.right); }
         }
       }
     }
+
+    let minX = wallLeft;
+    let maxX = wallRight - rect.width;
+    let minY = wallTop;
+    let maxY = Number.isFinite(wallBottom) ? wallBottom - rect.height : Infinity;
     // 兜底：范围别反转
     if (maxX < minX) maxX = minX;
     if (Number.isFinite(maxY) && maxY < minY) maxY = minY;
@@ -327,6 +376,14 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     if (!t0?.classList?.contains('canvas-inline-text-input')) {
       window.dispatchEvent(new CustomEvent('bc:commit-inline'));
     }
+    // 点画布 = 离开右侧属性面板的输入框：主动 blur。
+    // 画布的 pointerdown 会 preventDefault()，焦点不会自然转移 → 焦点留在输入框里，
+    // 之后按 Ctrl+Z / Ctrl+Y 会被输入框"吃掉"（用户反馈：选中元素后撤销没反应）。
+    const ae = document.activeElement as HTMLElement | null;
+    if (ae && ae !== document.body && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)
+      && !ae.closest('.canvas')) {
+      ae.blur();
+    }
     // 鼠标中键 = 打开"属性搜索"框（敲属性名 → Enter → 右侧面板定位高亮）
     if (e.button === 1) {
       e.preventDefault();
@@ -349,6 +406,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const rect = el.getBoundingClientRect();
     const pos = cs.position;
     const positioned = pos === 'absolute' || pos === 'fixed' || pos === 'relative';
+    const bounds = boundsFor(el, rect);
+    const parentNode = findParent(root, h.id);
     // 定位基准：优先计算后的 left/top（缺省时用计算值，第一次拖动即"补上" left/top，避免跳变）
     const startLeft = Number.isFinite(parseFloat(cs.left)) ? parseFloat(cs.left) : 0;
     const startTop = Number.isFinite(parseFloat(cs.top)) ? parseFloat(cs.top) : 0;
@@ -361,7 +420,11 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       startW: rect.width, startH: rect.height,
       positioned, isFixed: pos === 'fixed',
       startLeft, startTop, startMarginL, startMarginT,
-      bounds: boundsFor(el, rect),
+      bounds,
+      walls: [bounds.barL, bounds.barR, bounds.barT, bounds.barB].filter(Boolean) as Bar[],
+      reparent: false,
+      dropId: null,
+      parentId: parentNode?.id ?? null,
       startFont: parseFloat(cs.fontSize) || 16,
       engaged: false
     };
@@ -380,6 +443,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       d.engaged = true;
       document.body.classList.add('bc-alt-dragging');
       if (d.mode === 'font') document.body.classList.add('bc-alt-fonting');
+      // 拖动时常显"可达边界"提示线（橙色）——让内边距/外边距的界限一眼可见
+      if (d.mode !== 'font') setWallHints(d.walls);
       st.selectElement(d.id);
       st.beginStyleEdit(); // 单条撤销：整个拖动 = 一步 Ctrl+Z
     }
@@ -440,6 +505,34 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       let targetLeft = d.rect.left + dx;
       let targetTop = d.rect.top + dy;
 
+      // —— 撞墙后继续往墙外拖 → 进入"改父子关系"模式（模仿把元素拖进另一个容器）——
+      // 一旦进入就"锁住"：被拖元素冻结在墙上（淡化显示），改用鼠标位置挑要放入的块级元素。
+      const pushOut = Math.max(
+        d.bounds.minX - targetLeft,
+        targetLeft - d.bounds.maxX,
+        d.bounds.minY - targetTop,
+        Number.isFinite(d.bounds.maxY) ? targetTop - d.bounds.maxY : -Infinity
+      );
+      if (!d.reparent && pushOut > 28) {
+        d.reparent = true;
+        document.body.classList.add('bc-reparenting');
+        const srcEl = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
+        srcEl?.setAttribute('data-bc-drag-src', '1');
+        setWallHints([]); // 改父子关系时不再需要边界线
+      }
+      if (d.reparent) {
+        const under = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+        const draggedEl = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
+        const tgt = under && draggedEl ? pickDropTarget(under, draggedEl, d.parentId, st.scene.root) : null;
+        d.dropId = tgt?.id ?? null;
+        setDropTarget(tgt);
+        setAltBadge({
+          x: ev.clientX + 14, y: ev.clientY + 14,
+          text: tgt ? '松开 → 放入这个元素' : '移到某个块级元素上 → 放入其中'
+        });
+        return; // 冻结：不再继续改样式
+      }
+
       // —— 吸附对齐（PowerPoint 风格）：左/中/右、上/中/下 靠近参考线时吸过去并画参考线 ——
       const SNAP = 6;
       const trySnap = (edges: number[], targets: number[]) => {
@@ -497,7 +590,25 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     document.body.classList.remove('bc-alt-fonting');
     setAltBadge(null);
     setGuides(null);
+    setWallHints([]);
     if (!d) return;
+
+    // 「拖到墙外 → 改父子关系」收尾：清理淡化标记 + 执行 reparent
+    if (d.reparent) {
+      document.body.classList.remove('bc-reparenting');
+      const srcEl = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
+      srcEl?.removeAttribute('data-bc-drag-src');
+      setDropTarget(null);
+      if (d.engaged) useScene.getState().endStyleEdit(); // 先把拖动产生的样式改动收成一条撤销
+      if (d.dropId) {
+        useScene.getState().reparent(d.id, d.dropId);
+        useScene.getState().selectElement(d.id);
+      }
+      const swallow0 = (ev: MouseEvent) => { ev.stopPropagation(); ev.preventDefault(); window.removeEventListener('click', swallow0, true); };
+      window.addEventListener('click', swallow0, true);
+      return;
+    }
+
     if (d.engaged) {
       useScene.getState().endStyleEdit();
       // 吞掉这次拖拽之后冒泡上来的 click（否则会顺手选中/选中父级）
@@ -879,6 +990,19 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           className="bc-wall-flash"
           style={{ left: wallFlash.x, top: wallFlash.y, width: wallFlash.w, height: wallFlash.h }}
         />
+      )}
+      {/* Alt 拖动时常显的"可达边界"提示线（内边距 / 外边距 / 兄弟元素边） */}
+      {wallHints.map((b, i) => (
+        <div key={'wh' + i} className="bc-wall-hint" style={{ left: b.x, top: b.y, width: b.w, height: b.h }} />
+      ))}
+      {/* 拖到墙外 → 改父子关系：鼠标下的块级元素高亮（松开即放入） */}
+      {dropTarget && (
+        <div
+          className="bc-drop-into"
+          style={{ left: dropTarget.rect.x, top: dropTarget.rect.y, width: dropTarget.rect.w, height: dropTarget.rect.h }}
+        >
+          <span className="bc-drop-into-tag">放入此元素</span>
+        </div>
       )}
       {/* Alt 移动时的吸附对齐参考线 */}
       {guides && guides.box && guides.x !== null && (

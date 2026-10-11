@@ -669,9 +669,24 @@ function useKeyboardShortcuts(
       // 更新进行中：全局快捷键全部失效（连撤销都不允许，避免半途改数据）
       if (useUpdateBusy.getState().busy) return;
       const t = e.target as HTMLElement;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const inField = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      // 多行文本框 / 可编辑区：正在打字时用户要的是"撤销我刚敲的字" → 让原生撤销优先。
+      // 单行 <input>（属性面板那些数值/颜色框）原生撤销没有意义 → 照样走应用撤销。
+      const inTextEditor = !!t && (t.tagName === 'TEXTAREA' || t.isContentEditable);
 
       const mod = e.ctrlKey || e.metaKey;
+      const view = viewRef?.current;
+      const canvasView = !viewRef || view === 'editor';
+      const undoable = canvasView || view === 'table';
+
+      // ——— 撤销 / 重做：编辑器视图 **和表格编辑页** 都要能用 ———
+      // 放在"输入框守卫"之前：否则在右侧属性面板的输入框里按 Ctrl+Z 会完全没反应
+      //（用户反馈"选中元素后 Ctrl+Z / Ctrl+Y 用不了"就是被这个守卫吃掉的）。
+      // 表格编辑页改的是同一棵场景树、走的是同一条撤销栈（applyTableOp → replaceSubtree）。
+      if (undoable && !inTextEditor && mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); triggerUndo(); return; }
+      if (undoable && !inTextEditor && mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); triggerRedo(); return; }
+
+      if (inField) return;
 
       // ——— 应用级快捷键：任何视图都生效（不碰画布数据）———
       if (mod && e.key === ',') { e.preventDefault(); setView('settings'); return; }
@@ -702,15 +717,6 @@ function useKeyboardShortcuts(
         onOpenShortcuts?.();
         return;
       }
-
-      // ——— 撤销 / 重做：编辑器视图 **和表格编辑页** 都要能用 ———
-      // 表格编辑页改的是同一棵场景树、走的是同一条撤销栈（applyTableOp → replaceSubtree），
-      // 但以前这里一刀切"非 editor 视图全部 return"，导致表格编辑器里 Ctrl+Z 完全没反应。
-      const view = viewRef?.current;
-      const canvasView = !viewRef || view === 'editor';
-      const undoable = canvasView || view === 'table';
-      if (undoable && mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); triggerUndo(); return; }
-      if (undoable && mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); triggerRedo(); return; }
 
       // ——— 以下都是"对画布动手"的快捷键：只在编辑器视图里生效 ———
       // 表格编辑器 / 设置 / 项目中心 / 更新页各有自己的键位；在这里放行，Del、Ctrl+A

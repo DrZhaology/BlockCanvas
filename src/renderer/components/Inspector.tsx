@@ -677,10 +677,13 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   const [flashKey, setFlashKey] = useState<string | null>(null);
   useEffect(() => {
     const onFocusProp = (e: Event) => {
-      const key = (e as CustomEvent).detail?.key as string | undefined;
+      const detail = (e as CustomEvent).detail ?? {};
+      const key = detail.key as string | undefined;
       if (!key) return;
+      // add 默认 true（老行为）；中键搜索在"未添加"时按 Enter 会传 false —— 只提示、不偷偷加
+      const shouldAdd = detail.add !== false;
       setSecOpen((p) => ({ ...p, css: true }));
-      addVisibleProp(elementId, key);
+      if (shouldAdd) addVisibleProp(elementId, key);
       setFlashKey(key);
       window.setTimeout(() => {
         const row = document.querySelector(`[data-prop-key="${CSS.escape(key)}"]`) as HTMLElement | null;

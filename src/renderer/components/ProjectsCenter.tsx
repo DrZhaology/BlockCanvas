@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTabStore } from '@store/tabStore';
+import { useClosing } from '@lib/useClosing';
 import type { ProjectFileInfo } from '../global';
 
 // BlockCanvas · 本地全部项目库中心 (ProjectsCenter)
@@ -7,7 +8,38 @@ import type { ProjectFileInfo } from '../global';
 // - 卡片式浏览 data/projects/ 下所有 .bcproj 工程文件
 // - 点击项目直接载入为新标签页 (可多工程并存)
 // - 点击「⏱️ 快照」滑出专属抽屉，按项目隔离查看历史回退版本
-// - 删除项目实施【双重防护模态弹窗】：第一次确认影响，第二次要求手动输入项目全名方可解锁删除！
+// - 删除项目走【三步安全防护】，全程点遮罩不会关闭（只能主动点"取消"退出）：
+//     第 1 关：手动完整输入项目全名（**不提供**点击名字自动填充）
+//     第 2 关：3 个随机方向 / 随机位置的滑块，必须按顺序拖到位
+//     第 3 关：最后一次文字确认 → 才真正删除（同时清理该项目名下全部快照与备份）
+
+// ============ 第二关：滑块挑战的随机参数 ============
+interface SlideSpec {
+  /** 滑块起始位置（%） */
+  start: number;
+  /** 目标位置（%） */
+  target: number;
+  /** 当前值（%） */
+  value: number;
+  done: boolean;
+}
+
+const randPct = () => 4 + Math.random() * 92;
+
+/** 生成 3 个"方向随机、位置随机"的滑块：起点与目标至少差 22%（方向自然随机） */
+function makeSlides(): SlideSpec[] {
+  const out: SlideSpec[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    const start = randPct();
+    let target = randPct();
+    let guard = 0;
+    while (Math.abs(target - start) < 22 && guard < 60) { target = randPct(); guard += 1; }
+    out.push({ start, target, value: start, done: false });
+  }
+  return out;
+}
+
+const HIT_TOLERANCE = 3.5; // 距离目标 3.5% 以内即算"到位"
 
 export function ProjectsCenter(props: {
   onBack: () => void;
@@ -34,22 +66,109 @@ export function ProjectsCenter(props: {
   const [projectBackups, setProjectBackups] = useState<ProjectFileInfo[]>([]);
   const [backupsLoading, setBackupsLoading] = useState(false);
 
-  // 双重删除防护弹窗状态
+  // ============ 三步删除防护弹窗 ============
   const [deleteTarget, setDeleteTarget] = useState<ProjectFileInfo | null>(null);
+  const [delOpen, setDelOpen] = useState(false);
+  // 退场动画：先播动画再真正卸载
+  const { mounted: delMounted, closing: delClosing } = useClosing(delOpen, 200);
+  useEffect(() => {
+    if (!delMounted) setDeleteTarget(null);
+  }, [delMounted]);
+
+  const [delStep, setDelStep] = useState<1 | 2 | 3>(1);
   const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
   const deleteInputRef = useRef<HTMLInputElement>(null);
+  const [slides, setSlides] = useState<SlideSpec[]>([]);
+  const [activeSlide, setActiveSlide] = useState(0);
+  const [busy, setBusy] = useState(false);
+
+  const openDeleteModal = (e: React.MouseEvent, p: ProjectFileInfo) => {
+    e.stopPropagation();
+    setDeleteTarget(p);
+    setDelStep(1);
+    setDeleteConfirmInput('');
+    setSlides(makeSlides());
+    setActiveSlide(0);
+    setBusy(false);
+    setDelOpen(true);
+  };
+  const closeDeleteModal = () => setDelOpen(false);
 
   useEffect(() => {
-    if (deleteTarget) {
-      setTimeout(() => {
-        if (deleteInputRef.current) {
-          deleteInputRef.current.focus();
-          deleteInputRef.current.select();
-        }
-      }, 60);
+    if (deleteTarget && delStep === 1) {
+      const t = window.setTimeout(() => deleteInputRef.current?.focus(), 80);
+      return () => window.clearTimeout(t);
     }
-  }, [deleteTarget]);
+    return undefined;
+  }, [deleteTarget, delStep]);
 
+  // 三个滑块都到位 → 自动进入第 3 关（稍等一下，让用户看到第三个打勾）
+  const allSlidesDone = slides.length > 0 && slides.every((s) => s.done);
+  useEffect(() => {
+    if (delStep !== 2 || !allSlidesDone) return;
+    const t = window.setTimeout(() => setDelStep(3), 420);
+    return () => window.clearTimeout(t);
+  }, [delStep, allSlidesDone]);
+
+  // —— 滑块拖动 ——
+  const trackRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const dragIdxRef = useRef<number | null>(null);
+  const slidesRef = useRef<SlideSpec[]>([]);
+  slidesRef.current = slides;
+
+  const valueFromClientX = (idx: number, clientX: number): number => {
+    const el = trackRefs.current[idx];
+    if (!el) return 0;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0) return 0;
+    return Math.min(100, Math.max(0, ((clientX - r.left) / r.width) * 100));
+  };
+
+  const applySlideValue = (idx: number, v: number) => {
+    setSlides((prev) => {
+      const s = prev[idx];
+      if (!s || s.done) return prev;
+      const hit = Math.abs(v - s.target) <= HIT_TOLERANCE;
+      const next = [...prev];
+      next[idx] = { ...s, value: hit ? s.target : v, done: hit };
+      return next;
+    });
+  };
+
+  const onSlideMove = (e: PointerEvent) => {
+    const idx = dragIdxRef.current;
+    if (idx == null) return;
+    const s = slidesRef.current[idx];
+    if (!s || s.done) return;
+    const v = valueFromClientX(idx, e.clientX);
+    applySlideValue(idx, v);
+    if (Math.abs(v - s.target) <= HIT_TOLERANCE) {
+      // 到位：结束这次拖动，解锁下一个滑块（必须按顺序）
+      endSlideDrag();
+      setActiveSlide((a) => (a === idx ? idx + 1 : a));
+    }
+  };
+
+  const endSlideDrag = () => {
+    dragIdxRef.current = null;
+    window.removeEventListener('pointermove', onSlideMove);
+    window.removeEventListener('pointerup', endSlideDrag);
+  };
+
+  const onSlideDown = (idx: number) => (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    if (idx !== activeSlide || slidesRef.current[idx]?.done) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragIdxRef.current = idx;
+    // 不在这里直接赋值 —— 必须真的"拖动"（pointermove）才会移动滑块
+    window.addEventListener('pointermove', onSlideMove);
+    window.addEventListener('pointerup', endSlideDrag);
+  };
+
+  useEffect(() => () => endSlideDrag(), []);
+
+  // ============ 项目列表 ============
   const refreshProjects = async () => {
     setLoading(true);
     try {
@@ -103,34 +222,26 @@ export function ProjectsCenter(props: {
     onBack();
   };
 
-  // 4. 打开双重删除弹窗
-  const startDeleteModal = (e: React.MouseEvent, p: ProjectFileInfo) => {
-    e.stopPropagation();
-    setDeleteTarget(p);
-    setDeleteConfirmInput('');
-  };
-
-  // 5. 执行双重防护确认删除
+  // 4. 执行删除（第 3 关确认后）
   const executeDeleteProject = async () => {
-    if (!deleteTarget) return;
-    if (deleteConfirmInput.trim() !== deleteTarget.name.trim()) {
-      alert('输入的项目名称不匹配，删除已取消。');
-      return;
-    }
+    if (!deleteTarget || busy) return;
+    if (deleteConfirmInput.trim() !== deleteTarget.name.trim()) return;
+    setBusy(true);
     const res = await window.bc.deleteProject(deleteTarget.fileName, deleteTarget.name);
+    setBusy(false);
     if (res.ok) {
       showToast(`已永久删除项目「${deleteTarget.name}」及其所有历史备份`);
       refreshProjects();
       if (selectedProjectForBackups?.fileName === deleteTarget.fileName) {
         setSelectedProjectForBackups(null);
       }
-      setDeleteTarget(null);
+      closeDeleteModal();
     } else {
       showToast('删除失败：' + res.error, 'err');
     }
   };
 
-  // 6. 点击查看该项目专属快照列表
+  // 5. 点击查看该项目专属快照列表
   const handleViewBackups = async (e: React.MouseEvent, p: ProjectFileInfo) => {
     e.stopPropagation();
     setSelectedProjectForBackups(p);
@@ -144,7 +255,7 @@ export function ProjectsCenter(props: {
     }
   };
 
-  // 7. 恢复某份专属快照
+  // 6. 恢复某份专属快照
   const handleRestoreSnapshot = async (b: ProjectFileInfo) => {
     if (confirm(`确定要将画布载入该备份快照（${new Date(b.updatedAt).toLocaleString()}）吗？`)) {
       const res = await window.bc.openProjectFile(b.filePath);
@@ -161,6 +272,8 @@ export function ProjectsCenter(props: {
     if (!kw) return true;
     return p.name.toLowerCase().includes(kw) || p.fileName.toLowerCase().includes(kw);
   });
+
+  const nameMatches = !!deleteTarget && deleteConfirmInput.trim() === deleteTarget.name.trim();
 
   return (
     <div className="pc-page">
@@ -233,7 +346,7 @@ export function ProjectsCenter(props: {
                   <span className="spacer" />
                   <button
                     className="pc-card-del-btn"
-                    onClick={(e) => startDeleteModal(e, p)}
+                    onClick={(e) => openDeleteModal(e, p)}
                     title="删除此项目工程及所有历史备份"
                   >
                     🗑️
@@ -303,13 +416,28 @@ export function ProjectsCenter(props: {
         </div>
       )}
 
-      {/* 双重删除防护模态弹窗 */}
-      {deleteTarget && (
-        <div className="modal-mask" onClick={() => setDeleteTarget(null)}>
-          <div className="double-delete-modal" onClick={(e) => e.stopPropagation()}>
+      {/* ============ 三步删除防护 ============ */}
+      {deleteTarget && delMounted && (
+        <div className={'modal-mask dd-mask-static' + (delClosing ? ' is-closing' : '')}>
+          <div className={'double-delete-modal' + (delClosing ? ' is-closing' : '')} onClick={(e) => e.stopPropagation()}>
             <div className="dd-modal-header">
-              <span className="dd-modal-title">⚠️ 删除项目确认 (双重安全防护)</span>
-              <button className="cp-close" onClick={() => setDeleteTarget(null)}>×</button>
+              <span className="dd-modal-title">⚠️ 删除项目确认（三步安全防护）</span>
+              <button className="cp-close" onClick={closeDeleteModal} title="取消并关闭">×</button>
+            </div>
+
+            {/* 步骤指示 */}
+            <div className="dd-steps">
+              <span className={'dd-step-dot' + (delStep === 1 ? ' active' : ' done')}>
+                <span className="dd-step-no">1</span>输入项目名
+              </span>
+              <span className="dd-step-line" />
+              <span className={'dd-step-dot' + (delStep === 2 ? ' active' : delStep > 2 ? ' done' : '')}>
+                <span className="dd-step-no">2</span>滑块验证
+              </span>
+              <span className="dd-step-line" />
+              <span className={'dd-step-dot' + (delStep === 3 ? ' active' : '')}>
+                <span className="dd-step-no">3</span>最终确认
+              </span>
             </div>
 
             <div className="dd-modal-body">
@@ -319,38 +447,105 @@ export function ProjectsCenter(props: {
                 此操作将<b>同时清理该项目名下的所有历史备份与快照</b>，且无法从回收站恢复！
               </div>
 
-              <div className="dd-modal-input-group">
-                <label className="dd-modal-label">
-                  为防止误删，请输入项目全名 <code onClick={() => setDeleteConfirmInput(deleteTarget.name)} title="点击自动填入" style={{ cursor: 'pointer' }}>{deleteTarget.name}</code> 进行确认（可点击名字快速填入）：
-                </label>
-                <input
-                  ref={deleteInputRef}
-                  type="text"
-                  className="dd-modal-input"
-                  placeholder="在此输入项目全名以解锁删除"
-                  value={deleteConfirmInput}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => setDeleteConfirmInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && deleteConfirmInput.trim() === deleteTarget.name.trim()) {
-                      executeDeleteProject();
-                    }
-                  }}
-                />
-              </div>
+              {/* ---- 第 1 关：完整输入项目名 ---- */}
+              {delStep === 1 && (
+                <div className="dd-modal-input-group">
+                  <label className="dd-modal-label">
+                    第 1 关 · 为防止误删，请<b>手动完整输入</b>项目全名 <b>{deleteTarget.name}</b> 进行确认：
+                  </label>
+                  <input
+                    ref={deleteInputRef}
+                    type="text"
+                    className="dd-modal-input"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="在此手动输入项目全名（不支持点击填入）"
+                    value={deleteConfirmInput}
+                    onChange={(e) => setDeleteConfirmInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && nameMatches) setDelStep(2);
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* ---- 第 2 关：三个随机滑块，按顺序拖到位 ---- */}
+              {delStep === 2 && (
+                <div>
+                  <div className="dd-slider-hint">
+                    第 2 关 · 请按 <b>1 → 2 → 3</b> 的顺序，把每个滑块拖到竖线标记处。
+                    方向与位置每次随机（拖到目标附近会自动吸附并打勾）。
+                  </div>
+                  <div className="dd-slider-list">
+                    {slides.map((s, i) => {
+                      const isActive = i === activeSlide && !s.done;
+                      const cls = 'dd-slider-item'
+                        + (s.done ? ' is-done' : isActive ? ' is-active' : ' is-locked');
+                      return (
+                        <div key={i} className={cls}>
+                          <span className="dd-slider-no">{i + 1}</span>
+                          <div
+                            ref={(el) => { trackRefs.current[i] = el; }}
+                            className="dd-slider-track"
+                            onPointerDown={onSlideDown(i)}
+                            title={s.done ? '已通过' : isActive ? '按住并拖到竖线处' : '请先完成上一个滑块'}
+                          >
+                            <span className="dd-slider-target" style={{ left: s.target + '%' }} />
+                            <span className="dd-slider-knob" style={{ left: s.value + '%' }} />
+                          </div>
+                          <span className="dd-slider-state">
+                            {s.done ? '✓' : isActive ? (s.target > s.value ? '→' : '←') : '待'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ---- 第 3 关：最后确认 ---- */}
+              {delStep === 3 && (
+                <div>
+                  <div className="dd-final-warn">
+                    第 3 关 · 最后确认：点击下方按钮后，项目 <b>「{deleteTarget.name}」</b> 会被<b>立即永久删除</b>，
+                    且该项目名下<b>所有历史快照 / 自动备份</b>会一并清理，<b>无法撤销、无法恢复</b>。
+                  </div>
+                  <ul className="dd-final-list">
+                    <li>工程文件：{deleteTarget.fileName}</li>
+                    <li>历史快照：{deleteTarget.backupCount ?? 0} 份（将一并清理）</li>
+                  </ul>
+                </div>
+              )}
             </div>
 
             <div className="dd-modal-footer">
-              <button className="btn-secondary btn-mini" onClick={() => setDeleteTarget(null)}>
+              <button className="btn-secondary dd-cancel-btn" onClick={closeDeleteModal}>
                 取消
               </button>
-              <button
-                className="btn-danger btn-mini"
-                disabled={deleteConfirmInput.trim() !== deleteTarget.name.trim()}
-                onClick={executeDeleteProject}
-              >
-                我已确认，永久删除该项目
-              </button>
+              {delStep === 1 && (
+                <button
+                  className="btn-primary"
+                  disabled={!nameMatches}
+                  onClick={() => setDelStep(2)}
+                  title={nameMatches ? '进入第 2 关' : '请先完整输入项目全名'}
+                >
+                  下一步
+                </button>
+              )}
+              {delStep === 2 && (
+                <button className="btn-primary" disabled={!allSlidesDone} onClick={() => setDelStep(3)}>
+                  {allSlidesDone ? '下一步' : `还剩 ${slides.filter((s) => !s.done).length} 个滑块`}
+                </button>
+              )}
+              {delStep === 3 && (
+                <button
+                  className="btn-danger"
+                  disabled={busy}
+                  onClick={executeDeleteProject}
+                >
+                  {busy ? '正在删除…' : '我已确认，永久删除该项目'}
+                </button>
+              )}
             </div>
           </div>
         </div>
