@@ -92,6 +92,8 @@ contextBridge.exposeInMainWorld('bc', {
   // ============ 帮助文档 ============
   /** 开发态实时读盘；打包版返回 ok:false（渲染层用构建时内联的那份） */
   getReadme: () => ipcRenderer.invoke('help:get-readme'),
+  /** 按 key 读三份文档之一：'intro' | 'manual' | 'history'（打包版 ok:false → 用内联份） */
+  getDoc: (key: 'intro' | 'manual' | 'history') => ipcRenderer.invoke('help:get-doc', key),
   /** 开发态返回仓库根目录（帮助页里相对图片要用它拼绝对路径） */
   getAppRoot: () => ipcRenderer.invoke('help:get-root'),
 

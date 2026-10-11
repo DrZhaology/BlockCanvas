@@ -276,11 +276,35 @@ ipcMain.handle('data:open-path', async (_evt, target: string) => {
   return shell.openPath(p);
 });
 
-// ============ 帮助文档（README.md） ============
+// ============ 帮助文档（项目介绍 / 使用手册 / 开发历程） ============
 // 「打包时硬编码、运行时直读」：
-//   · 打包版（asar）里没有 README（electron-builder 排除了 docs/**、根目录也只剩 out/**），
-//     渲染层用的是构建时内联进去的那份（vite `?raw`）；
-//   · 开发态（pnpm dev）则走这里**实时读盘**，改完 README 刷新就能看到，不用重新构建。
+//   · 打包版（asar）里没有这些 .md（electron-builder 排除了 docs/**，根目录也只剩 out/**），
+//     渲染层用的是构建时内联进去的那几份（vite `?raw`）；
+//   · 开发态（pnpm dev）则走这里**实时读盘**，改完文档刷新就能看到，不用重新构建。
+const HELP_DOCS: Record<string, string> = {
+  intro: 'README.md',
+  manual: 'docs/使用手册.md',
+  history: 'docs/开发历程.md'
+};
+ipcMain.handle('help:get-doc', (_evt, key: string) => {
+  if (app.isPackaged) return { ok: false, bundled: true };
+  const rel = HELP_DOCS[key];
+  if (!rel) return { ok: false, source: 'none', error: '未知文档' };
+  const candidates = [
+    join(app.getAppPath(), rel),
+    join(process.cwd(), rel)
+  ];
+  for (const p of candidates) {
+    try {
+      if (existsSync(p)) {
+        const text = readFileSync(p, 'utf-8');
+        return { ok: true, text, path: p, source: 'disk' };
+      }
+    } catch { /* 试下一个 */ }
+  }
+  return { ok: false, source: 'none' };
+});
+// 兼容旧调用（只读 README）
 ipcMain.handle('help:get-readme', () => {
   if (app.isPackaged) return { ok: false, bundled: true };
   const candidates = [

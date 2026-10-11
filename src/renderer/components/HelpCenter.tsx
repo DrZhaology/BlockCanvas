@@ -1,28 +1,44 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
 import README_BUNDLED from '../../../README.md?raw';
-// README 里引用的三张图：显式 import 进来后会被 vite 打进产物，
+import MANUAL_BUNDLED from '../../../docs/使用手册.md?raw';
+import HISTORY_BUNDLED from '../../../docs/开发历程.md?raw';
+// README 里引用的截图：显式 import 进来后会被 vite 打进产物，
 // 于是**打包版**也能看到截图（否则 docs/ 不在 asar 里，图会全挂）。
 import shotLogo from '../../../docs/screenshots/logo.png';
 import shotEditor from '../../../docs/screenshots/editor-初始界面.png';
 import shotLayout from '../../../docs/screenshots/layout-底部模板页.png';
 
-// BlockCanvas · 帮助中心（v0.4.4）
+// ============================================================================
+// BlockCanvas · 帮助中心（v0.4.4d）
 // ----------------------------------------------------------------------------
-// 内容 = 项目的 README.md，**不另写一份**（省得两处不同步）。
-// "打包硬编码、运行直读"是这样落地的：
-//   · 构建时：`import README_BUNDLED from '../../../README.md?raw'` 把整篇内联进渲染层产物
-//     → 打包版（asar 里没有 docs/、README）打开就有内容；
-//   · 开发时：主进程 `help:get-readme` **实时读盘**，改完 README 刷新页面就能看到，
-//     不用重新构建（页眉会标出当前用的是哪一份）。
+// 三份文档可切换：项目介绍（README.md）/ 使用手册（docs/使用手册.md）/ 开发历程（docs/开发历程.md）。
+// "打包硬编码、运行直读"：
+//   · 构建时：`import X from '...md?raw'` 把整篇内联进渲染层产物 → 打包版打开就有内容；
+//   · 开发时：主进程 `help:get-doc` **实时读盘**，改完文档刷新页面就能看到，不用重新构建。
 //
-// Markdown 用 marked（MIT 许可，零依赖）渲染 —— 支持 GFM 全量语法：
-// 标题 / 表格 / 任务列表 / 嵌套列表 / 代码块 / 引用 / 分隔线 / 行内样式 / 自动链接等。
-// ⚠ 因为 README 里有 `<p align="center">` 这类原始 HTML（居中横幅 + 徽章），
-//   这里**保留 HTML 透传**；README 是本仓库自带的可信文件，不是远端内容。
-//   （远端发行说明走 UpdateCenter 里那套白名单解析器，从不产生原始 HTML。）
+// Markdown 用 marked（MIT 许可，零依赖）渲染 —— 支持 GFM 全量语法。
+// ⚠ README 里有 `<p align="center">` 这类原始 HTML（居中横幅 + 徽章），这里**保留 HTML 透传**
+//   （README 是本仓库自带的可信文件，不是远端内容）。
+//
+// 搜索（v0.4.4d 重做）：不再只是"高亮第一处"，而是
+//   · 把三份文档按标题切成一节一节的"段落块"建索引；
+//   · 按**权重**（标题精确命中 > 标题包含 > 正文出现次数 > 标题层级）排序；
+//   · 弹出一个结果框，点某条 → 自动切到对应文档并**跳到具体段落**（同时高亮命中词）。
+// ============================================================================
+
+type DocKey = 'intro' | 'manual' | 'history';
+
+interface DocDef { key: DocKey; label: string; icon: string; bundled: string; fileName: string }
+
+const DOCS: DocDef[] = [
+  { key: 'intro', label: '项目介绍', icon: '🏠', bundled: README_BUNDLED, fileName: 'README.md' },
+  { key: 'manual', label: '使用手册', icon: '📖', bundled: MANUAL_BUNDLED, fileName: 'docs/使用手册.md' },
+  { key: 'history', label: '开发历程', icon: '🕘', bundled: HISTORY_BUNDLED, fileName: 'docs/开发历程.md' }
+];
 
 interface TocItem { id: string; text: string; level: number }
+interface Section { doc: DocKey; id: string; title: string; level: number; text: string }
 
 const SHOT_MAP: Record<string, string> = {
   'docs/screenshots/logo.png': shotLogo,
@@ -34,12 +50,8 @@ const SHOT_MAP: Record<string, string> = {
 };
 
 /**
- * 在**塞进 DOM 之前**就把图片地址换掉。
- * 为什么不能等渲染完再改：Chromium 一拿到 innerHTML 就会立刻去取 `src`，
- * 于是 `docs/screenshots/x.png` 会先按当前页面地址发一次 `file://…/out/renderer/docs/...`
- * → 必然 ERR_FILE_NOT_FOUND（控制台报错、图片位置闪一下空框），改也来不及。
- * 另外 **marked 会把中文文件名做 URL 编码**（`editor-初始界面.png` → `editor-%E5%88%9D…`），
- * 所以匹配前必须先 decodeURIComponent。
+ * 在**塞进 DOM 之前**就把图片地址换掉（Chromium 一拿到 innerHTML 就会立刻去取 src）。
+ * marked 会把中文文件名做 URL 编码，所以匹配前先 decodeURIComponent。
  */
 function rewriteAssetSrc(html: string): string {
   return html.replace(/(src=")([^"]+)(")/g, (whole, pre: string, url: string, post: string) => {
@@ -48,7 +60,6 @@ function rewriteAssetSrc(html: string): string {
     try { decoded = decodeURIComponent(url); } catch { /* 保持原样 */ }
     const mapped = SHOT_MAP[decoded] || SHOT_MAP[decoded.replace(/^\.\//, '')];
     if (mapped) return pre + mapped + post;
-    // 其它相对路径 → 交给主进程注册的本地图片协议（开发态能定位到仓库里的原型文件）
     return pre + 'bc-img:///' + url.replace(/^\.?\//, '') + post;
   });
 }
@@ -56,22 +67,114 @@ function rewriteAssetSrc(html: string): string {
 /** 目录里不显示的章节（开发向内容，对普通用户没意义） */
 const TOC_SKIP = ['项目声明', '许可证'];
 
-function slugOf(text: string, i: number): string {
-  return 'hc-' + i + '-' + text.replace(/[^\w\u4e00-\u9fa5]+/g, '-').slice(0, 24);
+function slugOf(text: string): string {
+  return text.replace(/[^\w\u4e00-\u9fa5]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'sec';
+}
+/** 标题 id：文档 key + 序号 + 文字 slug（建索引与 DOM 赋值用同一套公式，保证一致） */
+function headingId(doc: DocKey, i: number, text: string): string {
+  return `hc-${doc}-${i}-${slugOf(text)}`;
+}
+
+/** 把 markdown 按标题切成"段落块"（用于建搜索索引）；先剥掉围栏代码块避免误判标题 */
+function parseSections(md: string, doc: DocKey): Section[] {
+  const withoutCode = md.replace(/```[\s\S]*?```/g, '');
+  const lines = withoutCode.split(/\r?\n/);
+  const out: Section[] = [];
+  let cur: Section | null = null;
+  let i = 0;
+  for (const line of lines) {
+    const m = /^(#{1,4})\s+(.*)$/.exec(line);
+    if (m) {
+      if (cur) out.push(cur);
+      const title = m[2].replace(/[*`_]/g, '').trim();
+      cur = { doc, id: headingId(doc, i, title), title, level: m[1].length, text: '' };
+      i += 1;
+    } else if (cur) {
+      cur.text += line + '\n';
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+/** 把正文里的 markdown 记号抹掉，做成适合检索/展示的纯文本 */
+function plain(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_>#|]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function countOcc(hay: string, needle: string): number {
+  if (!needle) return 0;
+  let n = 0, from = 0;
+  for (;;) {
+    const at = hay.indexOf(needle, from);
+    if (at < 0) break;
+    n += 1; from = at + needle.length;
+    if (n > 50) break;
+  }
+  return n;
+}
+
+interface Hit { doc: DocKey; docLabel: string; id: string; title: string; level: number; snippet: string; score: number }
+
+/** 按权重给"段落块"打分并排序 */
+function searchDocs(index: Section[], rawQuery: string): Hit[] {
+  const q = rawQuery.trim().toLowerCase();
+  if (!q) return [];
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const hits: Hit[] = [];
+  for (const s of index) {
+    const title = s.title.toLowerCase();
+    const body = plain(s.text).toLowerCase();
+    let score = 0;
+    if (title === q) score += 200;
+    if (title.includes(q)) score += 90 - Math.min(60, title.indexOf(q));
+    for (const t of tokens) {
+      if (t && title.includes(t)) score += 26;
+    }
+    const occ = countOcc(body, q);
+    if (occ > 0) { score += 18 + Math.min(occ, 15) * 6; }
+    else if (tokens.every((t) => body.includes(t))) { score += 10; }
+    if (score <= 0) continue;
+    score += Math.max(0, 6 - s.level) * 4; // 层级越高越优先
+    // 摘要：命中词前后各取一段
+    const plainBody = plain(s.text);
+    const at = plainBody.toLowerCase().indexOf(q);
+    const snippet = at >= 0
+      ? (at > 18 ? '…' : '') + plainBody.slice(Math.max(0, at - 18), at + q.length + 42).trim() + '…'
+      : plainBody.slice(0, 60) + (plainBody.length > 60 ? '…' : '');
+    hits.push({ doc: s.doc, docLabel: DOCS.find((d) => d.key === s.doc)!.label, id: s.id, title: s.title, level: s.level, snippet, score });
+  }
+  return hits.sort((a, b) => b.score - a.score).slice(0, 14);
 }
 
 export function HelpCenter({ onBack }: { onBack: () => void }) {
-  const [md, setMd] = useState<string>(README_BUNDLED);
+  const [docKey, setDocKey] = useState<DocKey>('intro');
+  const [mdMap, setMdMap] = useState<Record<DocKey, string>>(() => ({
+    intro: README_BUNDLED, manual: MANUAL_BUNDLED, history: HISTORY_BUNDLED
+  }));
   const [srcLabel, setSrcLabel] = useState<string>('随程序打包（构建时内联）');
   const [toc, setToc] = useState<TocItem[]>([]);
   const [activeId, setActiveId] = useState<string>('');
   const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState(0);
+  const [showResults, setShowResults] = useState(false);
   const [closing, setClosing] = useState(false);
   const docRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLDivElement>(null);
   const tocJson = useRef('');
+  const pendingJump = useRef<string>('');
+
+  const md = mdMap[docKey];
+  const docDef = DOCS.find((d) => d.key === docKey)!;
 
   // 关闭：先播退场动画，再真正切回编辑器（用户要的"开启退出动画"）
   const close = () => {
@@ -80,16 +183,18 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
     window.setTimeout(() => onBack(), 180);
   };
 
-  // 开发态：读磁盘上的 README（打包态主进程会返回 ok:false，就继续用内联的那份）
+  // 开发态：读三份文档的磁盘最新版（打包态主进程返回 ok:false，就继续用内联的那份）
   useEffect(() => {
     let alive = true;
-    window.bc.getReadme()
-      .then((r) => {
-        if (!alive || !r?.ok || !r.text) return;
-        setMd(r.text);
-        setSrcLabel(r.source === 'disk' ? '开发态实时读盘（改完 README 刷新即见）' : '随程序打包（构建时内联）');
-      })
-      .catch(() => { /* 保持内联版本 */ });
+    DOCS.forEach((d) => {
+      window.bc.getDoc(d.key)
+        .then((r) => {
+          if (!alive || !r?.ok || !r.text) return;
+          setMdMap((prev) => ({ ...prev, [d.key]: r.text as string }));
+          setSrcLabel(r.source === 'disk' ? '开发态实时读盘（改完文档刷新即见）' : '随程序打包（构建时内联）');
+        })
+        .catch(() => { /* 保持内联版本 */ });
+    });
     return () => { alive = false; };
   }, []);
 
@@ -102,36 +207,56 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
       if (inField && queryInput.trim()) {
         setQueryInput('');
         setQuery('');
+        setShowResults(false);
         (t as HTMLInputElement).blur();
         return;
       }
+      if (showResults) { setShowResults(false); return; }
       close();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [closing, queryInput]);
+  }, [closing, queryInput, showResults]);
 
   const html = useMemo(() => {
     try {
       marked.setOptions({ gfm: true, breaks: false });
       // README 第一行是 `# BlockCanvas · 积木画布`，下面紧跟一段居中横幅（原始 HTML 里的 <h1>），
       // 两个同级标题叠在一起很难看 —— 去掉开头那一行，让横幅当封面标题。
-      const body = md.replace(/^\uFEFF?#\s+[^\n]*\r?\n/, '');
+      const body = docKey === 'intro' ? md.replace(/^\uFEFF?#\s+[^\n]*\r?\n/, '') : md;
       return rewriteAssetSrc(marked.parse(body) as string);
     } catch {
       return '<p>Markdown 解析失败，已回退为纯文本。</p>';
     }
-  }, [md]);
+  }, [md, docKey]);
 
-  // 搜索：把命中的文字包进 <mark>（清空搜索时用原始 HTML 还原）
+  // 搜索：防抖
   useEffect(() => {
-    const t = window.setTimeout(() => setQuery(queryInput), 180);
+    const t = window.setTimeout(() => setQuery(queryInput), 160);
     return () => window.clearTimeout(t);
   }, [queryInput]);
 
-  // 渲染后处理：标题 id / 图片路径 / 链接行为 / 表格横向滚动
-  // —— 做成幂等的，搜索还原 innerHTML 之后可以再跑一遍
+  // 三份文档的搜索索引（按标题切段落块）
+  const searchIndex = useMemo<Section[]>(() => {
+    const all: Section[] = [];
+    for (const d of DOCS) all.push(...parseSections(mdMap[d.key], d.key));
+    return all;
+  }, [mdMap]);
+
+  const results = useMemo(() => searchDocs(searchIndex, query), [searchIndex, query]);
+
+  // 点搜索框外部 → 收起结果框
+  useEffect(() => {
+    if (!showResults) return;
+    const onDoc = (e: MouseEvent) => {
+      if (searchRef.current?.contains(e.target as Node)) return;
+      setShowResults(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [showResults]);
+
   const flashDocHint = (root: HTMLElement, msg: string) => {
     const old = root.querySelector('.hc-hint');
     if (old) old.remove();
@@ -146,9 +271,10 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
     const heads = Array.from(root.querySelectorAll('h1, h2, h3, h4')) as HTMLElement[];
     const items: TocItem[] = [];
     heads.forEach((h, i) => {
-      if (!h.id) h.id = slugOf(h.textContent || '', i);
-      const level = Number(h.tagName.slice(1));
       const text = (h.textContent || '').trim();
+      // 与搜索索引同一套 id 公式 → 点搜索结果能精确落到这一节
+      h.id = headingId(docKey, i, text);
+      const level = Number(h.tagName.slice(1));
       if (level <= 3 && !TOC_SKIP.some((s) => text.includes(s))) {
         items.push({ id: h.id, text, level });
       }
@@ -164,14 +290,12 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
       const mapped = SHOT_MAP[src];
       if (mapped) img.setAttribute('src', mapped);
       else if (src && !/^(https?:|data:|blob:|file:|bc-img:|assets\/|\/assets)/i.test(src)) {
-        // 相对路径 → 走主进程注册的本地图片协议（开发态能定位到仓库里的原型文件）
         img.setAttribute('src', 'bc-img:///' + src.replace(/^\.?\//, ''));
       }
       img.setAttribute('loading', 'lazy');
       img.setAttribute('referrerpolicy', 'no-referrer');
       const hide = () => { (img as HTMLElement).style.display = 'none'; };
       img.addEventListener('error', hide, { once: true });
-      // 离线时 shields.io 徽章 / 缺图会失败：已经失败过的直接藏起来，别留破图
       if (img.complete && img.naturalWidth === 0) hide();
     });
 
@@ -184,8 +308,16 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
           e.preventDefault();
           void window.bc.openExternal(href);
         });
-      } else if (href && !href.startsWith('#')) {
-        // 仓库内的相对文件（docs/xxx.md）没有随程序分发 → 给个明确反馈，别静默跳走
+      } else if (href.startsWith('#')) {
+        // 文档内锚点：跳到对应标题
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          const target = root.querySelector('#' + CSS.escape(href.slice(1))) as HTMLElement | null;
+          const scroller = scrollRef.current;
+          if (target && scroller) scroller.scrollTo({ top: Math.max(0, target.offsetTop - 24), behavior: 'smooth' });
+        });
+      } else if (href) {
+        // 仓库内的相对文件（docs/xxx.md）—— 提示在 GitHub 上查看
         a.addEventListener('click', (e) => {
           e.preventDefault();
           flashDocHint(root, `「${href}」在仓库 docs/ 目录里（不随软件分发），可在 GitHub 上查看。`);
@@ -204,7 +336,7 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
     });
   };
 
-  // 内容变化 / 首次渲染 → 后处理（搜索为空时就是"还原"）
+  // 内容变化 / 切换文档 → 后处理 + 搜索高亮
   useEffect(() => {
     const root = docRef.current;
     if (!root) return;
@@ -242,14 +374,24 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
       t.parentNode?.replaceChild(frag, t);
     }
     setHits(count);
-    const first = root.querySelector('mark.hc-hit');
-    const scroller = scrollRef.current;
-    if (first && scroller) {
-      const top = (first as HTMLElement).offsetTop - scroller.clientHeight / 3;
-      scroller.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, html]);
+
+  // 待跳转（点搜索结果）→ 内容渲染完成后滚动到目标段落
+  useEffect(() => {
+    if (!pendingJump.current) return;
+    const id = pendingJump.current;
+    const t = window.setTimeout(() => {
+      const el = docRef.current?.querySelector('#' + CSS.escape(id)) as HTMLElement | null;
+      const scroller = scrollRef.current;
+      if (el && scroller) {
+        scroller.scrollTo({ top: Math.max(0, el.offsetTop - 24), behavior: 'smooth' });
+        setActiveId(id);
+      }
+      pendingJump.current = '';
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [html, docKey]);
 
   // 滚动联动：高亮当前所在章节
   useEffect(() => {
@@ -266,7 +408,7 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
     onScroll();
     scroller.addEventListener('scroll', onScroll, { passive: true });
     return () => scroller.removeEventListener('scroll', onScroll);
-  }, [toc]);
+  }, [toc, docKey]);
 
   const jumpTo = (id: string) => {
     const el = docRef.current?.querySelector('#' + CSS.escape(id)) as HTMLElement | null;
@@ -275,34 +417,87 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
     scroller.scrollTo({ top: Math.max(0, el.offsetTop - 24), behavior: 'smooth' });
   };
 
+  /** 点搜索结果：切到对应文档 + 跳到段落 + 高亮 */
+  const goHit = (h: Hit) => {
+    setShowResults(false);
+    setQueryInput(h.title);
+    setQuery(h.title);
+    if (h.doc !== docKey) {
+      pendingJump.current = h.id;
+      setDocKey(h.doc);
+    } else {
+      jumpTo(h.id);
+      setActiveId(h.id);
+    }
+  };
+
+  const switchDoc = (k: DocKey) => {
+    if (k === docKey) return;
+    tocJson.current = '';
+    setToc([]);
+    setActiveId('');
+    setDocKey(k);
+    const sc = scrollRef.current;
+    if (sc) sc.scrollTo({ top: 0 });
+  };
+
   return (
     <div className={'help-page' + (closing ? ' is-closing' : '')}>
       <div className="help-topbar">
         <button className="fluent-back-btn" onClick={close} title="返回编辑器 (Esc)">← 返回编辑器</button>
         <div className="help-brand">
-          <span className="help-brand-logo">📖</span>
-          <span className="help-brand-text">使用手册</span>
+          <span className="help-brand-logo">{docDef.icon}</span>
+          <span className="help-brand-text">{docDef.label}</span>
         </div>
-        <div className="help-search">
+        <div className="help-doc-tabs">
+          {DOCS.map((d) => (
+            <button
+              key={d.key}
+              className={'help-doc-tab' + (d.key === docKey ? ' active' : '')}
+              onClick={() => switchDoc(d.key)}
+              title={`查看《${d.label}》（${d.fileName}）`}
+            >
+              <span className="help-doc-tab-ico">{d.icon}</span>{d.label}
+            </button>
+          ))}
+        </div>
+        <div className="help-search" ref={searchRef}>
           <span className="help-search-ico" aria-hidden="true">🔍</span>
           <input
             className="help-search-input"
             type="text"
             value={queryInput}
-            placeholder="在手册里查找…（输入即高亮，跳到第一处）"
-            onChange={(e) => setQueryInput(e.target.value)}
+            placeholder="搜索三份文档（回车/点结果跳转）"
+            onChange={(e) => { setQueryInput(e.target.value); setShowResults(true); }}
+            onFocus={() => { if (queryInput.trim()) setShowResults(true); }}
             onKeyDown={(e) => {
-              if (e.key === 'Escape') { setQueryInput(''); setQuery(''); (e.target as HTMLInputElement).blur(); }
+              if (e.key === 'Escape') { setQueryInput(''); setQuery(''); setShowResults(false); (e.target as HTMLInputElement).blur(); }
+              if (e.key === 'Enter' && results[0]) goHit(results[0]);
             }}
           />
           {queryInput.trim() && (
             <span className={'help-search-count' + (hits === 0 ? ' is-empty' : '')}>
-              {hits === 0 ? '没有匹配' : `${hits} 处`}
+              {results.length > 0 ? `${results.length} 个段落` : '没有匹配'}
             </span>
           )}
+          {/* 搜索结果下拉框（按权重排序） */}
+          {showResults && queryInput.trim() && (
+            <div className="help-results bc-scroll">
+              {results.length === 0 && <div className="help-results-empty">没有找到「{queryInput.trim()}」相关内容</div>}
+              {results.map((h) => (
+                <button key={h.doc + h.id} className="help-result" onClick={() => goHit(h)}>
+                  <div className="help-result-top">
+                    <span className="help-result-doc">{h.docLabel}</span>
+                    <span className={'help-result-title lv' + h.level}>{h.title}</span>
+                  </div>
+                  <div className="help-result-snippet">{h.snippet}</div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <span className="help-src" title="帮助内容直接取自项目根目录的 README.md">
-          内容来源：README.md · {srcLabel}
+        <span className="help-src" title={`帮助内容直接取自仓库里的 ${docDef.fileName}`}>
+          来源：{docDef.fileName} · {srcLabel}
         </span>
       </div>
 
@@ -323,7 +518,8 @@ export function HelpCenter({ onBack }: { onBack: () => void }) {
         <div className="help-scroll bc-scroll" ref={scrollRef}>
           <div className="help-doc" ref={docRef} dangerouslySetInnerHTML={{ __html: html }} />
           <div className="help-foot">
-            这一页的内容就是项目根目录的 <code>README.md</code> —— 想改手册内容，直接改那个文件即可。
+            这一页的内容就是仓库里的 <code>{docDef.fileName}</code> —— 想改内容，直接改那个文件即可。
+            顶部可切换「项目介绍 / 使用手册 / 开发历程」三份文档。
           </div>
         </div>
       </div>

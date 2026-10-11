@@ -130,6 +130,7 @@ declare global {
 
       // ============ 帮助文档（README.md）============
       getReadme: () => Promise<{ ok: boolean; text?: string; path?: string; source?: string; bundled?: boolean }>;
+      getDoc: (key: 'intro' | 'manual' | 'history') => Promise<{ ok: boolean; text?: string; path?: string; source?: string; bundled?: boolean; error?: string }>;
       getAppRoot: () => Promise<string>;
 
       // 扩展与插件
