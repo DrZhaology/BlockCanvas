@@ -144,8 +144,14 @@ if (INSTALL_HOOK || UNINSTALL_HOOK) {
   const hook = `#!/bin/sh
 # BlockCanvas · 切分支后自动体检忽略规则（由 tools/git-ignore-doctor.mjs --install-hook 安装）
 # 只在"有问题"时才有输出；永远 exit 0，绝不影响 checkout 本身。
+# 老分支（还没引入本脚本的分支）上静默跳过，不要报错刷屏。
 command -v node >/dev/null 2>&1 || exit 0
-node "$(git rev-parse --show-toplevel)/tools/git-ignore-doctor.mjs" --quiet >&2 || true
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+[ -n "$ROOT" ] || exit 0
+[ -f "$ROOT/tools/git-ignore-doctor.mjs" ] || exit 0
+# >&2 把「体检结论」转到 stderr（GitHub Desktop / 终端都能看到）；
+# 随后的 2>/dev/null 只吞掉 node 自己的异常输出（fd1 已先复制，结论不受影响）。
+node "$ROOT/tools/git-ignore-doctor.mjs" --quiet >&2 2>/dev/null || true
 exit 0
 `;
   writeFileSync(hookPath, hook, 'utf-8');
