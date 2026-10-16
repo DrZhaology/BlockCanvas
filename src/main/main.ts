@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net, shell, native
 import { join, basename, dirname, relative } from 'node:path';
 import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { isAbsolutePathAny, resolveInside, toWebPath } from './paths';
+import * as pathUtils from './paths';
 import { zipCreate, zipList } from './zip';
 import {
   dataRoot, initDataDirectories, readAppConfig, writeAppConfig, listProjects,
@@ -19,6 +21,12 @@ import {
 
 // 启动最优先：初始化纯便携数据区 data/，隔离系统盘
 initDataDirectories();
+
+// 探针钩子：开发态把跨平台路径工具挂到主进程 global，E2E 可用 app.evaluate 直接验证
+// （打包态不挂，避免把内部工具暴露给正式产物）
+if (!app.isPackaged) {
+  (globalThis as unknown as Record<string, unknown>)['__bcPaths'] = pathUtils;
+}
 
 // electron-vite 在 dev 模式下注入 ELECTRON_RENDERER_URL；
 const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
@@ -780,9 +788,11 @@ ipcMain.handle('ext:import-zip', async (_evt, kind: 'plugins' | 'resources') => 
     for (const e of entries) {
       if (e.name.endsWith('/')) continue;
       const rel = e.name.replace(/^\/+/, '').split('/').map(sanitizeId).join('/');
-      const out = join(target, rel);
-      if (!out.startsWith(target + '\\') && out !== target) continue;
-      mkdirSync(join(out, '..'), { recursive: true });
+      // 防 zip-slip：用 isInside（基于 path.relative）而不是 `startsWith(target + '\\')` ——
+      // 后者在 macOS/Linux 上恒为假，会导致扩展 zip 一个文件都解不出来（v0.4.4 修）。
+      const out = resolveInside(target, rel);
+      if (!out) continue;
+      mkdirSync(dirname(out), { recursive: true });
       writeFileSync(out, e.data);
     }
     return { ok: true, id, name: String(mf.name ?? id) };
@@ -908,7 +918,7 @@ ipcMain.handle('img:pick-src', async (_evt, mode: 'abs' | 'rel' = 'rel') => {
   const absPath = res.filePaths[0];
   if (mode === 'rel') {
     const base = app.isPackaged ? dirname(process.execPath) : app.getAppPath();
-    let rel = relative(base, absPath).replace(/\\/g, '/');
+    let rel = toWebPath(relative(base, absPath));
     if (!rel.startsWith('.') && !rel.startsWith('/')) rel = './' + rel;
     return { ok: true, path: rel, absPath };
   }
@@ -932,7 +942,8 @@ app.whenReady().then(() => {
       if (!rawPath) return new Response(null, { status: 400 });
 
       // 如果是相对路径，自动基于当前项目目录 / app 根目录 / data 目录解析
-      if (!/^[a-zA-Z]:[\\/]/.test(rawPath) && !rawPath.startsWith('\\\\')) {
+      // （绝对路径判断用跨平台版：Windows 盘符 / UNC 与 POSIX 的 `/xxx` 都算绝对路径）
+      if (!isAbsolutePathAny(rawPath)) {
         const cleanRel = rawPath.replace(/^\.?\/+/, '');
         const candidates = [
           join(dataRoot(), 'projects', cleanRel),

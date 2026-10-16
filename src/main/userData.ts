@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path';
 import {
   existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync, rmSync, copyFileSync
 } from 'node:fs';
+import { portableBaseDir, resolveWritableDir } from './paths';
 
 // BlockCanvas · 纯便携数据区与项目备份中枢 (data/)
 // 目录结构（绿色便携版，全部在 data/ 下）：
@@ -17,19 +18,39 @@ import {
 //   └── extensions/      (运行时插件/资源包：用户第三方扩展存储位置)
 //   注意：所有扩展（内置种子 + 用户安装）均统一在 data/extensions/，exe 旁不再保留扩展目录。
 
+/** 已解析的 data 根目录（首次初始化时确定；之后保持不变，避免运行中路径漂移） */
+let resolvedDataRoot: string | null = null;
+
 export function dataRoot(): string {
   // 测试隔离：E2E / CI 可通过 BC_DATA_DIR 指向临时目录，绝不污染用户的真实 data/。
   // 仅在显式设置该环境变量时生效，正常使用（双击 exe / pnpm dev）完全不受影响。
   const override = process.env['BC_DATA_DIR'];
   if (override && override.trim()) return override.trim();
-  const base = app.isPackaged
-    ? (process.env['PORTABLE_EXECUTABLE_DIR'] || dirname(process.execPath))
-    : app.getAppPath();
-  return join(base, 'data');
+  if (resolvedDataRoot) return resolvedDataRoot;
+  // 默认落在「便携目录 / data」；若该处不可写，initDataDirectories() 会改成用户级目录。
+  resolvedDataRoot = join(portableBaseDir(), 'data');
+  return resolvedDataRoot;
+}
+
+/**
+ * 确定 data/ 的最终落点（跨平台安全版）：
+ *   · 优先「程序所在目录 / data」= 真·绿色便携；
+ *   · 若该处不可写（macOS 把 App 放进 /Applications、程序装在只读盘…），
+ *     自动退到用户级目录（`<appData>/BlockCanvas/data`），保证任何平台都能正常跑起来。
+ * 开发态 / BC_DATA_DIR 覆盖时行为与以前完全一致。
+ */
+function resolveDataRoot(): string {
+  const override = process.env['BC_DATA_DIR'];
+  if (override && override.trim()) {
+    resolvedDataRoot = override.trim();
+    return resolvedDataRoot;
+  }
+  resolvedDataRoot = resolveWritableDir('data');
+  return resolvedDataRoot;
 }
 
 export function initDataDirectories(): { dataDir: string; extDir: string; projectsDir: string; backupsDir: string } {
-  const dRoot = dataRoot();
+  const dRoot = resolveDataRoot();
   const userDataDir = join(dRoot, 'user-data');
   const extDir = join(dRoot, 'extensions');
   const projectsDir = join(dRoot, 'projects');

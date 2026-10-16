@@ -39,7 +39,7 @@ function makeSlides(): SlideSpec[] {
   return out;
 }
 
-const HIT_TOLERANCE = 3.5; // 距离目标 3.5% 以内即算"到位"
+const HIT_TOLERANCE = 4; // 距离目标 4% 以内即算"到位"（手感宽松一点，触控板也好拖）
 
 export function ProjectsCenter(props: {
   onBack: () => void;
