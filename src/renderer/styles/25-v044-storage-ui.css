@@ -1,0 +1,84 @@
+/* ==========================================================================
+   v0.4.4 · 设置 → 存储占用明细（分类互斥、可加和）
+   --------------------------------------------------------------------------
+   背景：以前"统计"与"清理"各写一份硬编码目录清单，口径不一致 →
+   用户看到"显示 2.6 MB，清完还是 2.6 MB"，数字还对不上总占用。
+   现在统计与清理同源，UI 也要一眼看得出"哪类能清、哪类是你的数据"。
+   ========================================================================== */
+
+.bc-storage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.bc-storage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+.bc-storage-row + .bc-storage-row { border-top: 1px solid var(--border); border-radius: 0; }
+/* 可清理的：左边一条强调色，一眼区分 */
+.bc-storage-row.is-cleanable { border-left: 3px solid var(--accent); }
+.bc-storage-row:not(.is-cleanable) { border-left: 3px solid var(--border); }
+
+.bc-storage-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bc-storage-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.bc-storage-hint {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.bc-storage-size {
+  flex: none;
+  min-width: 74px;
+  text-align: right;
+  font-family: 'Consolas', monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bc-storage-btn { flex: none; min-width: 62px; }
+.bc-storage-keep {
+  flex: none;
+  min-width: 62px;
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  background: var(--hover);
+  border-radius: 4px;
+  padding: 2px 0;
+}
+
+/* 合计行 */
+.bc-storage-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.bc-storage-total b { color: var(--text); font-family: 'Consolas', monospace; }
+.bc-storage-plus { margin: 0 5px; opacity: 0.6; }
+
+html[data-bc-dark] .bc-storage-keep { background: rgba(255, 255, 255, 0.06); }

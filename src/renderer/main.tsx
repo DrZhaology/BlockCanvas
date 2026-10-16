@@ -26,6 +26,7 @@ import './styles/21-v044b-ui.css'; // v0.4.4b：表格自动命名提示 + Ctrl+
 import './styles/22-v044c-ui.css'; // v0.4.4c：工具栏「任务」按钮 / 帮助中心（README+Markdown）/ 更新任务总览
 import './styles/23-v044d-ui.css'; // v0.4.4d：UI 统一（动效/选择器）+ 画布 Alt 缩放移动 + 文字快捷调整 + 渐变扩散
 import './styles/24-v044h-ui.css'; // v0.4.4h：Alt 墙提示 + 拖到墙外改父子关系 + 中键属性搜索两态 + 删除项目三步防护
+import './styles/25-v044-storage-ui.css'; // v0.4.4：设置→存储占用明细（分类互斥可加和 + 分类清理）
 import './animations.css'; // 统一动画体系：token + 全部 keyframes（分片里只写引用）
 
 createRoot(document.getElementById('root')!).render(

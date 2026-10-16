@@ -8,7 +8,7 @@ import { HelpButton } from './HelpButton';
 import { Icon, type IconName } from './Icon';
 import { Collapse } from './Collapse';
 import { TIPS, TIPS_KEY, setTipsEnabled } from './CanvasOverlays';
-import type { DataPathsInfo, StorageStatsInfo } from '../global';
+import type { DataPathsInfo, StorageStatsInfo, StorageBreakdownInfo, StorageCategoryId } from '../global';
 
 function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return '0 B';
@@ -45,7 +45,9 @@ export function Settings(props: Props) {
   const [section, setSection] = useState<SettingsSection>(initialSection || 'personalization');
   const [paths, setPaths] = useState<DataPathsInfo | null>(null);
   const [storageStats, setStorageStats] = useState<StorageStatsInfo | null>(null);
+  const [breakdown, setBreakdown] = useState<StorageBreakdownInfo | null>(null);
   const [cleaningCache, setCleaningCache] = useState(false);
+  const [cleaningId, setCleaningId] = useState<string>('');
   const [appVersion, setAppVersion] = useState<string>('');
 
   useEffect(() => {
@@ -54,8 +56,12 @@ export function Settings(props: Props) {
 
   const refreshStorageStats = async () => {
     try {
-      const stats = await window.bc.getStorageStats();
+      const [stats, bd] = await Promise.all([
+        window.bc.getStorageStats(),
+        window.bc.getStorageBreakdown()
+      ]);
       setStorageStats(stats);
+      setBreakdown(bd);
     } catch {}
   };
 
@@ -68,7 +74,7 @@ export function Settings(props: Props) {
     if (!confirm('确定要清理运行缓存吗？\n\n· 只删除 Chromium/V8 生成的临时缓存文件；\n· 不会碰你的项目工程、快照与任何设计数据。')) return;
     setCleaningCache(true);
     try {
-      const res = await window.bc.clearAppCache();
+      const res = await window.bc.clearAllCleanable();
       if (res.ok) {
         alert(`✨ 运行缓存清理成功！\n\n本次已安全释放 ${formatBytes(res.freedBytes)} 临时空间。`);
         refreshStorageStats();
@@ -77,6 +83,25 @@ export function Settings(props: Props) {
       alert('清理失败: ' + (e.message || '未知错误'));
     } finally {
       setCleaningCache(false);
+    }
+  };
+
+  /** 按分类清理（可清的三类：Chromium 缓存 / 临时文件 / 更新包下载） */
+  const handleClearCategory = async (id: StorageCategoryId, label: string) => {
+    if (!confirm(`确定要清理「${label}」吗？\n\n只删除可再生成的临时文件，不会影响项目工程、快照与界面设置。`)) return;
+    setCleaningId(id);
+    try {
+      const res = await window.bc.clearStorageCategory(id);
+      if (res.ok) {
+        alert(`✨ 已清理「${label}」，释放 ${formatBytes(res.freedBytes)}。`);
+        refreshStorageStats();
+      } else {
+        alert('未能清理：' + (res.error || '未知原因'));
+      }
+    } catch (e: any) {
+      alert('清理失败: ' + (e.message || '未知错误'));
+    } finally {
+      setCleaningId('');
     }
   };
 
@@ -147,6 +172,7 @@ export function Settings(props: Props) {
   const [maxSnapshots, setMaxSnapshots] = useState<number>(15);
   const [autoCleanCache, setAutoCleanCache] = useState<boolean>(false);
   const [autoCleanOrphans, setAutoCleanOrphans] = useState<boolean>(true);
+  const [autoCleanTemp, setAutoCleanTemp] = useState<boolean>(true);
 
   useEffect(() => {
     window.bc.getAppConfig().then((cfg) => {
@@ -154,6 +180,7 @@ export function Settings(props: Props) {
       if (typeof cfg.maxSnapshots === 'number') setMaxSnapshots(cfg.maxSnapshots);
       setAutoCleanCache(!!cfg.autoCleanCacheOnStartup);
       setAutoCleanOrphans(cfg.autoCleanOrphansOnStartup !== false);
+      setAutoCleanTemp(cfg.autoCleanTempOnStartup !== false);
     });
     window.bc.getDataPaths().then((p) => setPaths(p));
   }, []);
@@ -176,6 +203,11 @@ export function Settings(props: Props) {
   const toggleAutoCleanOrphans = (v: boolean) => {
     setAutoCleanOrphans(v);
     window.bc.setAppConfig({ autoCleanOrphansOnStartup: v });
+  };
+
+  const toggleAutoCleanTemp = (v: boolean) => {
+    setAutoCleanTemp(v);
+    window.bc.setAppConfig({ autoCleanTempOnStartup: v });
   };
 
   // 工具栏管理（独立组件 ToolbarManagerSection，见文件末尾）
@@ -486,9 +518,9 @@ export function Settings(props: Props) {
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="broom" /></div>
                 <div className="fluent-card-info">
-                  <div className="fluent-card-title">运行临时缓存 (Chromium Cache)</div>
+                  <div className="fluent-card-title">一键清理运行缓存与临时文件</div>
                   <div className="fluent-card-desc">
-                    当前检测占用: <b style={{ color: 'var(--accent)', fontFamily: 'Consolas' }}>{storageStats ? formatBytes(storageStats.cacheSize) : '扫描中…'}</b>（安全清理，不影响项目工程）
+                    当前可清理: <b style={{ color: 'var(--accent)', fontFamily: 'Consolas' }}>{breakdown ? formatBytes(breakdown.categories.filter((c) => c.cleanable).reduce((a, c) => a + c.bytes, 0)) : (storageStats ? formatBytes(storageStats.cacheSize) : '扫描中…')}</b>（只清可再生成的临时文件，不碰项目工程与界面设置）
                   </div>
                 </div>
                 <div className="fluent-card-ctrl" style={{ display: 'flex', gap: 6, flexShrink: 0, alignSelf: 'center' }}>
@@ -505,7 +537,29 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
-              {/* 卡片 2：启动时自动清理缓存 */}
+              {/* 卡片 2：启动时自动清理临时文件 */}
+              <div className="fluent-card">
+                <div className="fluent-card-icon">🧹</div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">启动时自动清理临时文件 (Auto Clean Temp)</div>
+                  <div className="fluent-card-desc">
+                    每次启动自动回收程序留在系统 Temp 里的文件（浏览器预览页、更新脚本工作目录）。
+                    关闭后这些文件会一直留着，需要你自己去系统临时目录删。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <label className="fluent-switch">
+                    <input
+                      type="checkbox"
+                      checked={autoCleanTemp}
+                      onChange={(e) => toggleAutoCleanTemp(e.target.checked)}
+                    />
+                    <span className="fluent-slider" />
+                  </label>
+                </div>
+              </div>
+
+              {/* 卡片 3：启动时自动清理缓存 */}
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="bolt" /></div>
                 <div className="fluent-card-info">
@@ -524,7 +578,7 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
-              {/* 卡片 3：启动时自动清理孤立快照 */}
+              {/* 卡片 4：启动时自动清理孤立快照 */}
               <div className="fluent-card">
                 <div className="fluent-card-icon">🗑️</div>
                 <div className="fluent-card-info">
@@ -554,19 +608,23 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
-              {/* 分组 2：纯便携 data/ 目录占用 */}
+              {/* 分组 2：存储占用明细（分类互斥、可加和） */}
               <div className="fluent-group-title">
-                <span>纯便携数据目录占用 (data/)</span>
+                <span>存储占用明细</span>
+                <HelpButton
+                  title="这些分类是什么？"
+                  content={'【占用明细说明】：\n\n· 每一类都是**互斥**的，加起来正好等于总占用（不会出现"对不上账"）。\n· 标了「可清理」的三类只包含可再生成的临时文件，清掉不会丢任何数据。\n· 「界面偏好与会话」「项目工程文件」「历史快照」「扩展」属于你的数据，只能自己手动删。'}
+                />
               </div>
 
               <div className="fluent-card" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div className="fluent-card-icon">📁</div>
                     <div>
-                      <div className="fluent-card-title">便携数据根目录</div>
+                      <div className="fluent-card-title">存储总览</div>
                       <div className="fluent-card-desc" style={{ fontFamily: 'Consolas', fontSize: 11 }}>
-                        {paths?.dataRoot || '正在获取…'} · 总占用: <b style={{ color: 'var(--text)' }}>{storageStats ? formatBytes(storageStats.totalSize) : '…'}</b>
+                        {breakdown?.dataRoot || paths?.dataRoot || '正在获取…'}
                       </div>
                     </div>
                   </div>
@@ -577,31 +635,44 @@ export function Settings(props: Props) {
                   </div>
                 </div>
 
-                <div className="fluent-storage-grid">
-                  <div className="fluent-storage-item">
-                    <span className="fluent-storage-label">临时与编译缓存</span>
-                    <span className="fluent-storage-val" style={{ color: 'var(--accent)' }}>
-                      {storageStats ? formatBytes(storageStats.cacheSize) : '…'}
-                    </span>
-                  </div>
-                  <div className="fluent-storage-item">
-                    <span className="fluent-storage-label">历史快照与备份</span>
-                    <span className="fluent-storage-val">
-                      {storageStats ? formatBytes(storageStats.backupsSize) : '…'}
-                    </span>
-                  </div>
-                  <div className="fluent-storage-item">
-                    <span className="fluent-storage-label">项目工程文件 (.bcproj)</span>
-                    <span className="fluent-storage-val">
-                      {storageStats ? formatBytes(storageStats.projectsSize) : '…'}
-                    </span>
-                  </div>
-                  <div className="fluent-storage-item">
-                    <span className="fluent-storage-label">扩展与插件包</span>
-                    <span className="fluent-storage-val">
-                      {storageStats ? formatBytes(storageStats.extensionsSize) : '…'}
-                    </span>
-                  </div>
+                {/* 明细行：标签 / 说明 / 大小 / 清理按钮 */}
+                <div className="bc-storage-list">
+                  {(breakdown?.categories ?? []).map((c) => (
+                    <div key={c.id} className={'bc-storage-row' + (c.cleanable ? ' is-cleanable' : '')} data-storage-cat={c.id}>
+                      <div className="bc-storage-main">
+                        <span className="bc-storage-name">{c.label}</span>
+                        <span className="bc-storage-hint">{c.hint}</span>
+                      </div>
+                      <span className="bc-storage-size" style={{ color: c.cleanable ? 'var(--accent)' : 'var(--text)' }}>
+                        {formatBytes(c.bytes)}
+                      </span>
+                      {c.cleanable ? (
+                        <button
+                          className="btn-secondary btn-mini bc-storage-btn"
+                          disabled={cleaningId === c.id || c.bytes === 0}
+                          onClick={() => handleClearCategory(c.id, c.label)}
+                          title={`清理「${c.label}」`}
+                        >
+                          {cleaningId === c.id ? '清理中…' : '清理'}
+                        </button>
+                      ) : (
+                        <span className="bc-storage-keep" title="这是你的数据，只能手动删除">保留</span>
+                      )}
+                    </div>
+                  ))}
+                  {!breakdown && <div className="hint" style={{ padding: 12 }}>正在扫描占用…</div>}
+                </div>
+
+                {/* 合计：data/ + 系统 Temp（我们自己的文件） */}
+                <div className="bc-storage-total">
+                  <span>
+                    data/ 目录 <b>{formatBytes(breakdown?.dataTotal ?? 0)}</b>
+                    <span className="bc-storage-plus">+</span>
+                    系统 Temp 临时文件 <b>{formatBytes(breakdown?.tempTotal ?? 0)}</b>
+                  </span>
+                  <span>
+                    合计 <b style={{ color: 'var(--accent)' }}>{formatBytes(breakdown?.grandTotal ?? storageStats?.totalSize ?? 0)}</b>
+                  </span>
                 </div>
               </div>
 

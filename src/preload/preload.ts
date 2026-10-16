@@ -43,6 +43,13 @@ contextBridge.exposeInMainWorld('bc', {
     ipcRenderer.invoke('data:get-paths'),
   getStorageStats: () =>
     ipcRenderer.invoke('data:get-storage-stats'),
+  // 分类占用明细（统计与清理同源）
+  getStorageBreakdown: () =>
+    ipcRenderer.invoke('data:get-storage-breakdown'),
+  clearStorageCategory: (id: string) =>
+    ipcRenderer.invoke('data:clear-category', id),
+  clearAllCleanable: () =>
+    ipcRenderer.invoke('data:clear-all-cleanable'),
   clearAppCache: () =>
     ipcRenderer.invoke('data:clear-cache'),
   clearOrphanBackups: () =>

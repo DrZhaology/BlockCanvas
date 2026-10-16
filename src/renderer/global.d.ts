@@ -30,6 +30,28 @@ export interface StorageStatsInfo {
   orphanBackupsCount: number;
 }
 
+/** 存储分类（统计与清理同源，口径互斥可加和） */
+export type StorageCategoryId =
+  | 'chromiumCache' | 'temp' | 'downloads'
+  | 'userState' | 'projects' | 'backups' | 'extensions' | 'other';
+
+export interface StorageCategoryInfo {
+  id: StorageCategoryId;
+  label: string;
+  bytes: number;
+  cleanable: boolean;
+  hint: string;
+}
+
+export interface StorageBreakdownInfo {
+  dataRoot: string;
+  dataTotal: number;
+  tempTotal: number;
+  grandTotal: number;
+  categories: StorageCategoryInfo[];
+  orphanBackupsCount: number;
+}
+
 declare global {
   interface ScanResult {
     plugins: { id: string; name: string; version: string; author: string; description: string; enabled: boolean; error: string | null }[];
@@ -67,6 +89,9 @@ declare global {
       // 便携数据区与配置
       getDataPaths: () => Promise<DataPathsInfo>;
       getStorageStats: () => Promise<StorageStatsInfo>;
+      getStorageBreakdown: () => Promise<StorageBreakdownInfo>;
+      clearStorageCategory: (id: StorageCategoryId) => Promise<{ ok: boolean; freedBytes: number; error?: string }>;
+      clearAllCleanable: () => Promise<{ ok: boolean; freedBytes: number }>;
       clearAppCache: () => Promise<{ ok: boolean; freedBytes: number }>;
       clearOrphanBackups: () => Promise<{ ok: boolean; cleanedCount: number; freedBytes: number }>;
       openDataPath: (target: string) => Promise<string | undefined>;

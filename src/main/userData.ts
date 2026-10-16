@@ -75,14 +75,8 @@ export function initDataDirectories(): { dataDir: string; extDir: string; projec
   ensureInitialConfig();
   seedExtensionsFromZip(extDir);
 
-  // 启动自愈与自动清洁检查
-  const cfg = readAppConfig();
-  if (cfg.autoCleanCacheOnStartup) {
-    clearAppCache();
-  }
-  if (cfg.autoCleanOrphansOnStartup) {
-    clearOrphanBackups();
-  }
+  // 启动自愈（清缓存 / 孤立快照 / 我们自己的临时文件）挪到了 main.ts：
+  // 必须等 app.setPath('userData') 生效后再做，见 storage.ts 的 runStartupCleanup()。
 
   return { dataDir: dRoot, extDir, projectsDir, backupsDir };
 }
@@ -103,6 +97,7 @@ export interface AppConfig {
   autoRestoreSession?: boolean;       // 默认 true (类似 Notepad 原地恢复)
   autoCleanCacheOnStartup?: boolean; // 默认 false (开启后每次启动自动清理 Chromium 临时缓存)
   autoCleanOrphansOnStartup?: boolean; // 默认 true (启动时自动清理已删除项目的残留快照)
+  autoCleanTempOnStartup?: boolean;   // 默认 true (启动时清理我们自己在系统 Temp 里留下的文件)
   lastCheckUpdate?: string;          // 上次检测更新的时间戳 ISO 字符串
   [key: string]: any;
 }
@@ -112,7 +107,8 @@ const DEFAULT_CONFIG: AppConfig = {
   maxSnapshots: 15,
   autoRestoreSession: true,
   autoCleanCacheOnStartup: false,
-  autoCleanOrphansOnStartup: true
+  autoCleanOrphansOnStartup: true,
+  autoCleanTempOnStartup: true
 };
 
 export function readAppConfig(): AppConfig {
@@ -299,197 +295,6 @@ export function deleteProjectBackupFolder(projectName: string) {
   if (existsSync(bDir)) {
     try { rmSync(bDir, { recursive: true, force: true }); } catch {}
   }
-}
-
-// ============ 缓存与磁盘占用统计及自动清理 ============
-export interface StorageStats {
-  cacheSize: number;          // Chromium 渲染/字节码/GPU 临时缓存字节数
-  backupsSize: number;        // 历史快照与备份总占用
-  projectsSize: number;       // 项目工程文件占用
-  extensionsSize: number;     // 扩展与插件占用
-  totalSize: number;          // data/ 总占用字节数
-  orphanBackupsCount: number; // 孤立无主的快照文件夹数量
-}
-
-export function getDirSize(dirPath: string): number {
-  if (!existsSync(dirPath)) return 0;
-  let total = 0;
-  try {
-    const entries = readdirSync(dirPath, { withFileTypes: true });
-    for (const e of entries) {
-      const full = join(dirPath, e.name);
-      if (e.isDirectory()) {
-        total += getDirSize(full);
-      } else if (e.isFile()) {
-        try { total += statSync(full).size; } catch {}
-      }
-    }
-  } catch {}
-  return total;
-}
-
-export function getStorageStats(): StorageStats {
-  const dRoot = dataRoot();
-  const uData = join(dRoot, 'user-data');
-  const cacheDirs = [
-    join(uData, 'Cache'),
-    join(uData, 'Code Cache'),
-    join(uData, 'GPUCache'),
-    join(uData, 'DawnGraphiteCache'),
-    join(uData, 'DawnWebGPUCache'),
-    join(uData, 'blob_storage')
-  ];
-
-  let cacheSize = 0;
-  for (const d of cacheDirs) cacheSize += getDirSize(d);
-
-  const backupsDir = join(dRoot, 'backups');
-  const backupsSize = getDirSize(backupsDir);
-
-  const projectsDir = join(dRoot, 'projects');
-  const projectsSize = getDirSize(projectsDir);
-
-  const extensionsDir = join(dRoot, 'extensions');
-  const extensionsSize = getDirSize(extensionsDir);
-
-  const totalSize = getDirSize(dRoot);
-
-  // 统计已删除项目的孤立残留备份数
-  const projects = listProjects();
-  const validNames = new Set(projects.map((p) => sanitizeProjectFolder(p.name)));
-  for (const p of projects) {
-    validNames.add(sanitizeProjectFolder(p.fileName.replace(/\.bcproj$/i, '')));
-  }
-  validNames.add('_general');
-
-  let orphanBackupsCount = 0;
-  if (existsSync(backupsDir)) {
-    try {
-      for (const e of readdirSync(backupsDir, { withFileTypes: true })) {
-        if (e.isDirectory()) {
-          if (!validNames.has(e.name)) orphanBackupsCount++;
-        } else if (e.isFile() && e.name.endsWith('.bcproj')) {
-          orphanBackupsCount++;
-        }
-      }
-    } catch {}
-  }
-
-  return {
-    cacheSize,
-    backupsSize,
-    projectsSize,
-    extensionsSize,
-    totalSize,
-    orphanBackupsCount
-  };
-}
-
-/**
- * 递归深度清理目录下的所有文件，保留空目录结构；遇锁跳过，最大化安全释放空间
- */
-function cleanDirFilesRecursively(dir: string): number {
-  if (!existsSync(dir)) return 0;
-  let freed = 0;
-  try {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    for (const e of entries) {
-      const full = join(dir, e.name);
-      if (e.isDirectory()) {
-        freed += cleanDirFilesRecursively(full);
-        try { rmSync(full, { recursive: false }); } catch {}
-      } else if (e.isFile()) {
-        try {
-          const sz = statSync(full).size;
-          unlinkSync(full);
-          freed += sz;
-        } catch {}
-      }
-    }
-  } catch {}
-  return freed;
-}
-
-export async function clearAppCache(): Promise<{ ok: boolean; freedBytes: number }> {
-  // 1. 调用 Chromium 内部 session 清理接口（清除内存与活动网络缓存）
-  try {
-    const { session } = await import('electron');
-    if (session && session.defaultSession) {
-      await session.defaultSession.clearCache();
-      await session.defaultSession.clearStorageData({
-        storages: ['shadercache', 'cachestorage']
-      });
-    }
-  } catch {}
-
-  const uData = join(dataRoot(), 'user-data');
-  const cacheDirs = [
-    join(uData, 'Cache'),
-    join(uData, 'Code Cache'),
-    join(uData, 'GPUCache'),
-    join(uData, 'DawnGraphiteCache'),
-    join(uData, 'DawnWebGPUCache'),
-    join(uData, 'blob_storage')
-  ];
-
-  let freedBytes = 0;
-
-  // 2. 递归深度逐文件清空缓存目录（保留目录壳防重构报错）
-  for (const d of cacheDirs) {
-    if (existsSync(d)) {
-      freedBytes += cleanDirFilesRecursively(d);
-    }
-  }
-
-  // 3. 顺带清理 backups 根目录下早期残留的孤立文件（非文件夹）
-  const bRoot = join(dataRoot(), 'backups');
-  if (existsSync(bRoot)) {
-    try {
-      for (const e of readdirSync(bRoot, { withFileTypes: true })) {
-        if (e.isFile() && e.name.endsWith('.bcproj')) {
-          try {
-            const f = join(bRoot, e.name);
-            freedBytes += statSync(f).size;
-            unlinkSync(f);
-          } catch {}
-        }
-      }
-    } catch {}
-  }
-
-  return { ok: true, freedBytes };
-}
-
-export function clearOrphanBackups(): { ok: boolean; cleanedCount: number; freedBytes: number } {
-  const projects = listProjects();
-  const validNames = new Set(projects.map((p) => sanitizeProjectFolder(p.name)));
-  for (const p of projects) {
-    validNames.add(sanitizeProjectFolder(p.fileName.replace(/\.bcproj$/i, '')));
-  }
-  validNames.add('_general');
-
-  const bRoot = join(dataRoot(), 'backups');
-  if (!existsSync(bRoot)) return { ok: true, cleanedCount: 0, freedBytes: 0 };
-
-  let count = 0;
-  let freed = 0;
-
-  try {
-    for (const e of readdirSync(bRoot, { withFileTypes: true })) {
-      const full = join(bRoot, e.name);
-      if (e.isDirectory()) {
-        if (!validNames.has(e.name)) {
-          freed += getDirSize(full);
-          try { rmSync(full, { recursive: true, force: true }); count++; } catch {}
-        }
-      } else if (e.isFile() && e.name.endsWith('.bcproj')) {
-        freed += statSync(full).size;
-        try { unlinkSync(full); count++; } catch {}
-      }
-    }
-  } catch {}
-
-  return { ok: true, cleanedCount: count, freedBytes: freed };
 }
 
 function countNodes(node: any): number {

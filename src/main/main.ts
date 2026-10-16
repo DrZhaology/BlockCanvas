@@ -8,8 +8,12 @@ import { zipCreate, zipList } from './zip';
 import {
   dataRoot, initDataDirectories, readAppConfig, writeAppConfig, listProjects,
   listProjectBackups, saveProjectSnapshotFile, deleteProjectBackupFolder,
-  readSession, writeSession, getStorageStats, clearAppCache, clearOrphanBackups
+  readSession, writeSession
 } from './userData';
+import {
+  getStorageStats, getStorageBreakdown, clearStorageCategory, clearAllCleanable,
+  clearOrphanBackups, runStartupCleanup
+} from './storage';
 import {
   getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo,
   resolveInstallDir
@@ -201,7 +205,12 @@ ipcMain.handle('data:get-paths', () => ({
 }));
 
 ipcMain.handle('data:get-storage-stats', () => getStorageStats());
-ipcMain.handle('data:clear-cache', () => clearAppCache());
+// 分类占用明细（统计与清理共用同一份清单 → 不会再出现"显示的和清的不是一回事"）
+ipcMain.handle('data:get-storage-breakdown', () => getStorageBreakdown());
+ipcMain.handle('data:clear-category', (_e, id: string) => clearStorageCategory(id as never));
+ipcMain.handle('data:clear-all-cleanable', () => clearAllCleanable());
+// 兼容旧入口（一键清缓存 = 清"可清"的那几类）
+ipcMain.handle('data:clear-cache', () => clearAllCleanable());
 ipcMain.handle('data:clear-orphan-backups', () => clearOrphanBackups());
 
 // ============ 自动更新 IPC ============
@@ -969,6 +978,10 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  // 启动自愈：清我们自己在系统 Temp 里留下的文件（默认开）/ Chromium 缓存 / 孤立快照。
+  // 必须在这里（app ready 之后）：storage 里要用到 session，且 userData 已重定向到 data/user-data。
+  void runStartupCleanup();
 });
 
 app.on('window-all-closed', () => {
