@@ -89,7 +89,7 @@ interface TabState {
   activeTabId: string | null;
 
   loadSceneSilently: (scene: SceneGraph) => void;
-  newTab: (name?: string, scene?: SceneGraph, filePath?: string | null) => string;
+  newTab: (name?: string, scene?: SceneGraph, filePath?: string | null, history?: { past?: SceneGraph[]; future?: SceneGraph[] }) => string;
   closeTab: (tabId: string) => boolean;
   switchTab: (tabId: string) => void;
   updateActiveTabScene: (scene: SceneGraph, markDirty?: boolean) => void;
@@ -123,7 +123,7 @@ export const useTabStore = create<TabState>((set, get) => ({
     requestAnimationFrame(() => { isSwitchingTab = false; });
   },
 
-  newTab: (name, customScene, filePath = null) => {
+  newTab: (name, customScene, filePath = null, history) => {
     const st = get();
     const curIndex = st.tabs.length + 1;
     const tabName = name || `未命名项目 ${curIndex}`;
@@ -149,6 +149,13 @@ export const useTabStore = create<TabState>((set, get) => ({
 
     // 让画布渲染器载入新场景（静默：不算内容修改）
     get().loadSceneSilently(scene);
+    // 撤销历史随工程保存（v0.4.4）：工程文件里带了 history 节就恢复 ——
+    // 下次打开还能 Ctrl+Z 回退到上次关闭前的状态（条数由设置里的阈值控制）
+    if (history && Array.isArray(history.past) && history.past.length > 0) {
+      useScene.setState({
+        history: { past: history.past.slice(), future: (history.future || []).slice() }
+      });
+    }
     debouncePersistSession(get);
     return newId;
   },

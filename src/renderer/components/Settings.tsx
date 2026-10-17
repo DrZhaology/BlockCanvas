@@ -145,6 +145,27 @@ export function Settings(props: Props) {
     writeSelHighlight(v);
   };
 
+  // 自动保存（默认关）+ 撤销历史阈值 —— 都走 config.json（userData.writeAppConfig）
+  const [autoSaveOn, setAutoSaveOn] = useState<boolean>(false);
+  const [autoSaveSec, setAutoSaveSec] = useState<number>(300);
+  const [undoLimit, setUndoLimit] = useState<number>(100);
+  useEffect(() => {
+    window.bc.getAppConfig().then((cfg) => {
+      setAutoSaveOn(cfg.autoSaveOn === true);
+      if (typeof cfg.autoSaveSec === 'number') setAutoSaveSec(cfg.autoSaveSec);
+      if (typeof cfg.undoHistoryLimit === 'number') setUndoLimit(cfg.undoHistoryLimit);
+    }).catch(() => {});
+  }, []);
+  const changeAutoSave = (on: boolean, sec: number) => {
+    setAutoSaveOn(on);
+    setAutoSaveSec(sec);
+    void window.bc.setAppConfig({ autoSaveOn: on, autoSaveSec: sec });
+  };
+  const changeUndoLimit = (n: number) => {
+    setUndoLimit(n);
+    void window.bc.setAppConfig({ undoHistoryLimit: n });
+  };
+
   // 元素面板模式
   const [elemLabelMode, setElemLabelMode] = useState<'both' | 'zh' | 'tag'>(() => {
     try { return (localStorage.getItem('bc-elem-label-mode') as any) || 'both'; } catch { return 'both'; }
@@ -469,6 +490,66 @@ export function Settings(props: Props) {
                     <option value="1440px">桌面电脑 (1440px)</option>
                     <option value="768px">平板设备 (768px)</option>
                     <option value="375px">移动手机 (375px)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="fluent-card">
+                <div className="fluent-card-icon">💾</div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">自动保存（默认关闭）</div>
+                  <div className="fluent-card-desc">
+                    面向<b>写入次数有限</b>的场景（如 U 盘 / 部分固态盘）：默认<b>绝不自动写盘</b>，
+                    保存只看 Ctrl+S（第一次保存会弹位置选择框）。开启后相当于每隔一段时间自动按一次
+                    Ctrl+S —— <b>只对已保存过、且有实际修改的工程生效</b>；完全没有更改就不写盘。
+                    与历史快照备份无关。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <select
+                    className="fluent-select"
+                    value={String(autoSaveSec)}
+                    onChange={(e) => changeAutoSave(autoSaveOn, Number(e.target.value))}
+                    title="自动保存间隔"
+                  >
+                    <option value="60">每 1 分钟</option>
+                    <option value="120">每 2 分钟</option>
+                    <option value="300">每 5 分钟</option>
+                    <option value="600">每 10 分钟</option>
+                    <option value="1800">每 30 分钟</option>
+                  </select>
+                  <label className="fluent-switch">
+                    <input
+                      type="checkbox"
+                      checked={autoSaveOn}
+                      onChange={(e) => changeAutoSave(e.target.checked, autoSaveSec)}
+                    />
+                    <span className="fluent-slider" />
+                  </label>
+                </div>
+              </div>
+
+              <div className="fluent-card">
+                <div className="fluent-card-icon">⏪</div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">撤销历史随工程保存（Ctrl+Z / Ctrl+Y）</div>
+                  <div className="fluent-card-desc">
+                    保存工程时把最近的操作历史一起写进 .bcproj —— 下次打开还能继续撤销 / 重做，
+                    不会一关就清零。条数越多文件越大：默认 100 步；设为 0 = 不保存历史（文件最小）。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <select
+                    className="fluent-select"
+                    value={String(undoLimit)}
+                    onChange={(e) => changeUndoLimit(Number(e.target.value))}
+                    title="随工程保存的撤销历史条数"
+                  >
+                    <option value="0">不保存历史</option>
+                    <option value="25">最近 25 步</option>
+                    <option value="50">最近 50 步</option>
+                    <option value="100">最近 100 步（默认）</option>
+                    <option value="200">最近 200 步</option>
                   </select>
                 </div>
               </div>

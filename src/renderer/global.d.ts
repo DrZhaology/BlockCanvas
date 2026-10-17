@@ -73,8 +73,8 @@ declare global {
 
       // 项目工程管理 (.bcproj)
       listProjects: () => Promise<ProjectFileInfo[]>;
-      saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown }, saveAs?: boolean, customPath?: string) => Promise<{ ok: boolean; path?: string; name?: string; error?: string; canceled?: boolean }>;
-      openProjectFile: (customPath?: string) => Promise<{ ok: boolean; project?: any; path?: string; error?: string; canceled?: boolean }>;
+      saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown; history?: { past?: unknown[]; future?: unknown[] } }, saveAs?: boolean, customPath?: string) => Promise<{ ok: boolean; path?: string; name?: string; error?: string; canceled?: boolean }>;
+      openProjectFile: (customPath?: string) => Promise<{ ok: boolean; project?: any; path?: string; error?: string; canceled?: boolean; container?: string; history?: { past?: any[]; future?: any[] } }>;
       deleteProject: (fileName: string, projectName?: string) => Promise<{ ok: boolean; error?: string }>;
       renameProject: (oldFileName: string, newName: string) => Promise<{ ok: boolean; fileName?: string; path?: string; error?: string }>;
 

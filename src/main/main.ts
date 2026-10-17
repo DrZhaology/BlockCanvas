@@ -433,6 +433,23 @@ ipcMain.handle('project:save', async (_evt, projectData: { name?: string; scene:
       }
     }
 
+    // 撤销历史随工程保存（v0.4.4）：sections.history = { past, future }，条数受
+    // config.undoHistoryLimit 控制（默认 100，设 0 = 不保存）。ZIP 容器的多 section
+    // 能力在这里派上用场：老版本程序读到不认识的 section 会忽略但保留，不会丢数据。
+    const sections: Record<string, unknown> = {};
+    try {
+      const limit = Math.max(0, Math.floor(Number(readAppConfig().undoHistoryLimit ?? 100) || 0));
+      const h = (projectData as any).history;
+      if (limit > 0 && h && Array.isArray(h.past) && h.past.length > 0) {
+        sections.history = {
+          savedAt: new Date().toISOString(),
+          limit,
+          past: h.past.slice(-limit),
+          future: (Array.isArray(h.future) ? h.future : []).slice(0, Math.min(limit, 50))
+        };
+      }
+    } catch { /* 历史保存失败不影响工程保存 */ }
+
     // v2：写 ZIP 容器（manifest.json + scene.json），原子替换、自动继承 createdAt
     const w = writeProject(targetPath, {
       name: pName,
@@ -440,7 +457,8 @@ ipcMain.handle('project:save', async (_evt, projectData: { name?: string; scene:
       meta: {
         ...(projectData.meta || {}),
         elementCount: countNodes(projectData.scene?.root)
-      }
+      },
+      sections
     });
     if (!w.ok) return { ok: false, error: w.error || '写入工程文件失败' };
     return { ok: true, path: targetPath, name: pName };
@@ -466,7 +484,11 @@ ipcMain.handle('project:open-file', async (_evt, customPath?: string) => {
     // v1（纯 JSON）与 v2（ZIP 容器）都能读
     const r = readProject(targetPath);
     if (!r.ok || !r.payload) return { ok: false, error: r.error || '文件不是有效的 BlockCanvas 工程文件' };
-    return { ok: true, project: r.payload, path: targetPath, container: r.container };
+    return {
+      ok: true, project: r.payload, path: targetPath, container: r.container,
+      // 随工程保存的撤销历史（老工程没有这一节 → undefined）
+      history: (r.payload as any)?.extraSections?.history
+    };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }

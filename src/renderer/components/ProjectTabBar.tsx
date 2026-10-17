@@ -87,7 +87,8 @@ export function ProjectTabBar() {
         );
         if (!saveFirst) return;
         const curScene = useScene.getState().scene;
-        window.bc.saveProject({ name: tab.name, scene: curScene }, false, tab.filePath).then(() => {
+        const hist = useScene.getState().history;
+        window.bc.saveProject({ name: tab.name, scene: curScene, history: { past: hist.past, future: hist.future } }, false, tab.filePath).then(() => {
           useTabStore.getState().setTabSaved(tab.id, tab.filePath!, tab.name);
           closeTab(tab.id);
         });

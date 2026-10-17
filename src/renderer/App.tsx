@@ -63,6 +63,8 @@ export default function App() {
   const [leftWidth, setLeftWidth] = usePersistentState<number>(LEFT_WIDTH_KEY, LEFT_WIDTH_DEFAULT);
   const [zoom, setZoom] = useState(1);
   const [view, setView] = useState<AppView>('editor');
+  // 自动保存节流锚点：手动 Ctrl+S / 自动保存成功都会刷新（见下方自动保存循环）
+  const autoSaveLastRef = useRef(0);
   // 全局快捷键在一个"依赖里没有 view"的 useEffect 里注册 → 闭包里的 view 永远是首次渲染的值。
   // 用 ref 读当前视图，否则在表格编辑器 / 设置 / 项目中心里按 Del、Ctrl+A 会悄悄打到画布上。
   const viewRef = useRef<AppView>(view);
@@ -199,6 +201,39 @@ export default function App() {
     applySelHighlightClass();
   }, []);
 
+  // 3c. 自动保存循环（v0.4.4，默认**关**）：
+  //  · 面向"写入次数有限"的场景：默认绝不自动写盘，保存 = Ctrl+S（首次弹位置选择框）；
+  //  · 开启后相当于每隔 N 秒替用户按一次 Ctrl+S：**只保存已有文件路径的脏标签**，
+  //    完全没有修改（不脏）就不写，第一次保存仍由用户手动完成（要选位置）；
+  //  · 与历史快照备份完全无关 —— 它只是"定时 Ctrl+S"。
+  useEffect(() => {
+    const tick = async () => {
+      try {
+        if (useUpdateBusy.getState().busy) return;
+        const cfg = await window.bc.getAppConfig();
+        if (cfg.autoSaveOn !== true) return;
+        const sec = Math.max(30, Math.floor(Number(cfg.autoSaveSec) || 300));
+        const now = Date.now();
+        if (now - autoSaveLastRef.current < sec * 1000) return;
+        const st = useTabStore.getState();
+        const tab = st.tabs.find((t) => t.id === st.activeTabId);
+        if (!tab || !tab.isDirty || !tab.filePath) return;   // 没修改 / 没存过位置 → 不写
+        const hist = useScene.getState().history;
+        const res = await window.bc.saveProject(
+          { name: tab.name, scene: useScene.getState().scene, history: { past: hist.past, future: hist.future } },
+          false,
+          tab.filePath
+        );
+        if (res.ok) {
+          st.setTabSaved(tab.id, tab.filePath, tab.name);
+          autoSaveLastRef.current = Date.now();
+        }
+      } catch { /* 自动保存失败不打扰用户，下一轮再试 */ }
+    };
+    const timer = window.setInterval(tick, 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   // 4. 启动延迟检测更新（5秒后静默检查，有更新则打开软件内更新中心页面）
   useEffect(() => {
     const checkAndNotify = async () => {
@@ -269,13 +304,14 @@ export default function App() {
       const curTab = tabs.find((t) => t.id === activeId);
       if (!curTab) return;
       const curScene = useScene.getState().scene;
+      const hist = useScene.getState().history;
 
       if (curTab.filePath) {
-        const res = await window.bc.saveProject({ name: curTab.name, scene: curScene }, false, curTab.filePath);
-        if (res.ok) useTabStore.getState().setTabSaved(curTab.id, curTab.filePath, curTab.name);
+        const res = await window.bc.saveProject({ name: curTab.name, scene: curScene, history: { past: hist.past, future: hist.future } }, false, curTab.filePath);
+        if (res.ok) { useTabStore.getState().setTabSaved(curTab.id, curTab.filePath, curTab.name); autoSaveLastRef.current = Date.now(); }
       } else {
-        const res = await window.bc.saveProject({ name: curTab.name, scene: curScene }, true);
-        if (res.ok && res.path) useTabStore.getState().setTabSaved(curTab.id, res.path, res.name);
+        const res = await window.bc.saveProject({ name: curTab.name, scene: curScene, history: { past: hist.past, future: hist.future } }, true);
+        if (res.ok && res.path) { useTabStore.getState().setTabSaved(curTab.id, res.path, res.name); autoSaveLastRef.current = Date.now(); }
       }
     };
 
@@ -286,8 +322,9 @@ export default function App() {
       const curTab = tabs.find((t) => t.id === activeId);
       if (!curTab) return;
       const curScene = useScene.getState().scene;
-      const res = await window.bc.saveProject({ name: curTab.name, scene: curScene }, true);
-      if (res.ok && res.path) useTabStore.getState().setTabSaved(curTab.id, res.path, res.name);
+      const hist = useScene.getState().history;
+      const res = await window.bc.saveProject({ name: curTab.name, scene: curScene, history: { past: hist.past, future: hist.future } }, true);
+      if (res.ok && res.path) { useTabStore.getState().setTabSaved(curTab.id, res.path, res.name); autoSaveLastRef.current = Date.now(); }
     };
 
     const onOpenProject = async () => {
@@ -302,7 +339,7 @@ export default function App() {
           st.switchTab(existing.id);
           showToast(`「${existing.name}」已经打开着，已为你切换到那个标签页`, 'info');
         } else {
-          st.newTab(res.project.name || '已打开工程', res.project.scene, res.path);
+          st.newTab(res.project.name || '已打开工程', res.project.scene, res.path, res.history);
         }
         switchView('editor');
       }
