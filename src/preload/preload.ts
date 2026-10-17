@@ -54,6 +54,9 @@ contextBridge.exposeInMainWorld('bc', {
     ipcRenderer.invoke('data:clear-cache'),
   clearOrphanBackups: () =>
     ipcRenderer.invoke('data:clear-orphan-backups'),
+  /** 预算兜底（L4）：下载目录保留最近 1 个 + 30 天过期清理；临时区预览只留最近 5 个 */
+  enforceStorageBudgets: () =>
+    ipcRenderer.invoke('data:enforce-budgets'),
   openDataPath: (target: string) =>
     ipcRenderer.invoke('data:open-path', target),
   getAppConfig: () =>

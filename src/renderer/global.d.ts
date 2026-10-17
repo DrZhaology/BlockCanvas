@@ -95,6 +95,8 @@ declare global {
       clearAllCleanable: () => Promise<{ ok: boolean; freedBytes: number }>;
       clearAppCache: () => Promise<{ ok: boolean; freedBytes: number }>;
       clearOrphanBackups: () => Promise<{ ok: boolean; cleanedCount: number; freedBytes: number }>;
+      /** 预算兜底（L4）：下载目录 + 临时区上限 */
+      enforceStorageBudgets: () => Promise<{ removed: number; freedBytes: number; detail: { downloadsRemoved: number; previewsRemoved: number; tmpEvicted: number } }>;
       openDataPath: (target: string) => Promise<string | undefined>;
       getAppConfig: () => Promise<Record<string, any>>;
       setAppConfig: (patch: Record<string, unknown>) => Promise<Record<string, any>>;

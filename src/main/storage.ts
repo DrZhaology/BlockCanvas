@@ -318,8 +318,134 @@ export function clearDownloads(keepLatest = 1): number {
   return freed;
 }
 
-/** 单个分类的当前占用（比 getStorageBreakdown 轻，用于清理前后算差值） */
-function categoryBytes(id: StorageCategoryId): number {
+// ---------------------------------------------------------------------------
+// 预算（L4）：任何"写进去就不删"的目录都必须有上限，超了按时间淘汰
+// ---------------------------------------------------------------------------
+//
+// 与"清理"的区别：清理是用户主动点按钮 / 启动自愈全清；
+// 预算是**常驻兜底**——目录可以留着用，但不许无限长。
+//   ① data/downloads      ：保留最近 1 个 + 超过 30 天的一律清 + 总量 512 MB 上限
+//   ② data/tmp/preview    ：只留最近 5 个（与 preview:open 里的策略同一套阈值）
+//   ③ data/tmp 整体       ：总量 256 MB 上限（**跳过 system/**：那是 Chromium 正在用的运行时目录）
+// 快照目录（data/backups/<项目>）的预算不在这里 —— 它在 userData.ts 里
+// 跟着写入走（maxSnapshots=15 / maxBackupBytes=200MB），写一次就自检一次，比启动时补更及时。
+
+export interface BudgetResult {
+  removed: number;
+  freedBytes: number;
+  /** 分类明细，给日志 / 探针看 */
+  detail: { downloadsRemoved: number; previewsRemoved: number; tmpEvicted: number };
+}
+
+/** 预算默认值（config.json 可覆盖：maxDownloadFiles / maxDownloadAgeDays / maxDownloadBytes / maxPreviewFiles / maxTmpBytes） */
+const MB = 1024 * 1024;
+export const DEFAULT_DOWNLOAD_KEEP = 1;
+export const DEFAULT_DOWNLOAD_AGE_DAYS = 30;
+export const DEFAULT_DOWNLOAD_BYTES = 512 * MB;
+/** 预览页保留数量 —— 与 main.ts 的 `preview:open` 共用同一个默认值（别在两处各写一个 5） */
+export const DEFAULT_PREVIEW_KEEP = 5;
+export const DEFAULT_TMP_BYTES = 256 * MB;
+
+/** 列出目录下的文件（递归），可跳过指定的子目录名 */
+function listFilesRecursive(dir: string, skipDirs: Set<string> = new Set()): { path: string; mtime: number; size: number }[] {
+  const out: { path: string; mtime: number; size: number }[] = [];
+  if (!existsSync(dir)) return out;
+  let names: string[] = [];
+  try { names = readdirSync(dir); } catch { return out; }
+  for (const name of names) {
+    const full = join(dir, name);
+    let st;
+    try { st = statSync(full); } catch { continue; }
+    if (st.isDirectory()) {
+      if (skipDirs.has(name)) continue;
+      out.push(...listFilesRecursive(full, skipDirs));
+    } else if (st.isFile()) {
+      out.push({ path: full, mtime: st.mtimeMs, size: st.size });
+    }
+  }
+  return out;
+}
+
+/**
+ * 下载目录预算：**永远保留最近 keepLatest 个**（用户刚下完的那个不能动），
+ * 其余按"超过 maxAgeDays 天 → 删；仍然超 maxBytes → 从最旧的继续删"。
+ */
+export function enforceDownloadsBudget(
+  keepLatest = 1, maxAgeDays = 30, maxBytes = 512 * 1024 * 1024
+): { removed: number; freedBytes: number } {
+  const dir = join(dataRoot(), 'downloads');
+  const files = listFilesRecursive(dir).sort((a, b) => b.mtime - a.mtime);   // 新的在前
+  const keep = files.slice(0, Math.max(0, keepLatest));
+  const rest = files.slice(keep.length);
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  const doomed = rest.filter((f) => f.mtime < cutoff);                      // 过期
+  let totalKept = keep.reduce((a, f) => a + f.size, 0) + rest.filter((f) => !doomed.includes(f)).reduce((a, f) => a + f.size, 0);
+  for (const f of rest.filter((f) => !doomed.includes(f)).sort((a, b) => a.mtime - b.mtime)) {
+    if (totalKept <= maxBytes) break;                                        // 从最旧的开始淘汰
+    doomed.push(f);
+    totalKept -= f.size;
+  }
+  let removed = 0; let freed = 0;
+  for (const f of doomed) {
+    try { unlinkSync(f.path); removed += 1; freed += f.size; } catch { /* 被占用就跳过 */ }
+  }
+  return { removed, freedBytes: freed };
+}
+
+/**
+ * 临时区预算：
+ *   · `tmp/preview` 只留最近 N 个预览页；
+ *   · `tmp` 整体超量时，从最旧的开始淘汰（**跳过 system/**：Chromium 正在用它当运行时临时目录）。
+ */
+export function enforceTempBudget(
+  keepPreviews = 5, maxBytes = 256 * 1024 * 1024
+): { removed: number; freedBytes: number; previewsRemoved: number; evicted: number } {
+  let previewsRemoved = 0; let evicted = 0; let freed = 0;
+  const previewsDir = join(dataRoot(), 'tmp', 'preview');
+  // ① 预览页按数量保留
+  const previews = listFilesRecursive(previewsDir).sort((a, b) => b.mtime - a.mtime);
+  for (const f of previews.slice(Math.max(0, keepPreviews))) {
+    try { unlinkSync(f.path); previewsRemoved += 1; freed += f.size; } catch { /* 忽略 */ }
+  }
+  // ② 整体体积预算（跳过 system：Chromium 正在用它）
+  const tmpRoot = join(dataRoot(), 'tmp');
+  const all = listFilesRecursive(tmpRoot, new Set(['system'])).sort((a, b) => b.mtime - a.mtime);
+  let total = all.reduce((a, f) => a + f.size, 0);
+  for (const f of all.reverse()) {                          // 从最旧的开始淘汰
+    if (total <= maxBytes) break;
+    try { unlinkSync(f.path); evicted += 1; freed += f.size; total -= f.size; } catch { /* 忽略 */ }
+  }
+  return { removed: previewsRemoved + evicted, freedBytes: freed, previewsRemoved, evicted };
+}
+
+/** 启动兜底：把上面三条预算一起跑一遍（阈值可被 config.json 覆盖，见下） */
+export function enforceStorageBudgets(): BudgetResult {
+  const downloads = enforceDownloadsBudget(DEFAULT_DOWNLOAD_KEEP, DEFAULT_DOWNLOAD_AGE_DAYS, budgetLimit('maxDownloadBytes', DEFAULT_DOWNLOAD_BYTES));
+  const temp = enforceTempBudget(budgetLimit('maxPreviewFiles', DEFAULT_PREVIEW_KEEP), budgetLimit('maxTmpBytes', DEFAULT_TMP_BYTES));
+  return {
+    removed: downloads.removed + temp.removed,
+    freedBytes: downloads.freedBytes + temp.freedBytes,
+    detail: {
+      downloadsRemoved: downloads.removed,
+      previewsRemoved: temp.previewsRemoved,
+      tmpEvicted: temp.evicted
+    }
+  };
+}
+
+/**
+ * 预算阈值：默认写死，但允许 config.json 覆盖（沿用 `maxSnapshots` / `maxBackupBytes` 的既有路子）。
+ * 探针正是靠这个把阈值调到极小，验证"超了真的会淘汰"，而不用造几百 MB 的假文件。
+ */
+function budgetLimit(key: string, fallback: number): number {
+  try {
+    const v = (readAppConfig() as unknown as Record<string, unknown>)[key];
+    if (typeof v === 'number' && v > 0) return v;
+  } catch { /* 读不到就用默认 */ }
+  return fallback;
+}
+
+/** 单个分类的当前占用（比 getStorageBreakdown 轻，用于清理前后算差值） */function categoryBytes(id: StorageCategoryId): number {
   switch (id) {
     case 'chromiumCache': {
       const uData = userDataDir();
@@ -417,4 +543,10 @@ export async function runStartupCleanup(): Promise<void> {
   if (cfg.autoCleanOrphansOnStartup) {
     try { clearOrphanBackups(); } catch { /* 忽略 */ }
   }
+  // ③ 预算兜底（L4）：下载目录 / 临时区不许无限长。
+  //    与上面的开关无关 —— 它只淘汰"过期或超量"的东西，保留最近一次下载与最近若干预览页。
+  try {
+    const b = enforceStorageBudgets();
+    if (b.removed > 0) console.log('[storage-budget]', JSON.stringify(b.detail));
+  } catch { /* 忽略 */ }
 }

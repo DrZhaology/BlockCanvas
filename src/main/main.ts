@@ -12,7 +12,7 @@ import {
 import { readSession, writeSession } from './session';
 import {
   getStorageStats, getStorageBreakdown, clearStorageCategory, clearAllCleanable,
-  clearOrphanBackups, runStartupCleanup
+  clearOrphanBackups, runStartupCleanup, enforceStorageBudgets, DEFAULT_PREVIEW_KEEP
 } from './storage';
 import {
   readProject, writeProject, readManifestOnly, migrateAllProjectFilesAsync
@@ -227,6 +227,8 @@ ipcMain.handle('data:clear-all-cleanable', () => clearAllCleanable());
 // 兼容旧入口（一键清缓存 = 清"可清"的那几类）
 ipcMain.handle('data:clear-cache', () => clearAllCleanable());
 ipcMain.handle('data:clear-orphan-backups', () => clearOrphanBackups());
+// 预算兜底（探针可直接调，验证"下载目录 / 临时区有上限"）
+ipcMain.handle('data:enforce-budgets', () => enforceStorageBudgets());
 
 // ============ 自动更新 IPC ============
 ipcMain.handle('update:get-version', () => getLocalVersion());
@@ -927,8 +929,8 @@ ipcMain.handle('preview:open', async (_evt, html: string) => {
   }
 });
 
-/** 预览目录只保留最近 N 个（防止"每预览一次就多一个文件"） */
-const PREVIEW_KEEP = 5;
+/** 预览目录只保留最近 N 个（防止"每预览一次就多一个文件"）——阈值与存储预算共用一处 */
+const PREVIEW_KEEP = DEFAULT_PREVIEW_KEEP;
 function pruneOldPreviews(dir: string, keep: number): number {
   let n = 0;
   try {

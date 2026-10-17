@@ -7,7 +7,7 @@
 import { createRequire } from 'module';
 import { resolve, join } from 'path';
 import { tmpdir } from 'os';
-import { mkdirSync, rmSync, writeFileSync, existsSync, cpSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync, existsSync, cpSync, readdirSync, unlinkSync, utimesSync } from 'fs';
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
 const { _electron: electron } = require('playwright');
@@ -171,6 +171,48 @@ async function main() {
   ok('清理"临时文件"会清掉 data/tmp 的内容但保留目录壳',
     !existsSync(join(tmpDir, 'preview', 'bc-preview-1.html')) && existsSync(join(tmpDir, 'preview')),
     JSON.stringify({ file: existsSync(join(tmpDir, 'preview', 'bc-preview-1.html')), dir: existsSync(join(tmpDir, 'preview')) }));
+
+  // ============ 预算兜底（L4）：写进去就不删的目录必须有上限 ============
+  // 阈值走 config.json（探针故意调到极小，否则要造几百 MB 假文件才验证得到淘汰逻辑）
+  const DL = join(DATA_DIR, 'downloads');
+  const NOW = Date.now();
+  const backdate = (p, msAgo) => { const t = new Date(NOW - msAgo); utimesSync(p, t, t); };
+  mkdirSync(DL, { recursive: true });
+  writeFileSync(join(DL, 'old.zip'), BYTES(4096), 'utf-8');     backdate(join(DL, 'old.zip'), 2 * 3600e3);
+  writeFileSync(join(DL, 'older.zip'), BYTES(6000), 'utf-8');   backdate(join(DL, 'older.zip'), 3600e3);
+  writeFileSync(join(DL, 'newest.zip'), BYTES(6000), 'utf-8');
+  writeFileSync(join(DL, 'expired.zip'), BYTES(900), 'utf-8');  backdate(join(DL, 'expired.zip'), 40 * 24 * 3600e3);
+
+  await win.evaluate(() => window.bc.setAppConfig({
+    maxDownloadBytes: 7000, maxDownloadAgeDays: 30, maxPreviewFiles: 5, maxTmpBytes: 5000
+  }));
+  const b1 = await win.evaluate(() => window.bc.enforceStorageBudgets());
+  ok('预算：超过 30 天的更新包被清掉（与体积无关）', !existsSync(join(DL, 'expired.zip')));
+  ok('预算：下载目录超体积上限时从最旧淘汰，但最近一次永远保留',
+    existsSync(join(DL, 'newest.zip')) && !existsSync(join(DL, 'older.zip')) && !existsSync(join(DL, 'old.zip')),
+    JSON.stringify({ newest: existsSync(join(DL, 'newest.zip')), older: existsSync(join(DL, 'older.zip')), old: existsSync(join(DL, 'old.zip')), detail: b1.detail }));
+
+  // 预览页按数量保留；临时区总量超限时按时间淘汰，**但跳过 tmp/system**
+  const PV = join(DATA_DIR, 'tmp', 'preview');
+  const UP = join(DATA_DIR, 'tmp', 'updater');
+  const SYSD = join(DATA_DIR, 'tmp', 'system');
+  mkdirSync(PV, { recursive: true }); mkdirSync(UP, { recursive: true }); mkdirSync(SYSD, { recursive: true });
+  for (let i = 1; i <= 7; i += 1) { const p = join(PV, `bc-preview-${i}.html`); writeFileSync(p, BYTES(10), 'utf-8'); backdate(p, (8 - i) * 60e3); }
+  writeFileSync(join(UP, 'a.bin'), BYTES(3000), 'utf-8'); backdate(join(UP, 'a.bin'), 10 * 60e3);
+  writeFileSync(join(UP, 'b.bin'), BYTES(3000), 'utf-8'); backdate(join(UP, 'b.bin'), 5 * 60e3);
+  writeFileSync(join(SYSD, 'huge.bin'), BYTES(40000), 'utf-8'); backdate(join(SYSD, 'huge.bin'), 30e3);
+
+  const b2 = await win.evaluate(() => window.bc.enforceStorageBudgets());
+  const left = readdirSync(PV).filter((f) => f.startsWith('bc-preview-'));
+  ok('预算：预览页只留最近 5 个（多的从最旧淘汰）',
+    left.length === 5 && !left.includes('bc-preview-1.html') && left.includes('bc-preview-7.html'),
+    JSON.stringify({ n: left.length, left }));
+  ok('预算：临时区超量时从最旧的开始淘汰', !existsSync(join(UP, 'a.bin')) && existsSync(join(UP, 'b.bin')),
+    JSON.stringify({ a: existsSync(join(UP, 'a.bin')), b: existsSync(join(UP, 'b.bin')), detail: b2.detail }));
+  ok('预算：绝不碰 tmp/system（Chromium 正在用的运行时目录）', existsSync(join(SYSD, 'huge.bin')));
+  // 收尾：别把夹具留给后面的阶段（阶段 B 要断言"启动清理后 Temp 占用为 0"）
+  try { rmSync(UP, { recursive: true, force: true }); } catch { /* 忽略 */ }
+  try { unlinkSync(join(SYSD, 'huge.bin')); } catch { /* 忽略 */ }
 
   // ============ 设置页 UI：占用明细要真的渲染出来 ============
   await win.evaluate(() => window.dispatchEvent(new CustomEvent('bc:open-settings')));

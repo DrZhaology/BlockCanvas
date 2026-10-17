@@ -44,6 +44,12 @@ BlockCanvas（积木画布）是一个**可视化静态网页构建工具（WYSI
 - 🧱 后期用 Scratch 式积木编程添加交互
 - 📤 导出纯净、语义化、可读的 HTML + CSS（后续 +JS）
 - 💾 **纯便携设计**：所有工程、快照、配置均存储在 `data/` 目录，不写系统 AppData 和注册表
+- 📦 **工程文件是 ZIP 容器（v0.4.4）**：`.bcproj` 本质是个 zip（和 `.docx` / `.sketch` 一个套路），
+  `manifest.json`（名称/版本/元素数）+ `scene.json`（紧凑 JSON）分开存 ——
+  **既能被软件打开，也能被你自己解压看、被别的工具处理**；带 `schemaVersion` 迁移入口，
+  未知载荷（后续的 `blocks/` 积木程序）**原样保留不丢**；老 JSON 工程**启动后自动无痛升级**（留 `.v1.bak` 兜底）
+- 🧹 **临时文件不再散落系统 Temp（v0.4.4）**：程序自己的临时文件一律进 `data/tmp/`（预览页只留最近 5 个），
+  Chromium 内核的运行时临时目录也重定向到 `data/tmp/system` —— "删掉 `data/` 就回到出厂状态"这条承诺才成立
 - 🧭 **跨平台路径统一（v0.4.4）**：路径逻辑集中在 `src/main/paths.ts` —— 绝对路径判断、目录包含判断（防 zip-slip）、本机路径 ⇄ URL/zip 条目互转，**Windows / macOS / Linux 三种语义同时正确**；`data/` 落点会自动适配（macOS 不会写进 `.app` 包内，目录不可写时自动退到用户级目录）
 - 🔄 **自动更新系统**：启动时静默检测 GitHub Releases 最新版本，有更新弹窗提示，设置页可手动检测；更新时只替换程序本体，永久保留 `data/` 下的所有用户数据
 
@@ -141,9 +147,11 @@ pnpm typecheck      # TypeScript 类型检查
 pnpm build          # 构建产物到 out/
 pnpm test:e2e       # 构建 + 跑 Playwright 端到端测试（含逐步截图，慢）
 pnpm test:e2e:fast  # 同一个套件但不拍截图，约 1 分钟（日常回归用这个）
-pnpm test:probe     # 专项探针（表格编辑器 90 项 + 表格设置项逐项 47 项 + 帮助中心 31 项 + UI 交互 43 项 + 更新中心 32 项）
+pnpm test:probe     # 专项探针（表格 90 项 + 表格设置 47 项 + 帮助中心 34 项 + UI 交互 43 项 + 存储缓存 41 项 + 工程容器 40 项 + 更新中心 32 项 …共 444 项）
 node tests/e2e/probe-table-settings.mjs   # 只跑「表格右侧面板每一项设置是否真的生效」
 node tests/e2e/probe-help.mjs             # 只跑「帮助中心：README 渲染 / 目录 / 搜索 / 动画」
+node tests/e2e/probe-projectfile.mjs      # 只跑「.bcproj 容器：读写往返 / 只读 manifest / 老 JSON 自动迁移 / 会话与草稿」
+node tests/e2e/probe-storage.mjs          # 只跑「存储与缓存：分类账目 / 清理红线 / data/tmp / 预算上限」
 node tests/unit/table-ops.test.mjs   # 表格结构单测（37 项，秒级，改 tableOps 后先跑这个）
 
 # Git 忽略规则体检：确保"切到任何分支都不会冒出生成物"（详见 docs/Git分支使用说明.md 第九节）
@@ -195,9 +203,12 @@ BlockCanvas/
 │     └─ animations.css# 统一动画体系（token + 全部 @keyframes，唯一动画定义处）
 ├─ extensions/         # 内置扩展源码（git仓库收录，供构建时打包进 zip）
 ├─ data/               # 所有运行时数据（纯便携，不写系统目录）
-│  ├─ projects/        # 项目工程文件（.bcproj）
+│  ├─ projects/        # 项目工程文件（.bcproj = ZIP 容器）
 │  ├─ backups/         # 自动备份历史快照
+│  ├─ session/         # 会话草稿（未保存的标签）
+│  ├─ tmp/             # 程序临时区（preview/ 预览页 + system/ Chromium 运行时临时目录）
 │  ├─ config.json      # 用户配置（主题/布局/缓存清洁开关/更新记录等）
+│  ├─ downloads/       # 「下载 zip」落盘位置
 │  ├─ user-data/       # Chromium 隔离区（Cache / Session Storage / Dictionaries…）
 │  └─ extensions/      # 运行时扩展副本（内置种子同步 + 用户第三方扩展）
 ├─ docs/               # 文档与截图
