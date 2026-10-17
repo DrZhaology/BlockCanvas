@@ -1,0 +1,142 @@
+/* ==========================================================================
+   v0.4.4 · 空页面（关掉所有标签后的"首页"，类似浏览器新标签页）
+   --------------------------------------------------------------------------
+   中央大按钮 + 右上角背景自定义。背景只存 localStorage（外观偏好，不进工程）。
+   ========================================================================== */
+
+.empty-home {
+  position: relative;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* —— 右上角：页面设置 —— */
+.empty-home-settings { position: absolute; top: 14px; right: 16px; z-index: 20; }
+.empty-home-gear {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+.empty-home-gear:hover { color: var(--text); border-color: var(--accent); background: #fff; }
+
+.empty-home-bgpanel {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  width: 264px;
+  padding: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.14);
+  animation: bcPopIn var(--dur-pop, 0.18s) var(--ease-standard, ease) both;
+}
+.empty-home-bgpanel-title { font-size: 12.5px; font-weight: 700; color: var(--text); }
+.empty-home-bggrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+.empty-home-bgswatch {
+  position: relative;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+}
+.empty-home-bgswatch.is-active { outline: 2px solid var(--accent); outline-offset: 1px; }
+.empty-home-bgcustom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  color: var(--text-muted);
+  background: repeating-conic-gradient(#e8edf3 0% 25%, #ffffff 0% 50%) 50% / 12px 12px;
+}
+.empty-home-bgcustom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.empty-home-bgpanel-hint { margin-top: 10px; font-size: 10.5px; color: var(--text-muted); }
+
+/* —— 中央内容 —— */
+.empty-home-center { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 24px; }
+.empty-home-logo { width: 96px; height: 96px; user-select: none; }
+.empty-home-title { margin-top: 18px; font-size: 24px; font-weight: 700; color: var(--text); letter-spacing: 0.4px; }
+.empty-home-sub { margin-top: 8px; font-size: 13px; color: var(--text-muted); }
+
+.empty-home-actions { display: flex; gap: 12px; margin-top: 26px; }
+.empty-home-btn {
+  height: 46px;
+  padding: 0 26px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  transition: transform var(--dur-fast, 0.12s) var(--ease-standard, ease), box-shadow var(--dur-fast, 0.12s) ease;
+}
+.empty-home-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(15, 23, 42, 0.10); border-color: var(--accent); }
+.empty-home-btn.is-primary {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  padding: 0 34px;
+  font-size: 15px;
+}
+.empty-home-btn.is-primary:hover { box-shadow: 0 6px 18px rgba(30, 136, 229, 0.35); }
+.empty-home-btn.is-ghost { background: transparent; box-shadow: none; }
+
+.empty-home-hint { margin-top: 22px; font-size: 11px; color: var(--text-muted); }
+
+html[data-bc-dark] .empty-home-gear { background: rgba(30, 41, 59, 0.7); }
+html[data-bc-dark] .empty-home-btn { background: rgba(255, 255, 255, 0.06); }
+html[data-bc-dark] .empty-home-btn.is-primary { background: var(--accent); }
+
+/* —— 全局轻提示（toast）—— */
+.bc-toast-wrap {
+  position: fixed;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.bc-toast {
+  max-width: 460px;
+  padding: 9px 16px;
+  font-size: 12.5px;
+  color: #fff;
+  background: rgba(17, 24, 39, 0.92);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.25);
+  animation: bcToastIn 0.18s var(--ease-standard, ease) both;
+}
+.bc-toast.is-err { background: rgba(190, 32, 32, 0.94); }
+.bc-toast.is-info { background: rgba(30, 60, 110, 0.94); }
+@keyframes bcToastIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

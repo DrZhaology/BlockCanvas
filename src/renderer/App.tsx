@@ -24,6 +24,8 @@ import { useHorizontalWheel } from '@lib/hScroll';
 import { DEVICE_LIST, widthToBreakpoint, type DeviceId } from '@lib/device';
 import { tokensToRootCss } from '@lib/designTokens';
 import { applySelHighlightClass } from '@lib/selHighlight';
+import { showToast, type ToastType } from '@lib/toast';
+import { EmptyHome } from '@comp/EmptyHome';
 
 // BlockCanvas · 主界面
 // - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
@@ -292,7 +294,16 @@ export default function App() {
       if (blocked()) return;
       const res = await window.bc.openProjectFile();
       if (res.ok && res.project?.scene) {
-        useTabStore.getState().newTab(res.project.name || '已打开工程', res.project.scene, res.path);
+        // v0.4.4：同一个文件重复打开 → 不再开新标签，切到已打开的那个并轻提示
+        const st = useTabStore.getState();
+        const norm = (p: string) => String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
+        const existing = st.tabs.find((t) => t.filePath && norm(t.filePath) === norm(res.path || ''));
+        if (existing) {
+          st.switchTab(existing.id);
+          showToast(`「${existing.name}」已经打开着，已为你切换到那个标签页`, 'info');
+        } else {
+          st.newTab(res.project.name || '已打开工程', res.project.scene, res.path);
+        }
         switchView('editor');
       }
     };
@@ -414,8 +425,17 @@ export default function App() {
         />
       ) : (
         <>
-          <ProjectTabBar />
-          <Toolbar
+          {useTabStore((s) => s.tabs.length) === 0 ? (
+            /* 空页面：所有标签都关掉了 —— 类似浏览器新标签页的首页 */
+            <EmptyHome
+              onOpen={() => window.dispatchEvent(new CustomEvent('menu:open-project'))}
+              onNew={() => { useTabStore.getState().newTab(); }}
+              onProjects={() => switchView('projects')}
+            />
+          ) : (
+            <>
+              <ProjectTabBar />
+              <Toolbar
             canvasWidth={canvasWidth}
             onCanvasWidthChange={setCanvasWidth}
             zoom={zoom}
@@ -505,11 +525,39 @@ export default function App() {
               </div>
             );
           })()}
+            </>
+          )}
         </>
       )}
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
       <ShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       <UpdateBusyOverlay />
+      <AppToasts />
+    </div>
+  );
+}
+
+// ============ 全局轻提示（toast，v0.4.4） ============
+// "不要生硬的弹窗"：重复打开已打开的项目这类小事，只在底部飘一条提示，几秒自动消失。
+function AppToasts() {
+  const [items, setItems] = useState<{ id: number; text: string; type: ToastType }[]>([]);
+  useEffect(() => {
+    let seq = 1;
+    const onToast = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      const id = seq++;
+      setItems((prev) => [...prev.slice(-3), { id, text: String(d.text || ''), type: d.type || 'ok' }]);
+      window.setTimeout(() => setItems((prev) => prev.filter((t) => t.id !== id)), 3400);
+    };
+    window.addEventListener('bc:toast', onToast);
+    return () => window.removeEventListener('bc:toast', onToast);
+  }, []);
+  if (items.length === 0) return null;
+  return (
+    <div className="bc-toast-wrap">
+      {items.map((t) => (
+        <div key={t.id} className={'bc-toast' + (t.type === 'ok' ? '' : ' is-' + t.type)}>{t.text}</div>
+      ))}
     </div>
   );
 }

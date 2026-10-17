@@ -86,8 +86,9 @@ function debouncePersistSession(get: () => TabState) {
 
 interface TabState {
   tabs: ProjectTab[];
-  activeTabId: string;
+  activeTabId: string | null;
 
+  loadSceneSilently: (scene: SceneGraph) => void;
   newTab: (name?: string, scene?: SceneGraph, filePath?: string | null) => string;
   closeTab: (tabId: string) => boolean;
   switchTab: (tabId: string) => void;
@@ -110,6 +111,15 @@ const initialTab: ProjectTab = {
 export const useTabStore = create<TabState>((set, get) => ({
   tabs: [initialTab],
   activeTabId: initialTab.id,
+
+  // 静默载入场景：切 tab / 打开工程 / 恢复会话都用它 ——
+  // setScene 会触发 sceneStore.subscribe，若不打 isSwitchingTab 标记，
+  // "打开一个项目"会被误判成"内容修改" → 刚打开就挂着未保存圆点（用户反馈的混淆来源）。
+  loadSceneSilently: (scene: SceneGraph) => {
+    isSwitchingTab = true;
+    useScene.getState().setScene(scene);
+    requestAnimationFrame(() => { isSwitchingTab = false; });
+  },
 
   newTab: (name, customScene, filePath = null) => {
     const st = get();
@@ -135,8 +145,8 @@ export const useTabStore = create<TabState>((set, get) => ({
       activeTabId: newId
     });
 
-    // 让画布渲染器载入新场景
-    useScene.getState().setScene(scene);
+    // 让画布渲染器载入新场景（静默：不算内容修改）
+    get().loadSceneSilently(scene);
     debouncePersistSession(get);
     return newId;
   },
@@ -144,21 +154,10 @@ export const useTabStore = create<TabState>((set, get) => ({
   closeTab: (tabId: string) => {
     const st = get();
     if (st.tabs.length <= 1) {
-      // 最后一个标签关闭：自动重置为新的空白网页
-      const empty = createEmptyScene();
-      const newId = genTabId();
-      const freshTab: ProjectTab = {
-        id: newId,
-        name: '未命名网页 1',
-        filePath: null,
-        isDirty: false,
-        scene: empty
-      };
-      set({
-        tabs: [freshTab],
-        activeTabId: newId
-      });
-      useScene.getState().setScene(empty);
+      // v0.4.4：关掉最后一个标签 → 进入「空页面」状态（一个标签都不留），
+      // 不再自动补一个"未命名网页 1"—— 空页面上有大按钮，想开随时开。
+      set({ tabs: [], activeTabId: null });
+      useScene.getState().setScene(createEmptyScene());
       debouncePersistSession(get);
       return true;
     }
@@ -258,7 +257,13 @@ export const useTabStore = create<TabState>((set, get) => ({
   },
 
   initFromSession: (session: { activeTabId: string | null; tabs: any[] }) => {
-    if (!session || !Array.isArray(session.tabs) || session.tabs.length === 0) return;
+    if (!session || !Array.isArray(session.tabs)) return;
+    // 空会话（上次退出时关掉了所有标签）→ 恢复成「空页面」状态，不自动补标签
+    if (session.tabs.length === 0) {
+      set({ tabs: [], activeTabId: null });
+      useScene.getState().setScene(createEmptyScene());
+      return;
+    }
     const loadedTabs: ProjectTab[] = session.tabs.map((t, idx) => ({
       id: t.id || genTabId(),
       name: t.name || `未命名网页 ${idx + 1}`,
@@ -278,7 +283,7 @@ export const useTabStore = create<TabState>((set, get) => ({
       activeTabId: activeId
     });
 
-    useScene.getState().setScene(activeTab.scene);
+    get().loadSceneSilently(activeTab.scene);
   }
 }));
 

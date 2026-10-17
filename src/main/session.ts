@@ -58,6 +58,10 @@ export interface AppSession {
 
 const SESSION_SCHEMA = 2;
 
+function nowIsoSafe(): string {
+  try { return new Date().toISOString(); } catch { return ''; }
+}
+
 function sessionDir(): string {
   return join(dataRoot(), 'session');
 }
@@ -105,7 +109,12 @@ export function readSession(): AppSession | null {
   } catch {
     return null;
   }
-  if (!raw || !Array.isArray(raw.tabs) || raw.tabs.length === 0) return null;
+  if (!raw || !Array.isArray(raw.tabs)) return null;
+  // 空会话（上次退出时关掉了全部标签）→ 原样返回空，让启动端进入「空页面」状态；
+  // 文件不存在（首次运行）才返回 null → 启动端补一个默认新标签。
+  if (raw.tabs.length === 0) {
+    return { activeTabId: null, tabs: [], updatedAt: String(raw.updatedAt || nowIsoSafe()) };
+  }
 
   // —— 老格式（标签里直接带 scene）：顺手迁移 ——
   const isLegacy = raw.tabs.some((t: any) => t && typeof t === 'object' && 'scene' in t);

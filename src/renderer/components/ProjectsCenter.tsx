@@ -199,8 +199,17 @@ export function ProjectsCenter(props: {
   const handleOpenInNewTab = async (p: ProjectFileInfo) => {
     const res = await window.bc.openProjectFile(p.filePath);
     if (res.ok && res.project?.scene) {
-      newTab(p.name, res.project.scene, p.filePath);
-      showToast(`已在新标签页打开「${p.name}」`);
+      // v0.4.4：同一个文件重复打开 → 切到已打开的标签，不再新开（轻提示，不弹窗）
+      const norm = (x: string) => String(x || '').replace(/[\\/]+/g, '/').toLowerCase();
+      const st = useTabStore.getState();
+      const existing = st.tabs.find((t) => t.filePath && norm(t.filePath) === norm(p.filePath));
+      if (existing) {
+        st.switchTab(existing.id);
+        showToast(`「${existing.name}」已经打开着，已为你切换过去`);
+      } else {
+        newTab(p.name, res.project.scene, p.filePath);
+        showToast(`已在新标签页打开「${p.name}」`);
+      }
       onBack();
     } else {
       showToast('打开失败：' + (res.error || '无效文件'), 'err');
@@ -213,8 +222,16 @@ export function ProjectsCenter(props: {
     if (res.canceled) return;
     if (res.ok && res.project?.scene) {
       const pName = res.project.name || '已导入工程';
-      newTab(pName, res.project.scene, res.path);
-      showToast(`已导入并打开「${pName}」`);
+      const norm = (x: string) => String(x || '').replace(/[\\/]+/g, '/').toLowerCase();
+      const st = useTabStore.getState();
+      const existing = st.tabs.find((t) => t.filePath && norm(t.filePath) === norm(res.path || ''));
+      if (existing) {
+        st.switchTab(existing.id);
+        showToast(`「${existing.name}」已经打开着，已为你切换过去`);
+      } else {
+        newTab(pName, res.project.scene, res.path);
+        showToast(`已导入并打开「${pName}」`);
+      }
       onBack();
     } else {
       showToast('导入失败：' + (res.error || '无效文件'), 'err');
