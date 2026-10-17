@@ -50,6 +50,26 @@
 }
 body.bc-reparenting { cursor: copy; }
 
+/* v0.4.5：拿着元素时鼠标旁的"元素幽灵"（缩小变淡、跟随指针）+ 停留 1 秒预览脉冲 */
+.bc-alt-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 410;
+  pointer-events: none;
+  opacity: 0.35;
+  transform-origin: top left;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+  transition: opacity 0.12s ease;
+}
+/* 悬停同一目标 1 秒：目标脉冲预览（"松开就放这里"）——高特异性命中元素本体，无 !important */
+.canvas [data-bc-id].bc-drop-preview {
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.95), inset 0 0 0 2px rgba(245, 158, 11, 0.45);
+  animation: bcDropPulse 1s ease-in-out infinite;
+}
+
 /* ---------- 中键属性搜索：结果项的"已添加 / 未添加"两态 ---------- */
 /* 退场动画（与进场同一套 token；bcPopOut 比 bcPopIn 短 —— 走比来快） */
 .bc-prop-search.is-closing {

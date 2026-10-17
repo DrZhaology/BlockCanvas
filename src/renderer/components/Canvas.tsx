@@ -177,6 +177,37 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   // Alt 移动时的"吸附对齐参考线"（PowerPoint 风格）
   const [guides, setGuides] = useState<{ x: number | null; y: number | null; box: { left: number; top: number; right: number; bottom: number } | null } | null>(null);
   const wallFlashTimer = useRef(0);
+  // v0.4.5：「拿着元素」（改父子关系）时的鼠标幽灵（元素缩小版，跟随鼠标）+ 停留 1 秒预览
+  const altGhostRef = useRef<HTMLElement | null>(null);
+  const altPreviewTimer = useRef(0);
+  const altPreviewRef = useRef<string | null>(null);
+  const spawnAltGhost = (srcEl: HTMLElement, rect: DOMRect) => {
+    if (altGhostRef.current) return;
+    const g = srcEl.cloneNode(true) as HTMLElement;
+    g.removeAttribute('data-bc-id');
+    g.querySelectorAll('[data-bc-id]').forEach((n) => n.removeAttribute('data-bc-id'));
+    g.classList.add('bc-alt-ghost');
+    // 按元素真实大小定缩放：小元素 0.5 倍；很高的元素压到 ~200px 高，避免幽灵过大
+    const sc = Math.min(0.5, Math.max(0.16, 200 / Math.max(rect.height, 80)));
+    g.style.transform = `translate(0, 0) scale(${sc})`;
+    document.body.appendChild(g);
+    altGhostRef.current = g;
+  };
+  const moveAltGhost = (x: number, y: number) => {
+    const g = altGhostRef.current;
+    if (!g) return;
+    g.style.transform = g.style.transform.replace(/translate\([^)]*\)/, `translate(${x + 18}px, ${y + 18}px)`);
+  };
+  const clearDropPreview = () => {
+    window.clearTimeout(altPreviewTimer.current);
+    altPreviewRef.current = null;
+    document.querySelectorAll('.bc-drop-preview').forEach((n) => n.classList.remove('bc-drop-preview'));
+  };
+  const removeAltGhost = () => {
+    clearDropPreview();
+    altGhostRef.current?.remove();
+    altGhostRef.current = null;
+  };
   const flashWall = (b: Bar | null) => {
     if (!b) return;
     setWallFlash(b);
@@ -211,13 +242,16 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   /**
    * 计算元素"能动到哪儿"的边界（client 坐标）+ 每面墙要画的位置。
    *
-   * 规则（v0.4.4g 重做）：
+   * 规则（v0.4.5 定稿）：
    *   · 墙基准取父容器的**内容盒**（去掉 padding/border），并**把元素自己的 margin 算进去** ——
    *     所以"碰到内边距/外边距"就停，不会无视 margin 直接突破。
    *   · **元素与元素的碰撞**：定位元素（absolute/relative/fixed）会把邻近兄弟的边缘当成墙，
    *     墙就画在那个兄弟的边上；只有没有兄弟可撞时才退回父容器/画布。
+   *   · **常规流元素**（v0.4.5）：上方兄弟（边框底 + 兄弟 margin-bottom）是上墙 ——
+   *     块级元素拖动不再互相压盖，也不会拖出大段负 margin；下方兄弟会被流推走，无需墙。
    *   · `fixed` 额外受**画布四边**限制（画布 = 浏览器视口）。
-   *   · 常规流元素纵向不设底（可以一直往下拖，把画布撑长）。
+   *   · 常规流子元素：父容器**设了固定高度**时下墙 = 父内容盒底（不再穿出父容器）；
+   *     自适应高度的父允许撑长（不设下墙）。
    */
   const boundsFor = (el: HTMLElement, rect: DOMRect) => {
     const canvasEl = el.closest('.canvas') as HTMLElement | null;
@@ -260,22 +294,38 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     let barT: Bar | null = hBar(wallTop, pb.left, pb.right);
     let barB: Bar | null = Number.isFinite(wallBottom) ? hBar(wallBottom, pb.left, pb.right) : null;
 
-    // 元素与元素的碰撞（只对定位元素生效 —— 常规流的兄弟永远紧挨着，谈不上"撞"）
-    if (positioned && parentEl) {
+    // 元素与元素的碰撞：
+    //  · 定位元素（absolute/relative/fixed）：邻近兄弟的边缘（含自身固定 margin）当墙
+    //  · 常规流元素（v0.4.5）：上方兄弟当上墙（兄弟边框底 + 兄弟 margin-bottom）——
+    //    块级元素拖动不再互相压盖、也不再拖出大段负 margin；下方兄弟会被流推走，不需要墙
+    if (parentEl) {
       for (const sib of Array.from(parentEl.children) as HTMLElement[]) {
         if (sib === el || !sib.hasAttribute?.('data-bc-id')) continue;
         const sr = sib.getBoundingClientRect();
         const vOverlap = Math.min(rect.bottom, sr.bottom) - Math.max(rect.top, sr.top) > 1;
         const hOverlap = Math.min(rect.right, sr.right) - Math.max(rect.left, sr.left) > 1;
-        if (vOverlap) {
-          if (sr.right <= rect.left + 1 && sr.right + m.left > wallLeft) { wallLeft = sr.right + m.left; barL = vBar(wallLeft, sr.top, sr.bottom); }
-          if (sr.left >= rect.right - 1 && sr.left - m.right < wallRight) { wallRight = sr.left - m.right; barR = vBar(wallRight, sr.top, sr.bottom); }
-        }
-        if (hOverlap) {
-          if (sr.bottom <= rect.top + 1 && sr.bottom + m.top > wallTop) { wallTop = sr.bottom + m.top; barT = hBar(wallTop, sr.left, sr.right); }
-          if (sr.top >= rect.bottom - 1 && sr.top - m.bottom < wallBottom) { wallBottom = sr.top - m.bottom; barB = hBar(wallBottom, sr.left, sr.right); }
+        if (positioned) {
+          if (vOverlap) {
+            if (sr.right <= rect.left + 1 && sr.right + m.left > wallLeft) { wallLeft = sr.right + m.left; barL = vBar(wallLeft, sr.top, sr.bottom); }
+            if (sr.left >= rect.right - 1 && sr.left - m.right < wallRight) { wallRight = sr.left - m.right; barR = vBar(wallRight, sr.top, sr.bottom); }
+          }
+          if (hOverlap) {
+            if (sr.bottom <= rect.top + 1 && sr.bottom + m.top > wallTop) { wallTop = sr.bottom + m.top; barT = hBar(wallTop, sr.left, sr.right); }
+            if (sr.top >= rect.bottom - 1 && sr.top - m.bottom < wallBottom) { wallBottom = sr.top - m.bottom; barB = hBar(wallBottom, sr.left, sr.right); }
+          }
+        } else if (hOverlap && sr.bottom <= rect.top + 1) {
+          const sibMB = parseFloat(getComputedStyle(sib).marginBottom) || 0;
+          const wall = sr.bottom + sibMB;
+          if (wall > wallTop) { wallTop = wall; barT = hBar(wall, sr.left, sr.right); }
         }
       }
+    }
+
+    // 常规流子元素（v0.4.5）：父容器**设了固定高度**时，下边界 = 父内容盒底（内边距内侧），
+    // 下拖不再穿出父容器（且四面墙线齐全）；自适应高度的父仍允许被撑长（不设下墙）
+    if (!positioned && parentEl && parentEl !== canvasEl && (parentEl as HTMLElement).style.height !== '') {
+      const wb = pb.bottom;
+      if (wb < wallBottom) { wallBottom = wb; barB = hBar(wb, pb.left, pb.right); }
     }
 
     let minX = wallLeft;
@@ -534,27 +584,57 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       let targetLeft = d.rect.left + dx;
       let targetTop = d.rect.top + dy;
 
-      // —— 撞墙后继续往墙外拖 → 进入"改父子关系"模式（模仿把元素拖进另一个容器）——
-      // 一旦进入就"锁住"：被拖元素冻结在墙上（淡化显示），改用鼠标位置挑要放入的块级元素。
+      // —— 撞墙后继续往墙外拖 → 进入"改父子关系"模式（把元素拖进另一个容器）——
+      // v0.4.5：进入阈值调大（56px）防误触；**撤回到 12px 内自动取消**（用户要求）；
+      // 进入后鼠标旁跟随"缩小变淡的元素幽灵"；悬停同一目标 1 秒给强化预览（脉冲）。
       const pushOut = Math.max(
         d.bounds.minX - targetLeft,
         targetLeft - d.bounds.maxX,
         d.bounds.minY - targetTop,
         Number.isFinite(d.bounds.maxY) ? targetTop - d.bounds.maxY : -Infinity
       );
-      if (!d.reparent && pushOut > 28) {
+      const REPARENT_ENTER = 56;
+      const REPARENT_EXIT = 12;
+      if (!d.reparent && pushOut > REPARENT_ENTER) {
         d.reparent = true;
         document.body.classList.add('bc-reparenting');
         const srcEl = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
         srcEl?.setAttribute('data-bc-drag-src', '1');
+        if (srcEl) spawnAltGhost(srcEl, d.rect);
         setWallHints([]); // 改父子关系时不再需要边界线
       }
+      if (d.reparent && pushOut < REPARENT_EXIT) {
+        // 拖回来了 → 取消"拿着元素"状态，恢复普通拖动
+        d.reparent = false;
+        d.dropId = null;
+        document.body.classList.remove('bc-reparenting');
+        const srcEl = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
+        srcEl?.removeAttribute('data-bc-drag-src');
+        setDropTarget(null);
+        removeAltGhost();
+        setWallHints(d.walls);
+      }
       if (d.reparent) {
+        moveAltGhost(ev.clientX, ev.clientY);
         const under = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
         const draggedEl = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
         const tgt = under && draggedEl ? pickDropTarget(under, draggedEl, d.parentId, st.scene.root) : null;
-        d.dropId = tgt?.id ?? null;
+        const tgtId = tgt?.id ?? null;
+        if (tgtId !== d.dropId) clearDropPreview(); // 目标换人：清掉旧目标的"停留预览"
+        d.dropId = tgtId;
         setDropTarget(tgt);
+        // 悬停同一目标 1 秒 → 目标强化脉冲（"松开就放这里"的预览暗示）
+        if (tgtId && altPreviewRef.current !== tgtId) {
+          altPreviewRef.current = tgtId;
+          const idForTimer = tgtId;
+          window.clearTimeout(altPreviewTimer.current);
+          altPreviewTimer.current = window.setTimeout(() => {
+            const cur = altDragRef.current;
+            if (cur && cur.reparent && cur.dropId === idForTimer) {
+              document.querySelector(`.canvas [data-bc-id="${CSS.escape(idForTimer)}"]`)?.classList.add('bc-drop-preview');
+            }
+          }, 1000);
+        }
         setAltBadge({
           x: ev.clientX + 14, y: ev.clientY + 14,
           text: tgt ? '松开 → 放入这个元素' : '移到某个块级元素上 → 放入其中'
@@ -622,6 +702,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     setAltBadge(null);
     setGuides(null);
     setWallHints([]);
+    removeAltGhost(); // 幽灵 + 停留预览一律清掉（幂等）
     if (!d) return;
 
     // 「拖到墙外 → 改父子关系」收尾：清理淡化标记 + 执行 reparent
