@@ -257,7 +257,7 @@ export function FontPickerModal(props: Props) {
 
             <div className="fp-preview-foot">
               <div className="fp-hint">
-                想用网络字体或字体文件？在右侧面板「页面」页签的高级 CSS 里写
+                想用网络字体或字体文件？需先用扩展包注入或导出后在 HTML 里写
                 <code>@font-face</code> 声明，然后在这里把字体名登记为自定义字体即可选用。
               </div>
               <button className="btn-primary fp-apply" onClick={applyNow} disabled={chain.length === 0}>
