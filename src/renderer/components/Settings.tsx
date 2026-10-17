@@ -668,7 +668,7 @@ export function Settings(props: Props) {
                   <span>
                     data/ 目录 <b>{formatBytes(breakdown?.dataTotal ?? 0)}</b>
                     <span className="bc-storage-plus">+</span>
-                    系统 Temp 临时文件 <b>{formatBytes(breakdown?.tempTotal ?? 0)}</b>
+                    系统 Temp 遗留 <b>{formatBytes(breakdown?.systemTempBytes ?? 0)}</b>
                   </span>
                   <span>
                     合计 <b style={{ color: 'var(--accent)' }}>{formatBytes(breakdown?.grandTotal ?? storageStats?.totalSize ?? 0)}</b>

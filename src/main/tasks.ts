@@ -102,7 +102,7 @@ function scheduleSave(): void {
     saveTimer = null;
     try {
       mkdirSync(dataRoot(), { recursive: true });
-      writeFileSync(tasksPath(), JSON.stringify(tasks, null, 2), 'utf-8');
+      writeFileSync(tasksPath(), JSON.stringify(tasks), 'utf-8');
     } catch { /* 磁盘满 / 只读 → 忽略，不影响本次会话 */ }
   }, 400);
 }
@@ -491,7 +491,7 @@ export function flushTasksOnQuit(): void {
   }
   try {
     mkdirSync(dataRoot(), { recursive: true });
-    writeFileSync(tasksPath(), JSON.stringify(tasks, null, 2), 'utf-8');
+    writeFileSync(tasksPath(), JSON.stringify(tasks), 'utf-8');
   } catch { /* 忽略 */ }
 }
 

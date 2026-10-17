@@ -1,7 +1,9 @@
-import { app, session } from 'electron';
+import { session } from 'electron';
 import { join } from 'node:path';
 import { existsSync, readdirSync, statSync, unlinkSync, rmSync } from 'node:fs';
 import { dataRoot, listProjects, sanitizeProjectFolder, readAppConfig } from './userData';
+import { sessionDraftBytes } from './session';
+import { systemTempDir } from './paths';
 
 // ============================================================================
 // BlockCanvas · 存储与缓存统一管理（v0.4.4）
@@ -77,11 +79,13 @@ export interface StorageBreakdown {
   dataRoot: string;
   /** data/ 目录总占用 */
   dataTotal: number;
-  /** 系统临时目录里属于我们的文件占用 */
+  /** 临时文件分类总占用（= data/tmp + 系统 Temp 里我们的文件） */
   tempTotal: number;
-  /** 合计（= dataTotal + tempTotal） */
+  /** 其中"在 data/ 之外"的那部分：系统 Temp */
+  systemTempBytes: number;
+  /** 合计（= dataTotal + systemTempBytes） */
   grandTotal: number;
-  /** 分类占用（**互斥且可加和**：data 类之和 === dataTotal） */
+  /** 分类占用（**互斥且可加和**：所有分类之和 === grandTotal） */
   categories: StorageCategory[];
   orphanBackupsCount: number;
 }
@@ -135,11 +139,12 @@ function userDataDir(): string {
   return join(dataRoot(), 'user-data');
 }
 
-/** 系统临时目录里属于我们的条目（文件或目录） */
+/** 系统临时目录里属于我们的条目（文件或目录）——用于回收**旧版本**的遗留文件 */
 function listTempEntries(): { path: string; isDir: boolean; bytes: number }[] {
   const out: { path: string; isDir: boolean; bytes: number }[] = [];
-  let tmp: string;
-  try { tmp = app.getPath('temp'); } catch { return out; }
+  // ⚠ 用「操作系统真正的临时目录」而不是 app.getPath('temp')：
+  //    后者在开启便携临时目录后已经指向 <data>/tmp/system，扫它就找不到老版本留下的文件了。
+  const tmp = systemTempDir();
   if (!tmp || !existsSync(tmp)) return out;
   try {
     for (const e of readdirSync(tmp, { withFileTypes: true })) {
@@ -190,25 +195,31 @@ export function getStorageBreakdown(): StorageBreakdown {
   let chromiumCache = 0;
   for (const name of CACHE_ENTRIES) chromiumCache += getDirSize(join(uData, name));
 
-  // —— 界面偏好 / 会话：user-data 总占用 - 缓存（保证两类之和 === user-data 总量）——
+  // —— 界面偏好 / 会话草稿：这两类都是"你的状态"，绝不清 ——
+  //    · user-data 里除缓存外的部分（Local Storage / Preferences…）
+  //    · data/session/ 下的未保存草稿（每个未保存标签一份容器）
   const userDataTotal = getDirSize(uData);
-  const userState = Math.max(0, userDataTotal - chromiumCache);
+  const sessionBytes = sessionDraftBytes();
+  const userState = Math.max(0, userDataTotal - chromiumCache) + sessionBytes;
 
   const projectsBytes = getDirSize(join(dRoot, 'projects'));
   const backupsBytes = getDirSize(join(dRoot, 'backups'));
   const extensionsBytes = getDirSize(join(dRoot, 'extensions'));
   const downloadsBytes = getDirSize(join(dRoot, 'downloads'));
-  const tempTotal = getTempSize();
+  // 临时文件 = 程序目录里的 data/tmp（预览页 / 更新脚本工作目录）+ 系统 Temp 里遗留的我们的文件
+  const localTempBytes = getDirSize(join(dRoot, 'tmp'));
+  const systemTempBytes = getTempSize();
+  const tempTotal = localTempBytes + systemTempBytes;
 
   const dataTotal = getDirSize(dRoot);
-  // —— 其它：data/ 总占用 - 已分类部分（保证所有 data 类之和 === dataTotal，账目对得上）——
-  const other = Math.max(0, dataTotal - (userDataTotal + projectsBytes + backupsBytes + extensionsBytes + downloadsBytes));
+  // —— 其它：data/ 总占用 - 已分类部分（保证**所有 data 类之和 === dataTotal**，账目对得上）——
+  const other = Math.max(0, dataTotal - (userDataTotal + sessionBytes + projectsBytes + backupsBytes + extensionsBytes + downloadsBytes + localTempBytes));
 
   const categories: StorageCategory[] = [
     { id: 'chromiumCache', label: 'Chromium 运行缓存', bytes: chromiumCache, cleanable: true, hint: '渲染 / 脚本编译 / GPU 的临时文件，清理不影响任何项目数据' },
-    { id: 'temp', label: '临时文件（系统 Temp）', bytes: tempTotal, cleanable: true, hint: '浏览器预览页与更新脚本的工作文件，程序用完就该删掉' },
+    { id: 'temp', label: '临时文件（预览 / 更新 / 系统 Temp）', bytes: tempTotal, cleanable: true, hint: '浏览器预览页与更新脚本的工作文件，程序用完就该删掉' },
     { id: 'downloads', label: '更新包下载', bytes: downloadsBytes, cleanable: true, hint: '手动下载的更新 zip，装完就没用了' },
-    { id: 'userState', label: '界面偏好与会话', bytes: userState, cleanable: false, hint: '窗口布局、面板宽度、未保存草稿等 —— 清掉会"设置被重置"' },
+    { id: 'userState', label: '界面偏好与未保存草稿', bytes: userState, cleanable: false, hint: '窗口布局 / 面板宽度 / 各标签的未保存编辑内容 —— 清掉会"设置被重置 + 草稿丢失"' },
     { id: 'projects', label: '项目工程文件 (.bcproj)', bytes: projectsBytes, cleanable: false, hint: '你的作品本体，只能自己删' },
     { id: 'backups', label: '历史快照与备份', bytes: backupsBytes, cleanable: false, hint: '自动备份，可用"清理孤立快照"回收已删项目的部分' },
     { id: 'extensions', label: '扩展与插件包', bytes: extensionsBytes, cleanable: false, hint: '插件 / 资源包' },
@@ -219,7 +230,10 @@ export function getStorageBreakdown(): StorageBreakdown {
     dataRoot: dRoot,
     dataTotal,
     tempTotal,
-    grandTotal: dataTotal + tempTotal,
+    systemTempBytes,
+    // 合计 = data/ 全部 + **只有系统 Temp 那部分**在 data/ 之外
+    //（data/tmp 已经在 dataTotal 里了，不能再加一次 —— 否则"分类之和 ≠ 合计"）
+    grandTotal: dataTotal + systemTempBytes,
     categories,
     orphanBackupsCount: countOrphanBackups()
   };
@@ -260,9 +274,20 @@ export async function clearChromiumCache(): Promise<number> {
   return freed;
 }
 
-/** 清系统临时目录里属于我们的文件（**只按精确前缀，绝不扫全目录**） */
+/**
+ * 清临时文件：`data/tmp/{preview,system}` 的内容 + 系统 Temp 里属于我们的文件。
+ * ⚠ **保留 `preview` / `system` 两个目录壳** —— `system` 正被 Chromium 当作临时目录用，
+ *    把目录本身删掉会让内核在运行中写不进去。
+ */
 export function clearOurTempFiles(): number {
   let freed = 0;
+  // ① 程序目录里的临时区：只清内容，保留目录壳
+  const localTmp = join(dataRoot(), 'tmp');
+  for (const sub of ['preview', 'system']) {
+    const d = join(localTmp, sub);
+    if (existsSync(d)) freed += cleanDirFilesRecursively(d);
+  }
+  // ② 系统 Temp 里的历史遗留（老版本写的）
   for (const e of listTempEntries()) {
     try {
       if (e.isDir) rmSync(e.path, { recursive: true, force: true });

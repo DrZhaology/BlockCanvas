@@ -2,18 +2,22 @@ import { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net, shell, native
 import { join, basename, dirname, relative } from 'node:path';
 import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { isAbsolutePathAny, resolveInside, toWebPath } from './paths';
+import { isAbsolutePathAny, resolveInside, toWebPath, previewDir, runtimeTempDir } from './paths';
 import * as pathUtils from './paths';
 import { zipCreate, zipList } from './zip';
 import {
   dataRoot, initDataDirectories, readAppConfig, writeAppConfig, listProjects,
-  listProjectBackups, saveProjectSnapshotFile, deleteProjectBackupFolder,
-  readSession, writeSession
+  listProjectBackups, saveProjectSnapshotFile, deleteProjectBackupFolder
 } from './userData';
+import { readSession, writeSession } from './session';
 import {
   getStorageStats, getStorageBreakdown, clearStorageCategory, clearAllCleanable,
   clearOrphanBackups, runStartupCleanup
 } from './storage';
+import {
+  readProject, writeProject, readManifestOnly, migrateAllProjectFilesAsync
+} from './projectFile';
+import * as projectFileApi from './projectFile';
 import {
   getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo,
   resolveInstallDir
@@ -26,10 +30,21 @@ import {
 // 启动最优先：初始化纯便携数据区 data/，隔离系统盘
 initDataDirectories();
 
+// 把运行时临时目录也收进程序目录（便携化）：Chromium 内核/下载暂存等一律写 <data>/tmp/system。
+// 必须在 app ready **之前**设置才生效；不可写时自动退回系统 Temp（resolveWritableDir 已兜底）。
+try {
+  if (readAppConfig().usePortableTemp !== false) {
+    const rt = runtimeTempDir();
+    mkdirSync(rt, { recursive: true });
+    app.setPath('temp', rt);
+  }
+} catch { /* 失败就用系统 Temp，不影响功能 */ }
+
 // 探针钩子：开发态把跨平台路径工具挂到主进程 global，E2E 可用 app.evaluate 直接验证
 // （打包态不挂，避免把内部工具暴露给正式产物）
 if (!app.isPackaged) {
   (globalThis as unknown as Record<string, unknown>)['__bcPaths'] = pathUtils;
+  (globalThis as unknown as Record<string, unknown>)['__bcProjectFile'] = projectFileApi;
 }
 
 // electron-vite 在 dev 模式下注入 ELECTRON_RENDERER_URL；
@@ -385,20 +400,16 @@ ipcMain.handle('project:save', async (_evt, projectData: { name?: string; scene:
       }
     }
 
-    const payload = {
-      format: 'BlockCanvas-Project',
-      version: '1.0.0',
+    // v2：写 ZIP 容器（manifest.json + scene.json），原子替换、自动继承 createdAt
+    const w = writeProject(targetPath, {
       name: pName,
-      updatedAt: new Date().toISOString(),
+      scene: projectData.scene,
       meta: {
         ...(projectData.meta || {}),
         elementCount: countNodes(projectData.scene?.root)
-      },
-      scene: projectData.scene
-    };
-
-    mkdirSync(dirname(targetPath), { recursive: true });
-    writeFileSync(targetPath, JSON.stringify(payload, null, 2), 'utf-8');
+      }
+    });
+    if (!w.ok) return { ok: false, error: w.error || '写入工程文件失败' };
     return { ok: true, path: targetPath, name: pName };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
@@ -419,11 +430,10 @@ ipcMain.handle('project:open-file', async (_evt, customPath?: string) => {
       targetPath = res.filePaths[0];
     }
     if (!existsSync(targetPath)) return { ok: false, error: '文件不存在' };
-    const raw = JSON.parse(readFileSync(targetPath, 'utf-8'));
-    if (!raw || !raw.scene || typeof raw.scene !== 'object') {
-      return { ok: false, error: '文件不是有效的 BlockCanvas 工程文件' };
-    }
-    return { ok: true, project: raw, path: targetPath };
+    // v1（纯 JSON）与 v2（ZIP 容器）都能读
+    const r = readProject(targetPath);
+    if (!r.ok || !r.payload) return { ok: false, error: r.error || '文件不是有效的 BlockCanvas 工程文件' };
+    return { ok: true, project: r.payload, path: targetPath, container: r.container };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -434,10 +444,9 @@ ipcMain.handle('project:delete', async (_evt, fileName: string, projectName?: st
     const full = join(dataRoot(), 'projects', fileName);
     let innerName = '';
     if (existsSync(full)) {
-      try {
-        const raw = JSON.parse(readFileSync(full, 'utf-8'));
-        innerName = raw.name || '';
-      } catch {}
+      // 容器或旧 JSON 都能取到内部 name（只读 manifest，不解 scene）
+      const m = readManifestOnly(full);
+      innerName = m.ok && m.manifest ? m.manifest.name : '';
       unlinkSync(full);
     }
     // 1. 按文件名清理对应快照目录
@@ -476,9 +485,10 @@ ipcMain.handle('backup:get-autosave', (_evt, projectName?: string) => {
     const folder = (projectName || '_general').trim().replace(/[\\/:*?"<>|]+/g, '_');
     const f = join(dataRoot(), 'backups', folder, 'autosave.bcproj');
     if (!existsSync(f)) return { ok: false };
-    const raw = JSON.parse(readFileSync(f, 'utf-8'));
+    const r = readProject(f);
+    if (!r.ok || !r.payload) return { ok: false };
     const stat = statSync(f);
-    return { ok: true, autosave: raw, updatedAt: stat.mtime.toISOString(), elementCount: countNodes(raw.scene?.root) };
+    return { ok: true, autosave: r.payload, updatedAt: stat.mtime.toISOString(), elementCount: countNodes((r.payload.scene as any)?.root) };
   } catch {
     return { ok: false };
   }
@@ -544,15 +554,12 @@ ipcMain.handle('export:html-with-project', async (_evt, html: string, scene: any
 
     writeFileSync(htmlPath, html, 'utf-8');
 
-    const projectPayload = {
-      format: 'BlockCanvas-Project',
-      version: '1.0.0',
+    const w = writeProject(projectPath, {
       name: projectName,
-      updatedAt: new Date().toISOString(),
-      meta: { elementCount: countNodes(scene?.root) },
-      scene
-    };
-    writeFileSync(projectPath, JSON.stringify(projectPayload, null, 2), 'utf-8');
+      scene,
+      meta: { elementCount: countNodes(scene?.root) }
+    });
+    if (!w.ok) return { ok: false, error: w.error || '写入工程文件失败' };
 
     return { ok: true, htmlPath, projectPath };
   } catch (e) {
@@ -905,8 +912,13 @@ ipcMain.handle('ext:create-package', async (_evt, meta: { id?: string; name?: st
 
 ipcMain.handle('preview:open', async (_evt, html: string) => {
   try {
-    const file = join(app.getPath('temp'), `bc-preview-${Date.now()}.html`);
+    // v0.4.4：预览页收进 <data>/tmp/preview，并只保留最近 N 个 —— 不再散落系统 Temp、不再无限增长。
+    // 为什么仍带时间戳而不是固定文件名：浏览器会按 URL 缓存，复用同一文件名可能显示上一次的内容。
+    const dir = previewDir();
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `bc-preview-${Date.now()}.html`);
     writeFileSync(file, html, 'utf-8');
+    pruneOldPreviews(dir, PREVIEW_KEEP);
     const err = await shell.openPath(file);
     if (err) return { ok: false, error: err };
     return { ok: true, path: file };
@@ -914,6 +926,27 @@ ipcMain.handle('preview:open', async (_evt, html: string) => {
     return { ok: false, error: (e as Error).message };
   }
 });
+
+/** 预览目录只保留最近 N 个（防止"每预览一次就多一个文件"） */
+const PREVIEW_KEEP = 5;
+function pruneOldPreviews(dir: string, keep: number): number {
+  let n = 0;
+  try {
+    const files = readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && /^bc-preview-.*\.html$/i.test(e.name))
+      .map((e) => {
+        const full = join(dir, e.name);
+        let mtime = 0;
+        try { mtime = statSync(full).mtimeMs; } catch { /* 忽略 */ }
+        return { full, mtime };
+      })
+      .sort((a, b) => b.mtime - a.mtime);          // 新的在前
+    for (const f of files.slice(keep)) {
+      try { unlinkSync(f.full); n += 1; } catch { /* 忽略 */ }
+    }
+  } catch { /* 忽略 */ }
+  return n;
+}
 
 ipcMain.handle('img:pick-src', async (_evt, mode: 'abs' | 'rel' = 'rel') => {
   const res = await dialog.showOpenDialog({
@@ -982,6 +1015,26 @@ app.whenReady().then(() => {
   // 启动自愈：清我们自己在系统 Temp 里留下的文件（默认开）/ Chromium 缓存 / 孤立快照。
   // 必须在这里（app ready 之后）：storage 里要用到 session，且 userData 已重定向到 data/user-data。
   void runStartupCleanup();
+
+  // 后台静默迁移：老版本留下的纯 JSON .bcproj → v2 ZIP 容器。
+  // 幂等（已是容器的只看 4 字节就跳过），**这段代码长期保留**。
+  //
+  // ⚠ 两个约束（都踩过坑，别改回去）：
+  //   1. 必须**分片让出事件循环**（migrateAllProjectFilesAsync）——同步跑满会把主进程占住，
+  //      那一瞬 Chromium 的输入事件会丢，表现为"鼠标在上面悬停提示却不弹"；
+  //   2. 延迟到启动 3 秒后 —— 躲开"窗口刚出来、用户/探针正在交互"的那一段。
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const stats = await migrateAllProjectFilesAsync(join(dataRoot(), 'projects'), join(dataRoot(), 'backups'));
+        if (stats.migrated > 0 || stats.failed > 0) {
+          console.log('[project-migrate]', JSON.stringify(stats));
+        }
+      } catch (e) {
+        console.warn('[project-migrate] 失败：', (e as Error).message);
+      }
+    })();
+  }, 3000);
 });
 
 app.on('window-all-closed', () => {

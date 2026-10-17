@@ -47,6 +47,7 @@ export interface StorageBreakdownInfo {
   dataRoot: string;
   dataTotal: number;
   tempTotal: number;
+  systemTempBytes: number;
   grandTotal: number;
   categories: StorageCategoryInfo[];
   orphanBackupsCount: number;

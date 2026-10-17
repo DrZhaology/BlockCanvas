@@ -186,6 +186,61 @@ function safeUserDataRoot(): string {
   return nodePath.join(home, '.blockcanvas');
 }
 
+// ---------------------------------------------------------------------------
+// 临时目录（v0.4.4：程序产生的临时文件一律收进 data/tmp，不再散落系统 Temp）
+// ---------------------------------------------------------------------------
+
+let cachedTmpDir: string | null = null;
+
+/**
+ * 程序自己的临时区：`<data>/tmp`（不可写时自动退到用户级目录）。
+ * 放这里的理由：用户看得见、能自己删、启动自愈零风险、便携版"删 data/ 就干净"。
+ *
+ * ⚠ 必须跟随 `BC_DATA_DIR`（E2E / CI 的数据目录覆盖），否则测试跑起来会把临时文件
+ *   写到仓库里，污染开发目录（踩过一次）。
+ */
+export function tmpDir(): string {
+  if (cachedTmpDir) return cachedTmpDir;
+  const override = process.env['BC_DATA_DIR'];
+  if (override && override.trim()) {
+    cachedTmpDir = nodePath.join(override.trim(), 'tmp');
+  } else {
+    // 与 userData 的 dataRoot() 保持同一基准：<便携根>/data/tmp
+    cachedTmpDir = resolveWritableDir(nodePath.join('data', 'tmp'));
+  }
+  return cachedTmpDir;
+}
+
+/** 给 Chromium / 运行时用的临时目录：`<data>/tmp/system`（app.setPath('temp') 指向它） */
+export function runtimeTempDir(): string {
+  return nodePath.join(tmpDir(), 'system');
+}
+
+/**
+ * **操作系统真正的**临时目录（不受 `app.setPath('temp')` 影响）。
+ * 用途：回收旧版本散落在系统 Temp 里的遗留文件（那时还没有 data/tmp）。
+ * 优先读环境变量 —— 因为 `app.getPath('temp')` 可能已经被我们改到程序目录里了。
+ */
+export function systemTempDir(): string {
+  const env = process.env['TMPDIR'] || process.env['TEMP'] || process.env['TMP'];
+  if (env && env.trim()) return env.trim();
+  try {
+    return app.getPath('temp');
+  } catch {
+    return process.platform === 'win32' ? '.' : '/tmp';
+  }
+}
+
+/** 浏览器预览落盘目录：`<data>/tmp/preview` */
+export function previewDir(): string {
+  return nodePath.join(tmpDir(), 'preview');
+}
+
+/** 仅供测试：清掉 tmpDir 缓存 */
+export function __resetTmpDirCache(): void {
+  cachedTmpDir = null;
+}
+
 /** 仅供测试：清掉 portableBaseDir 的缓存 */
 export function __resetPortableBaseCache(): void {
   cachedBase = null;

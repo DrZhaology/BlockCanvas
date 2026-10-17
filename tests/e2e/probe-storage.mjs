@@ -150,6 +150,28 @@ async function main() {
   const all = await win.evaluate(() => window.bc.clearAllCleanable());
   ok('一键清理全部"可清"分类成功', all.ok === true, JSON.stringify(all));
 
+  // ============ 便携临时目录（v0.4.4：运行时临时目录收进程序目录） ============
+  const tmpDir = join(DATA_DIR, 'tmp');
+  ok('程序目录里创建了 data/tmp', existsSync(tmpDir), tmpDir);
+  ok('data/tmp/system 存在（Chromium 临时目录已重定向）', existsSync(join(tmpDir, 'system')));
+  // 先清一次：system 目录壳必须保留（Chromium 正在用它当临时目录）
+  await win.evaluate(() => window.bc.clearStorageCategory('temp'));
+  await sleep(300);
+  ok('清理临时文件后 system 目录壳仍在（不删内核正在用的目录）', existsSync(join(tmpDir, 'system')));
+
+  mkdirSync(join(tmpDir, 'preview'), { recursive: true });
+  writeFileSync(join(tmpDir, 'preview', 'bc-preview-1.html'), BYTES(3000), 'utf-8');
+  const bd4 = await win.evaluate(() => window.bc.getStorageBreakdown());
+  const tempCat = bd4.categories.find((c) => c.id === 'temp');
+  ok('data/tmp 里的文件被计入"临时文件"分类', (tempCat?.bytes ?? 0) >= 3000, String(tempCat?.bytes));
+  const sum4 = bd4.categories.reduce((a, c) => a + c.bytes, 0);
+  ok('加入 data/tmp 后账目依然对得上', sum4 === bd4.grandTotal, `${sum4} vs ${bd4.grandTotal}`);
+  await win.evaluate(() => window.bc.clearStorageCategory('temp'));
+  await sleep(350);
+  ok('清理"临时文件"会清掉 data/tmp 的内容但保留目录壳',
+    !existsSync(join(tmpDir, 'preview', 'bc-preview-1.html')) && existsSync(join(tmpDir, 'preview')),
+    JSON.stringify({ file: existsSync(join(tmpDir, 'preview', 'bc-preview-1.html')), dir: existsSync(join(tmpDir, 'preview')) }));
+
   // ============ 设置页 UI：占用明细要真的渲染出来 ============
   await win.evaluate(() => window.dispatchEvent(new CustomEvent('bc:open-settings')));
   await win.waitForSelector('.fluent-settings-page', { timeout: 8000 });
