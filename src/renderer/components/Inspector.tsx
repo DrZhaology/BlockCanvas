@@ -33,10 +33,10 @@ import { classColor, isValidClassToken } from '@lib/classColor';
 import { isGradient } from '@lib/gradient';
 import { requestDevice } from '@lib/device';
 import { planResponsiveFixes } from '@lib/responsiveAuto';
-import { usePersistedBool } from '@lib/usePersisted';
 import { useClosing } from '@lib/useClosing';
 import { checkApplicability } from '@lib/propertySchema';
 import { inferRelationalSelectors, inferMultiRelationalSelectors, type RelCandidate, type RelInferResult } from '@lib/relationInfer';
+import { appAlert, appConfirm } from '@lib/appConfirm';
 
 // BlockCanvas · 属性面板（阶段2 重写）——「按需添加属性」架构：
 //  - 默认只显示 width / height 两个基础尺寸输入
@@ -57,9 +57,6 @@ export function Inspector() {
   const scene = useScene((s) => s.scene);
   const removeMany = useScene((s) => s.removeMany);
   const selectMany = useScene((s) => s.selectMany);
-  const beginStyleEdit = useScene((s) => s.beginStyleEdit);
-  const endStyleEdit = useScene((s) => s.endStyleEdit);
-  const setGlobalCss = useScene((s) => s.setGlobalCss);
 
   // ⚠️ Hooks 必须在任何提前 return 之前声明（React 规则），
   // 否则"未选中 → 选中"切换时 hook 数量变化会让 React 崩溃卸载整棵组件树（白屏）。
@@ -79,13 +76,6 @@ export function Inspector() {
     window.addEventListener('bc:open-class', openClass);
     return () => window.removeEventListener('bc:open-class', openClass);
   }, []);
-  // 页面 CSS 文本的本地草稿（blur 时提交，避免每键入栈）
-  const [pageCssDraft, setPageCssDraft] = useState(scene.globalCss ?? '');
-  // 撤销/重做或外部改动时同步草稿（编辑中不会触发：打字只在本地草稿）
-  useEffect(() => {
-    setPageCssDraft(scene.globalCss ?? '');
-  }, [scene.globalCss]);
-
   // 切换选中元素时，清除"刚添加"标记（高亮/聚焦不属于新元素）
   const selectedIdForSync = scene.selectedId;
   useEffect(() => {
@@ -193,18 +183,7 @@ export function Inspector() {
           : inspectorTab === 'token'
             ? <TokenPanel />
             : inspectorTab === 'page'
-            ? (
-              <PageCssBody
-                draft={pageCssDraft}
-                onDraftChange={setPageCssDraft}
-                onCommit={() => {
-                  // blur 一次性提交：会话内不入栈
-                  beginStyleEdit();
-                  setGlobalCss(pageCssDraft);
-                  endStyleEdit();
-                }}
-              />
-            )
+            ? <PageCssBody />
             : elementBody}
       </div>
     </div>
@@ -238,18 +217,32 @@ const PAGE_PROPS: PagePropDef[] = [
 
 const PAGE_DEFAULT_KEYS = new Set<string>(['bodyBg', 'textColor', 'linkColor', 'fontFamily']);
 
-function PageCssBody(props: {
-  draft: string;
-  onDraftChange: (v: string) => void;
-  onCommit: () => void;
-}) {
-  const { draft, onDraftChange, onCommit } = props;
+// 「全局样式」属性名建议（可自由输入，这里是常用项提示）
+const BODY_EXTRA_SUGGESTIONS = [
+  'background-image', 'background-size', 'background-repeat', 'background-position', 'background-attachment',
+  'text-align', 'letter-spacing', 'word-spacing', 'font-weight', 'text-transform',
+  'min-height', 'padding', 'cursor', 'user-select', 'overflow-x', 'transition'
+];
+
+function PageCssBody() {
   const quickCss = useScene((s) => s.scene.quickCss);
   const setQuickCss = useScene((s) => s.setQuickCss);
+  const bodyExtra = useScene((s) => s.scene.bodyExtra);
+  const setBodyExtra = useScene((s) => s.setBodyExtra);
   const beginStyleEdit = useScene((s) => s.beginStyleEdit);
   const endStyleEdit = useScene((s) => s.endStyleEdit);
-  const [advancedOpen, setAdvancedOpen] = usePersistedBool('page-advanced-open', false);
+  // 两块开合记忆：存工程文件 scene.uiState.pageSec（与右侧其他板块同一机制，不触发脏标记）
+  const pageSec = useScene((s) => s.scene.uiState?.pageSec);
+  const setPageSec = useScene((s) => s.setPageSec);
+  const bodyOpen = pageSec?.body ?? true;
+  const globalOpen = pageSec?.global ?? false;
+  // 「全局样式」添加表单
+  const [extraAddOpen, setExtraAddOpen] = useState(false);
+  const [extraProp, setExtraProp] = useState('');
+  const [extraVal, setExtraVal] = useState('');
   const qc = quickCss ?? {};
+  const extraEntries = Object.entries(bodyExtra ?? {}).filter(([, v]) => String(v ?? '').trim() !== '');
+  const legacyCss = (useScene.getState().scene.globalCss ?? '').trim();
 
   // 已显示 = 默认项 ∪ 键已存在（含空串）的项；可添加 = 其余
   const visibleDefs = PAGE_PROPS.filter((it) => PAGE_DEFAULT_KEYS.has(it.key) || qc[it.key] !== undefined);
@@ -300,15 +293,44 @@ function PageCssBody(props: {
     );
   };
 
+  const canAdd = /^[-a-z][a-z0-9-]*$/.test(extraProp.trim().toLowerCase());
+  const commitExtraAdd = () => {
+    const k = extraProp.trim().toLowerCase().replace(/\s+/g, '-');
+    if (!canAdd || !k) return;
+    beginStyleEdit();
+    setBodyExtra({ [k]: extraVal });
+    endStyleEdit();
+    setExtraProp('');
+    setExtraVal('');
+    setExtraAddOpen(false);
+  };
+
   return (
     <>
-      <div className="panel-title">页面 · 全局样式</div>
+      <div className="panel-title">页面 · 全局</div>
       <div className="hint" style={{ marginBottom: 8 }}>
         这里改的是整页的外观，效果和你写的 CSS 一样，会一起放进导出的 HTML。
       </div>
 
-      {/* 页面属性：基础重置开关 + 默认 4 项 + 「+ 添加属性」按需扩展 */}
-      <div className="page-quick-css">
+      {/* ① body 设置：常用项 + 「+ 添加属性」按需扩展（可折叠，状态进工程文件） */}
+      <div className="inspector-sec">
+        <div
+          className="inspector-sec-head"
+          onClick={() => setPageSec({ body: !bodyOpen })}
+          title="点击展开或收起 body 设置"
+        >
+          <span>
+            <span className="sec-caret">{bodyOpen ? '▾' : '▸'}</span>
+            body 设置
+          </span>
+          <HelpButton
+            title="body 设置"
+            content={'改的是整页 body 的常用外观：背景色、文字颜色、字体、字号等。\n\n· 每项留空 = 不设置；点 × 可以把该项从面板里移除。\n· 下面的开关：去掉浏览器默认给页面留的白边 / 重置标题段落自带的间距。\n· 这里没覆盖到的属性，用下方「全局样式」自由添加。'}
+          />
+        </div>
+        <Collapse open={bodyOpen}>
+          <div className="inspector-sec-body">
+            <div className="page-quick-css">
         <div className="page-quick-row">
           <span className="page-quick-label">默认边距</span>
           <label className="page-check" title="浏览器默认给页面四周留 8px 白边；勾选后导出的 HTML 会加 html,body 边距重置，和画布一样贴边显示">
@@ -341,39 +363,103 @@ function PageCssBody(props: {
         </div>
         {visibleDefs.map((item) => row(item))}
         <PageAddProp items={addableDefs} onAdd={addKey} />
-      </div>
-
-      {/* 高级：可展开的 CSS 文本区 */}
-      <div className="page-advanced">
-        <button
-          className="page-advanced-toggle"
-          onClick={() => setAdvancedOpen(!advancedOpen)}
-        >
-          <span className={advancedOpen ? 'page-advanced-caret open' : 'page-advanced-caret'}>▸</span>
-          高级 CSS（会写的直接用）
-        </button>
-        <div className="hint" style={{ fontSize: 12, opacity: 0.75 }}>
-          放最后生效，可以覆盖上面所有样式：比如给某个元素写 .banner {'{ background-color: #ffd; }'}
-        </div>
-        <Collapse open={advancedOpen}>
-          <div className="page-advanced-body">
-            <div className="page-css-help">
-              <HelpButton
-                title="全局 CSS 怎么用？"
-                content={'这是给懂一点 CSS 的用户走的"高级门"：\n\n1. 想给元素加样式名字：在「元素 → HTML 属性 → 类名」里填一个名字（比如 banner）\n\n2. 在这里写规则：\n.banner { background-color: #ffd; }\n\n3. 也可以直接选标签：\np { line-height: 1.8; }\n\na:hover { color: orange; }\n\n注意\n· 不需要会 CSS 也能用本软件：全部可视化操作都支持，这里只是额外入口\n· 写错了不会破坏画布，导出前可以在浏览器里预览（Ctrl+P）检查\n· 自动样式放前面，你写的放后面 → 你的规则优先级更高'}
-              />
             </div>
-            <textarea
-              className="page-css-textarea"
-              placeholder={'/* 例如：让所有段落更宽松 */\np {\n  margin-bottom: 20px;\n}\n\n/* 或者针对某个元素：先给它填类名 banner */\n.banner {\n  border: 2px solid gold;\n}'}
-              value={draft}
-              spellCheck={false}
-              onChange={(e) => onDraftChange(e.target.value)}
-              onBlur={onCommit}
-            />
           </div>
         </Collapse>
       </div>
+
+      {/* ② 全局样式：像给 body 写 CSS 一样自由添加任意属性（可折叠，状态进工程文件） */}
+      <div className="inspector-sec">
+        <div
+          className="inspector-sec-head"
+          onClick={() => setPageSec({ global: !globalOpen })}
+          title="点击展开或收起全局样式"
+        >
+          <span>
+            <span className="sec-caret">{globalOpen ? '▾' : '▸'}</span>
+            全局样式
+          </span>
+          <HelpButton
+            title="全局样式"
+            content={'给整个网页的 body 补任意 CSS 属性，和元素的属性面板同一种用法：\n\n· 左侧写属性名（如 letter-spacing），右侧写值（如 2px）。\n· 属性名有常用项下拉建议，也可以自由输入。\n· 留空的值不会输出；点 × 删除该属性。\n\n这些属性和 body 设置一起并进同一条 body 规则，画布和导出的网页都生效。'}
+          />
+        </div>
+        <Collapse open={globalOpen}>
+          <div className="inspector-sec-body">
+            {extraEntries.length === 0 && !extraAddOpen && (
+              <div className="hint" style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>
+                还没有额外属性。body 设置不够用时（例如背景图、字距），在这里点「+ 添加属性」。
+              </div>
+            )}
+            {extraEntries.map(([k, v]) => (
+              <div className="page-quick-row" key={k}>
+                <span className="page-quick-label extra-key" title={k}>{k}</span>
+                <input
+                  className="page-quick-input"
+                  value={v}
+                  spellCheck={false}
+                  placeholder="留空 = 不设置"
+                  onFocus={() => beginStyleEdit()}
+                  onChange={(e) => setBodyExtra({ [k]: e.target.value })}
+                  onBlur={() => endStyleEdit()}
+                />
+                <button
+                  className="page-quick-clear"
+                  title="删除此属性"
+                  onClick={() => { beginStyleEdit(); setBodyExtra({ [k]: undefined }); endStyleEdit(); }}
+                >×</button>
+              </div>
+            ))}
+            {extraAddOpen ? (
+              <div className="page-quick-row extra-add-row">
+                <input
+                  className="page-quick-input extra-key-input"
+                  list="bc-body-prop-list"
+                  placeholder="属性名，如 letter-spacing"
+                  value={extraProp}
+                  spellCheck={false}
+                  autoFocus
+                  onChange={(e) => setExtraProp(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && canAdd) commitExtraAdd();
+                    if (e.key === 'Escape') setExtraAddOpen(false);
+                  }}
+                />
+                <input
+                  className="page-quick-input"
+                  placeholder="值，如 2px / cover"
+                  value={extraVal}
+                  spellCheck={false}
+                  onChange={(e) => setExtraVal(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && canAdd) commitExtraAdd();
+                    if (e.key === 'Escape') setExtraAddOpen(false);
+                  }}
+                />
+                <button className="btn-mini" disabled={!canAdd} onClick={commitExtraAdd}>添加</button>
+                <button className="page-quick-clear" title="取消" onClick={() => setExtraAddOpen(false)}>×</button>
+                <datalist id="bc-body-prop-list">
+                  {BODY_EXTRA_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
+                </datalist>
+              </div>
+            ) : (
+              <button className="add-prop-trigger" onClick={() => setExtraAddOpen(true)}>+ 添加属性</button>
+            )}
+          </div>
+        </Collapse>
+      </div>
+
+      {legacyCss !== '' && (
+        <div className="page-legacy-css-hint">
+          <span>此工程来自旧版本，含有「高级 CSS」内容（仍在导出时生效，这里不再提供编辑）。</span>
+          <button
+            className="btn-mini"
+            title="清空旧版高级 CSS（清空后导出不再包含它）"
+            onClick={() => { beginStyleEdit(); useScene.getState().setGlobalCss(''); endStyleEdit(); }}
+          >清空</button>
+        </div>
+      )}
+
     </>
   );
 }
@@ -417,6 +503,19 @@ function PageAddProp(props: { items: PagePropDef[]; onAdd: (key: PageQuickKey) =
 }
 
 // ============ 元素页签内容（选中元素的属性编辑区） ============
+// 画布是否处于「自适应」宽度（与工具栏同一状态；通过事件与 localStorage 同步）
+function useCanvasWidthAuto(): boolean {
+  const [w, setW] = useState<string>(() => {
+    try { return JSON.parse(localStorage.getItem('bc-canvas-width') || '"auto"') as string; } catch { return 'auto'; }
+  });
+  useEffect(() => {
+    const on = (e: Event) => setW(String((e as CustomEvent).detail ?? 'auto'));
+    window.addEventListener('bc-canvas-width-changed', on);
+    return () => window.removeEventListener('bc-canvas-width-changed', on);
+  }, []);
+  return !w || w === 'auto';
+}
+
 function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string | null; onJustAdded: (k: string | null) => void }) {
   const { selected, justAddedKey, onJustAdded } = props;
   const updateStyle = useScene((s) => s.updateStyle);
@@ -431,6 +530,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   const endStyleEdit = useScene((s) => s.endStyleEdit);
   const activeBreakpoint = useScene((s) => s.activeBreakpoint);
   const clearBreakpointOverride = useScene((s) => s.clearBreakpointOverride);
+  const canvasAuto = useCanvasWidthAuto();
   const elementId = selected.id;
   const elementType = selected.type;
   // v0.4.3：选中项是不是表格（或表格里的单元格/行）—— 是则给出「打开表格编辑器」入口
@@ -463,23 +563,25 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   };
 
   // ✨ 整页自动适配：按当前断点批量重排（只算建议 → 确认 → 一次性写入，一条撤销可回退）
-  const autoFitPage = () => {
+  const autoFitPage = async () => {
     if (activeBreakpoint === 'desktop') return;
     const bp = activeBreakpoint as 'tablet' | 'mobile';
     const bpName = bp === 'mobile' ? '手机' : '平板';
     const root = useScene.getState().scene.root;
     const fixes = planResponsiveFixes(root, bp);
     if (fixes.length === 0) {
-      alert(`这一页在「${bpName}」断点下已经很合适了 —— 没有需要自动调整的地方。`);
+      void appAlert(`这一页在「${bpName}」断点下已经很合适了 —— 没有需要自动调整的地方。`, '无需调整');
       return;
     }
     const preview = fixes.slice(0, 6).map((f) => `· ${f.label}：${f.reasons[0]}`).join('\n');
     const more = fixes.length > 6 ? `\n…还有 ${fixes.length - 6} 个元素` : '';
-    const ok = confirm(
-      `将为「${bpName}」断点自动调整 ${fixes.length} 个元素：\n\n${preview}${more}\n\n` +
-      `· 只影响当前断点的样式，电脑端完全不受影响\n` +
-      `· 全部改动算一步，Ctrl+Z 可整体撤销\n\n继续？`
-    );
+    const ok = await appConfirm({
+      title: `整页自动适配（${bpName}）`,
+      body: `将为「${bpName}」断点自动调整 ${fixes.length} 个元素：\n\n${preview}${more}\n\n` +
+        `· 只影响当前断点的样式，电脑端完全不受影响\n` +
+        `· 全部改动算一步，Ctrl+Z 可整体撤销\n\n继续？`,
+      okText: '开始调整'
+    });
     if (!ok) return;
     beginStyleEdit();
     for (const f of fixes) updateStyle(f.id, f.patch);
@@ -782,9 +884,16 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
       <div className="inspector-bp-bar">
         <div className="inspector-bp-tabs">
           <button
+            className={'bp-tab-btn' + (canvasAuto ? ' active' : '')}
+            onClick={() => window.dispatchEvent(new CustomEvent('bc:set-device', { detail: 'auto' }))}
+            title="自适应：画布铺满编辑区（与工具栏「自适应」同一逻辑）"
+          >
+            ↔ 自适应
+          </button>
+          <button
             className={'bp-tab-btn' + (activeBreakpoint === 'desktop' ? ' active' : '')}
             onClick={() => requestDevice('desktop')}
-            title="电脑端基础样式（全局基准，平板/手机自动继承）。点此画布宽度也会切回自适应"
+            title="电脑端基础样式（全局基准，平板/手机自动继承）。点此画布宽度切为 1920px"
           >
             💻 电脑默认
           </button>

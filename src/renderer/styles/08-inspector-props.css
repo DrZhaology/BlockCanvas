@@ -624,6 +624,72 @@
   border-color: var(--accent);
 }
 
+/* v0.4.5：数值输入的 var 按钮 —— 直接引用设计变量（var(--bc-xxx)） */
+.num-unit-var-wrap { position: relative; flex: none; }
+.num-unit-var-btn {
+  height: 26px;
+  padding: 0 7px;
+  font-size: 10.5px;
+  font-family: Consolas, Menlo, monospace;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.num-unit-var-btn:hover { color: var(--accent); border-color: var(--accent); }
+.num-unit-var-btn.active { color: var(--accent); border-color: var(--accent); background: rgba(30, 136, 229, 0.08); }
+.num-unit-var-backdrop { position: fixed; inset: 0; z-index: 60; }
+.num-unit-var-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 61;
+  min-width: 220px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.num-unit-var-empty { padding: 8px; font-size: 11.5px; color: var(--text-muted); line-height: 1.5; }
+.num-unit-var-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 11.5px;
+  color: var(--text);
+}
+.num-unit-var-item:hover { background: var(--panel-soft); }
+.num-unit-var-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  flex: none;
+}
+.num-unit-var-name { font-family: Consolas, Menlo, monospace; flex: none; }
+.num-unit-var-val {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: auto;
+  max-width: 96px;
+}
+
 /* ↑↓ 微调小按钮（数字与单位之间）：按住左右拖拽调数值，单击 +1 */
 .step-drag {
   flex: 0 0 auto;

@@ -62,6 +62,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   const root = useScene((s) => s.scene.root);
   const globalCss = useScene((s) => s.scene.globalCss);
   const quickCss = useScene((s) => s.scene.quickCss);
+  const bodyExtra = useScene((s) => s.scene.bodyExtra);
   // 自动样式类规则（与导出同一生成逻辑）：画布注入 <style>，元素挂类名
   const styleSet = useMemo(() => {
     const ctx = createStyleClassSet();
@@ -74,7 +75,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     // 避免污染编辑器窗口（所见即所得语义不变）。
     // 「默认边距」所见即所得：未开启"去掉白边"时，画布模拟浏览器给 body 的 8px 默认 margin
     //（.canvas 无 margin 概念，用 padding 等效呈现）；开启后贴边，与导出行为一致。
-    const base = quickCssToCss(quickCss)
+    const base = quickCssToCss(quickCss, bodyExtra)
       .replace('body {', '.canvas {')
       .replace('a {', '.canvas a {')
       .replace('h1, h2, h3, h4, h5, h6 {', '.canvas h1, .canvas h2, .canvas h3, .canvas h4, .canvas h5, .canvas h6 {');
@@ -85,7 +86,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       ? '\n.canvas h1, .canvas h2, .canvas h3, .canvas h4, .canvas h5, .canvas h6, .canvas p, .canvas ul, .canvas ol, .canvas figure, .canvas blockquote, .canvas table { margin: 0; }'
       : '';
     return base + bodyMargin + headingReset;
-  }, [quickCss]);
+  }, [quickCss, bodyExtra]);
   // 同类同色：轮廓模式下，同类名/关系选择器元素用同一专属颜色描边（颜色 = classColor 哈希色板）。
   // 只注入编辑器可视化样式（挂在 body 开关类下），导出链路不经过。
   const classColorCss = useMemo(() => {

@@ -712,6 +712,31 @@
   cursor: pointer;
 }
 .page-check input { accent-color: var(--accent); margin: 0; }
+
+/* v0.4.5 页面栏重构：全局样式（任意属性）与旧版高级 CSS 提示 */
+.page-quick-label.extra-key {
+  width: 118px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Consolas, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.extra-add-row .extra-key-input { flex: 0 0 44%; }
+.page-legacy-css-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.page-legacy-css-hint span { flex: 1; }
 .page-quick-clear {
   flex: none;
   width: 22px;

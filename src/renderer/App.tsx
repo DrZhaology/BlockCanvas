@@ -124,11 +124,14 @@ export default function App() {
     if (useScene.getState().activeBreakpoint !== bp) {
       useScene.getState().setActiveBreakpoint(bp);
     }
+    // 广播给关心"画布是否自适应"的组件（如属性面板断点栏的「自适应」按钮高亮）
+    window.dispatchEvent(new CustomEvent('bc:canvas-width-changed', { detail: canvasWidth }));
   }, [canvasWidth]);
 
   useEffect(() => {
     const onSetDevice = (e: Event) => {
-      const d = (e as CustomEvent).detail as DeviceId;
+      const d = (e as CustomEvent).detail as DeviceId | 'auto';
+      if (d === 'auto') { setCanvasWidth('auto'); return; } // 与工具栏「自适应」同一逻辑
       const target = DEVICE_LIST.find((x) => x.id === d);
       if (target) setCanvasWidth(target.width);
     };

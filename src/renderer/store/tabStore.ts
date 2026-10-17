@@ -52,6 +52,10 @@ export function isEmptyProject(scene: SceneGraph | null | undefined): boolean {
   for (const v of Object.values(qc)) {
     if (v !== undefined && v !== null && String(v).trim() !== '') return false;
   }
+  const be = scene.bodyExtra ?? {};
+  for (const v of Object.values(be)) {
+    if (v !== undefined && v !== null && String(v).trim() !== '') return false;
+  }
   const cur = scene.tokens ?? [];
   const def = fresh.tokens ?? [];
   if (cur.length !== def.length) return false;

@@ -521,6 +521,12 @@ export interface SceneStore {
   setScene: (s: SceneGraph) => void;
   /** 右侧面板板块开合记忆（存进 scene.uiState → 随工程文件保存；不触发脏标记、不进撤销栈） */
   setInspectorSec: (key: string, val: { identity: boolean; layout: boolean; css: boolean; pseudo: boolean }) => void;
+  /** 「页面」栏两大板块开合记忆（body 设置 / 全局样式），同样存 scene.uiState */
+  setPageSec: (patch: { body?: boolean; global?: boolean }) => void;
+  /** 变量面板分组开合记忆（按分组名），同样存 scene.uiState */
+  setTokenGroupOpen: (group: string, open: boolean) => void;
+  /** 页面「全局样式」：任意 CSS 属性（key=属性名），undefined/空串 = 删除该属性；走撤销栈 */
+  setBodyExtra: (patch: Record<string, string | undefined>) => void;
 }
 
 // 初始空场景：一个 body 根
@@ -1519,6 +1525,43 @@ export const useScene = create<SceneStore>((set) => ({
   // 面板板块开合记忆（v0.4.4）：写入 scene.uiState，随工程文件 / 会话草稿一起保存。
   // 刻意**不走 beginStyleEdit/pushPast**：折叠个面板不该产生撤销记录，也不该让工程
   // 挂上"未保存"圆点（subscribe 的脏判断只看 root/globalCss/quickCss/撤销栈，不会误伤）。
+  // 页面「全局样式」：任意 CSS 属性（并进 body 规则）。与 setQuickCss 同一套会话语义：
+  // focus/blur 之间用 beginStyleEdit/endStyleEdit 收束，一条撤销。
+  setBodyExtra: (patch) => {
+    set((st) => {
+      const push = !st.styleEditPending;
+      const next: Record<string, string> = { ...(st.scene.bodyExtra ?? {}) };
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === undefined || v === '') delete next[k];
+        else next[k] = v;
+      }
+      return {
+        scene: { ...st.scene, bodyExtra: next },
+        history: push ? pushPast(st.history, st.scene) : st.history
+      };
+    });
+  },
+
+  setPageSec: (patch) => set((st) => ({
+    scene: {
+      ...st.scene,
+      uiState: {
+        ...(st.scene.uiState || {}),
+        pageSec: { ...(st.scene.uiState?.pageSec || {}), ...patch }
+      }
+    }
+  })),
+
+  setTokenGroupOpen: (group, open) => set((st) => ({
+    scene: {
+      ...st.scene,
+      uiState: {
+        ...(st.scene.uiState || {}),
+        tokenGroups: { ...(st.scene.uiState?.tokenGroups || {}), [group]: open }
+      }
+    }
+  })),
+
   setInspectorSec: (key, val) => set((st) => ({
     scene: {
       ...st.scene,
@@ -1613,6 +1656,7 @@ if (typeof window !== 'undefined') {
       prev.root !== state.scene.root ||
       prev.globalCss !== state.scene.globalCss ||
       prev.quickCss !== state.scene.quickCss ||
+      prev.bodyExtra !== state.scene.bodyExtra ||
       curPastLen > lastPastLen;
 
     lastPastLen = curPastLen;
