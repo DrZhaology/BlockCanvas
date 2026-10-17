@@ -245,6 +245,25 @@ export function ProjectsCenter(props: {
     onBack();
   };
 
+  // 3b. 重命名工程文件（只改文件名，不改项目名；打开着的标签同步换路径）
+  const [renamingFile, setRenamingFile] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const commitRename = async (p: ProjectFileInfo) => {
+    setRenamingFile(null);
+    const next = renameValue.trim();
+    const base = next.replace(/\.bcproj$/i, '');
+    if (!base || `${base}.bcproj` === p.fileName) return;
+    const res = await window.bc.renameProject(p.fileName, base);
+    if (res.ok && res.fileName && res.path) {
+      // 打开着的标签同步换到新路径（不换名字 —— 项目名和文件名是两回事）
+      useTabStore.getState().renameTabFilePath(p.filePath, res.path);
+      showToast(`文件已重命名为「${res.fileName}」`);
+      refreshProjects();
+    } else {
+      showToast('重命名失败：' + (res.error || '未知错误'), 'err');
+    }
+  };
+
   // 4. 执行删除（第 3 关确认后）
   const executeDeleteProject = async () => {
     if (!deleteTarget || busy) return;
@@ -340,11 +359,13 @@ export function ProjectsCenter(props: {
       <div className="pc-body">
         {filteredProjects.length > 0 ? (
           <div className="pc-grid">
-            {filteredProjects.map((p) => (
+            {filteredProjects.map((p) => {
+              const isRenaming = renamingFile === p.fileName;
+              return (
               <div
                 key={p.fileName}
                 className="pc-card"
-                onClick={() => handleOpenInNewTab(p)}
+                onClick={() => { if (!isRenaming) handleOpenInNewTab(p); }}
                 title={`点击在新标签页打开项目「${p.name}」`}
               >
                 <div className="pc-card-cover">
@@ -354,7 +375,24 @@ export function ProjectsCenter(props: {
 
                 <div className="pc-card-body">
                   <div className="pc-card-name" title={p.name}>{p.name}</div>
-                  <div className="pc-card-file">{p.fileName}</div>
+                  {isRenaming ? (
+                    <input
+                      type="text"
+                      className="pc-rename-input"
+                      autoFocus
+                      value={renameValue}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => { void commitRename(p); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { void commitRename(p); }
+                        else if (e.key === 'Escape') { setRenamingFile(null); }
+                      }}
+                      title="输入新的文件名（回车确认，Esc 取消）"
+                    />
+                  ) : (
+                    <div className="pc-card-file" title={`文件名：${p.fileName}（点 ✏️ 可重命名文件）`}>{p.fileName}</div>
+                  )}
                   <div className="pc-card-time">📅 {new Date(p.updatedAt).toLocaleDateString()} {new Date(p.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                 </div>
 
@@ -369,6 +407,13 @@ export function ProjectsCenter(props: {
                   <span className="spacer" />
                   <button
                     className="pc-card-del-btn"
+                    onClick={(e) => { e.stopPropagation(); setRenamingFile(p.fileName); setRenameValue(p.fileName.replace(/\.bcproj$/i, '')); }}
+                    title="重命名此工程文件（只改文件名，不改项目名）"
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    className="pc-card-del-btn"
                     onClick={(e) => openDeleteModal(e, p)}
                     title="删除此项目工程及所有历史备份"
                   >
@@ -376,7 +421,8 @@ export function ProjectsCenter(props: {
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         ) : !loading && (
           <div className="pc-empty-full">

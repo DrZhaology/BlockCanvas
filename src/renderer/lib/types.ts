@@ -270,4 +270,10 @@ export interface SceneGraph {
   // 设计变量 / Token（v0.4.0）：项目级统一定义，元素样式里写 var(--bc-xxx) 引用。
   // 导出时在 <style> 最前面生成 :root{...}，脱离本软件同样生效；改一处全站跟着变。
   tokens?: import('./designTokens').TokenEntry[];
+  // 编辑器 UI 状态（v0.4.4）：**随工程文件保存**，但不参与导出、也不触发"未保存"脏标记 ——
+  // 目前只有右侧面板各板块的展开/折叠记忆（按元素的类名/选择器/ID 记）。
+  // 用户要求：这类"每个元素的开关"存在项目文件里，不再存 localStorage。
+  uiState?: {
+    inspectorSec?: Record<string, { identity: boolean; layout: boolean; css: boolean; pseudo: boolean }>;
+  };
 }

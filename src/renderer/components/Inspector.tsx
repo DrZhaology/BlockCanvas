@@ -498,47 +498,61 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   // 面板板块开合：**默认只展开「选择器与标识」**（新插入的元素先让人看到"叫什么名字"这件事），
   // 其余板块（布局 / CSS 属性 / 交互状态）默认折叠；用户手动开合后按元素/选择器记忆。
   // 不提供"默认展开哪个板块"的设置项 —— 就这一套默认值。
+  //
+  // v0.4.4：记忆改存**工程文件**（scene.uiState.inspectorSec）—— 用户要求这类
+  // "每个元素的开关"跟着项目走，不再写 localStorage。
+  // 一次性迁移：工程里还没有、而 localStorage 里有旧记录时，读过来并写进工程。
+  const normalizeSec = (p: any) => ({
+    identity: p?.identity ?? true,
+    layout: p?.layout ?? false,
+    css: p?.css ?? false,
+    pseudo: p?.pseudo ?? false
+  });
   const [secOpen, setSecOpen] = useState<{ identity: boolean; layout: boolean; css: boolean; pseudo: boolean }>(() => {
-    try {
-      const saved = localStorage.getItem(secStorageKey) || localStorage.getItem('bc-inspector-sec-' + elementId);
-      if (saved) {
-        const p = JSON.parse(saved);
-        return { identity: p.identity ?? true, layout: p.layout ?? false, css: p.css ?? false, pseudo: p.pseudo ?? false };
-      }
-    } catch {}
+    const fromScene = useScene.getState().scene.uiState?.inspectorSec?.[secStorageKey];
+    if (fromScene) return normalizeSec(fromScene);
+    for (const k of [secStorageKey, 'bc-inspector-sec-id-' + elementId, 'bc-inspector-sec-' + elementId]) {
+      try {
+        const saved = localStorage.getItem(k);
+        if (saved) {
+          const v = normalizeSec(JSON.parse(saved));
+          queueMicrotask(() => useScene.getState().setInspectorSec(secStorageKey, v));
+          return v;
+        }
+      } catch { /* 忽略 */ }
+    }
     return { identity: true, layout: false, css: false, pseudo: false };
   });
 
-  // 折叠状态变更时持久化到共享 key
+  // 折叠状态变更 → 写进工程文件（scene.uiState）
   useEffect(() => {
-    try {
-      localStorage.setItem(secStorageKey, JSON.stringify(secOpen));
-    } catch {}
+    useScene.getState().setInspectorSec(secStorageKey, secOpen);
   }, [secOpen, secStorageKey]);
 
-  // 元素切换 / 身份变化时，根据新元素的共享 key 重新恢复折叠状态；
+  // 元素切换 / 身份变化时，从工程文件恢复该元素的折叠状态；
   // 并做一次性迁移：元素从「未命名（按 id 记录）」到「有了类名/选择器（按选择器记录）」时，
-  // 把原 id 记录复制到新 key —— 展开习惯跟着元素走，不会因为起了个名字就全收回去了。
+  // 把原记录搬过去 —— 展开习惯跟着元素走，不会因为起了个名字就全收回去了。
   useEffect(() => {
-    try {
-      let saved = localStorage.getItem(secStorageKey);
-      if (!saved && secStorageKey.startsWith('bc-inspector-sec-cls-')) {
-        // 只有"获得类名"才迁移（关系选择器/ID 是另一种身份，习惯未必通用）
-        for (const oldKey of ['bc-inspector-sec-id-' + elementId, 'bc-inspector-sec-' + elementId]) {
-          const old = localStorage.getItem(oldKey);
-          if (old) {
-            localStorage.setItem(secStorageKey, old);
-            localStorage.removeItem(oldKey);
-            saved = old;
-            break;
-          }
-        }
+    const readFrom = (key: string) => {
+      const fromScene = useScene.getState().scene.uiState?.inspectorSec?.[key];
+      if (fromScene) return normalizeSec(fromScene);
+      try {
+        const saved = localStorage.getItem(key);
+        if (saved) return normalizeSec(JSON.parse(saved));
+      } catch { /* 忽略 */ }
+      return null;
+    };
+    let v = readFrom(secStorageKey);
+    if (!v && secStorageKey.startsWith('bc-inspector-sec-cls-')) {
+      // 只有"获得类名"才迁移（关系选择器/ID 是另一种身份，习惯未必通用）
+      for (const oldKey of ['bc-inspector-sec-id-' + elementId, 'bc-inspector-sec-' + elementId]) {
+        const old = readFrom(oldKey);
+        if (old) { v = old; break; }
       }
-      if (saved) {
-        const p = JSON.parse(saved);
-        setSecOpen({ identity: p.identity ?? true, layout: p.layout ?? false, css: p.css ?? false, pseudo: p.pseudo ?? false });
-      }
-    } catch {}
+    }
+    if (v) setSecOpen(v);
+    else setSecOpen({ identity: true, layout: false, css: false, pseudo: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secStorageKey, elementId]);
 
   // 「快捷助手 → 是否显示到下方 CSS 属性」开关

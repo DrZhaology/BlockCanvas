@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('bc', {
     ipcRenderer.invoke('project:open-file', customPath),
   deleteProject: (fileName: string, projectName?: string) =>
     ipcRenderer.invoke('project:delete', fileName, projectName),
+  /** 重命名工程文件（只改磁盘文件名，不改容器内的项目名） */
+  renameProject: (oldFileName: string, newName: string) =>
+    ipcRenderer.invoke('project:rename', oldFileName, newName),
 
   // 自动备份与灾难恢复
   saveBackupSnapshot: (scene: unknown, projectName?: string, isAuto = true) =>

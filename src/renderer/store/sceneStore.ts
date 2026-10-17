@@ -519,6 +519,8 @@ export interface SceneStore {
 
   // 整体
   setScene: (s: SceneGraph) => void;
+  /** 右侧面板板块开合记忆（存进 scene.uiState → 随工程文件保存；不触发脏标记、不进撤销栈） */
+  setInspectorSec: (key: string, val: { identity: boolean; layout: boolean; css: boolean; pseudo: boolean }) => void;
 }
 
 // 初始空场景：一个 body 根
@@ -1512,7 +1514,20 @@ export const useScene = create<SceneStore>((set) => ({
 
   // 撤销栈属于当前文档：切换 / 打开 / 新建标签一律清空（沿用上一个标签的历史会导致
   // 切标签后 Ctrl+Z 把别的标签的内容恢复进来，也会让"这个空画布有没有历史"判断失真）。
-  setScene: (s) => set(() => ({ scene: s, history: { past: [], future: [] }, styleEditPending: false }))
+  setScene: (s) => set(() => ({ scene: s, history: { past: [], future: [] }, styleEditPending: false })),
+
+  // 面板板块开合记忆（v0.4.4）：写入 scene.uiState，随工程文件 / 会话草稿一起保存。
+  // 刻意**不走 beginStyleEdit/pushPast**：折叠个面板不该产生撤销记录，也不该让工程
+  // 挂上"未保存"圆点（subscribe 的脏判断只看 root/globalCss/quickCss/撤销栈，不会误伤）。
+  setInspectorSec: (key, val) => set((st) => ({
+    scene: {
+      ...st.scene,
+      uiState: {
+        ...(st.scene.uiState || {}),
+        inspectorSec: { ...(st.scene.uiState?.inspectorSec || {}), [key]: val }
+      }
+    }
+  }))
 }));
 
 function pushPast(h: History, snapshot: SceneGraph): History {

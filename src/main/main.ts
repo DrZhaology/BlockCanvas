@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net, shell, nativeTheme, session, type MenuItemConstructorOptions } from 'electron';
 import { join, basename, dirname, relative } from 'node:path';
-import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync, renameSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { isAbsolutePathAny, resolveInside, toWebPath, previewDir, runtimeTempDir } from './paths';
 import * as pathUtils from './paths';
@@ -379,10 +379,41 @@ ipcMain.handle('cfg:set', (_evt, patch: Record<string, any>) => writeAppConfig(p
 // ============ 项目工程管理 (.bcproj) ============
 ipcMain.handle('project:list', () => listProjects());
 
+/**
+ * 工程名 → 安全文件名：**保留中文等 Unicode 字符**，只剔除 Windows 文件名的非法字符。
+ * （修复：以前用 sanitizeId 只留 a-z0-9，中文名整个被清空 → 首次保存弹出的默认文件名
+ *   永远是 "project.bcproj"。文件名不是元素 ID，就该让"演示站点"存成"演示站点.bcproj"。）
+ */
+function safeFileName(s: string): string {
+  return (s || '')
+    .replace(/[\\/:*?"<>|\r\n\t]+/g, ' ')   // Windows 非法字符 → 空格
+    .replace(/\s+/g, ' ')
+    .replace(/^[.\s]+|[.\s]+$/g, '')        // 首尾的点/空格（Windows 不允许结尾带点）
+    .slice(0, 80);
+}
+
+// 重命名工程文件（项目中心里的"改文件名"）：只改磁盘文件名，**不改**容器内的项目名
+// —— 项目名（标签页）与文件名是两个东西，分开管理（用户口径）。
+ipcMain.handle('project:rename', async (_evt, oldFileName: string, newName: string) => {
+  try {
+    const base = safeFileName(String(newName || '').replace(/\.bcproj$/i, ''));
+    if (!base) return { ok: false, error: '文件名无效' };
+    const dir = join(dataRoot(), 'projects');
+    const from = join(dir, oldFileName);
+    const to = join(dir, `${base}.bcproj`);
+    if (!existsSync(from)) return { ok: false, error: '找不到工程文件' };
+    if (to !== from && existsSync(to)) return { ok: false, error: '同名文件已存在' };
+    renameSync(from, to);
+    return { ok: true, fileName: `${base}.bcproj`, path: to };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
 ipcMain.handle('project:save', async (_evt, projectData: { name?: string; scene: any; meta?: any }, saveAs = false, customPath?: string) => {
   try {
     const pName = (projectData.name || '未命名网页').trim();
-    const cleanName = sanitizeId(pName) || 'project';
+    const cleanName = safeFileName(pName) || 'project';
     const defaultFullDir = join(dataRoot(), 'projects');
     let targetPath = customPath;
 

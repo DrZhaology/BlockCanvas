@@ -76,6 +76,7 @@ declare global {
       saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown }, saveAs?: boolean, customPath?: string) => Promise<{ ok: boolean; path?: string; name?: string; error?: string; canceled?: boolean }>;
       openProjectFile: (customPath?: string) => Promise<{ ok: boolean; project?: any; path?: string; error?: string; canceled?: boolean }>;
       deleteProject: (fileName: string, projectName?: string) => Promise<{ ok: boolean; error?: string }>;
+      renameProject: (oldFileName: string, newName: string) => Promise<{ ok: boolean; fileName?: string; path?: string; error?: string }>;
 
       // 自动备份与灾难恢复
       saveBackupSnapshot: (scene: unknown, projectName?: string, isAuto?: boolean) => Promise<{ ok: boolean; timestamp?: string; error?: string }>;

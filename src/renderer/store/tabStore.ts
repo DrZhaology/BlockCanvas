@@ -96,6 +96,8 @@ interface TabState {
   onSceneChange: (scene: SceneGraph, isContentModified: boolean) => void;
   markActiveTabDirty: (isDirty?: boolean) => void;
   setTabSaved: (tabId: string, filePath: string, name?: string) => void;
+  /** 工程文件在磁盘上被重命名后，同步更新打开了它的标签的 filePath */
+  renameTabFilePath: (oldPath: string, newPath: string) => void;
   initFromSession: (session: { activeTabId: string | null; tabs: any[] }) => void;
 }
 
@@ -253,6 +255,16 @@ export const useTabStore = create<TabState>((set, get) => ({
       );
       return { tabs };
     });
+    debouncePersistSession(get);
+  },
+
+  renameTabFilePath: (oldPath: string, newPath: string) => {
+    const norm = (p: string) => String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
+    set((st) => ({
+      tabs: st.tabs.map((t) =>
+        t.filePath && norm(t.filePath) === norm(oldPath) ? { ...t, filePath: newPath } : t
+      )
+    }));
     debouncePersistSession(get);
   },
 
