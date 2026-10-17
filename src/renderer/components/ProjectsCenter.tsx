@@ -406,7 +406,7 @@ export function ProjectsCenter(props: {
                   </button>
                   <span className="spacer" />
                   <button
-                    className="pc-card-del-btn"
+                    className="pc-card-ren-btn"
                     onClick={(e) => { e.stopPropagation(); setRenamingFile(p.fileName); setRenameValue(p.fileName.replace(/\.bcproj$/i, '')); }}
                     title="重命名此工程文件（只改文件名，不改项目名）"
                   >

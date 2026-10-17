@@ -63,6 +63,10 @@ export default function App() {
   const [leftWidth, setLeftWidth] = usePersistentState<number>(LEFT_WIDTH_KEY, LEFT_WIDTH_DEFAULT);
   const [zoom, setZoom] = useState(1);
   const [view, setView] = useState<AppView>('editor');
+  // 标签数（用于空页面判断）。⚠ 必须在组件顶部调用 —— 不能放进 JSX 的 view 分支里，
+  // 否则切到"表格编辑器/设置"等视图时这个 hook 不执行，hooks 数量前后不一致，
+  // React 直接抛 #300 把整个视图渲染崩掉（踩过一次，表格编辑器打不开就是它）。
+  const tabCount = useTabStore((s) => s.tabs.length);
   // 自动保存节流锚点：手动 Ctrl+S / 自动保存成功都会刷新（见下方自动保存循环）
   const autoSaveLastRef = useRef(0);
   // 全局快捷键在一个"依赖里没有 view"的 useEffect 里注册 → 闭包里的 view 永远是首次渲染的值。
@@ -462,7 +466,7 @@ export default function App() {
         />
       ) : (
         <>
-          {useTabStore((s) => s.tabs.length) === 0 ? (
+          {tabCount === 0 ? (
             /* 空页面：所有标签都关掉了 —— 类似浏览器新标签页的首页 */
             <EmptyHome
               onOpen={() => window.dispatchEvent(new CustomEvent('menu:open-project'))}
