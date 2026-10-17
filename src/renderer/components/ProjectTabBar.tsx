@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTabStore, isEmptyProject, type ProjectTab } from '@store/tabStore';
 import { useScene } from '@store/sceneStore';
 import { TipsTicker } from './TipsTicker';
+import { appConfirm } from '@lib/appConfirm';
 
 // BlockCanvas · Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
 // 遵循《设计语言规范》与 VS Code 标准交互：
@@ -50,7 +51,7 @@ export function ProjectTabBar() {
     }
   };
 
-  const handleClose = (e: React.MouseEvent, tab: ProjectTab) => {
+  const handleClose = async (e: React.MouseEvent, tab: ProjectTab) => {
     e.stopPropagation();
 
     // —— v0.4.1 修复：未保存标签关闭保护（模仿记事本）——
@@ -81,10 +82,12 @@ export function ProjectTabBar() {
 
     if (tab.isDirty) {
       if (tab.filePath) {
-        const saveFirst = confirm(
-          `项目「${tab.name}」有未保存的修改。\n\n` +
-            `确定 = 保存并关闭\n取消 = 保持打开（不关闭）`
-        );
+        const saveFirst = await appConfirm({
+          title: '关闭前保存',
+          body: `项目「${tab.name}」有未保存的修改。\n\n确定 = 保存并关闭\n取消 = 保持打开（不关闭）`,
+          okText: '保存并关闭',
+          cancelText: '保持打开'
+        });
         if (!saveFirst) return;
         const curScene = useScene.getState().scene;
         const hist = useScene.getState().history;
@@ -94,12 +97,16 @@ export function ProjectTabBar() {
         });
         return;
       }
-      const abandon = confirm(
-        `「${tab.name}」还没有保存过（Ctrl+S 可保存为 .bcproj 工程文件）。\n\n` +
+      const abandon = await appConfirm({
+        title: '未保存的项目',
+        body: `「${tab.name}」还没有保存过（Ctrl+S 可保存为 .bcproj 工程文件）。\n\n` +
           `直接关闭后，这个项目将从标签列表移除且无法找回。\n` +
           `（提示：不点 ×、直接退出软件的话，未保存草稿仍会在下次打开时恢复）\n\n` +
-          `确定要直接关闭吗？`
-      );
+          `确定要直接关闭吗？`,
+        okText: '直接关闭',
+        cancelText: '留着',
+        danger: true
+      });
       if (!abandon) return;
       closeTab(tab.id);
       return;

@@ -8,6 +8,7 @@ import { getPluginElements } from '@lib/pluginHost';
 import { TABLE_STYLE_PRESETS, applyTableStylePreset } from '@lib/tablePresets';
 import { uniqueTableClassName } from '@lib/tableOps';
 import { HOVER_OPEN_MS } from '@lib/hoverPop';
+import { appAlert } from '@lib/appConfirm';
 
 // BlockCanvas · 元素面板
 // 阶段1：按类别分组，点击插入选中元素的父级（或根）
@@ -207,7 +208,7 @@ export function ElementPanel() {
     try {
       const res = await window.bc.readTemplate(resId, tplId);
       if (!res.ok || !res.template) {
-        alert('模板加载失败：' + (res.error ?? '未知错误'));
+        void appAlert('模板加载失败：' + (res.error ?? '未知错误'), '加载失败');
         return;
       }
       insertTemplate(res.template, selectedId);

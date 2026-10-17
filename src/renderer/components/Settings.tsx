@@ -10,6 +10,7 @@ import logoUrl from '@renderer/assets/logo.svg';
 import { Collapse } from './Collapse';
 import { TIPS, TIPS_KEY, setTipsEnabled } from './CanvasOverlays';
 import { readSelHighlight, writeSelHighlight } from '@lib/selHighlight';
+import { appAlert, appConfirm } from '@lib/appConfirm';
 import type { DataPathsInfo, StorageStatsInfo, StorageBreakdownInfo, StorageCategoryId } from '../global';
 
 function formatBytes(bytes: number): string {
@@ -73,16 +74,21 @@ export function Settings(props: Props) {
   }, [initialSection]);
 
   const handleClearCache = async () => {
-    if (!confirm('确定要清理运行缓存吗？\n\n· 只删除 Chromium/V8 生成的临时缓存文件；\n· 不会碰你的项目工程、快照与任何设计数据。')) return;
+    const okClear = await appConfirm({
+      title: '清理运行缓存',
+      body: '确定要清理运行缓存吗？\n\n· 只删除 Chromium/V8 生成的临时缓存文件；\n· 不会碰你的项目工程、快照与任何设计数据。',
+      okText: '清理'
+    });
+    if (!okClear) return;
     setCleaningCache(true);
     try {
       const res = await window.bc.clearAllCleanable();
       if (res.ok) {
-        alert(`✨ 运行缓存清理成功！\n\n本次已安全释放 ${formatBytes(res.freedBytes)} 临时空间。`);
+        void appAlert(`运行缓存清理成功！\n\n本次已安全释放 ${formatBytes(res.freedBytes)} 临时空间。`, '清理成功');
         refreshStorageStats();
       }
     } catch (e: any) {
-      alert('清理失败: ' + (e.message || '未知错误'));
+      void appAlert('清理失败: ' + (e.message || '未知错误'), '清理失败');
     } finally {
       setCleaningCache(false);
     }
@@ -90,33 +96,43 @@ export function Settings(props: Props) {
 
   /** 按分类清理（可清的三类：Chromium 缓存 / 临时文件 / 更新包下载） */
   const handleClearCategory = async (id: StorageCategoryId, label: string) => {
-    if (!confirm(`确定要清理「${label}」吗？\n\n只删除可再生成的临时文件，不会影响项目工程、快照与界面设置。`)) return;
+    const okClear = await appConfirm({
+      title: `清理「${label}」`,
+      body: `确定要清理「${label}」吗？\n\n只删除可再生成的临时文件，不会影响项目工程、快照与界面设置。`,
+      okText: '清理'
+    });
+    if (!okClear) return;
     setCleaningId(id);
     try {
       const res = await window.bc.clearStorageCategory(id);
       if (res.ok) {
-        alert(`✨ 已清理「${label}」，释放 ${formatBytes(res.freedBytes)}。`);
+        void appAlert(`已清理「${label}」，释放 ${formatBytes(res.freedBytes)}。`, '清理完成');
         refreshStorageStats();
       } else {
-        alert('未能清理：' + (res.error || '未知原因'));
+        void appAlert('未能清理：' + (res.error || '未知原因'), '清理失败');
       }
     } catch (e: any) {
-      alert('清理失败: ' + (e.message || '未知错误'));
+      void appAlert('清理失败: ' + (e.message || '未知错误'), '清理失败');
     } finally {
       setCleaningId('');
     }
   };
 
   const handleClearOrphanBackups = async () => {
-    if (!confirm('确定要清理所有已删除项目遗留的孤立历史快照吗？')) return;
+    const okClear = await appConfirm({
+      title: '清理孤立快照',
+      body: '确定要清理所有已删除项目遗留的孤立历史快照吗？',
+      okText: '清理'
+    });
+    if (!okClear) return;
     try {
       const res = await window.bc.clearOrphanBackups();
       if (res.ok) {
-        alert(`✨ 已成功清理 ${res.cleanedCount} 处孤立历史快照，释放 ${formatBytes(res.freedBytes)} 空间！`);
+        void appAlert(`已成功清理 ${res.cleanedCount} 处孤立历史快照，释放 ${formatBytes(res.freedBytes)} 空间！`, '清理完成');
         refreshStorageStats();
       }
     } catch (e: any) {
-      alert('清理失败: ' + (e.message || '未知错误'));
+      void appAlert('清理失败: ' + (e.message || '未知错误'), '清理失败');
     }
   };
 
@@ -938,14 +954,14 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
     try {
       const r = await fn();
       if (r.ok) {
-        if (r.path) alert(label + '成功：' + r.path);
+        if (r.path) void appAlert(label + '成功：' + r.path, label + '成功');
       } else if (!r.canceled) {
-        alert(label + '失败：' + (r.error ?? '未知错误'));
+        void appAlert(label + '失败：' + (r.error ?? '未知错误'), label + '失败');
       }
       rescan();
       return r.ok;
     } catch (e) {
-      alert(label + '异常：' + (e as Error).message);
+      void appAlert(label + '异常：' + (e as Error).message, label + '异常');
       return false;
     }
   };
@@ -958,22 +974,28 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
   };
 
   const onDelete = async (kind: 'plugins' | 'resources', id: string) => {
-    if (confirm(`确定要删除扩展「${id}」吗？`)) {
+    const okDel = await appConfirm({
+      title: '删除扩展',
+      body: `确定要删除扩展「${id}」吗？`,
+      okText: '删除',
+      danger: true
+    });
+    if (okDel) {
       const ok = await run('删除', () => window.bc.deleteExtension(kind, id));
       if (kind === 'plugins' && ok) pluginsChanged();
     }
   };
 
   const onCreatePackage = async () => {
-    if (!makeForm.name.trim()) { alert('请填写资源包名称'); return; }
+    if (!makeForm.name.trim()) { void appAlert('请填写资源包名称', '缺少名称'); return; }
     const r = await window.bc.createResourcePackage({ ...makeForm, id: makeForm.id || undefined });
     if (r.ok) {
-      alert('已生成资源包结构：\n' + (r.path ?? ''));
+      void appAlert('已生成资源包结构：\n' + (r.path ?? ''), '生成成功');
       setCreating(false);
       setMakeForm({ name: '', id: '', version: '1.0.0', author: '', description: '' });
       rescan();
     } else {
-      alert('生成失败：' + (r.error ?? '未知错误'));
+      void appAlert('生成失败：' + (r.error ?? '未知错误'), '生成失败');
     }
   };
 
@@ -1532,8 +1554,13 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
           </span>
           <button
             className="btn-mini"
-            onClick={() => {
-              if (!confirm('确定要恢复默认布局吗？\n\n· 会清空全部「排序 / 停靠区 / 工具组」的自定义记忆；\n· 按钮回到出厂位置与分组（操作组、设备组），\n  收进「⋯更多」的按钮也会重新显示；\n· 此操作立即生效，且没有撤销。')) return;
+            onClick={async () => {
+              const okReset = await appConfirm({
+                title: '恢复默认布局',
+                body: '确定要恢复默认布局吗？\n\n· 会清空全部「排序 / 停靠区 / 工具组」的自定义记忆；\n· 按钮回到出厂位置与分组（操作组、设备组），\n  收进「⋯更多」的按钮也会重新显示；\n· 此操作立即生效，且没有撤销。',
+                okText: '恢复默认'
+              });
+              if (!okReset) return;
               resetToolbar();
             }}
             title="清除排序 / 停靠 / 分组记忆，恢复出厂布局（会二次确认）"

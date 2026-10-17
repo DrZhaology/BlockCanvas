@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTabStore } from '@store/tabStore';
 import { useClosing } from '@lib/useClosing';
+import { appConfirm } from '@lib/appConfirm';
 import type { ProjectFileInfo } from '../global';
 
 // BlockCanvas · 本地全部项目库中心 (ProjectsCenter)
@@ -299,7 +300,12 @@ export function ProjectsCenter(props: {
 
   // 6. 恢复某份专属快照
   const handleRestoreSnapshot = async (b: ProjectFileInfo) => {
-    if (confirm(`确定要将画布载入该备份快照（${new Date(b.updatedAt).toLocaleString()}）吗？`)) {
+    const okOpen = await appConfirm({
+      title: '载入快照',
+      body: `确定要将画布载入该备份快照（${new Date(b.updatedAt).toLocaleString()}）吗？`,
+      okText: '载入'
+    });
+    if (okOpen) {
       const res = await window.bc.openProjectFile(b.filePath);
       if (res.ok && res.project?.scene) {
         newTab(`${selectedProjectForBackups?.name || '项目'} (快照恢复)`, res.project.scene, null);

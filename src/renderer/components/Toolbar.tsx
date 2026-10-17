@@ -13,6 +13,7 @@ import { runHealthCheck, hasBlocking } from '@lib/healthCheck';
 import { HealthWizard } from './HealthWizard';
 import { AnchoredPanel } from './AnchoredPanel';
 import { TaskButton } from './TaskButton';
+import { appAlert } from '@lib/appConfirm';
 
 // BlockCanvas · 顶部工具栏（全按钮自由池 + 二级工具组）
 //
@@ -124,16 +125,16 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     const result = exportHTML(useScene.getState().scene);
     const res = await window.bc.exportHTML(result.html, 'index.html');
     if (!res.ok && !res.canceled) {
-      alert('导出失败：' + (res.error ?? '未知错误'));
+      void appAlert('导出失败：' + (res.error ?? '未知错误'), '导出失败');
     } else if (res.ok && res.path) {
       showExportTips(result);
-      alert('✨ HTML 网页导出成功！\n\n文件保存路径：\n' + res.path);
+      void appAlert('HTML 网页导出成功！\n\n文件保存路径：\n' + res.path, '导出成功');
     }
   };
   const previewNow = async () => {
     const result = exportHTML(useScene.getState().scene);
     const res = await window.bc.previewOpen(result.html);
-    if (!res.ok) alert('预览失败：' + (res.error ?? '未知错误'));
+    if (!res.ok) void appAlert('预览失败：' + (res.error ?? '未知错误'), '预览失败');
     else showExportTips(result);
   };
   const doExportTemplate = async () => {
@@ -147,8 +148,8 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     const fallbackName = (tree.attrs?.className?.trim() || tree.type || 'template') + '.json';
     const res = await window.bc.exportTemplateSingle(tree, fallbackName);
     if (res.canceled) return;
-    if (res.ok) alert('模板已导出：\n' + res.path);
-    else alert('导出失败：' + (res.error ?? '未知错误'));
+    if (res.ok) void appAlert('模板已导出：\n' + res.path, '导出成功');
+    else void appAlert('导出失败：' + (res.error ?? '未知错误'), '导出失败');
   };
 
   type ToolbarOp = {

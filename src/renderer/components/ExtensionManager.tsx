@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { exportHTML } from '@lib/exporter';
+import { appAlert } from '@lib/appConfirm';
 
 // BlockCanvas · 扩展管理（全页界面）
 // 取代旧的弹窗式 ExtensionsDialog：
@@ -32,11 +33,11 @@ export function ExtensionManager(props: { onBack: () => void }) {
     try {
       const r = await fn();
       if (r.ok) {
-        if (r.path) alert(label + '成功：' + r.path);
+        if (r.path) void appAlert(label + '成功：' + r.path, label + '成功');
       } else if (r.canceled) {
         // 用户取消，静默
       } else {
-        alert(label + '失败：' + (r.error ?? '未知错误'));
+        void appAlert(label + '失败：' + (r.error ?? '未知错误'), label + '失败');
       }
       rescan();
       return r.ok;
@@ -76,18 +77,18 @@ export function ExtensionManager(props: { onBack: () => void }) {
   const onExportResource = (id: string, format: 'folder' | 'zip') =>
     run(format === 'zip' ? '导出 zip 资源包' : '导出资源包文件夹', () => window.bc.exportResource(id, format));
 
-  const onOpenDir = async () => { const r = await window.bc.openExtensionsDir(); if (!r.ok) alert('打开扩展文件夹失败：' + (r.error ?? '')); };
+  const onOpenDir = async () => { const r = await window.bc.openExtensionsDir(); if (!r.ok) void appAlert('打开扩展文件夹失败：' + (r.error ?? ''), '打开失败'); };
 
   const onCreatePackage = async () => {
-    if (!makeForm.name.trim()) { alert('请填写资源包名称'); return; }
+    if (!makeForm.name.trim()) { void appAlert('请填写资源包名称', '缺少名称'); return; }
     const r = await window.bc.createResourcePackage({ ...makeForm, id: makeForm.id || undefined });
     if (r.ok) {
-      alert('已生成资源包结构：\n' + (r.path ?? ''));
+      void appAlert('已生成资源包结构：\n' + (r.path ?? ''), '生成成功');
       setCreating(false);
       setMakeForm({ name: '', id: '', version: '1.0.0', author: '', description: '' });
       rescan();
     } else {
-      alert('生成失败：' + (r.error ?? '未知错误'));
+      void appAlert('生成失败：' + (r.error ?? '未知错误'), '生成失败');
     }
   };
 
