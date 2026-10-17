@@ -49,6 +49,7 @@
   padding: 0 4px;
 }
 .fluent-brand-logo { font-size: 18px; }
+/* v0.4.4：品牌位换成真 Logo 图 —— 尺寸统一在 25-v044-storage-ui.css 末尾定（级联最末，防被覆盖） */
 .fluent-brand-text { font-size: 14px; font-weight: 700; color: var(--text); }
 
 .fluent-nav-list {

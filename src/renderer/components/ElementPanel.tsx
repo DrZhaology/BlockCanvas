@@ -98,8 +98,9 @@ const GROUPS: { title: string; items: ElementDef[] }[] = [
     items: [
       { type: 'img', label: '图片', help: { tag: 'img', what: '插入一张图片', where: '任意位置；src 选本地文件或填网址' } },
       { type: 'figcaption', label: '图注', help: { tag: 'figcaption', what: 'figure 图文块的说明文字', where: '只能放在 figure 内部' } },
-      { type: 'hr', label: '分割线', help: { tag: 'hr', what: '一条水平分割线，隔开两段内容', where: '任意两个区块之间' } },
-      { type: 'br', label: '换行', help: { tag: 'br', what: '强制换一行（空元素，无样式可调）', where: '文字内部需要断行的地方' } }
+      { type: 'hr', label: '分割线', help: { tag: 'hr', what: '一条水平分割线，隔开两段内容', where: '任意两个区块之间' } }
+      // 「换行 br」已从插入面板移除（v0.4.4）：文本里直接敲回车就会自动生成 <br>，
+      // 单独插一个空 br 没有意义；旧工程里已有的 br 仍然正常渲染与导出。
     ]
   }
 ];

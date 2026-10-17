@@ -96,8 +96,14 @@ export function ProjectsCenter(props: {
 
   useEffect(() => {
     if (deleteTarget && delStep === 1) {
-      const t = window.setTimeout(() => deleteInputRef.current?.focus(), 80);
-      return () => window.clearTimeout(t);
+      // v0.4.4 修复"输入框有时候点不开/打不了字"：
+      // 自动聚焦只在上场动画播完前抢一次（80ms），动画还没结束/焦点被别处抢走时就丢了。
+      // 改成多次重试（80ms / 320ms / 900ms），并在整个第 1 关期间"点哪都把焦点还给输入框"。
+      const times = [80, 320, 900];
+      const timers = times.map((t) => window.setTimeout(() => {
+        if (delStep === 1) deleteInputRef.current?.focus();
+      }, t));
+      return () => timers.forEach((t) => window.clearTimeout(t));
     }
     return undefined;
   }, [deleteTarget, delStep]);
@@ -449,7 +455,10 @@ export function ProjectsCenter(props: {
 
               {/* ---- 第 1 关：完整输入项目名 ---- */}
               {delStep === 1 && (
-                <div className="dd-modal-input-group">
+                <div
+                  className="dd-modal-input-group"
+                  onClick={() => deleteInputRef.current?.focus()}
+                >
                   <label className="dd-modal-label">
                     第 1 关 · 为防止误删，请<b>手动完整输入</b>项目全名 <b>{deleteTarget.name}</b> 进行确认：
                   </label>

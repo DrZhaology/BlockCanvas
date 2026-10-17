@@ -3,6 +3,7 @@ import { useUpdateBusy } from '@store/updateStore';
 import { useTasks } from '@store/taskStore';
 import { InlineTaskStrip } from './TaskButton';
 import { RESUMABLE_STATUS, type BgTask } from '@lib/taskTypes';
+import logoUrl from '@renderer/assets/logo.svg';
 
 // BlockCanvas · 更新中心（v0.4.4 第三版）
 //
@@ -365,7 +366,7 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
       <div className="update-topbar">
         <button className="fluent-back-btn" onClick={onBack} disabled={busy}>← 返回编辑器</button>
         <div className="update-brand">
-          <span className="update-brand-logo">⚡</span>
+          <img className="update-brand-logo" src={logoUrl} alt="BlockCanvas" />
           <span className="update-brand-text">BlockCanvas 更新中心</span>
         </div>
         <span className="update-topbar-plat">

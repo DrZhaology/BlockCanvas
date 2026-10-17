@@ -162,6 +162,9 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   const [altHover, setAltHover] = useState<{ id: string; edge: AltEdge | null; mode: AltMode; rect: { x: number; y: number; w: number; h: number } } | null>(null);
   const altHoverRef = useRef<typeof altHover>(null);
   altHoverRef.current = altHover;
+  // Alt 拖拽中"实时边界框"的 rAF 句柄：样式写入 → React 提交 → 下一帧量真实 rect 再画框，
+  // 保证拖动过程中橙色边界 1:1 跟手（以前拖动时框直接消失，松手才回来）
+  const altLiveRaf = useRef(0);
   const [altBadge, setAltBadge] = useState<{ x: number; y: number; text: string } | null>(null);
   // 撞到"墙"时闪一下的那条边（橙色），告诉用户"这是限制不是 BUG"
   const [wallFlash, setWallFlash] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -300,7 +303,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     return { minX, maxX, minY, maxY, barL, barR, barT, barB, snapX, snapY };
   };
 
-  const EDGE_PX = 7; // 边缘热区宽度（按住 Alt 后才生效）
+  const EDGE_PX = 7;   // 边缘热区宽度（按住 Alt 后才生效）
+  const CORNER_PX = 18; // 四角热区宽度（v0.4.4：角上要"好抓"，比边大得多 —— 以前 7px 太精确，很难命中）
   // 被标了 Alt 光标属性的元素（CSS 按 data-bc-alt 切换 resize/move/pointer 光标；
   // 因为元素光标已不在内联里，样式表能正常覆盖）
   const altTaggedRef = useRef<HTMLElement | null>(null);
@@ -315,15 +319,21 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     }
   };
 
-  /** 判断指针落在某个元素的哪条边上（贴边才算，避免整块都能拖） */
+  /** 判断指针落在某个元素的哪条边上（贴边才算，避免整块都能拖）。
+   *  四角用更大的热区（CORNER_PX），边用小的（EDGE_PX）—— 角优先判定。 */
   const edgeAt = (rect: DOMRect, x: number, y: number): AltEdge | null => {
-    const nearL = x - rect.left <= EDGE_PX;
-    const nearR = rect.right - x <= EDGE_PX;
-    const nearT = y - rect.top <= EDGE_PX;
-    const nearB = rect.bottom - y <= EDGE_PX;
-    const h = nearL ? 'l' : nearR ? 'r' : '';
-    const v = nearT ? 't' : nearB ? 'b' : '';
-    if (h && v) return (v + h) as AltEdge; // tl / tr / bl / br
+    const dL = x - rect.left;
+    const dR = rect.right - x;
+    const dT = y - rect.top;
+    const dB = rect.bottom - y;
+    // 1) 先用大热区判"角"：横纵同时进入 CORNER_PX 才算角（角上既要改宽又要改高）
+    const hCorner = dL <= CORNER_PX ? 'l' : dR <= CORNER_PX ? 'r' : '';
+    const vCorner = dT <= CORNER_PX ? 't' : dB <= CORNER_PX ? 'b' : '';
+    if (hCorner && vCorner) return (vCorner + hCorner) as AltEdge;
+    // 2) 再用小热区判"边"
+    const h = dL <= EDGE_PX ? 'l' : dR <= EDGE_PX ? 'r' : '';
+    const v = dT <= EDGE_PX ? 't' : dB <= EDGE_PX ? 'b' : '';
+    if (h && v) return (v + h) as AltEdge;
     if (h) return h as AltEdge;
     if (v) return v as AltEdge;
     return null;
@@ -432,6 +442,22 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     window.addEventListener('pointerup', onAltDragUp);
   };
 
+  /** Alt 拖拽进行中：下一帧量一次元素真实 rect，让悬停高亮框实时跟随（拖动中不再消失） */
+  const scheduleAltLiveBox = () => {
+    if (altLiveRaf.current) return;
+    altLiveRaf.current = requestAnimationFrame(() => {
+      altLiveRaf.current = 0;
+      const d = altDragRef.current;
+      if (!d) return;
+      const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
+      if (!el) return;
+      try {
+        const r = el.getBoundingClientRect();
+        setAltHover({ id: d.id, edge: d.edge, mode: d.mode, rect: { x: r.left, y: r.top, w: r.width, h: r.height } });
+      } catch { /* 忽略 */ }
+    });
+  };
+
   const onAltDragMove = (ev: PointerEvent) => {
     const d = altDragRef.current;
     if (!d) return;
@@ -494,10 +520,12 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       if (hasL) patch[d.positioned ? 'left' : 'marginLeft'] = Math.round((d.positioned ? d.startLeft : d.startMarginL) + shiftX) + 'px';
       if (hasT) patch[d.positioned ? 'top' : 'marginTop'] = Math.round((d.positioned ? d.startTop : d.startMarginT) + shiftY) + 'px';
       st.updateStyle(d.id, patch);
+      scheduleAltLiveBox();
       setAltBadge({ x: d.rect.right, y: d.rect.top, text: `${Math.round(nw)} × ${Math.round(nh)}` });
     } else if (d.mode === 'font') {
       const size = Math.max(6, Math.min(400, Math.round(d.startFont + dx / 6)));
       st.updateStyle(d.id, { fontSize: size + 'px' });
+      scheduleAltLiveBox();
       setAltBadge({ x: ev.clientX + 14, y: ev.clientY + 14, text: `字号 ${size}px` });
     } else {
       // move：定位元素改 left/top（缺省会自动补上），常规流元素改 margin；
@@ -577,6 +605,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       }
       st.updateStyle(d.id, patch);
       if (hit) flashWall(hit);
+      scheduleAltLiveBox();
       setAltBadge({ x: ev.clientX + 14, y: ev.clientY + 14, text: `${Math.round(ax)}, ${Math.round(ay)}` });
     }
   };
@@ -584,6 +613,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   const onAltDragUp = () => {
     const d = altDragRef.current;
     altDragRef.current = null;
+    if (altLiveRaf.current) { cancelAnimationFrame(altLiveRaf.current); altLiveRaf.current = 0; }
     window.removeEventListener('pointermove', onAltDragMove);
     window.removeEventListener('pointerup', onAltDragUp);
     document.body.classList.remove('bc-alt-dragging');
@@ -620,11 +650,31 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
 
   // 松开 Alt / 组件卸载 → 清掉 Alt 悬停高亮与光标标记
   useEffect(() => {
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Alt' || !e.altKey) { setAltHover(null); tagAltCursor(null, ''); }
+    // 按住 Alt 期间给 body 打标记：画布宽度手柄要让位（隐藏 + 不响应），
+    // 否则 Alt 贴边调元素时会被画布宽度的竖线手柄抢走操作（用户反馈）。
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') document.body.classList.add('bc-alt-down');
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Alt' || !e.altKey) {
+        document.body.classList.remove('bc-alt-down');
+        setAltHover(null);
+        tagAltCursor(null, '');
+      }
+    };
+    const onBlur = () => document.body.classList.remove('bc-alt-down');
+    window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    return () => { window.removeEventListener('keyup', onKeyUp); tagAltCursor(null, ''); window.clearTimeout(wallFlashTimer.current); };
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+      document.body.classList.remove('bc-alt-down');
+      tagAltCursor(null, '');
+      window.clearTimeout(wallFlashTimer.current);
+      if (altLiveRaf.current) { cancelAnimationFrame(altLiveRaf.current); altLiveRaf.current = 0; }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -907,7 +957,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       onPointerDown={onCanvasPointerDown}
       onPointerDownCapture={onWrapPointerDownCapture}
       onPointerMove={onWrapPointerMove}
-      onPointerLeave={() => setAltHover(null)}
+      onPointerLeave={() => { if (!altDragRef.current) setAltHover(null); }}
       onContextMenu={onWrapContextMenu}
       onClick={onCanvasClick}
     >
@@ -971,10 +1021,11 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
         />
       ))}
-      {/* Alt 悬停高亮：按住 Alt 后，鼠标下的元素亮出可交互边框 + 命中边提示 */}
-      {altHover && !altDragRef.current && (
+      {/* Alt 悬停高亮：按住 Alt 后，鼠标下的元素亮出可交互边框 + 命中边提示。
+          v0.4.4：拖拽过程中也持续显示（rAF 量真实 rect），橙色边界 1:1 实时跟随 —— 以前拖动时框会消失。 */}
+      {altHover && (
         <div
-          className={'bc-alt-box mode-' + altHover.mode}
+          className={'bc-alt-box mode-' + altHover.mode + (altDragRef.current ? ' is-live' : '')}
           style={{ left: altHover.rect.x, top: altHover.rect.y, width: altHover.rect.w, height: altHover.rect.h }}
         >
           {altHover.edge && <span className={'bc-alt-edge e-' + altHover.edge} />}
@@ -1182,11 +1233,8 @@ const CanvasNode = React.memo(function CanvasNode(props: {
     baseStyle.minWidth = '60px';
   }
   if (isSelected && !isInlineFrag) {
-    // 选中高亮：外圈亮蓝描边，向内 -2px 偏移，绝不向外扩张改变视觉尺寸
-    // （行内跨行元素除外——它们由 Canvas 层的合并外框负责，见 isInlineFrag）
-    baseStyle.outline = '2px solid #1e88e5';
-    baseStyle.outlineOffset = '-2px';
-    // 内圈白细线：**追加**在用户自己的 box-shadow 之前，绝不覆盖用户的阴影。
+    // 选中高亮（v0.4.4）：外框改由 CSS 按 data-bc-sel 画（两种可切换样式，见 25-v044-storage-ui.css）；
+    // 这里只保留"内圈白细线"——**追加**在用户自己的 box-shadow 之前，绝不覆盖用户的阴影。
     // （旧实现直接 baseStyle.boxShadow = 'inset ...' —— 内联样式优先级高于类名规则，
     //   结果元素一被选中，它自己的盒子阴影就"消失"了。）
     const ownShadow = (
@@ -1219,6 +1267,9 @@ const CanvasNode = React.memo(function CanvasNode(props: {
   const commonProps = {
     'data-bc-id': node.id,
     'data-bc-locked': node.locked ? '1' : '0',
+    // 选中高亮（v0.4.4）：用 data 属性 + CSS 画，不再写内联 outline ——
+    // 两种可切换样式（橙色光晕闪烁 / 蓝色细线）都在样式表里，body.bc-sel-plain 一键切换
+    'data-bc-sel': isSelected && !isInlineFrag ? '1' : undefined,
     // 类名优先原则：用户类名（或兜底 hash 类）真实挂到 DOM；用 ID 做选择器时挂 id 属性 —— 与导出一致
     className: selInfo.classAttr || undefined,
     id: selInfo.idAttr || undefined,

@@ -6,8 +6,10 @@ import {
 } from '@store/toolbarStore';
 import { HelpButton } from './HelpButton';
 import { Icon, type IconName } from './Icon';
+import logoUrl from '@renderer/assets/logo.svg';
 import { Collapse } from './Collapse';
 import { TIPS, TIPS_KEY, setTipsEnabled } from './CanvasOverlays';
+import { readSelHighlight, writeSelHighlight } from '@lib/selHighlight';
 import type { DataPathsInfo, StorageStatsInfo, StorageBreakdownInfo, StorageCategoryId } from '../global';
 
 function formatBytes(bytes: number): string {
@@ -136,6 +138,13 @@ export function Settings(props: Props) {
     try { localStorage.setItem('bc-outlines', v ? '1' : '0'); } catch {}
   };
 
+  // 选中高亮样式（v0.4.4）：橙色光晕闪烁（默认·最醒目）/ 蓝色细线（原始）
+  const [selStyle, setSelStyle] = useState<'glow' | 'plain'>(() => readSelHighlight());
+  const changeSelStyle = (v: 'glow' | 'plain') => {
+    setSelStyle(v);
+    writeSelHighlight(v);
+  };
+
   // 元素面板模式
   const [elemLabelMode, setElemLabelMode] = useState<'both' | 'zh' | 'tag'>(() => {
     try { return (localStorage.getItem('bc-elem-label-mode') as any) || 'both'; } catch { return 'both'; }
@@ -255,7 +264,7 @@ export function Settings(props: Props) {
             ← 返回编辑器
           </button>
           <div className="fluent-app-brand">
-            <span className="fluent-brand-logo">⚡</span>
+            <img className="fluent-brand-logo" src={logoUrl} alt="BlockCanvas" />
             <span className="fluent-brand-text">BlockCanvas 设置</span>
           </div>
         </div>
@@ -328,6 +337,29 @@ export function Settings(props: Props) {
                     />
                     <span className="fluent-slider" />
                   </label>
+                </div>
+              </div>
+
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="sparkle" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">选中元素的高亮样式</div>
+                  <div className="fluent-card-desc">
+                    点选元素后画布上的"选中框"用哪种画法：
+                    <b>橙色光晕 + 呼吸闪烁</b>（默认，复杂页面里也一眼可见）或
+                    <b>蓝色细线</b>（v0.4.4 之前的原始样式，安静无动效）。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <select
+                    className="fluent-select"
+                    value={selStyle}
+                    onChange={(e) => changeSelStyle(e.target.value as 'glow' | 'plain')}
+                    title="切换画布选中框的样式"
+                  >
+                    <option value="glow">橙色光晕 + 闪烁（醒目）</option>
+                    <option value="plain">蓝色细线（原始）</option>
+                  </select>
                 </div>
               </div>
 
@@ -778,7 +810,7 @@ export function Settings(props: Props) {
               <div className="fluent-group-title">软件信息</div>
               <div className="fluent-about-box">
                 <div className="fluent-about-hero">
-                  <span className="fluent-hero-logo">⚡</span>
+                  <img className="fluent-hero-logo" src={logoUrl} alt="BlockCanvas" />
                   <div className="fluent-hero-text">
                     <div className="fluent-hero-title">BlockCanvas 积木画布</div>
                     <div className="fluent-hero-ver">版本 {appVersion || '…'}</div>

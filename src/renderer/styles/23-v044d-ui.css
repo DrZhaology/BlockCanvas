@@ -204,19 +204,22 @@ body.bc-alt-dragging { user-select: none; }
 body.bc-alt-fonting, body.bc-alt-fonting *,
 body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
 
-/* Alt 悬停高亮框（fixed，跟随元素 client rect） */
+/* Alt 悬停高亮框（fixed，跟随元素 client rect）
+   v0.4.4：resize 模式由蓝改橙 —— 用户语境里"Alt 的边界"就是橙色（与撞墙提示/选中框统一）；
+   拖拽中（.is-live）转实线，配合 rAF 实时量 rect = 1:1 跟手 */
 .bc-alt-box {
   position: fixed;
   z-index: 88;
   pointer-events: none;
-  border: 1.5px dashed var(--accent);
+  border: 1.5px dashed #f97316;
   border-radius: 2px;
-  box-shadow: 0 0 0 1px rgba(30, 136, 229, 0.25) inset;
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.22) inset;
 }
+.bc-alt-box.is-live { border-style: solid; box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.35) inset; }
 .bc-alt-box.mode-font { border-color: #f59e0b; border-style: solid; }
 .bc-alt-box.mode-move { border-color: #10b981; border-style: solid; }
 /* 命中边的加粗提示（8 条边） */
-.bc-alt-edge { position: absolute; background: var(--accent); border-radius: 2px; }
+.bc-alt-edge { position: absolute; background: #f97316; border-radius: 2px; }
 .bc-alt-edge.e-l { left: -3px; top: 0; width: 6px; height: 100%; }
 .bc-alt-edge.e-r { right: -3px; top: 0; width: 6px; height: 100%; }
 .bc-alt-edge.e-t { top: -3px; left: 0; height: 6px; width: 100%; }

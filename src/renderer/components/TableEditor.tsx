@@ -12,6 +12,7 @@ import { HelpButton } from './HelpButton';
 import { ColorPicker, ColorField } from './ColorPicker';
 import { useWheelAdjust } from '@lib/wheelAdjust';
 import { isValidChildSelector, cssTextToObject } from '@lib/styleClass';
+import logoUrl from '@renderer/assets/logo.svg';
 import { exportHTML } from '@lib/exporter';
 
 // ============================================================================
@@ -739,7 +740,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
       <div className="table-topbar">
         <button className="fluent-back-btn" onClick={onBack}>← 返回编辑器</button>
         <div className="update-brand">
-          <span className="update-brand-logo">▦</span>
+          <img className="update-brand-logo" src={logoUrl} alt="BlockCanvas" />
           <span className="update-brand-text">表格编辑器</span>
         </div>
         <span className="table-meta">

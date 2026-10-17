@@ -23,6 +23,7 @@ import { withViewTransition } from '@lib/viewTransition';
 import { useHorizontalWheel } from '@lib/hScroll';
 import { DEVICE_LIST, widthToBreakpoint, type DeviceId } from '@lib/device';
 import { tokensToRootCss } from '@lib/designTokens';
+import { applySelHighlightClass } from '@lib/selHighlight';
 
 // BlockCanvas · 主界面
 // - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
@@ -189,6 +190,11 @@ export default function App() {
     const onPluginsChanged = () => refreshPlugins();
     window.addEventListener('bc:plugins-changed', onPluginsChanged);
     return () => window.removeEventListener('bc:plugins-changed', onPluginsChanged);
+  }, []);
+
+  // 3b. 启动时恢复"选中高亮样式"（橙色光晕闪烁 / 蓝色细线，设置里可切换）
+  useEffect(() => {
+    applySelHighlightClass();
   }, []);
 
   // 4. 启动延迟检测更新（5秒后静默检查，有更新则打开软件内更新中心页面）

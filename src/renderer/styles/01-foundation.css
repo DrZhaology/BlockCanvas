@@ -124,6 +124,15 @@ body {
   pointer-events: auto;
 }
 
+/* 数值框占位"穿模"修复（v0.4.4）：margin/padding 等灰色的 0 占位符，
+   聚焦后光标竖线正好从"0"字形中间穿过去，非常难看。
+   规则：**聚焦后隐藏占位符**（未聚焦时照常显示灰色的 0 / auto / 提示文字）——
+   这也是各家设计系统的通行做法：占位符只在"空且未聚焦"时有意义。 */
+.app input:focus::placeholder,
+.app textarea:focus::placeholder {
+  color: transparent;
+}
+
 /* 光标形状：:where() 让 :not() 链不贡献特异性，各处可按需覆盖 */
 .app input:where(:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"])),
 .app textarea {
