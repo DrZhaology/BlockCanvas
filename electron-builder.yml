@@ -33,6 +33,12 @@ files:
 
 asar: true
 
+# 窗口/任务栏图标：把三色 Logo 复制到 resources/icon.png。
+# build/** 不进 asar，主进程在打包态从 resources 读它（见 main.ts createWindow）。
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+
 win:
   # 用 build/icon.png（256×256）自动生成 exe 图标
   icon: build/icon.png

@@ -25,6 +25,7 @@ import { DEVICE_LIST, widthToBreakpoint, type DeviceId } from '@lib/device';
 import { tokensToRootCss } from '@lib/designTokens';
 import { applySelHighlightClass } from '@lib/selHighlight';
 import { showToast, type ToastType } from '@lib/toast';
+import { requestPropFocus } from '@lib/propFocus';
 import { EmptyHome } from '@comp/EmptyHome';
 
 // BlockCanvas · 主界面
@@ -159,6 +160,9 @@ export default function App() {
   }, [tokens]);
 
   // 1. 启动时像 Windows 11 记事本一样秒级恢复上次会话
+  // v0.4.4 修：恢复是异步的 —— 如果先渲染首页、再恢复出标签，用户会看到"首页一闪 → 画布"。
+  // 这里加一个 ready 闸门：会话读回来之前只显示纯背景，读完再一次性渲染正确视图。
+  const [sessionReady, setSessionReady] = useState(false);
   useEffect(() => {
     (async () => {
       try {
@@ -168,6 +172,8 @@ export default function App() {
         }
       } catch (e) {
         console.warn('恢复会话失败:', e);
+      } finally {
+        setSessionReady(true);
       }
     })();
   }, []);
@@ -399,7 +405,14 @@ export default function App() {
     };
     window.addEventListener('bc:open-table-editor', onOpenTable);
     // 中键搜索属性 → 切到「属性」页签并回到编辑器（定位/高亮由 Inspector 负责）
-    const onFocusProp = () => { setRightTab('inspector'); switchView('editor'); };
+    // 中键属性搜索：先把请求写进缓冲（lib/propFocus），再切页签。
+    // 这样无论右侧当前在「图层」还是「页面 / 类名 / 变量」，Inspector 挂载后都能补上定位。
+    const onFocusProp = (e: Event) => {
+      const d = (e as CustomEvent).detail as { key?: string; add?: boolean } | undefined;
+      if (d?.key) requestPropFocus({ key: d.key, add: d.add !== false });
+      setRightTab('inspector');
+      switchView('editor');
+    };
     window.addEventListener('bc:focus-prop', onFocusProp);
     window.addEventListener('menu:new-tab', onNewTab);
     window.addEventListener('menu:save-project', onSaveProject);
@@ -454,6 +467,11 @@ export default function App() {
       offs.forEach((off) => off && off());
     };
   }, [setLayout, switchView, openUpdateCenter]);
+
+  // 会话还没读回来：先只铺一层背景，避免"首页一闪 → 画布"的跳变
+  if (!sessionReady) {
+    return <div className="app bc-booting" />;
+  }
 
   return (
     <div className="app">

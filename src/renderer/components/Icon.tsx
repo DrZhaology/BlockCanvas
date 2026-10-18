@@ -393,14 +393,16 @@ const P: Record<IconName, ReactNode> = {
   ),
   tablet: (
     <>
-      <rect x="5.5" y="3.5" width="13" height="17" rx="2" />
-      <path d="M10.5 17.5h3" />
+      <rect x="4.5" y="3.5" width="15" height="17" rx="2.2" />
+      <path d="M10 6.2h4" />
+      <circle cx="12" cy="17.4" r="0.9" fill="currentColor" stroke="none" />
     </>
   ),
   phone: (
     <>
-      <rect x="7.5" y="3.5" width="9" height="17" rx="2" />
-      <path d="M10.8 17.5h2.4" />
+      <rect x="7.8" y="3" width="8.4" height="18" rx="2.2" />
+      <path d="M10.6 5.4h2.8" />
+      <path d="M10.5 18.4h3" />
     </>
   ),
   monitor: (
@@ -411,8 +413,9 @@ const P: Record<IconName, ReactNode> = {
   ),
   responsive: (
     <>
-      <path d="M9.5 5h7v11.5M11.5 20.5h-7" />
-      <path d="m6.5 17.5-3-3 3-3M17.5 6.5l3 3-3 3" />
+      <rect x="3.2" y="6" width="17.6" height="12" rx="2" />
+      <path d="M7.4 12h9.2" />
+      <path d="m10 9.4-2.6 2.6L10 14.6M14 9.4l2.6 2.6L14 14.6" />
     </>
   ),
   // —— 文件与结构 ——

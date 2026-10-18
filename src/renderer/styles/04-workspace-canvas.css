@@ -123,19 +123,44 @@
 /* （已废弃）旧的「手机外框」做法是把 .canvas 本身变成一台手机 —— 画布会随内容
    越长越长，手机就被拉成一根细条。现改为固定高度的 .canvas-device 边框，见下。 */
 
-/* Inspector 响应式断点切换栏 */
+/* Inspector 响应式断点切换栏：三个设备分段 + 右侧一枚小的「自适应」按钮 */
 .inspector-bp-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 0 10px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 10px;
 }
 .inspector-bp-tabs {
+  flex: 1;
+  min-width: 0;
   display: flex;
   background: var(--panel-tint);
   padding: 3px;
   border-radius: 6px;
   gap: 3px;
 }
+/* 自适应：独立小按钮，不参与分段高亮（设备高亮由画布实际宽度决定） */
+.bp-auto-btn {
+  flex: none;
+  width: 30px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  background: var(--panel-tint);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.bp-auto-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--hover-accent);
+}
+.bp-auto-btn:active { transform: scale(0.94); }
 .bp-tab-btn {
   flex: 1;
   height: 26px;

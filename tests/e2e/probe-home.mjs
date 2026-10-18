@@ -93,14 +93,16 @@ async function main() {
 
   await win.locator('.eh-tab', { hasText: '渐变' }).click();
   await sleep(300);
-  ok('渐变页有实时预览条', (await win.locator('.eh-gradient-preview').count()) === 1);
-  await win.locator('.eh-apply').click();
-  await sleep(300);
+  ok('渐变页用的是画布同款渐变编辑器', (await win.locator('.eh-panel .grad-editor').count()) === 1);
+  // 点「径向」分段 → onChange 实时写回背景（首页没有撤销栈，改了就生效）
+  const radialBtn = win.locator('.eh-panel .grad-seg-btn', { hasText: '径向' }).first();
+  if (await radialBtn.count()) await radialBtn.click();
+  await sleep(400);
   const grad = await win.evaluate(() => ({
     css: getComputedStyle(document.querySelector('.empty-home')).backgroundImage,
     saved: JSON.parse(localStorage.getItem('bc-empty-home-bg') || 'null')
   }));
-  ok('应用渐变 → 背景是 linear-gradient 且已保存', /linear-gradient/.test(grad.css) && grad.saved?.kind === 'gradient', grad.css.slice(0, 50));
+  ok('改渐变 → 背景实时变化且已保存', /gradient/.test(grad.css) && grad.saved?.kind === 'gradient', grad.css.slice(0, 50));
   await win.locator('.eh-save-row .eh-input').fill('探针背景');
   await win.locator('.eh-save-row .eh-mini').click();
   await sleep(300);
@@ -109,12 +111,30 @@ async function main() {
   await sleep(300);
   ok('「保存」把当前背景存成「我的背景」', (await win.locator('.eh-saved').count()) === 1);
 
+  // 图片：填路径即时生效（不再有「应用」按钮），并渲染出媒体层
   await win.locator('.eh-tab', { hasText: '图片' }).click();
   await sleep(300);
-  ok('图片页：未填路径时「应用」禁用', await win.locator('.eh-apply').isDisabled());
+  ok('图片页没有「应用」按钮（改成实时生效）', (await win.locator('.eh-apply').count()) === 0);
+  await win.locator('.eh-panel .eh-input').first().fill('C:/definitely/not/exist/bg.png');
+  await sleep(400);
+  const imgState = await win.evaluate(() => ({
+    saved: JSON.parse(localStorage.getItem('bc-empty-home-bg') || 'null'),
+    media: document.querySelectorAll('.empty-home .eh-media').length
+  }));
+  ok('填图片路径 → 立刻切到图片背景并渲染媒体层',
+    imgState.saved?.kind === 'image' && imgState.media === 1, JSON.stringify(imgState));
+
+  // 视频页同理（这里只验证"填了就生效"，不依赖真实视频文件）
   await win.locator('.eh-tab', { hasText: '视频' }).click();
   await sleep(300);
-  ok('视频页：未填路径时「应用」禁用', await win.locator('.eh-apply').isDisabled());
+  await win.locator('.eh-panel .eh-input').first().fill('C:/definitely/not/exist/bg.mp4');
+  await sleep(400);
+  const vidState = await win.evaluate(() => ({
+    saved: JSON.parse(localStorage.getItem('bc-empty-home-bg') || 'null'),
+    video: document.querySelectorAll('.empty-home video.eh-video').length
+  }));
+  ok('填视频路径 → 立刻切到视频背景并渲染 video 层',
+    vidState.saved?.kind === 'video' && vidState.video === 1, JSON.stringify(vidState));
 
   // 5. 搜索：文档结果
   await win.keyboard.press('Escape');
@@ -135,13 +155,67 @@ async function main() {
   ok('点「新建项目」→ 进入编辑器（工具栏出现）', (await win.locator('.toolbar').count()) === 1);
   ok('首页已卸载', (await win.locator('.empty-home').count()) === 0);
 
+  // 6b. 存一个真实工程，再从首页「最近打开」把它打开（用户反馈的"打开项目整窗变白"路径）
+  const savePath = resolve(DATA_DIR, 'projects', 'home-probe.bcproj');
+  const savedOk = await win.evaluate(async (p) => {
+    const st = window.__sceneStore.getState();
+    st.addElement('h1', null);
+    const res = await window.bc.saveProject({ name: '首页探针工程', scene: window.__sceneStore.getState().scene }, false, p);
+    const ts = window.__tabStore.getState();
+    if (res.ok) ts.setTabSaved(ts.activeTabId, p, '首页探针工程');
+    return res.ok;
+  }, savePath);
+  await sleep(400);
+  ok('准备：保存了一个真实工程', savedOk === true);
+
   // 7. 关掉唯一标签 → 回到首页
   await win.locator('.tab-item.active').hover();
   await win.locator('.tab-item.active .tab-close-btn').click();
-  await sleep(700);
+  await sleep(800);
   ok('关掉最后一个标签 → 回到首页', (await win.locator('.empty-home').count()) === 1);
 
-  ok('无 console / page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));
+  // 8. 首页「最近打开」→ 打开工程：不能整窗变白
+  const cardCount = await win.locator('.eh-card').count();
+  ok('首页「最近打开」列出了刚才的工程', cardCount >= 1, 'cards=' + cardCount);
+  if (cardCount > 0) {
+    await win.locator('.eh-card').first().click();
+    await sleep(1800);
+    const opened = await win.evaluate(() => ({
+      home: document.querySelectorAll('.empty-home').length,
+      toolbar: document.querySelectorAll('.toolbar').length,
+      canvasChildren: document.querySelector('.canvas')?.children.length ?? -1,
+      bodyBg: getComputedStyle(document.body).backgroundColor,
+      rootText: (document.querySelector('#root')?.textContent || '').slice(0, 40)
+    }));
+    ok('从首页打开工程 → 进入编辑器且画布有内容（不是白屏）',
+      opened.home === 0 && opened.toolbar === 1 && opened.canvasChildren > 0 && opened.rootText.length > 0,
+      JSON.stringify(opened));
+  }
+
+  // 9. 「打开工程」等原生对话框期间，首页背景不能变透明（以前整页淡出 → 看起来全白）
+  await win.evaluate(() => {
+    const ts = window.__tabStore.getState();
+    if (ts.activeTabId) ts.closeTab(ts.activeTabId);
+  });
+  await sleep(700);
+  await app.evaluate(({ dialog }) => {
+    // 让对话框一直不返回，模拟"用户正停在文件选择框"
+    dialog.showOpenDialog = () => new Promise(() => {});
+  });
+  await win.locator('.empty-home .eh-btn').first().click();
+  await sleep(600);
+  const leaving = await win.evaluate(() => {
+    const h = document.querySelector('.empty-home');
+    if (!h) return null;
+    const cs = getComputedStyle(h);
+    return { opacity: cs.opacity, bg: cs.backgroundColor, cls: h.className };
+  });
+  ok('打开工程（对话框等待中）首页背景保持不透明，不会整窗变白',
+    !!leaving && leaving.opacity === '1' && leaving.bg !== 'rgba(0, 0, 0, 0)', JSON.stringify(leaving));
+
+  // 图片 / 视频这两步故意指向不存在的文件 → 浏览器会打 404，属于预期，不计入错误
+  const realErrs = errs.filter((t) => !/Failed to load resource/.test(t));
+  ok('无 console / page 错误', realErrs.length === 0, realErrs.slice(0, 2).join(' | '));
 
   await app.close();
   console.log(`\n===== 首页探针：${pass} 通过 / ${fail} 失败 =====`);

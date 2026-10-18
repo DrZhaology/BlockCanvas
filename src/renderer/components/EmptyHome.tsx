@@ -2,20 +2,22 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import logoUrl from '@renderer/assets/logo.svg';
 import { readPersisted, writePersisted } from '@lib/usePersisted';
 import { Icon } from './Icon';
+import { GradientEditor } from './GradientEditor';
 import { DOC_INDEX, searchDocs, type DocHit } from '@lib/docSearch';
 import { useTabStore } from '@store/tabStore';
 import { showToast } from '@lib/toast';
 import type { ProjectFileInfo } from '../global';
 
 // ============================================================================
-// BlockCanvas · 首页（v0.4.5）
+// BlockCanvas · 首页
 // ----------------------------------------------------------------------------
 // 关掉所有项目标签后进入这里 —— 做成浏览器"新标签页"的样子：
 //   · 组件统一偏上：Logo / 标题 / 大搜索框 / 快捷入口 / 最近项目
 //   · 搜索框同时搜「本地工程」和「三份内置文档」，回车或点击直达
-//   · 右上角只有一枚 SVG 齿轮，点开是背景设置（预设 / 渐变 / 图片 / 视频）
+//   · 右上角只有一枚 SVG 齿轮，点开是背景设置
+//   · 背景 = 预设 / 渐变（复用画布同款渐变编辑器）/ 图片 / 视频，**改动实时生效**
+//   · 文字颜色按背景亮度自动切换（视频每 1.8s 采样一次），深色壁纸也看得清
 //   · 背景是"软件外观偏好"，存 localStorage，不进工程文件
-//   · 离开首页时淡出，回来时淡入；视频背景在窗口不可见时自动暂停（不烧 GPU）
 // ============================================================================
 
 const BG_KEY = 'bc-empty-home-bg';
@@ -23,9 +25,9 @@ const SAVED_KEY = 'bc-empty-home-saved';
 
 type BgSpec =
   | { kind: 'preset'; value: string }
-  | { kind: 'gradient'; from: string; to: string; angle: number }
-  | { kind: 'image'; src: string; dim: number }
-  | { kind: 'video'; src: string; dim: number };
+  | { kind: 'gradient'; css: string }
+  | { kind: 'image'; src: string; dim: number; blur: number }
+  | { kind: 'video'; src: string; dim: number; blur: number };
 
 interface SavedBg { id: string; name: string; spec: BgSpec }
 
@@ -41,6 +43,7 @@ const BG_PRESETS: { label: string; value: string }[] = [
 ];
 
 const DEFAULT_BG: BgSpec = { kind: 'preset', value: BG_PRESETS[0].value };
+const DEFAULT_GRADIENT = 'linear-gradient(160deg, #dbeafe 0%, #ffffff 100%)';
 
 /** 本地路径 → bc-img://（与画布同一套协议；相对路径由主进程按 data / app 目录解析） */
 function mediaSrc(src: string): string {
@@ -54,9 +57,15 @@ function mediaSrc(src: string): string {
   return 'bc-img://file/' + encodeURIComponent(s);
 }
 
+/** 需要走自定义协议（本地文件）才加 crossorigin，避免把普通 https 图片/视频搞挂 */
+function isLocalMedia(src: string): boolean {
+  const s = (src || '').trim();
+  return !/^https?:\/\//i.test(s) && !/^(data:|blob:)/i.test(s);
+}
+
 function bgCss(spec: BgSpec): string {
   if (spec.kind === 'preset') return spec.value;
-  if (spec.kind === 'gradient') return `linear-gradient(${spec.angle}deg, ${spec.from}, ${spec.to})`;
+  if (spec.kind === 'gradient') return spec.css || DEFAULT_GRADIENT;
   return 'var(--bg)';
 }
 
@@ -64,7 +73,17 @@ function loadBg(): BgSpec {
   const raw = readPersisted<unknown>(BG_KEY, null);
   if (!raw) return DEFAULT_BG;
   if (typeof raw === 'string') return { kind: 'preset', value: raw }; // 旧版只存一个 CSS 值
-  if (typeof raw === 'object' && raw && 'kind' in (raw as Record<string, unknown>)) return raw as BgSpec;
+  if (typeof raw === 'object' && raw && 'kind' in (raw as Record<string, unknown>)) {
+    const s = raw as Record<string, any>;
+    // 旧版渐变 {from,to,angle} → 新的 css 字符串
+    if (s.kind === 'gradient' && !s.css && s.from && s.to) {
+      return { kind: 'gradient', css: `linear-gradient(${s.angle ?? 160}deg, ${s.from} 0%, ${s.to} 100%)` };
+    }
+    if (s.kind === 'image' || s.kind === 'video') {
+      return { kind: s.kind, src: String(s.src ?? ''), dim: Number(s.dim) || 0, blur: Number(s.blur) || 0 };
+    }
+    return s as BgSpec;
+  }
   return DEFAULT_BG;
 }
 
@@ -79,6 +98,49 @@ function normPath(p: string) {
   return String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
 }
 
+/** 从 CSS 颜色（hex / rgb）里估一个平均亮度（0~1），用于自动切换文字颜色 */
+function cssLuminance(css: string): number | null {
+  const lums: number[] = [];
+  const toLum = (r: number, g: number, b: number) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  for (const m of css.matchAll(/#([0-9a-f]{3}|[0-9a-f]{6})\b/gi)) {
+    let h = m[1];
+    if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    lums.push(toLum(r, g, b));
+  }
+  for (const m of css.matchAll(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/gi)) {
+    lums.push(toLum(Number(m[1]), Number(m[2]), Number(m[3])));
+  }
+  if (lums.length === 0) return null;
+  return lums.reduce((a, b) => a + b, 0) / lums.length;
+}
+
+/** 把一帧画面缩到 24×24 取平均亮度；取不到（跨域/未加载）返回 null */
+function frameLuminance(source: CanvasImageSource): number | null {
+  try {
+    const c = document.createElement('canvas');
+    c.width = 24;
+    c.height = 24;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(source, 0, 0, 24, 24);
+    const d = ctx.getImageData(0, 0, 24, 24).data;
+    let sum = 0;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const a = d[i + 3] / 255;
+      if (a <= 0) continue;
+      sum += ((0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255) * a;
+      n += 1;
+    }
+    return n ? sum / n : null;
+  } catch {
+    return null; // canvas 被跨域污染
+  }
+}
+
 type PanelTab = 'preset' | 'gradient' | 'image' | 'video';
 
 export function EmptyHome(props: {
@@ -91,15 +153,16 @@ export function EmptyHome(props: {
   const [panelOpen, setPanelOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>('preset');
   const [leaving, setLeaving] = useState(false);
+  // 深色背景 → 文字/玻璃控件自动转白
+  const [onDark, setOnDark] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // —— 背景草稿（面板里改，点「应用」才落到首页）——
-  const [gFrom, setGFrom] = useState(() => (bg.kind === 'gradient' ? bg.from : '#dbeafe'));
-  const [gTo, setGTo] = useState(() => (bg.kind === 'gradient' ? bg.to : '#ffffff'));
-  const [gAngle, setGAngle] = useState(() => (bg.kind === 'gradient' ? bg.angle : 160));
+  // 图片 / 视频的草稿参数（输入即生效，所以直接跟 bg 同步）
   const [imgSrc, setImgSrc] = useState(() => (bg.kind === 'image' ? bg.src : ''));
   const [vidSrc, setVidSrc] = useState(() => (bg.kind === 'video' ? bg.src : ''));
   const [dim, setDim] = useState(() => (bg.kind === 'image' || bg.kind === 'video' ? bg.dim : 12));
+  const [blur, setBlur] = useState(() => (bg.kind === 'image' || bg.kind === 'video' ? bg.blur : 0));
+  const [gradCss, setGradCss] = useState(() => (bg.kind === 'gradient' ? bg.css : DEFAULT_GRADIENT));
   const [saveName, setSaveName] = useState('');
 
   // —— 搜索 ——
@@ -114,15 +177,15 @@ export function EmptyHome(props: {
     window.bc.listProjects().then(setProjects).catch(() => setProjects([]));
   }, []);
 
-  // 离开首页：先淡出，再执行动作（用户要的"切换到别的页面有过渡动画"）
+  // 离开首页：先淡出内容，再执行动作（背景保持不动，避免"窗口全白"）
   const leave = (action: () => void) => {
     if (leaving) return;
     setLeaving(true);
     window.setTimeout(action, 150);
   };
 
-  // 「打开工程」会弹原生文件对话框：用户取消时页面还停在首页，
-  // 但已经进入 is-leaving（透明 + 不可点）。窗口重新获得焦点（对话框关闭）时恢复。
+  // 「打开工程」会弹原生文件对话框：取消时页面还停在首页，但已进入 is-leaving。
+  // 窗口重新获得焦点（对话框关闭）时恢复可交互。
   useEffect(() => {
     const onFocus = () => setLeaving(false);
     window.addEventListener('focus', onFocus);
@@ -160,7 +223,7 @@ export function EmptyHome(props: {
     return () => document.removeEventListener('mousedown', onDown, true);
   }, [focused]);
 
-  // 视频背景：窗口不可见 / 首页卸载时暂停，避免后台空转
+  // —— 视频背景：窗口不可见 / 首页卸载时暂停，避免后台空转 ——
   const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     if (bg.kind !== 'video') return;
@@ -173,6 +236,44 @@ export function EmptyHome(props: {
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [bg.kind]);
+
+  // —— 文字颜色自动反色 ——
+  // 预设 / 渐变：直接解析颜色算亮度
+  useEffect(() => {
+    if (bg.kind !== 'preset' && bg.kind !== 'gradient') return;
+    const lum = cssLuminance(bgCss(bg));
+    if (lum !== null) setOnDark(lum < 0.5);
+  }, [bg]);
+  // 图片：加载后采样一次
+  useEffect(() => {
+    if (bg.kind !== 'image' || !bg.src.trim()) return;
+    let alive = true;
+    const img = new Image();
+    if (isLocalMedia(bg.src)) img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (!alive) return;
+      const lum = frameLuminance(img);
+      if (lum !== null) setOnDark(lum < 0.5);
+    };
+    img.onerror = () => { if (alive) setOnDark(true); };
+    img.src = mediaSrc(bg.src);
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bg.kind === 'image' ? bg.src : '', bg.kind]);
+  // 视频：每 1.8s 采一帧（成本很低：24×24 缩放）
+  useEffect(() => {
+    if (bg.kind !== 'video') return;
+    const tick = () => {
+      const v = videoRef.current;
+      if (!v || v.readyState < 2) return;
+      const lum = frameLuminance(v);
+      if (lum !== null) setOnDark(lum < 0.5);
+    };
+    const t = window.setInterval(tick, 1800);
+    window.setTimeout(tick, 600);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bg.kind === 'video' ? bg.src : '', bg.kind]);
 
   // —— 搜索结果 ——
   const q = query.trim();
@@ -250,23 +351,32 @@ export function EmptyHome(props: {
     try {
       const res = await window.bc.pickMediaSrc(kind);
       if (!res?.ok || !res.path) return;
-      if (kind === 'image') setImgSrc(res.path);
-      else setVidSrc(res.path);
+      if (kind === 'image') {
+        setImgSrc(res.path);
+        applyBg({ kind: 'image', src: res.path, dim, blur });
+        setTab('image');
+      } else {
+        setVidSrc(res.path);
+        applyBg({ kind: 'video', src: res.path, dim, blur });
+        setTab('video');
+      }
     } catch {
       showToast('选择文件失败', 'err');
     }
   };
 
+  const setImage = (src: string, d = dim, b = blur) => {
+    setImgSrc(src);
+    if (src.trim()) applyBg({ kind: 'image', src: src.trim(), dim: d, blur: b });
+  };
+  const setVideo = (src: string, d = dim, b = blur) => {
+    setVidSrc(src);
+    if (src.trim()) applyBg({ kind: 'video', src: src.trim(), dim: d, blur: b });
+  };
+
   const saveCurrent = () => {
     const name = saveName.trim() || `我的背景 ${saved.length + 1}`;
-    const spec: BgSpec = tab === 'gradient'
-      ? { kind: 'gradient', from: gFrom, to: gTo, angle: gAngle }
-      : tab === 'image'
-        ? { kind: 'image', src: imgSrc.trim(), dim }
-        : tab === 'video'
-          ? { kind: 'video', src: vidSrc.trim(), dim }
-          : bg;
-    const item: SavedBg = { id: 'bg-' + Date.now().toString(36), name, spec };
+    const item: SavedBg = { id: 'bg-' + Date.now().toString(36), name, spec: bg };
     const next = [item, ...saved].slice(0, 24);
     setSaved(next);
     writePersisted(SAVED_KEY, next);
@@ -282,14 +392,23 @@ export function EmptyHome(props: {
 
   const isMedia = bg.kind === 'image' || bg.kind === 'video';
   const media = bg.kind === 'image' ? bg.src : bg.kind === 'video' ? bg.src : '';
+  const mediaDim = bg.kind === 'image' || bg.kind === 'video' ? bg.dim : 0;
+  const mediaBlur = bg.kind === 'image' || bg.kind === 'video' ? bg.blur : 0;
 
   return (
     <div
-      className={'empty-home' + (leaving ? ' is-leaving' : '')}
+      className={'empty-home' + (leaving ? ' is-leaving' : '') + (onDark ? ' is-dark-bg' : '')}
       style={{ background: bgCss(bg) }}
     >
       {bg.kind === 'image' && (
-        <div className="eh-media" style={{ backgroundImage: `url("${mediaSrc(media)}")` }} />
+        <div
+          className="eh-media"
+          style={{
+            backgroundImage: `url("${mediaSrc(media)}")`,
+            filter: mediaBlur > 0 ? `blur(${mediaBlur}px)` : undefined,
+            transform: mediaBlur > 0 ? 'scale(1.04)' : undefined
+          }}
+        />
       )}
       {bg.kind === 'video' && (
         <video
@@ -301,9 +420,15 @@ export function EmptyHome(props: {
           loop
           playsInline
           preload="auto"
+          disablePictureInPicture
+          crossOrigin={isLocalMedia(media) ? 'anonymous' : undefined}
+          style={{
+            filter: mediaBlur > 0 ? `blur(${mediaBlur}px)` : undefined,
+            transform: mediaBlur > 0 ? 'scale(1.04)' : undefined
+          }}
         />
       )}
-      {isMedia && <div className="eh-dim" style={{ opacity: (bg.kind === 'image' || bg.kind === 'video' ? bg.dim : 0) / 100 }} />}
+      {isMedia && <div className="eh-dim" style={{ opacity: mediaDim / 100 }} />}
 
       {/* 右上角：只有一枚齿轮，不写文字 */}
       <div className="eh-settings" ref={panelRef}>
@@ -369,10 +494,21 @@ export function EmptyHome(props: {
                         <span
                           key={s.id}
                           className="eh-swatch eh-saved"
-                          style={{ background: bgCss(s.spec) }}
                           title={s.name}
+                          style={s.spec.kind === 'preset' || s.spec.kind === 'gradient'
+                            ? { background: bgCss(s.spec) }
+                            : undefined}
                           onClick={() => applyBg(s.spec)}
                         >
+                          {s.spec.kind === 'image' && (
+                            <i className="eh-saved-media" style={{ backgroundImage: `url("${mediaSrc(s.spec.src)}")` }} />
+                          )}
+                          {s.spec.kind === 'video' && (
+                            <>
+                              <video className="eh-saved-media" src={mediaSrc(s.spec.src)} muted preload="metadata" />
+                              <span className="eh-saved-play"><Icon name="play" size={9} /></span>
+                            </>
+                          )}
                           <button
                             className="eh-saved-x"
                             title="删除这个背景"
@@ -389,33 +525,17 @@ export function EmptyHome(props: {
             )}
 
             {tab === 'gradient' && (
-              <>
-                <div className="eh-gradient-preview" style={{ background: `linear-gradient(${gAngle}deg, ${gFrom}, ${gTo})` }} />
-                <div className="eh-row">
-                  <label className="eh-color">
-                    <input type="color" value={gFrom} onChange={(e) => setGFrom(e.target.value)} />
-                    <span>起色</span>
-                  </label>
-                  <label className="eh-color">
-                    <input type="color" value={gTo} onChange={(e) => setGTo(e.target.value)} />
-                    <span>止色</span>
-                  </label>
-                </div>
-                <div className="eh-row">
-                  <input
-                    className="eh-range"
-                    type="range"
-                    min={0}
-                    max={360}
-                    step={1}
-                    value={gAngle}
-                    onChange={(e) => setGAngle(Number(e.target.value))}
-                  />
-                  <span className="eh-val">{gAngle}°</span>
-                </div>
-                <button className="eh-apply" onClick={() => applyBg({ kind: 'gradient', from: gFrom, to: gTo, angle: gAngle })}>
-                  应用这个渐变
-                </button>
+              <div className="eh-gradient-wrap">
+                <GradientEditor
+                  value={bg.kind === 'gradient' ? bg.css : gradCss}
+                  onChange={(css) => {
+                    setGradCss(css);
+                    applyBg({ kind: 'gradient', css });
+                  }}
+                  onCommit={() => { /* 首页没有撤销栈，实时生效即可 */ }}
+                  onRemove={() => applyBg(DEFAULT_BG)}
+                  scope="background"
+                />
                 <div className="eh-save-row">
                   <input
                     className="eh-input"
@@ -425,7 +545,7 @@ export function EmptyHome(props: {
                   />
                   <button className="eh-mini" onClick={saveCurrent}>保存</button>
                 </div>
-              </>
+              </div>
             )}
 
             {tab === 'image' && (
@@ -435,7 +555,7 @@ export function EmptyHome(props: {
                     className="eh-input"
                     placeholder="相对路径 / 绝对路径 / https 链接"
                     value={imgSrc}
-                    onChange={(e) => setImgSrc(e.target.value)}
+                    onChange={(e) => setImage(e.target.value)}
                   />
                   <button className="eh-mini" onClick={() => pickFile('image')}>选择</button>
                 </div>
@@ -447,21 +567,27 @@ export function EmptyHome(props: {
                     min={0}
                     max={80}
                     value={dim}
-                    onChange={(e) => setDim(Number(e.target.value))}
+                    onChange={(e) => { const v = Number(e.target.value); setDim(v); setImage(imgSrc, v, blur); }}
                   />
                   <span className="eh-val">{dim}%</span>
                 </div>
-                <button
-                  className="eh-apply"
-                  disabled={!imgSrc.trim()}
-                  onClick={() => applyBg({ kind: 'image', src: imgSrc.trim(), dim })}
-                >
-                  应用图片背景
-                </button>
+                <div className="eh-row">
+                  <span className="eh-label">模糊</span>
+                  <input
+                    className="eh-range"
+                    type="range"
+                    min={0}
+                    max={24}
+                    value={blur}
+                    onChange={(e) => { const v = Number(e.target.value); setBlur(v); setImage(imgSrc, dim, v); }}
+                  />
+                  <span className="eh-val">{blur}px</span>
+                </div>
                 <div className="eh-save-row">
                   <input className="eh-input" placeholder="给这个背景起个名字" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
                   <button className="eh-mini" onClick={saveCurrent}>保存</button>
                 </div>
+                <div className="eh-panel-foot">填了路径 / 选了文件就立即生效，不需要再点「应用」。</div>
               </>
             )}
 
@@ -470,9 +596,9 @@ export function EmptyHome(props: {
                 <div className="eh-row">
                   <input
                     className="eh-input"
-                    placeholder="视频相对路径 / 绝对路径 / https 链接"
+                    placeholder="视频路径 / https 链接（mp4 / webm / ogv）"
                     value={vidSrc}
-                    onChange={(e) => setVidSrc(e.target.value)}
+                    onChange={(e) => setVideo(e.target.value)}
                   />
                   <button className="eh-mini" onClick={() => pickFile('video')}>选择</button>
                 </div>
@@ -484,21 +610,27 @@ export function EmptyHome(props: {
                     min={0}
                     max={80}
                     value={dim}
-                    onChange={(e) => setDim(Number(e.target.value))}
+                    onChange={(e) => { const v = Number(e.target.value); setDim(v); setVideo(vidSrc, v, blur); }}
                   />
                   <span className="eh-val">{dim}%</span>
                 </div>
-                <button
-                  className="eh-apply"
-                  disabled={!vidSrc.trim()}
-                  onClick={() => applyBg({ kind: 'video', src: vidSrc.trim(), dim })}
-                >
-                  应用视频背景
-                </button>
+                <div className="eh-row">
+                  <span className="eh-label">模糊</span>
+                  <input
+                    className="eh-range"
+                    type="range"
+                    min={0}
+                    max={24}
+                    value={blur}
+                    onChange={(e) => { const v = Number(e.target.value); setBlur(v); setVideo(vidSrc, dim, v); }}
+                  />
+                  <span className="eh-val">{blur}px</span>
+                </div>
                 <div className="eh-save-row">
                   <input className="eh-input" placeholder="给这个背景起个名字" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
                   <button className="eh-mini" onClick={saveCurrent}>保存</button>
                 </div>
+                <div className="eh-panel-foot">支持 mp4 / webm / ogv；窗口不可见时自动暂停，不占显卡。</div>
               </>
             )}
 
@@ -573,7 +705,7 @@ export function EmptyHome(props: {
         </div>
 
         <div className="eh-actions">
-          <button className="eh-btn is-primary" onClick={() => leave(props.onOpen)}>
+          <button className="eh-btn is-primary" onClick={() => props.onOpen()}>
             <Icon name="folderOpen" size={17} />
             <span>打开工程</span>
           </button>

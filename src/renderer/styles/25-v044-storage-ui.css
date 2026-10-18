@@ -110,6 +110,15 @@ body.bc-sel-plain .canvas [data-bc-sel="1"] {
 .canvas-inline-sel { animation: bcSelGlow 1.6s ease-in-out infinite; }
 body.bc-sel-plain .canvas-inline-sel { animation: none; filter: none; }
 
+/* v0.4.4：按住 Alt 时隐藏"已选中"的橙色框 ——
+   这时用户看的是 Alt 悬停/拖动框，两个橙框叠在一起会分不清哪个是"选中"哪个是"正在改"。 */
+body.bc-alt-down .canvas [data-bc-sel="1"] {
+  outline: none;
+  animation: none;
+  filter: none;
+}
+body.bc-alt-down .canvas-inline-sel { display: none; }
+
 /* ==========================================================================
    v0.4.4 · 品牌位统一：⚡/▦ 表情 → 真 Logo 图
    img 不给尺寸会按原始 256px 渲染，把侧边栏/顶栏撑爆 —— 必须显式定尺寸。

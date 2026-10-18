@@ -8,7 +8,7 @@ import {
 } from '@store/toolbarStore';
 import { dragSteps } from '@lib/drag';
 import { useHoverPop } from '@lib/hoverPop';
-import { widthLabel, widthToDevice, DEVICE_LIST, requestDevice, type DeviceId } from '@lib/device';
+import { widthLabel, widthToDevice, DEVICE_LIST, requestDevice, useEffectiveDevice, type DeviceId } from '@lib/device';
 import { runHealthCheck, hasBlocking } from '@lib/healthCheck';
 import { HealthWizard } from './HealthWizard';
 import { AnchoredPanel } from './AnchoredPanel';
@@ -558,31 +558,6 @@ function ToolbarGroupButton(props: {
       </AnchoredPanel>
     </div>
   );
-}
-
-/**
- * 「设备」按钮图标的实时依据（v0.4.4g）：
- *   · 画布宽度是固定像素值 → 直接用宽度落回设备；
- *   · 画布宽度是「自适应」 → 观察画布**实际渲染宽度**（窗口变窄它就变窄），
- *     实时算出应显示成电脑 / 平板 / 手机。
- */
-function useEffectiveDevice(canvasWidth: string): DeviceId {
-  const [dev, setDev] = useState<DeviceId>(() => widthToDevice(canvasWidth));
-  useEffect(() => {
-    if (canvasWidth !== 'auto') {
-      setDev(widthToDevice(canvasWidth));
-      return;
-    }
-    const el = document.querySelector('.canvas') as HTMLElement | null;
-    if (!el) { setDev('desktop'); return; }
-    const update = () => setDev(widthToDevice(el.clientWidth + 'px'));
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    window.addEventListener('resize', update);
-    return () => { ro.disconnect(); window.removeEventListener('resize', update); };
-  }, [canvasWidth]);
-  return dev;
 }
 
 function findNodeBy(root: SceneElement, id: string): SceneElement | null {

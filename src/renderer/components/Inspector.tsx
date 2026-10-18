@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { TEXT_TAGS, SELF_CLOSING_TAGS, CONTAINER_TAGS } from '@lib/types';
@@ -33,7 +33,7 @@ import { ClassManager } from './ClassManager';
 import { TokenPanel } from './TokenPanel';
 import { classColor, isValidClassToken } from '@lib/classColor';
 import { isGradient } from '@lib/gradient';
-import { requestDevice } from '@lib/device';
+import { requestDevice, useEffectiveDevice } from '@lib/device';
 import { planResponsiveFixes } from '@lib/responsiveAuto';
 import { useClosing } from '@lib/useClosing';
 import { checkApplicability } from '@lib/propertySchema';
@@ -623,8 +623,8 @@ function PageBox4(props: {
 }
 
 // ============ 元素页签内容（选中元素的属性编辑区） ============
-// 画布是否处于「自适应」宽度（与工具栏同一状态；通过事件与 localStorage 同步）
-function useCanvasWidthAuto(): boolean {
+// 画布当前宽度（与工具栏同一状态；通过事件与 localStorage 同步）
+function useCanvasWidth(): string {
   const [w, setW] = useState<string>(() => {
     try { return JSON.parse(localStorage.getItem('bc-canvas-width') || '"auto"') as string; } catch { return 'auto'; }
   });
@@ -633,7 +633,7 @@ function useCanvasWidthAuto(): boolean {
     window.addEventListener('bc-canvas-width-changed', on);
     return () => window.removeEventListener('bc-canvas-width-changed', on);
   }, []);
-  return !w || w === 'auto';
+  return w || 'auto';
 }
 
 function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string | null; onJustAdded: (k: string | null) => void }) {
@@ -650,7 +650,15 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   const endStyleEdit = useScene((s) => s.endStyleEdit);
   const activeBreakpoint = useScene((s) => s.activeBreakpoint);
   const clearBreakpointOverride = useScene((s) => s.clearBreakpointOverride);
-  const canvasAuto = useCanvasWidthAuto();
+  const setActiveBreakpoint = useScene((s) => s.setActiveBreakpoint);
+  const canvasWidth = useCanvasWidth();
+  const canvasAuto = !canvasWidth || canvasWidth === 'auto';
+  // 设备高亮按**画布实际宽度**判断：自适应时窗口变窄，会自动切到平板 / 手机
+  const liveDevice = useEffectiveDevice(canvasWidth);
+  // 自适应模式下，编辑断点跟着实际宽度走（否则在 375px 画布上还在改电脑端样式）
+  useEffect(() => {
+    if (canvasAuto && activeBreakpoint !== liveDevice) setActiveBreakpoint(liveDevice);
+  }, [canvasAuto, liveDevice, activeBreakpoint, setActiveBreakpoint]);
   const elementId = selected.id;
   const elementType = selected.type;
   // v0.4.3：选中项是不是表格（或表格里的单元格/行）—— 是则给出「打开表格编辑器」入口
@@ -747,7 +755,13 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   });
 
   // 折叠状态变更 → 写进工程文件（scene.uiState）
+  // v0.4.4 修：**切换选中元素时不能把上一个元素的开关状态写到新元素名下**。
+  // 以前两个 effect 的执行顺序是「先保存（用新 key + 旧 state）→ 再读取」，于是永远读到刚写进去的旧状态，
+  // 表现就是"换了个元素，右侧面板还是上一个元素的开合状态"。
+  // 这里用 loadedSecKey 记录"当前 state 属于哪个 key"，只在 key 一致时才保存。
+  const loadedSecKey = useRef(secStorageKey);
   useEffect(() => {
+    if (loadedSecKey.current !== secStorageKey) return;
     useScene.getState().setInspectorSec(secStorageKey, secOpen);
   }, [secOpen, secStorageKey]);
 
@@ -774,6 +788,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
     }
     if (v) setSecOpen(v);
     else setSecOpen({ identity: true, layout: false, css: false, pseudo: false });
+    loadedSecKey.current = secStorageKey;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secStorageKey, elementId]);
 
@@ -920,11 +935,48 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
       setSecOpen((p) => ({ ...p, css: true }));
       if (shouldAdd) addVisibleProp(elementId, key);
       setFlashKey(key);
-      window.setTimeout(() => {
+      // 滚动到该行：**不用 scrollIntoView('center')** —— 行在列表末尾时容器已经滚不动，
+      // 只能贴底，容易被面板底部挡住（用户反馈"末尾元素定位不到"）。
+      // 这里按"可视区 + 28px 内边距"校正，并且行还没渲染出来时自动重试。
+      const scrollToRow = (attempt = 0) => {
         const row = document.querySelector(`[data-prop-key="${CSS.escape(key)}"]`) as HTMLElement | null;
-        row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      }, 140);
-      window.setTimeout(() => setFlashKey(null), 2000);
+        if (!row) {
+          if (attempt < 6) window.setTimeout(() => scrollToRow(attempt + 1), 90);
+          return;
+        }
+        // 右侧是嵌套滚动：`.tab-body` 与 `.panel` 都可能滚，真正能滚的是"内容超出"的那一层
+        const findScroller = (start: HTMLElement | null): HTMLElement | null => {
+          let cur = start?.parentElement ?? null;
+          while (cur) {
+            const oy = getComputedStyle(cur).overflowY;
+            if ((oy === 'auto' || oy === 'scroll') && cur.scrollHeight > cur.clientHeight + 1) return cur;
+            cur = cur.parentElement;
+          }
+          return null;
+        };
+        const scroller = findScroller(row);
+        if (!scroller) { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+        const sr = scroller.getBoundingClientRect();
+        const rr = row.getBoundingClientRect();
+        const pad = 28;
+        if (rr.top < sr.top + pad) {
+          scroller.scrollBy({ top: rr.top - sr.top - pad, behavior: 'smooth' });
+        } else if (rr.bottom > sr.bottom - pad) {
+          scroller.scrollBy({ top: rr.bottom - sr.bottom + pad, behavior: 'smooth' });
+        }
+        // 折叠区展开有 0.3s 动画，首帧量到的位置会偏 —— 稍后再校验一次，不在可视区就继续校正
+        if (attempt < 4) {
+          window.setTimeout(() => {
+            const r2 = document.querySelector(`[data-prop-key="${CSS.escape(key)}"]`) as HTMLElement | null;
+            if (!r2) return;
+            const s2 = scroller.getBoundingClientRect();
+            const b2 = r2.getBoundingClientRect();
+            if (b2.top < s2.top + 4 || b2.bottom > s2.bottom - 4) scrollToRow(attempt + 1);
+          }, 280);
+        }
+      };
+      window.setTimeout(() => scrollToRow(), 90);
+      window.setTimeout(() => setFlashKey(null), 2200);
     };
     // 挂载瞬间先消费缓冲：从「页面 / 类名 / 图层」切过来的请求，事件早就派发完了
     const first = takePendingPropFocus();
@@ -1000,25 +1052,18 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
         </div>
       )}
 
-      {/* 响应式断点模式切换条（与画布宽度、画布顶部设备条三合一同步） */}
+      {/* 响应式断点条：三个设备分段（高亮按画布**实际宽度**判断）+ 右侧一枚小的「自适应」按钮（不常亮） */}
       <div className="inspector-bp-bar">
         <div className="inspector-bp-tabs">
           <button
-            className={'bp-tab-btn' + (canvasAuto ? ' active' : '')}
-            onClick={() => window.dispatchEvent(new CustomEvent('bc:set-device', { detail: 'auto' }))}
-            title="自适应：画布铺满编辑区（与工具栏「自适应」同一逻辑）"
-          >
-            <Icon name="responsive" size={14} /><span>自适应</span>
-          </button>
-          <button
-            className={'bp-tab-btn' + (activeBreakpoint === 'desktop' ? ' active' : '')}
+            className={'bp-tab-btn' + (liveDevice === 'desktop' ? ' active' : '')}
             onClick={() => requestDevice('desktop')}
             title="电脑端基础样式（全局基准，平板/手机自动继承）。点此画布宽度切为 1920px"
           >
             <Icon name="laptop" size={14} /><span>电脑</span>
           </button>
           <button
-            className={'bp-tab-btn' + (activeBreakpoint === 'tablet' ? ' active' : '') + (hasTabletOverride ? ' has-override' : '')}
+            className={'bp-tab-btn' + (liveDevice === 'tablet' ? ' active' : '') + (hasTabletOverride ? ' has-override' : '')}
             onClick={() => requestDevice('tablet')}
             title="平板端 ≤768px 样式定制。点此画布宽度同步变为 768px，所见即所得"
           >
@@ -1026,7 +1071,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
             {hasTabletOverride && <span className="bp-dot" title="已有平板端定制覆盖" />}
           </button>
           <button
-            className={'bp-tab-btn' + (activeBreakpoint === 'mobile' ? ' active' : '') + (hasMobileOverride ? ' has-override' : '')}
+            className={'bp-tab-btn' + (liveDevice === 'mobile' ? ' active' : '') + (hasMobileOverride ? ' has-override' : '')}
             onClick={() => requestDevice('mobile')}
             title="手机端 ≤480px 样式定制。点此画布宽度同步变为 375px，所见即所得"
           >
@@ -1034,6 +1079,13 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
             {hasMobileOverride && <span className="bp-dot" title="已有手机端定制覆盖" />}
           </button>
         </div>
+        <button
+          className={'bp-auto-btn' + (canvasAuto ? ' is-auto' : '')}
+          onClick={() => window.dispatchEvent(new CustomEvent('bc:set-device', { detail: 'auto' }))}
+          title="自适应宽度：画布铺满编辑区。设备按画布实际宽度自动判断，这个按钮不会常亮"
+        >
+          <Icon name="responsive" size={14} />
+        </button>
       </div>
 
       {/* 移动端快捷操作与覆盖说明条 */}

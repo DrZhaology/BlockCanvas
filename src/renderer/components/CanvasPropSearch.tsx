@@ -5,7 +5,6 @@ import { getPluginProperties } from '@lib/pluginHost';
 import { searchProperties } from '@lib/propSearch';
 import { useScene, findNode } from '@store/sceneStore';
 import { useClosing } from '@lib/useClosing';
-import { requestPropFocus } from '@lib/propFocus';
 import { Icon } from './Icon';
 
 // ============================================================================
@@ -98,10 +97,9 @@ export function CanvasPropSearch({ x, y, onClose }: { x: number; y: number; onCl
       setMsg(`「${item.label}」还没添加，按 Ctrl+Enter 添加并定位。`);
       return;
     }
-    // 先把请求放进缓冲：右侧面板可能停在图层/页面页签，ElementPropsBody 还没挂载，
-    // 光派发事件会落空。Inspector 顶层会据此切到「元素」页签，挂载后再取走执行。
+    // 派发事件：App 负责切到「属性 · 元素」并把请求写进 lib/propFocus 的缓冲，
+    // 这样右侧面板停在图层 / 页面 / 类名页时也不会丢（见 Inspector 顶层与 ElementPropsBody）。
     const req = { key: item.key, add: forceAdd || isAdded(item) };
-    requestPropFocus(req);
     window.dispatchEvent(new CustomEvent('bc:focus-prop', { detail: req }));
     close();
   };

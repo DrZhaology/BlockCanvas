@@ -766,15 +766,24 @@
   z-index: 91;
   display: flex;
   flex-direction: column;
-  max-height: 400px;
+  max-height: min(400px, 58vh);
   transform-origin: top center;
   animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
-  transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.4, 0, 1, 1);
+  transition: opacity 0.11s ease, transform 0.11s cubic-bezier(0.4, 0, 1, 1);
 }
 /* 关闭：先播出场动画再卸载 */
 .add-prop-menu.is-closing {
   opacity: 0;
   transform: translateY(-6px) scale(0.98);
+}
+/* 触发按钮贴近面板底部时向上展开（JS 量完空间加 drop-up） */
+.add-prop-menu.drop-up {
+  top: auto;
+  bottom: 42px;
+  transform-origin: bottom center;
+}
+.add-prop-menu.drop-up.is-closing {
+  transform: translateY(6px) scale(0.98);
 }
 .add-prop-search {
   padding: 8px;

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net, shell, nativeTheme, session, type MenuItemConstructorOptions } from 'electron';
 import { join, basename, dirname, relative } from 'node:path';
-import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync, renameSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync, renameSync, openSync, readSync, closeSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { isAbsolutePathAny, resolveInside, toWebPath, previewDir, runtimeTempDir } from './paths';
 import * as pathUtils from './paths';
@@ -165,7 +165,13 @@ async function createWindow() {
     callback((permission as string) === 'local-fonts');
   });
 
-  const iconPath = join(app.getAppPath(), 'build', 'icon.png');
+  // 窗口/任务栏图标：统一用三色 Logo。
+  // · 开发态：build/icon.png（仓库里就是三色 Logo）
+  // · 打包态：electron-builder 通过 extraResources 把它复制到 resources/icon.png ——
+  //   因为 build/** 不进 asar，以前打包后这里找不到文件，任务栏就回落到 exe 的旧图标。
+  const iconPath = app.isPackaged
+    ? join(process.resourcesPath, 'icon.png')
+    : join(app.getAppPath(), 'build', 'icon.png');
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -181,6 +187,8 @@ async function createWindow() {
       sandbox: false
     }
   });
+  // Windows 任务栏分组/图标缓存按 AppUserModelID 走，显式设成和 electron-builder 一致的 appId
+  if (process.platform === 'win32') app.setAppUserModelId('com.blockcanvas.app');
 
   Menu.setApplicationMenu(buildMenu(win));
 
@@ -1045,6 +1053,17 @@ function countNodes(node: any): number {
   return count;
 }
 
+/** bc-img 协议要按扩展名给 Content-Type（视频缺它会被 Chromium 当二进制拒绝播放） */
+const MEDIA_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif',
+  mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', ogg: 'video/ogg', mov: 'video/quicktime'
+};
+function mediaMimeOf(p: string): string {
+  const ext = (p.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]) ?? '';
+  return MEDIA_MIME[ext] ?? 'application/octet-stream';
+}
+
 app.whenReady().then(() => {
   protocol.handle('bc-img', async (request) => {
     try {
@@ -1070,10 +1089,50 @@ app.whenReady().then(() => {
         }
       }
 
-      if (existsSync(rawPath)) {
-        return await net.fetch(pathToFileURL(rawPath).toString());
+      if (!existsSync(rawPath)) return new Response(null, { status: 404 });
+      const mime = mediaMimeOf(rawPath);
+      // CORS 放开：首页要采样画面算平均亮度（canvas.getImageData 不能读跨域污染的画布）；
+      // 图片/视频都是用户自己机器上的文件，放开只读没有安全影响。
+      const cors: Record<string, string> = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
+        'Accept-Ranges': 'bytes'
+      };
+
+      // —— Range 请求（视频拖动进度 / 边下边播）——
+      // 以前直接 net.fetch(file://) 不支持 206，Chromium 的视频解码器拿不到分段 → 一片白。
+      const range = request.headers.get('Range');
+      if (range) {
+        const st = statSync(rawPath);
+        const m = /bytes=(\d*)-(\d*)/.exec(range);
+        let start = m && m[1] ? parseInt(m[1], 10) : 0;
+        let end = m && m[2] ? parseInt(m[2], 10) : st.size - 1;
+        if (!Number.isFinite(start) || start < 0) start = 0;
+        if (!Number.isFinite(end) || end >= st.size) end = st.size - 1;
+        if (start > end) {
+          return new Response(null, { status: 416, headers: { ...cors, 'Content-Range': `bytes */${st.size}` } });
+        }
+        const len = end - start + 1;
+        const buf = Buffer.alloc(len);
+        const fd = openSync(rawPath, 'r');
+        try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
+        return new Response(buf as any, {
+          status: 206,
+          headers: {
+            ...cors,
+            'Content-Type': mime,
+            'Content-Length': String(len),
+            'Content-Range': `bytes ${start}-${end}/${st.size}`
+          }
+        });
       }
-      return new Response(null, { status: 404 });
+
+      const res = await net.fetch(pathToFileURL(rawPath).toString());
+      const headers = new Headers(res.headers);
+      for (const [k, v] of Object.entries(cors)) headers.set(k, v);
+      const ct = headers.get('Content-Type');
+      if (!ct || ct === 'application/octet-stream') headers.set('Content-Type', mime);
+      return new Response(res.body, { status: res.status, headers });
     } catch {
       return new Response(null, { status: 400 });
     }

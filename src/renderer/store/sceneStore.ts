@@ -1532,7 +1532,10 @@ export const useScene = create<SceneStore>((set) => ({
       const push = !st.styleEditPending;
       const next: Record<string, string> = { ...(st.scene.bodyExtra ?? {}) };
       for (const [k, v] of Object.entries(patch)) {
-        if (v === undefined || v === '') delete next[k];
+        // v0.4.4 修：**空串要保留** —— 「添加属性」先写入空值再等用户填，
+        // 以前这里把空串当成删除，导致点了添加按钮什么也不出现（全局样式加不了属性）。
+        // 导出时会跳过空值，所以保留空键不会污染 CSS。
+        if (v === undefined) delete next[k];
         else next[k] = v;
       }
       return {

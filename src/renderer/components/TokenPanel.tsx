@@ -6,7 +6,10 @@ import {
   type TokenEntry, type TokenGroup
 } from '@lib/designTokens';
 import { appAlert, appConfirm } from '@lib/appConfirm';
+import { getSchemaItem } from '@lib/propertySchema';
+import type { ElementType } from '@lib/types';
 import { ColorField } from './ColorPicker';
+import { AddPropertyMenu } from './AddPropertyMenu';
 import { HelpButton } from './HelpButton';
 import { Icon } from './Icon';
 
@@ -174,6 +177,34 @@ export function TokenPanel() {
     setEditingName(name);
   };
 
+  /**
+   * 从「CSS 属性」新建变量（v0.4.4）：和元素 / 全局样式用同一个添加属性菜单。
+   * 属性决定变量类型与分组：颜色 → 颜色组、阴影 → 阴影组、圆角/字号/间距各归各组。
+   */
+  const addFromCssProp = (key: string) => {
+    const sc = getSchemaItem(key);
+    const base = key
+      .replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())
+      .replace(/[^a-z0-9-]/g, '')
+      .replace(/^-+|-+$/g, '') || 'token';
+    const name = uniqueTokenName(base, list);
+    const kind: TokenEntry['kind'] =
+      sc?.input === 'color' ? 'color'
+        : sc?.input === 'shadow' || sc?.input === 'textShadow' ? 'shadow'
+          : 'size';
+    const group: TokenGroup =
+      sc?.category === '颜色' ? '颜色'
+        : sc?.category === '字体与排版' ? '文字'
+          : sc?.category === '边框与阴影' ? (kind === 'shadow' ? '阴影' : '圆角')
+            : '间距';
+    const value = kind === 'color' ? '#1e88e5'
+      : kind === 'shadow' ? '0 4px 16px rgba(0, 0, 0, 0.15)'
+        : '16px';
+    commit([...list, { name, value, group, kind }]);
+    setTokenGroupOpen(group, true);
+    setEditingName(name);
+  };
+
   /** 自定义添加：保留原来的"先想名字+选分组"入口 */
   const addCustom = () => {
     const base = newName.trim() || (newGroup === '颜色' ? 'brand' : 'size');
@@ -265,11 +296,20 @@ export function TokenPanel() {
           </div>
         </div>
         <div className="token-head-actions">
-          <button className="btn-mini" onClick={() => { setAddOpen((v) => !v); setCustomOpen(false); }}>+ 新建变量</button>
+          <button className="btn-mini" onClick={() => { setAddOpen((v) => !v); setCustomOpen(false); }} title="从常用模板新建变量">模板</button>
           <button className="btn-mini" onClick={resetDefaults} title="恢复默认变量集">默认集</button>
           {list.length > 0 && <button className="btn-mini" onClick={clearAll} title="清空全部变量">清空</button>}
         </div>
       </div>
+
+      {/* v0.4.4：和元素 / 全局样式同一个「添加属性」菜单 —— 选一个 CSS 属性就建一个对应类型的变量；
+          不适用的属性会显示「不生效」并禁用（例如行内元素不能用的盒模型属性）。 */}
+      <AddPropertyMenu
+        type={'div' as ElementType}
+        elementStyle={{}}
+        visibleKeys={list.map((t) => t.name.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase()))}
+        onAdd={(key) => addFromCssProp(key)}
+      />
 
       {/* 「＋ 新建变量」：模板一板选（点一下建好并自动进入改名），下方保留「自定义」 */}
       {addOpen && (

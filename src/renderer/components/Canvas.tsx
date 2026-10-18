@@ -189,6 +189,9 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   // 保证拖动过程中橙色边界 1:1 跟手（以前拖动时框直接消失，松手才回来）
   const altLiveRaf = useRef(0);
   const [altBadge, setAltBadge] = useState<{ x: number; y: number; text: string } | null>(null);
+  // v0.4.4：Alt 拖动时临时把画布加长（向下拖到边也能继续走），松手恢复原长度
+  const [altPad, setAltPad] = useState(0);
+  const altPadRef = useRef(0);
   // v0.4.5：按住 Alt 拖动时，按浏览器 F12 的方式把盒模型画出来 ——
   // margin / border / padding / content 四层 + 各边数值 + 中央定位方式 + relative 的偏移距离箭头。
   const [boxModel, setBoxModel] = useState<AltBoxModelData | null>(null);
@@ -332,17 +335,35 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     let wallRight = pb.right - (addM ? m.right : 0);
     let wallTop = pb.top + (addM ? m.top : 0);
     let wallBottom = isFixed ? pb.bottom - (addM ? m.bottom : 0) : Infinity;
+
+    // v0.4.4：`fixed` 是**独立的视口层** —— 它相对画布（= 模拟浏览器视口）定位，
+    // 不与文档流里的兄弟元素碰撞，四面墙都取画布视口。
+    if (isFixed && canvasEl) {
+      const vb = boxOf(canvasEl);
+      wallLeft = vb.left + m.left;
+      wallRight = vb.right - m.right;
+      wallTop = vb.top + m.top;
+      wallBottom = vb.bottom - m.bottom;
+    }
     // 每面墙要画的"整面"（默认铺满父容器内容盒；被兄弟元素挡住时改成画在那个兄弟的边上）
     let barL: Bar | null = vBar(wallLeft, pb.top, pb.bottom);
     let barR: Bar | null = vBar(wallRight, pb.top, pb.bottom);
     let barT: Bar | null = hBar(wallTop, pb.left, pb.right);
     let barB: Bar | null = Number.isFinite(wallBottom) ? hBar(wallBottom, pb.left, pb.right) : null;
+    if (isFixed && canvasEl) {
+      const vb = boxOf(canvasEl);
+      barL = vBar(wallLeft, vb.top, vb.bottom);
+      barR = vBar(wallRight, vb.top, vb.bottom);
+      barT = hBar(wallTop, vb.left, vb.right);
+      barB = hBar(wallBottom, vb.left, vb.right);
+    }
 
     // 元素与元素的碰撞：
-    //  · 定位元素（absolute/relative/fixed）：邻近兄弟的边缘（含自身固定 margin）当墙
+    //  · 定位元素（absolute/relative）：邻近兄弟的边缘（含自身固定 margin）当墙
     //  · 常规流元素（v0.4.5）：上方兄弟当上墙（兄弟边框底 + 兄弟 margin-bottom）——
     //    块级元素拖动不再互相压盖、也不再拖出大段负 margin；下方兄弟会被流推走，不需要墙
-    if (parentEl) {
+    //  · fixed 不参与兄弟碰撞（它在独立的视口层）
+    if (parentEl && !isFixed) {
       // relative 元素**仍在文档流里**：按常规流规则把它挡在上方兄弟下面，
       // 否则会出现"代码里是第二个、拖一拖视觉上跑到第一个上面"的假象（用户反馈）。
       const inFlow = !positioned || pos === 'relative';
@@ -531,9 +552,18 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const positioned = pos === 'absolute' || pos === 'fixed' || pos === 'relative';
     const bounds = boundsFor(el, rect);
     const parentNode = findParent(root, h.id);
-    // 定位基准：优先计算后的 left/top（缺省时用计算值，第一次拖动即"补上" left/top，避免跳变）
-    const startLeft = Number.isFinite(parseFloat(cs.left)) ? parseFloat(cs.left) : 0;
-    const startTop = Number.isFinite(parseFloat(cs.top)) ? parseFloat(cs.top) : 0;
+    // 定位基准：优先计算后的 left/top（缺省时按"当前实际位置 - 定位父级内容盒"补一个，
+    // 这样 right/bottom 锚定或 left/top:auto 的元素第一次拖动不会跳变）
+    const baseEl = pos === 'fixed'
+      ? (el.closest('.canvas') as HTMLElement | null)
+      : (el.offsetParent as HTMLElement | null);
+    const baseRect = baseEl?.getBoundingClientRect();
+    const baseLeft = baseRect ? baseRect.left + (baseEl!.clientLeft || 0) : 0;
+    const baseTop = baseRect ? baseRect.top + (baseEl!.clientTop || 0) : 0;
+    const parsedLeft = parseFloat(cs.left);
+    const parsedTop = parseFloat(cs.top);
+    const startLeft = Number.isFinite(parsedLeft) ? parsedLeft : rect.left - baseLeft;
+    const startTop = Number.isFinite(parsedTop) ? parsedTop : rect.top - baseTop;
     const startMarginL = Number.isFinite(parseFloat(cs.marginLeft)) ? parseFloat(cs.marginLeft) : 0;
     const startMarginT = Number.isFinite(parseFloat(cs.marginTop)) ? parseFloat(cs.marginTop) : 0;
     altDragRef.current = {
@@ -748,6 +778,18 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
         patch.marginLeft = Math.round(d.startMarginL + ax) + 'px';
         patch.marginTop = Math.round(d.startMarginT + ay) + 'px';
       }
+
+      // —— Alt 拖动时自动加长画布：往下拖不再被"画布高度"卡住（松手自动缩回）——
+      const canvasEl = canvasRef.current;
+      if (canvasEl && !d.isFixed) {
+        const cr = canvasEl.getBoundingClientRect();
+        const need = Math.max(0, Math.ceil(targetTop + d.rect.height - cr.bottom + 180));
+        if (need > altPadRef.current + 60) {
+          altPadRef.current = need;
+          setAltPad(need);
+        }
+      }
+
       st.updateStyle(d.id, patch);
       if (hit) flashWall(hit);
       scheduleAltLiveBox();
@@ -767,6 +809,9 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     setBoxModel(null);
     setGuides(null);
     setWallHints([]);
+    // 松手：画布长度恢复原样
+    altPadRef.current = 0;
+    setAltPad(0);
     removeAltGhost(); // 幽灵 + 停留预览一律清掉（幂等）
     if (!d) return;
 
@@ -787,6 +832,81 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     }
 
     if (d.engaged) {
+      // —— 松手时把"贴边"归一化成更合理的 CSS ——
+      // · fixed：贴到画布（= 浏览器视口）底边/右边 → 写成 bottom: 0 / right: 0，而不是 top/left 的绝对值
+      // · relative：水平拖到父容器中线 → 改用 margin-left/right: auto（而不是一个死偏移）
+      if (d.mode === 'move') {
+        const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
+        const cv = canvasRef.current?.getBoundingClientRect();
+        if (el) {
+          const r = el.getBoundingClientRect();
+          const cs = getComputedStyle(el);
+          const patch: Record<string, string | undefined> = {};
+          const EDGE = 3;
+          if (d.isFixed && cv) {
+            if (r.bottom >= cv.bottom - EDGE) { patch.bottom = '0px'; patch.top = undefined; }
+            else if (r.top <= cv.top + EDGE) { patch.top = '0px'; }
+            if (r.right >= cv.right - EDGE) { patch.right = '0px'; patch.left = undefined; }
+            else if (r.left <= cv.left + EDGE) { patch.left = '0px'; }
+          }
+
+          // —— relative / 常规流：贴边与居中都用"更稳定的 CSS"表达 ——
+          // · 水平中线 → margin-left/right: auto（比写死一个 left/margin 偏移更耐改）
+          // · relative 贴右 / 贴底 → 改用 right / bottom 锚定（四边都可用）
+          // · 偏移归零 → 清掉 left/top，别在样式里留一堆 left:0
+          const parentEl = el.parentElement;
+          if (!d.isFixed && parentEl && r.width > 0) {
+            const pr = parentEl.getBoundingClientRect();
+            const pcs = getComputedStyle(parentEl);
+            const padL = parseFloat(pcs.paddingLeft) || 0;
+            const padR = parseFloat(pcs.paddingRight) || 0;
+            const padT = parseFloat(pcs.paddingTop) || 0;
+            const padB = parseFloat(pcs.paddingBottom) || 0;
+            const contentL = pr.left + parentEl.clientLeft + padL;
+            const contentR = pr.right - parentEl.clientLeft - padR;
+            const contentT = pr.top + parentEl.clientTop + padT;
+            const contentB = pr.bottom - parentEl.clientTop - padB;
+            const innerW = contentR - contentL;
+
+            // 水平居中（元素比父容器窄时才用 auto，否则 auto 两边都是 0、等于没居中）
+            if (innerW > 0 && r.width < innerW - 2
+              && Math.abs((r.left + r.width / 2) - (contentL + innerW / 2)) <= 3) {
+              patch.marginLeft = 'auto';
+              patch.marginRight = 'auto';
+              if (cs.position === 'relative') patch.left = undefined;
+            }
+
+            if (cs.position === 'relative') {
+              // 贴右 / 贴底：换成 right / bottom 锚定
+              if (r.right >= contentR - EDGE) {
+                patch.right = '0px';
+                patch.left = undefined;
+              } else if (r.left <= contentL + EDGE) {
+                patch.left = '0px';
+                patch.right = undefined;
+              } else if (Math.abs(parseFloat(cs.left) || 0) < 0.5) {
+                patch.left = undefined;
+              }
+              if (r.bottom >= contentB - EDGE) {
+                patch.bottom = '0px';
+                patch.top = undefined;
+              } else if (r.top <= contentT + EDGE) {
+                patch.top = '0px';
+                patch.bottom = undefined;
+              } else if (Math.abs(parseFloat(cs.top) || 0) < 0.5) {
+                patch.top = undefined;
+              }
+            } else if (cs.position === 'static') {
+              // 常规流：margin 归零就删掉，避免样式里堆 margin-left: 0px
+              if (Math.abs(parseFloat(cs.marginLeft) || 0) < 0.5) patch.marginLeft = undefined;
+              if (Math.abs(parseFloat(cs.marginTop) || 0) < 0.5) patch.marginTop = undefined;
+            }
+          }
+          if (Object.keys(patch).length > 0) {
+            useScene.getState().updateStyle(d.id, patch as any);
+          }
+        }
+      }
       useScene.getState().endStyleEdit();
       // 吞掉这次拖拽之后冒泡上来的 click（否则会顺手选中/选中父级）
       const swallow = (ev: MouseEvent) => { ev.stopPropagation(); ev.preventDefault(); window.removeEventListener('click', swallow, true); };
@@ -827,6 +947,15 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   }, []);
 
   const onCanvasWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    // v0.4.4：Alt 拖动元素期间，滚轮改成**上下滚动画布**（不再缩放）——
+    // 拖动时手已经被占住，缩放手感反而会干扰；需要缩放松开后再滚。
+    const drag = altDragRef.current;
+    if (e.altKey && drag?.engaged && drag.mode === 'move') {
+      e.preventDefault();
+      const wrapEl = canvasRef.current?.parentElement;
+      wrapEl?.scrollBy({ top: e.deltaY });
+      return;
+    }
     // 滚轮时先收掉 Alt 悬停高亮（避免缩放时还挂着"可编辑"虚线框与光标）
     if (altHover) setAltHover(null);
     tagAltCursor(null, '');
@@ -1134,7 +1263,9 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           transform: `scale(${zoom})`,
           transformOrigin: zoomOrigin,
           // 拖拽调宽时关掉过渡（否则 1:1 跟手会变成"追不上"）
-          ...(wDrag ? { transition: 'none' } : undefined)
+          ...(wDrag ? { transition: 'none' } : undefined),
+          // Alt 拖动时临时加长画布（松手归零）
+          ...(altPad ? { paddingBottom: altPad } : undefined)
         }}
         onWheel={onCanvasWheel}
       >

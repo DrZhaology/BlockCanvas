@@ -267,6 +267,145 @@ async function main() {
   await win.mouse.up();
   await win.keyboard.up('Alt');
 
+  // ============ 4f. Alt 时隐藏"已选中"的橙色框（避免两个橙框混淆）============
+  await win.evaluate((e) => window.__sceneStore.getState().selectElement(e), id);
+  await sleep(300);
+  await win.keyboard.down('Alt');
+  await sleep(250);
+  const selOutline = await win.evaluate(() => {
+    const el = document.querySelector('.canvas [data-bc-sel="1"]');
+    return el ? getComputedStyle(el).outlineStyle : 'none';
+  });
+  ok('按住 Alt：选中框隐藏（outline: none）', selOutline === 'none', String(selOutline));
+  await win.keyboard.up('Alt');
+
+  // ============ 4g. Alt 拖动自动加长画布、松手恢复 ============
+  const tallId = await win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    st.addElement('div', null);
+    const x = window.__sceneStore.getState().scene.selectedId;
+    st.updateStyle(x, { minHeight: '1800px', backgroundColor: '#eef7ff' });
+    return x;
+  });
+  await sleep(400);
+  await win.evaluate((e) => document.querySelector(`.canvas [data-bc-id="${e}"]`)?.scrollIntoView({ block: 'start' }), tallId);
+  await sleep(400);
+  const rt = await rectOf(tallId);
+  const pad0 = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas')).paddingBottom);
+  await win.keyboard.down('Alt');
+  await win.mouse.move(rt.x + rt.w / 2, rt.y + 30);
+  await sleep(200);
+  await win.mouse.down();
+  await win.mouse.move(rt.x + rt.w / 2, rt.y + 30 + 620, { steps: 10 });
+  await sleep(300);
+  const padDuring = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas')).paddingBottom);
+  ok('Alt 往下拖：画布自动加长（padding-bottom > 0）', parseFloat(padDuring) > 0, `${pad0} → ${padDuring}`);
+  await win.mouse.up();
+  await sleep(350);
+  const padAfter = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas')).paddingBottom);
+  ok('松手后画布长度恢复', Math.abs(parseFloat(padAfter) - parseFloat(pad0)) < 0.5, `${pad0} → ${padAfter}`);
+  await win.keyboard.up('Alt');
+
+  // ============ 4h. Alt 拖动中：滚轮改为上下滚动（不缩放）============
+  await win.evaluate((e) => document.querySelector(`.canvas [data-bc-id="${e}"]`)?.scrollIntoView({ block: 'start' }), tallId);
+  await sleep(300);
+  const rt2 = await rectOf(tallId);
+  await win.keyboard.down('Alt');
+  await win.mouse.move(rt2.x + rt2.w / 2, rt2.y + 30);
+  await sleep(200);
+  await win.mouse.down();
+  await win.mouse.move(rt2.x + rt2.w / 2 + 10, rt2.y + 50, { steps: 4 });
+  await sleep(200);
+  const wheel0 = await win.evaluate(() => ({
+    top: document.querySelector('.canvas-wrap').scrollTop,
+    width: document.querySelector('.canvas').getBoundingClientRect().width
+  }));
+  await win.mouse.wheel(0, 260);
+  await sleep(350);
+  const wheel1 = await win.evaluate(() => ({
+    top: document.querySelector('.canvas-wrap').scrollTop,
+    width: document.querySelector('.canvas').getBoundingClientRect().width
+  }));
+  ok('Alt 拖动中：滚轮上下滚动画布', wheel1.top > wheel0.top + 20, `${wheel0.top} → ${wheel1.top}`);
+  ok('Alt 拖动中：滚轮不再缩放画布', Math.abs(wheel1.width - wheel0.width) < 0.5, `${wheel0.width} → ${wheel1.width}`);
+  await win.mouse.up();
+  await win.keyboard.up('Alt');
+
+  // ============ 4i. fixed 贴到画布底边 → 归一化成 bottom: 0 ============
+  const fid2 = await win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    st.addElement('div', null);
+    const x = window.__sceneStore.getState().scene.selectedId;
+    st.updateStyle(x, {
+      position: 'fixed', left: '40px', top: '20px',
+      width: '120px', height: '60px', backgroundColor: '#ffe0e0'
+    });
+    return x;
+  });
+  await sleep(400);
+  // fixed 是相对画布视口定位的：先把画布滚回顶部，否则它可能不在可视区里
+  await win.evaluate(() => { const w = document.querySelector('.canvas-wrap'); if (w) w.scrollTop = 0; });
+  await sleep(350);
+  const rf2 = await rectOf(fid2);
+  const cvr = await win.evaluate(() => {
+    const r = document.querySelector('.canvas').getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+  });
+  await win.keyboard.down('Alt');
+  await win.mouse.move(rf2.x + rf2.w / 2, rf2.y + rf2.h / 2);
+  await sleep(200);
+  await win.mouse.down();
+  await win.mouse.move(rf2.x + rf2.w / 2, cvr.bottom - 10, { steps: 10 });
+  await sleep(250);
+  await win.mouse.up();
+  await win.keyboard.up('Alt');
+  await sleep(400);
+  const fixedStyle = await win.evaluate((e) => {
+    const find = (n, id) => (n.id === id ? n : (n.children || []).reduce((a, k) => a || find(k, id), null));
+    return find(window.__sceneStore.getState().scene.root, e)?.style || {};
+  }, fid2);
+  ok('fixed 拖到画布底边 → 写成 bottom: 0（而不是 top 绝对值）',
+    fixedStyle.bottom === '0px' && (fixedStyle.top === undefined || fixedStyle.top === ''),
+    JSON.stringify({ top: fixedStyle.top, bottom: fixedStyle.bottom }));
+
+  // ============ 4j. relative 拖到父容器中线 → margin-left/right: auto ============
+  const rid2 = await win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    st.addElement('div', null);
+    const x = window.__sceneStore.getState().scene.selectedId;
+    st.updateStyle(x, {
+      position: 'relative', left: '0px', top: '0px',
+      width: '160px', height: '50px', backgroundColor: '#fff3cd'
+    });
+    return x;
+  });
+  await sleep(400);
+  await win.evaluate((e) => document.querySelector(`.canvas [data-bc-id="${e}"]`)?.scrollIntoView({ block: 'center' }), rid2);
+  await sleep(350);
+  const rr2 = await rectOf(rid2);
+  const parentBox = await win.evaluate(() => {
+    const r = document.querySelector('.canvas').getBoundingClientRect();
+    return { left: r.left, width: r.width };
+  });
+  const targetCenter = parentBox.left + parentBox.width / 2;
+  const dx = targetCenter - (rr2.x + rr2.w / 2);
+  await win.keyboard.down('Alt');
+  await win.mouse.move(rr2.x + rr2.w / 2, rr2.y + rr2.h / 2);
+  await sleep(200);
+  await win.mouse.down();
+  await win.mouse.move(rr2.x + rr2.w / 2 + dx, rr2.y + rr2.h / 2, { steps: 10 });
+  await sleep(250);
+  await win.mouse.up();
+  await win.keyboard.up('Alt');
+  await sleep(400);
+  const relStyle = await win.evaluate((e) => {
+    const find = (n, id) => (n.id === id ? n : (n.children || []).reduce((a, k) => a || find(k, id), null));
+    return find(window.__sceneStore.getState().scene.root, e)?.style || {};
+  }, rid2);
+  ok('relative 拖到中线 → 自动用 margin-left/right: auto',
+    relStyle.marginLeft === 'auto' && relStyle.marginRight === 'auto' && (relStyle.left === undefined || relStyle.left === ''),
+    JSON.stringify({ left: relStyle.left, ml: relStyle.marginLeft, mr: relStyle.marginRight }));
+
   // ============ 5. Alt + 滚轮 = 缩放 ============
   const z0 = await win.evaluate(() => document.querySelector('.canvas').getBoundingClientRect().width);
   await win.keyboard.down('Alt');
