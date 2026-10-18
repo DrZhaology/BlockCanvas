@@ -77,6 +77,8 @@ export default function App() {
   const [tableEditId, setTableEditId] = useState<string>('');
   // 帮助中心默认打开哪份文档（菜单「使用手册」→ manual；别处要开特定文档可先 setHelpDoc）
   const [helpDoc, setHelpDoc] = useState<DocKey>('manual');
+  // 首页搜索点中某节文档时，带一个精确跳转目标（文档 + 段落 id）
+  const [helpTarget, setHelpTarget] = useState<{ doc: DocKey; id: string } | null>(null);
   // 所有「整页切换」都走原生视图过渡：旧页面淡出 + 新页面淡入
   // （不重挂载视图、不丢状态；宿主不支持或系统开了"减少动态效果"时自动降级为直接切换）
   const switchView = useCallback((next: AppView) => {
@@ -287,15 +289,22 @@ export default function App() {
     };
     const openAbout = () => setShowAbout(true);
     // 「使用手册」入口统一打开《使用手册》文档（不是项目介绍）
-    const openHelp = (doc: DocKey = 'manual') => {
+    const openHelp = (doc: DocKey = 'manual', target: { doc: DocKey; id: string } | null = null) => {
       if (useUpdateBusy.getState().busy) return;
       setHelpDoc(doc);
+      setHelpTarget(target);
       setView('help');
     };
     // 事件回调：允许携带 detail 指定文档（默认 manual）
     const onOpenHelpEvent = (e: Event) => {
       const d = (e as CustomEvent).detail as DocKey | undefined;
       openHelp(d === 'intro' || d === 'history' || d === 'manual' ? d : 'manual');
+    };
+    // 首页搜索：直达某份文档的某一节
+    const onOpenHelpDocEvent = (e: Event) => {
+      const d = (e as CustomEvent).detail as { doc?: DocKey; id?: string } | undefined;
+      if (!d?.doc) return;
+      openHelp(d.doc, d.id ? { doc: d.doc, id: d.id } : null);
     };
 
     const onNewTab = () => {
@@ -378,6 +387,7 @@ export default function App() {
     window.addEventListener('menu:about', openAbout);
     window.addEventListener('menu:help', onOpenHelpEvent);
     window.addEventListener('bc:open-help', onOpenHelpEvent);
+    window.addEventListener('bc:open-help-doc', onOpenHelpDocEvent);
     window.addEventListener('menu:shortcuts', () => setShowShortcuts(true));
     window.addEventListener('menu:check-update', openUpdateCenter);
     const onOpenTable = (e: Event) => {
@@ -431,6 +441,7 @@ export default function App() {
       window.removeEventListener('menu:about', openAbout);
       window.removeEventListener('menu:help', onOpenHelpEvent);
       window.removeEventListener('bc:open-help', onOpenHelpEvent);
+      window.removeEventListener('bc:open-help-doc', onOpenHelpDocEvent);
       window.removeEventListener('menu:check-update', openUpdateCenter);
       window.removeEventListener('bc:open-table-editor', onOpenTable);
       window.removeEventListener('bc:focus-prop', onFocusProp);
@@ -455,7 +466,7 @@ export default function App() {
           onBack={() => switchView('editor')}
         />
       ) : view === 'help' ? (
-        <HelpCenter initialDoc={helpDoc} onBack={() => switchView('editor')} />
+        <HelpCenter initialDoc={helpDoc} initialTarget={helpTarget} onBack={() => switchView('editor')} />
       ) : view === 'settings' ? (
         <Settings
           onBack={() => switchView('editor')}

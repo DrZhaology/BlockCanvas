@@ -3,6 +3,7 @@ import { useScene } from '@store/sceneStore';
 import { styleToCssText, simplifyStyle } from '@lib/styleClass';
 import { classColor, isValidClassToken } from '@lib/classColor';
 import type { SceneElement } from '@lib/types';
+import { Icon } from './Icon';
 
 // BlockCanvas · 「类名」页签 —— 轻量总览（方案A 重构）
 //
@@ -119,7 +120,7 @@ export function ClassManager() {
         <div className="hint">还没有类名 / ID。选中元素后在属性面板顶部「+ 类名」回车即可创建。</div>
       )}
       {unnamed.length === 0 && groups.length > 0 && (
-        <div className="cls-block-head" style={{ color: '#2e7d32' }}>✓ 元素都起了名字</div>
+        <div className="cls-block-head" style={{ color: '#2e7d32' }}><Icon name="check" size={13} /> 元素都起了名字</div>
       )}
 
       {/* 名称总览卡 */}
@@ -130,7 +131,7 @@ export function ClassManager() {
             <span className="cls-dot" style={{ background: color }} title="轮廓模式下此类元素的描边颜色" />
             <div className="cls-card-main">
               <div className="cls-card-head">
-                <span className="cls-card-name">{g.kind === 'rel' ? '⚡ ' + g.name : g.kind === 'id' ? '#' + g.name : '.' + g.name}</span>
+                <span className="cls-card-name">{g.kind === 'rel' ? <><Icon name="bolt" size={12} /> {g.name}</> : g.kind === 'id' ? '#' + g.name : '.' + g.name}</span>
                 <span className="cls-card-meta">{g.count} 个元素</span>
                 {g.conflicted && (
                   <span className="cls-badge" title="同名元素的样式不一致（历史遗留）。点「以此为准统一」用第一个元素的样式覆盖全部">样式不统一</span>

@@ -7,6 +7,7 @@ import { classColor } from '@lib/classColor';
 import { useShowBr } from '@lib/showBr';
 import { CanvasTextMenu, isTextStylable, type TextMenuPayload } from './CanvasTextMenu';
 import { CanvasPropSearch } from './CanvasPropSearch';
+import { Icon } from './Icon';
 
 // BlockCanvas · 画布
 // 阶段1：递归渲染 scene graph。
@@ -21,6 +22,27 @@ import { CanvasPropSearch } from './CanvasPropSearch';
 //  - 自闭合元素走 SELF_CLOSING_TAGS 单独渲染
 //  - Alt+点击元素 = 选中它的父级；Ctrl+点击 = 加/减选中；空白拖框 = 框选
 // 4-B/4-F：Ctrl+滚轮缩放画布；zoom 状态由 App 持有（归位按钮在工具栏）
+
+/**
+ * 「撞墙后继续往外拖 → 改父子关系」总开关。
+ *
+ * v0.4.5：按用户要求**暂时关闭**。理由：这个交互太容易误触（稍微多拖一点就换了父子），
+ * 而"复制 / 剪切 + 粘贴到目标元素"对层级的控制更精确、更可预期。
+ * 实现（pickDropTarget / 幽灵 / 1 秒停留预览）完整保留，把这里改回 true 即可恢复，
+ * 不需要再改任何调用点。
+ */
+const ALT_REPARENT_ENABLED = false;
+
+/** Alt 拖动时 F12 式盒模型的数据（全部是 client 坐标 / px 数值） */
+type AltBoxModelData = {
+  x: number; y: number; w: number; h: number;
+  mt: number; mr: number; mb: number; ml: number;
+  bt: number; br: number; bb: number; bl: number;
+  pt: number; pr: number; pb: number; pl: number;
+  posLabel: string;
+  /** relative 才有意义：当前 left / top 偏移量 */
+  offsetX: number; offsetY: number;
+};
 
 /**
  * 「拖到墙外 → 改父子关系」：从鼠标下的 DOM 往上找第一个可作为新父级的**块级容器**。
@@ -167,6 +189,28 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   // 保证拖动过程中橙色边界 1:1 跟手（以前拖动时框直接消失，松手才回来）
   const altLiveRaf = useRef(0);
   const [altBadge, setAltBadge] = useState<{ x: number; y: number; text: string } | null>(null);
+  // v0.4.5：按住 Alt 拖动时，按浏览器 F12 的方式把盒模型画出来 ——
+  // margin / border / padding / content 四层 + 各边数值 + 中央定位方式 + relative 的偏移距离箭头。
+  const [boxModel, setBoxModel] = useState<AltBoxModelData | null>(null);
+  const readBoxModel = (el: HTMLElement): AltBoxModelData => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    const n = (v: string) => { const x = parseFloat(v); return Number.isFinite(x) ? x : 0; };
+    const pos = cs.position;
+    const posLabel = pos === 'relative' ? '相对定位'
+      : pos === 'absolute' ? '绝对定位'
+        : pos === 'fixed' ? '固定定位'
+          : pos === 'sticky' ? '粘性定位' : '常规流';
+    return {
+      x: r.left, y: r.top, w: r.width, h: r.height,
+      mt: n(cs.marginTop), mr: n(cs.marginRight), mb: n(cs.marginBottom), ml: n(cs.marginLeft),
+      bt: n(cs.borderTopWidth), br: n(cs.borderRightWidth), bb: n(cs.borderBottomWidth), bl: n(cs.borderLeftWidth),
+      pt: n(cs.paddingTop), pr: n(cs.paddingRight), pb: n(cs.paddingBottom), pl: n(cs.paddingLeft),
+      posLabel,
+      offsetX: pos === 'relative' ? n(cs.left) : 0,
+      offsetY: pos === 'relative' ? n(cs.top) : 0
+    };
+  };
   // 撞到"墙"时闪一下的那条边（橙色），告诉用户"这是限制不是 BUG"
   const [wallFlash, setWallFlash] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   // Alt 拖动中"当前可达边界"的常显提示线（橙色细线）——
@@ -299,12 +343,15 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     //  · 常规流元素（v0.4.5）：上方兄弟当上墙（兄弟边框底 + 兄弟 margin-bottom）——
     //    块级元素拖动不再互相压盖、也不再拖出大段负 margin；下方兄弟会被流推走，不需要墙
     if (parentEl) {
+      // relative 元素**仍在文档流里**：按常规流规则把它挡在上方兄弟下面，
+      // 否则会出现"代码里是第二个、拖一拖视觉上跑到第一个上面"的假象（用户反馈）。
+      const inFlow = !positioned || pos === 'relative';
       for (const sib of Array.from(parentEl.children) as HTMLElement[]) {
         if (sib === el || !sib.hasAttribute?.('data-bc-id')) continue;
         const sr = sib.getBoundingClientRect();
         const vOverlap = Math.min(rect.bottom, sr.bottom) - Math.max(rect.top, sr.top) > 1;
         const hOverlap = Math.min(rect.right, sr.right) - Math.max(rect.left, sr.left) > 1;
-        if (positioned) {
+        if (!inFlow) {
           if (vOverlap) {
             if (sr.right <= rect.left + 1 && sr.right + m.left > wallLeft) { wallLeft = sr.right + m.left; barL = vBar(wallLeft, sr.top, sr.bottom); }
             if (sr.left >= rect.right - 1 && sr.left - m.right < wallRight) { wallRight = sr.left - m.right; barR = vBar(wallRight, sr.top, sr.bottom); }
@@ -315,7 +362,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           }
         } else if (hOverlap && sr.bottom <= rect.top + 1) {
           const sibMB = parseFloat(getComputedStyle(sib).marginBottom) || 0;
-          const wall = sr.bottom + sibMB;
+          // relative 的 margin 是固定的，墙还要把元素自己的 margin-top 算进去（margin 盒不能叠）
+          const wall = sr.bottom + sibMB + (pos === 'relative' ? m.top : 0);
           if (wall > wallTop) { wallTop = wall; barT = hBar(wall, sr.left, sr.right); }
         }
       }
@@ -332,6 +380,20 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     let maxX = wallRight - rect.width;
     let minY = wallTop;
     let maxY = Number.isFinite(wallBottom) ? wallBottom - rect.height : Infinity;
+    // —— 常规流：margin 不允许被拖成负数（用户明确"负数不合规、不好打理"）——
+    if (!positioned) {
+      const mt = parseFloat(cs.marginTop) || 0;
+      const ml = parseFloat(cs.marginLeft) || 0;
+      minY = Math.max(minY, rect.top - mt);
+      minX = Math.max(minX, rect.left - ml);
+    }
+    // —— relative：最多回到自己的"文档流原位"，不能再往上/往左压到兄弟元素身上 ——
+    if (pos === 'relative') {
+      const curTop = parseFloat(cs.top) || 0;
+      const curLeft = parseFloat(cs.left) || 0;
+      minY = Math.max(minY, Math.min(rect.top - curTop, rect.top));
+      minX = Math.max(minX, Math.min(rect.left - curLeft, rect.left));
+    }
     // 兜底：范围别反转
     if (maxX < minX) maxX = minX;
     if (Number.isFinite(maxY) && maxY < minY) maxY = minY;
@@ -505,6 +567,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       try {
         const r = el.getBoundingClientRect();
         setAltHover({ id: d.id, edge: d.edge, mode: d.mode, rect: { x: r.left, y: r.top, w: r.width, h: r.height } });
+        setBoxModel(readBoxModel(el));
       } catch { /* 忽略 */ }
     });
   };
@@ -595,7 +658,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       );
       const REPARENT_ENTER = 56;
       const REPARENT_EXIT = 12;
-      if (!d.reparent && pushOut > REPARENT_ENTER) {
+      // v0.4.5：ALT_REPARENT_ENABLED=false → 这段"拖出边界改父子关系"整体停用（实现保留）
+      if (ALT_REPARENT_ENABLED && !d.reparent && pushOut > REPARENT_ENTER) {
         d.reparent = true;
         document.body.classList.add('bc-reparenting');
         const srcEl = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
@@ -700,6 +764,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     document.body.classList.remove('bc-alt-dragging');
     document.body.classList.remove('bc-alt-fonting');
     setAltBadge(null);
+    setBoxModel(null);
     setGuides(null);
     setWallHints([]);
     removeAltGhost(); // 幽灵 + 停留预览一律清掉（幂等）
@@ -741,6 +806,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       if (e.key === 'Alt' || !e.altKey) {
         document.body.classList.remove('bc-alt-down');
         setAltHover(null);
+        setBoxModel(null);
         tagAltCursor(null, '');
       }
     };
@@ -1039,7 +1105,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       onPointerDown={onCanvasPointerDown}
       onPointerDownCapture={onWrapPointerDownCapture}
       onPointerMove={onWrapPointerMove}
-      onPointerLeave={() => { if (!altDragRef.current) setAltHover(null); }}
+      onPointerLeave={() => { if (!altDragRef.current) { setAltHover(null); setBoxModel(null); } }}
       onContextMenu={onWrapContextMenu}
       onClick={onCanvasClick}
     >
@@ -1113,6 +1179,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           {altHover.edge && <span className={'bc-alt-edge e-' + altHover.edge} />}
         </div>
       )}
+      {/* Alt 拖动时的 F12 式盒模型：四层盒 + 各边数值 + 定位方式 + relative 偏移箭头 */}
+      {boxModel && <AltBoxModel bm={boxModel} />}
       {/* Alt 拖拽实时数值气泡 */}
       {altBadge && (
         <div className="bc-alt-badge" style={{ left: altBadge.x, top: altBadge.y }}>{altBadge.text}</div>
@@ -1148,6 +1216,71 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       {textMenu && <CanvasTextMenu payload={textMenu} onClose={() => setTextMenu(null)} />}
       {/* 中键属性搜索（Portal 到 body） */}
       {propSearch && <CanvasPropSearch x={propSearch.x} y={propSearch.y} onClose={() => setPropSearch(null)} />}
+    </div>
+  );
+}
+
+/**
+ * F12 式盒模型覆盖层（Alt 拖动时实时显示）。
+ * 全部用 client 坐标 + position: fixed —— 不随画布滚动 / 缩放漂移。
+ */
+function AltBoxModel({ bm }: { bm: AltBoxModelData }) {
+  const { x, y, w, h, mt, mr, mb, ml, bt, br, bb, bl, pt, pr, pb, pl } = bm;
+  // 四层盒（外 → 内）：margin 盒 / border 盒 / padding 盒 / content 盒
+  const margin = { left: x - ml, top: y - mt, width: w + ml + mr, height: h + mt + mb };
+  const border = { left: x, top: y, width: w, height: h };
+  const padding = { left: x + bl, top: y + bt, width: Math.max(0, w - bl - br), height: Math.max(0, h - bt - bb) };
+  const content = {
+    left: padding.left + pl,
+    top: padding.top + pt,
+    width: Math.max(0, padding.width - pl - pr),
+    height: Math.max(0, padding.height - pt - pb)
+  };
+  const num = (v: number) => Math.round(v);
+  const show = (v: number) => v >= 12; // 太窄就不画数字，避免糊成一团
+
+  return (
+    <div className="bc-boxm">
+      <div className="bc-boxm-layer is-margin" style={margin} />
+      <div className="bc-boxm-layer is-border" style={border} />
+      <div className="bc-boxm-layer is-padding" style={padding} />
+      <div className="bc-boxm-layer is-content" style={content} />
+
+      {/* margin 四边数值 */}
+      {show(mt) && <span className="bc-boxm-num" style={{ left: x + w / 2, top: y - mt / 2 }}>{num(mt)}</span>}
+      {show(mb) && <span className="bc-boxm-num" style={{ left: x + w / 2, top: y + h + mb / 2 }}>{num(mb)}</span>}
+      {show(ml) && <span className="bc-boxm-num" style={{ left: x - ml / 2, top: y + h / 2 }}>{num(ml)}</span>}
+      {show(mr) && <span className="bc-boxm-num" style={{ left: x + w + mr / 2, top: y + h / 2 }}>{num(mr)}</span>}
+
+      {/* padding 四边数值 */}
+      {show(pt) && <span className="bc-boxm-num is-pad" style={{ left: x + w / 2, top: padding.top + pt / 2 }}>{num(pt)}</span>}
+      {show(pb) && <span className="bc-boxm-num is-pad" style={{ left: x + w / 2, top: padding.top + padding.height - pb / 2 }}>{num(pb)}</span>}
+      {show(pl) && <span className="bc-boxm-num is-pad" style={{ left: padding.left + pl / 2, top: y + h / 2 }}>{num(pl)}</span>}
+      {show(pr) && <span className="bc-boxm-num is-pad" style={{ left: padding.left + padding.width - pr / 2, top: y + h / 2 }}>{num(pr)}</span>}
+
+      {/* 中央：定位方式 + 实际尺寸 */}
+      <span className="bc-boxm-pos" style={{ left: x + w / 2, top: y + h / 2 }}>
+        <b>{bm.posLabel}</b>
+        <i>{Math.round(w)} × {Math.round(h)}</i>
+      </span>
+
+      {/* relative：从文档流原位到当前位置的距离箭头 */}
+      {bm.offsetX !== 0 && (
+        <span
+          className="bc-boxm-dist is-h"
+          style={{ left: Math.min(x, x - bm.offsetX), top: y + h / 2, width: Math.abs(bm.offsetX) }}
+        >
+          <em>{`left ${bm.offsetX > 0 ? '+' : ''}${Math.round(bm.offsetX)}px`}</em>
+        </span>
+      )}
+      {bm.offsetY !== 0 && (
+        <span
+          className="bc-boxm-dist is-v"
+          style={{ left: x + w / 2, top: Math.min(y, y - bm.offsetY), height: Math.abs(bm.offsetY) }}
+        >
+          <em>{`top ${bm.offsetY > 0 ? '+' : ''}${Math.round(bm.offsetY)}px`}</em>
+        </span>
+      )}
     </div>
   );
 }
@@ -1478,7 +1611,7 @@ const CanvasNode = React.memo(function CanvasNode(props: {
         node.children.map((c) => (
           <CanvasNode key={c.id} node={c} depth={props.depth + 1} selectedIds={selectedIds} onSelect={onSelect} onSelectParent={onSelectParent} onToggleSelect={onToggleSelect} onTextMenu={onTextMenu} />
         ))}
-      {node.locked && <span className="lock-badge">🔒</span>}
+      {node.locked && <span className="lock-badge"><Icon name="lock" size={12} /></span>}
     </Tag>
   );
 });

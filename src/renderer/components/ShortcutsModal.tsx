@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useClosing } from '@lib/useClosing';
+import { Icon } from './Icon';
 
 interface Props {
   open: boolean;
@@ -47,23 +48,23 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     category: '画布直接改（按住 Alt）',
     items: [
-      { key: 'Alt + 贴边拖动', desc: '快捷调整元素宽 / 高（行内元素不参与；贴左/上边时对侧边不动）' },
-      { key: 'Alt + 按住文字左右拖', desc: '快捷改字号：往左变小、往右变大（拖动时鼠标隐藏）' },
-      { key: 'Alt + 按住元素中间拖', desc: '快捷移动位置（拖动时常显橙色边界线；撞墙闪一下 = 正常限制）' },
-      { key: 'Alt + 撞墙后继续往外拖', desc: '改父子关系：元素淡化 → 移到块级元素上高亮 → 松开放进去' },
+      { key: 'Alt + 贴边拖动', desc: '快捷调整元素宽 / 高' },
+      { key: 'Alt + 按住文字左右拖', desc: '快捷改字号：往左变小、往右变大' },
+      { key: 'Alt + 按住元素中间拖', desc: '快捷移动位置' },
+      { key: 'Alt + 撞墙后继续往外拖', desc: '改父子关系：拖到块级元素上高亮，松手放入' },
       { key: 'Alt + 滚轮', desc: '以鼠标位置为锚点精准缩放画布' },
       { key: 'Alt + 点击元素', desc: '选中它的父级容器' },
-      { key: '中键（滚轮按下）', desc: '对元素搜索属性：Enter 定位；Ctrl+Enter 添加并定位；点别处关闭' },
+      { key: '中键（滚轮按下）', desc: '搜索元素属性：Enter 定位，Ctrl+Enter 添加并定位' },
       { key: '右键文字元素', desc: '单独调整这段文字（字号/字重/颜色/下划线/删除线/斜体）' },
-      { key: '双击文字元素', desc: '就地编辑文案（点别处 / Esc 都保存；Enter 换行自动生成 <br>）' }
+      { key: '双击文字元素', desc: '就地编辑文案（Enter 换行自动生成 <br>）' }
     ]
   },
   {
     category: '响应式与视图',
     items: [
-      { key: '顶栏画布下拉', desc: '随时在 💻桌面 / 📱平板 / 📱手机 三端断点切换' },
-      { key: '📱 手机端隐藏', desc: '为当前设备快速注入 display: none 覆盖' },
-      { key: '🔄 一键切竖排', desc: '将容器一键转为适合手机单手滑动的纵向排版' },
+      { key: '顶栏画布下拉', desc: '随时切换桌面 / 平板 / 手机三端断点' },
+      { key: '手机端隐藏', desc: '为当前设备快速注入 display: none 覆盖' },
+      { key: '一键切竖排', desc: '将容器一键转为适合手机单手滑动的纵向排版' },
       { key: '? / Shift + /', desc: '随时呼出本键盘快捷键速查表' }
     ]
   }
@@ -89,9 +90,10 @@ export function ShortcutsModal({ open, onClose }: Props) {
       <div className="shortcuts-modal-card" onClick={(e) => e.stopPropagation()}>
         <div className="shortcuts-modal-header">
           <div className="shortcuts-modal-title">
-            <span>⌨️ 键盘快捷键速查表 (Keyboard Shortcuts)</span>
+            <Icon name="keyboard" size={16} />
+            <span>键盘快捷键速查表</span>
           </div>
-          <button className="cp-close" onClick={onClose}>×</button>
+          <button className="cp-close" onClick={onClose} title="关闭"><Icon name="close" size={14} /></button>
         </div>
 
         <div className="shortcuts-modal-body">
@@ -111,7 +113,7 @@ export function ShortcutsModal({ open, onClose }: Props) {
         </div>
 
         <div className="shortcuts-modal-footer">
-          <span className="hint">💡 提示：在输入框或文本域打字时，快捷键会自动防误触忽略。</span>
+          <span className="hint"><Icon name="lightbulb" size={14} /> 在输入框打字时，快捷键会自动忽略。</span>
           <button className="btn-primary btn-mini" onClick={onClose}>
             我知道了 (Esc)
           </button>

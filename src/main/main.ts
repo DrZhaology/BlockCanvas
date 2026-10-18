@@ -128,10 +128,10 @@ function buildMenu(win: BrowserWindow): Menu {
     {
       label: '帮助',
       submenu: [
-        { label: '📖 使用手册（帮助中心）', accelerator: 'F1', click: () => win.webContents.send('menu:help') },
+        { label: '使用手册（帮助中心）', accelerator: 'F1', click: () => win.webContents.send('menu:help') },
         { type: 'separator' },
-        { label: '⌨️ 键盘快捷键速查表', accelerator: 'Shift+/', click: () => win.webContents.send('menu:shortcuts') },
-        { label: '🔄 检测更新…', click: () => win.webContents.send('menu:check-update') },
+        { label: '键盘快捷键速查表', accelerator: 'Shift+/', click: () => win.webContents.send('menu:shortcuts') },
+        { label: '检测更新…', click: () => win.webContents.send('menu:check-update') },
         { type: 'separator' },
         { label: '关于 BlockCanvas', click: () => win.webContents.send('menu:about') }
       ]
@@ -139,7 +139,7 @@ function buildMenu(win: BrowserWindow): Menu {
     {
       label: '设置',
       submenu: [
-        { label: '⚙️ 偏好设置…', accelerator: 'CmdOrCtrl+,', click: () => win.webContents.send('menu:settings') },
+        { label: '偏好设置…', accelerator: 'CmdOrCtrl+,', click: () => win.webContents.send('menu:settings') },
         { type: 'separator' },
         { label: '左侧布局（元素面板在左）', click: () => win.webContents.send('menu:layout-left') },
         { label: '底部布局（元素面板在下方）', click: () => win.webContents.send('menu:layout-bottom') },
@@ -148,7 +148,7 @@ function buildMenu(win: BrowserWindow): Menu {
         { label: '打开便携数据文件夹 (data/)…', click: () => shell.openPath(dataRoot()) },
         { label: '打开扩展文件夹 (extensions/)…', click: () => shell.openPath(extRoot()) },
         { type: 'separator' },
-        { label: '🔄 检测更新…', click: () => win.webContents.send('menu:check-update') },
+        { label: '检测更新…', click: () => win.webContents.send('menu:check-update') },
         { type: 'separator' },
         { label: '类名 / ID 总览…', click: () => win.webContents.send('menu:class-manager') }
       ]
@@ -1020,6 +1020,20 @@ ipcMain.handle('img:pick-src', async (_evt, mode: 'abs' | 'rel' = 'rel') => {
     return { ok: true, path: rel, absPath };
   }
   return { ok: true, path: absPath, absPath };
+});
+
+// 首页背景：选择图片 / 视频文件（只返回路径，不复制；渲染层用 bc-img:// 预览）
+ipcMain.handle('media:pick-src', async (_evt, kind: 'image' | 'video' = 'image') => {
+  const isVideo = kind === 'video';
+  const res = await dialog.showOpenDialog({
+    title: isVideo ? '选择本地视频' : '选择本地图片',
+    properties: ['openFile'],
+    filters: isVideo
+      ? [{ name: '视频文件', extensions: ['mp4', 'webm', 'ogv', 'ogg', 'mov', 'm4v'] }]
+      : [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] }]
+  });
+  if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
+  return { ok: true, path: res.filePaths[0], absPath: res.filePaths[0] };
 });
 
 function countNodes(node: any): number {

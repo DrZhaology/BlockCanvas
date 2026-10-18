@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { TIPS, tipsEnabled, setTipsEnabled } from './CanvasOverlays';
+import { Icon } from './Icon';
 
 // BlockCanvas · 「小技巧」轮播条
 //
@@ -53,7 +54,7 @@ export function TipsTicker({ variant = 'toolbar' }: { variant?: 'toolbar' | 'tab
   if (variant === 'tabbar') {
     return (
       <div className="tabbar-tips" title="编辑器小技巧：每隔一会儿自动换一条；双击文字立刻换下一条">
-        <span className="tt-icon">💡</span>
+        <span className="tt-icon"><Icon name="lightbulb" size={12} /></span>
         {/* key 变化 → 重新挂载 → 入场动画重播，形成"淡出换入"的轮播感 */}
         <button
           className="tt-text"
@@ -66,14 +67,14 @@ export function TipsTicker({ variant = 'toolbar' }: { variant?: 'toolbar' | 'tab
           className="tt-btn"
           onClick={() => setTipsEnabled(false)}
           title="不再显示技巧（可随时在「设置 → 个性化与外观」重新打开）"
-        >×</button>
+        ><Icon name="close" size={12} /></button>
       </div>
     );
   }
 
   return (
     <div className="tips-ticker" title="编辑器小技巧：每隔一会儿自动换一条；点文字立刻换下一条">
-      <span className="tt-icon">💡</span>
+      <span className="tt-icon"><Icon name="lightbulb" size={12} /></span>
       <button
         className="tt-text"
         key={idx}
@@ -81,12 +82,12 @@ export function TipsTicker({ variant = 'toolbar' }: { variant?: 'toolbar' | 'tab
         dangerouslySetInnerHTML={{ __html: TIPS[idx] }}
       />
       <span className="tt-count">{idx + 1}/{TIPS.length}</span>
-      <button className="tt-btn" onClick={next} title="换一条">↻</button>
+      <button className="tt-btn" onClick={next} title="换一条"><Icon name="refresh" size={12} /></button>
       <button
         className="tt-btn"
         onClick={() => setTipsEnabled(false)}
         title="不再在工具栏显示技巧（可随时在「设置 → 个性化与外观」重新打开）"
-      >×</button>
+      ><Icon name="close" size={12} /></button>
     </div>
   );
 }

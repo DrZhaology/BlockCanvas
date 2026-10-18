@@ -3,6 +3,7 @@ import { useTasks, pickHeadTask } from '@store/taskStore';
 import { isActive, RESUMABLE_STATUS, STATUS_LABEL, fmtMB, type BgTask } from '@lib/taskTypes';
 import { useHoverPop } from '@lib/hoverPop';
 import { AnchoredPanel } from './AnchoredPanel';
+import { Icon } from './Icon';
 
 // BlockCanvas · 工具栏「任务」按钮（v0.4.4）
 // ----------------------------------------------------------------------------
@@ -25,7 +26,7 @@ function Ring({ pct, status }: { pct: number; status: BgTask['status'] }) {
       style={{ ['--p' as any]: `${p}%` }}
       aria-hidden="true"
     >
-      <span className="tb-task-ring-in">{done ? '✓' : err ? '!' : `${Math.round(p)}`}</span>
+      <span className="tb-task-ring-in">{done ? <Icon name="check" size={11} /> : err ? <Icon name="warning" size={11} /> : `${Math.round(p)}`}</span>
     </span>
   );
 }
@@ -62,7 +63,7 @@ export function TaskButton() {
       >
         {showRing && head
           ? <Ring pct={head.status === 'done' ? 100 : head.pct} status={head.status} />
-          : <span className="tb-task-ico">{running > 0 ? '⏳' : '🗂'}</span>}
+          : <span className="tb-task-ico">{running > 0 ? <Icon name="hourglass" size={16} /> : <Icon name="list" size={16} />}</span>}
         {badge}
       </button>
 

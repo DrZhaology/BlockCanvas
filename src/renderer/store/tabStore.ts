@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import type { SceneGraph } from '@lib/types';
-import { DEFAULT_TOKENS } from '@lib/designTokens';
 import { useScene } from './sceneStore';
 
 // BlockCanvas · Windows Notepad 风格多工程标签页状态机 (TabStore)
@@ -26,9 +25,10 @@ export function createEmptyScene(): SceneGraph {
     },
     selectedId: null,
     selectedIds: [],
-    // 新项目预置一套设计变量：让「主色改一处全站变」开箱可用，
-    // 不需要用户先去面板里手动添加（不想要可以在变量面板清空）
-    tokens: DEFAULT_TOKENS.map((t) => ({ ...t }))
+    // v0.4.5：新工程**不再预载**一套全局默认变量。
+    // 以前每个新工程都自带同样的 15 个变量，看起来像"变量在项目之间共享"（用户反馈）。
+    // 变量现在严格跟着工程走：空工程就是空的，需要默认集时到变量面板点「载入默认集」。
+    tokens: []
   };
 }
 
@@ -105,18 +105,11 @@ interface TabState {
   initFromSession: (session: { activeTabId: string | null; tabs: any[] }) => void;
 }
 
-const initialScene = createEmptyScene();
-const initialTab: ProjectTab = {
-  id: 'tab-default',
-  name: '未命名项目 1',
-  filePath: null,
-  isDirty: false,
-  scene: initialScene
-};
-
 export const useTabStore = create<TabState>((set, get) => ({
-  tabs: [initialTab],
-  activeTabId: initialTab.id,
+  // v0.4.5：启动时不预置「未命名项目 1」——没有标签就直接进首页（浏览器新标签页的体验）。
+  // 会话恢复（initFromSession）拿到上次的标签时会自动填回来。
+  tabs: [],
+  activeTabId: null,
 
   // 静默载入场景：切 tab / 打开工程 / 恢复会话都用它 ——
   // setScene 会触发 sceneStore.subscribe，若不打 isSwitchingTab 标记，

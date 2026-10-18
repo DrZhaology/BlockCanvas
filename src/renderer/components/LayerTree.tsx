@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useScene, CONTAINER_TAGS } from '@store/sceneStore';
 import type { SceneElement } from '@lib/types';
 import { HelpButton } from './HelpButton';
+import { Icon, type IconName } from './Icon';
 
 // BlockCanvas · 图层树 (DOM 结构)
 // - 树状递归展示 DOM 嵌套关系
@@ -62,7 +63,7 @@ export function LayerTree() {
           <span>图层结构</span>
           <HelpButton
             title="图层树功能说明"
-            content={'【图层树帮助】：\n\n· 单击选中元素，Ctrl+点击进行多选。\n· 开启「🖐️ 拖拽排序」后，可按住节点自由上下拖动调整顺序，或拖入容器内形成嵌套。\n\n⚠ 提示：移动跨越父容器后，元素此前若使用过「⚡ 智能关系选择器」（如 .hero > h1），可能因层级变化而失效，建议重新关联。'}
+            content={'【图层树】\n\n· 单击选中，Ctrl+点击多选。\n· 开启拖拽排序后，可按住节点上下调序，或拖入容器形成嵌套。\n\n注意：跨父容器移动后，元素此前的智能关系选择器（如 .hero > h1）可能失效，建议重新关联。'}
           />
         </div>
         <div className="layer-drag-toggle-wrap">
@@ -71,14 +72,15 @@ export function LayerTree() {
             onClick={() => toggleDrag(!dragEnabled)}
             title={dragEnabled ? '拖拽排序已开启（可直接按住节点拖动重排）。点击关闭' : '点击开启拖拽排序模式'}
           >
-            {dragEnabled ? '🖐️ 拖拽排序: 开' : '🖐️ 拖拽排序: 关'}
+            <Icon name="hand" size={12} /> 拖拽排序
           </button>
         </div>
       </div>
 
       {dragEnabled && (
         <div className="layer-drag-warn">
-          <span>💡 拖拽模式已开启，按住节点可上下调序或拖入容器（拖到画布根可移出最外层）。</span>
+          <Icon name="lightbulb" size={12} />
+          <span>按住节点上下调序，拖入容器可嵌套；拖到画布根可移出最外层。</span>
         </div>
       )}
 
@@ -96,7 +98,7 @@ export function LayerTree() {
         }}
         onDrop={handleRootDrop}
       >
-        <span className="layer-icon">📄</span>
+        <span className="layer-icon"><Icon name="file" size={12} /></span>
         <span className="layer-name">画布根 (body)</span>
         <span className="field-hint" style={{ fontSize: 10 }}>拖到此处移至最外层</span>
       </div>
@@ -242,7 +244,7 @@ function LayerRow(props: {
         className={"layer-row" + (isSelected ? " selected" : "") + (node.hidden ? " row-hidden" : "") + dropClass}
         title={[
           TYPE_LABELS[node.type] ?? node.type,
-          relSel ? `[⚡ ${relSel}]` : cls ? `[.${cls}]` : '',
+          relSel ? `[${relSel}]` : cls ? `[.${cls}]` : '',
           node.text ? `· ${node.text}` : '',
           node.hidden ? '（已隐藏）' : '',
           node.locked ? '（已锁定）' : ''
@@ -265,14 +267,20 @@ function LayerRow(props: {
             onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
             title={expanded ? "收起" : "展开"}
           >
-            {expanded ? "▾" : "▸"}
+            {expanded ? <Icon name="chevronDown" size={12} /> : <Icon name="chevronRight" size={12} />}
           </button>
         ) : (
           <span className="layer-toggle-placeholder" />
         )}
-        <span className="layer-icon">{node.hidden ? '🚫' : node.locked ? '🔒' : typeIcon(node.type)}</span>
+        <span className="layer-icon">
+          {node.hidden
+            ? <Icon name="block" size={12} />
+            : node.locked
+              ? <Icon name="lock" size={12} />
+              : <Icon name={typeIcon(node.type)} size={12} />}
+        </span>
         <span className="layer-name">{TYPE_LABELS[node.type] ?? node.type}</span>
-        {relSel && <span className="layer-rel-badge" title={relSel}>⚡</span>}
+        {relSel && <span className="layer-rel-badge" title={relSel}><Icon name="bolt" size={10} /></span>}
         {cls && !relSel && <span className="layer-cls-badge" title={cls}>.{cls.split(/\s+/)[0]}</span>}
         {node.text && <span className="layer-text-preview">{"· " + node.text}</span>}
         <span className="layer-actions" onClick={(e) => e.stopPropagation()}>
@@ -315,23 +323,23 @@ function LayerRow(props: {
   );
 }
 
-function typeIcon(t: string): string {
-  // 单字符标准字形/图标（彻底杜绝多字符 .square 导致的重叠溢出问题）
-  const m: Record<string, string> = {
-    div: '⬚', section: '▦', header: '▭', nav: '☰',
-    footer: '▭', main: '▣', article: '▤', aside: '▥',
-    figure: '🖼', blockquote: '❝',
-    h1: 'H1', h2: 'H2', h3: 'H3', h4: 'H4',
-    p: '¶', span: '⌥', strong: '𝐁', em: '𝑖',
-    mark: '🖍', small: '🆂', code: '⟨⟩', del: '✂',
-    sup: 'x²', sub: 'x₂', label: '🏷', a: '🔗',
-    ul: '≣', ol: '🔢', li: '•',
-    table: '⊞', tr: '═', th: '┳', td: '▫',
-    figcaption: '💬',
-    button: '🔘', input: '⌨', textarea: '📝', form: '▢',
-    img: '🖼', hr: '―', br: '↵'
+function typeIcon(t: string): IconName {
+  // 统一走 SVG 图标集，避免单字符字形在不同字体下大小不一、错位重叠
+  const m: Record<string, IconName> = {
+    div: 'rect', section: 'grid', header: 'rows', nav: 'menu',
+    footer: 'rows', main: 'fill', article: 'note', aside: 'columns',
+    figure: 'image', blockquote: 'quote',
+    h1: 'heading', h2: 'heading', h3: 'heading', h4: 'heading',
+    p: 'text', span: 'text', strong: 'bold', em: 'italic',
+    mark: 'highlighter', small: 'text', code: 'code', del: 'scissors',
+    sup: 'text', sub: 'text', label: 'tag', a: 'link',
+    ul: 'list', ol: 'list', li: 'dot',
+    table: 'grid', tr: 'rows', th: 'columns', td: 'square',
+    figcaption: 'comment',
+    button: 'radio', input: 'keyboard', textarea: 'note', form: 'rect',
+    img: 'image', hr: 'minus', br: 'enter'
   };
-  return m[t] ?? '◻';
+  return m[t] ?? 'square';
 }
 
 // ============ 行内 SVG 图标 ============

@@ -158,5 +158,8 @@ contextBridge.exposeInMainWorld('bc', {
   setNativeTheme: (source: 'dark' | 'light' | 'system') =>
     ipcRenderer.send('theme:set-source', source),
   pickImageSrc: (mode?: 'abs' | 'rel') =>
-    ipcRenderer.invoke('img:pick-src', mode)
+    ipcRenderer.invoke('img:pick-src', mode),
+  /** 首页背景：选择图片 / 视频文件（返回绝对路径） */
+  pickMediaSrc: (kind: 'image' | 'video') =>
+    ipcRenderer.invoke('media:pick-src', kind)
 });

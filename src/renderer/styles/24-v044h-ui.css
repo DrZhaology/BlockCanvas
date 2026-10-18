@@ -259,3 +259,90 @@ body.bc-reparenting { cursor: copy; }
 
 /* 遮罩：点击不关闭（只做视觉），整条流程用同一个遮罩 */
 .dd-mask-static { cursor: default; }
+
+/* ==========================================================================
+   v0.4.5 · Alt 拖动时的 F12 式盒模型
+   --------------------------------------------------------------------------
+   四层盒用半透明色块叠出来（margin 橙 / border 黄 / padding 绿 / content 蓝），
+   数值与定位方式都是 fixed 覆盖层，坐标直接取 getBoundingClientRect（client 坐标）。
+   "撞墙改父子关系"已按用户要求停用（Canvas.tsx 的 ALT_REPARENT_ENABLED），
+   下面的 .bc-drop-into / .bc-alt-ghost 样式保留，重新开启即可复用。
+   ========================================================================== */
+.bc-boxm { position: fixed; inset: 0; z-index: 402; pointer-events: none; }
+.bc-boxm-layer { position: fixed; border-radius: 2px; }
+.bc-boxm-layer.is-margin {
+  background: rgba(246, 178, 107, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(180, 110, 30, 0.45);
+}
+.bc-boxm-layer.is-border { background: rgba(255, 229, 153, 0.55); }
+.bc-boxm-layer.is-padding { background: rgba(174, 213, 129, 0.5); }
+.bc-boxm-layer.is-content {
+  background: rgba(111, 168, 220, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(40, 90, 150, 0.35);
+}
+.bc-boxm-num {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  padding: 0 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 13px;
+  color: #8a4b0f;
+  background: rgba(255, 255, 255, 0.86);
+  border-radius: 3px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.bc-boxm-num.is-pad { color: #2f6b2f; }
+.bc-boxm-pos {
+  position: fixed;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 8px;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.8);
+  border-radius: 6px;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+.bc-boxm-pos b { font-size: 10.5px; font-weight: 700; }
+.bc-boxm-pos i {
+  font-style: normal;
+  font-size: 9px;
+  opacity: 0.82;
+  font-variant-numeric: tabular-nums;
+}
+/* relative 的偏移距离：红色虚线 + 两端箭头 + 数值 */
+.bc-boxm-dist { position: fixed; pointer-events: none; }
+.bc-boxm-dist.is-h { height: 0; border-top: 1.5px dashed #dc2626; }
+.bc-boxm-dist.is-v { width: 0; border-left: 1.5px dashed #dc2626; }
+.bc-boxm-dist::before,
+.bc-boxm-dist::after {
+  content: '';
+  position: absolute;
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+}
+.bc-boxm-dist.is-h::before { left: -1px; top: -4.8px; border-right-color: #dc2626; border-left: none; }
+.bc-boxm-dist.is-h::after { right: -1px; top: -4.8px; border-left-color: #dc2626; border-right: none; }
+.bc-boxm-dist.is-v::before { top: -1px; left: -4.8px; border-bottom-color: #dc2626; border-top: none; }
+.bc-boxm-dist.is-v::after { bottom: -1px; left: -4.8px; border-top-color: #dc2626; border-bottom: none; }
+.bc-boxm-dist em {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 0 4px;
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #b91c1c;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 3px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}

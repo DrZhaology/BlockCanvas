@@ -14,6 +14,7 @@ import { useWheelAdjust } from '@lib/wheelAdjust';
 import { isValidChildSelector, cssTextToObject } from '@lib/styleClass';
 import logoUrl from '@renderer/assets/logo.svg';
 import { exportHTML } from '@lib/exporter';
+import { Icon } from './Icon';
 
 // ============================================================================
 // BlockCanvas · 表格编辑页（v0.4.3）
@@ -23,7 +24,7 @@ import { exportHTML } from '@lib/exporter';
 //
 // 操作哲学：**能用鼠标拖的，绝不做成按钮墙**。
 //   · 插入行/列 → 网格里行与行、列与列之间有"插入轨"：
-//       鼠标移上去浮出 ＋（整条轨道都是热区，不用瞄准）
+//       鼠标移上去浮出加号（整条轨道都是热区，不用瞄准）
 //       点一下 = 插 1 个；按住沿"列→右 / 行→下"拖 = 一次插 N 个（实时预览 + 计数气泡）
 //   · 选中     → 在单元格上按住拖，可以框出一个矩形选区
 //   · 合并/拆分/设为表头/删行删列 → 选区上方浮出操作条，就近点
@@ -403,7 +404,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
         e.preventDefault();
         e.stopPropagation();
         setSel({ kind: 'cell', r: 0, c: 0, r2: rowCount - 1, c2: cols - 1 });
-        flashToast(`✓ 已全选整张表（${rowCount} 行 × ${cols} 列）—— 可直接设样式、合并或复制`);
+        flashToast(`已全选整张表（${rowCount} 行 × ${cols} 列）—— 可直接设样式、合并或复制`);
         return;
       }
 
@@ -411,13 +412,13 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
       e.stopPropagation();
       if (e.shiftKey) {
         const html = tableHtml();
-        flashToast(copyText(html) ? '✓ 已复制整张表的 HTML 源码（可直接粘进别的网页/编辑器）' : '复制失败：剪贴板不可用');
+        flashToast(copyText(html) ? '已复制整张表的 HTML 源码（可直接粘进别的网页/编辑器）' : '复制失败：剪贴板不可用');
         return;
       }
       const { tsv, rows, cols: nCols } = selectionTsv();
       if (!tsv.trim()) { flashToast('这张表还没有内容可复制'); return; }
       flashToast(copyText(tsv)
-        ? `✓ 已复制 ${rows} 行 × ${nCols} 列（Tab 分隔，可直接粘进 Excel / WPS）`
+        ? `已复制 ${rows} 行 × ${nCols} 列（Tab 分隔，可直接粘进 Excel / WPS）`
         : '复制失败：剪贴板不可用');
     };
     window.addEventListener('keydown', onKey);
@@ -558,7 +559,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
     if (r.named > 0) bits.push(`新命名 ${r.named} 个元素`);
     if (r.fixed > 0) bits.push(`修正 ${r.fixed} 个会串味的选择器`);
     if (r.renamedTo) bits.push(`表名与别的表重复，已改用 ${r.renamedTo}`);
-    setAutoNameHint(bits.length > 0 ? '✓ ' + bits.join('；') : '✓ 所有内部元素都已经是各自独立的选择器');
+    setAutoNameHint(bits.length > 0 ? '已完成：' + bits.join('；') : '已完成：所有内部元素都已经是各自独立的选择器');
     window.setTimeout(() => setAutoNameHint(''), 6000);
   };
 
@@ -738,7 +739,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
   return (
     <div className="table-page">
       <div className="table-topbar">
-        <button className="fluent-back-btn" onClick={onBack}>← 返回编辑器</button>
+        <button className="fluent-back-btn" onClick={onBack}><Icon name="chevronLeft" size={13} /> 返回编辑器</button>
         <div className="update-brand">
           <img className="update-brand-logo" src={logoUrl} alt="BlockCanvas" />
           <span className="update-brand-text">表格编辑器</span>
@@ -764,11 +765,11 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
             <div className="tbl-panel-title">表格结构</div>
             <HelpButton
               title="怎么改表格结构"
-              content={'【插入行 / 列】\n把鼠标移到行与行、列与列之间那条缝上，会浮出一条轨道和 ＋。\n· 点一下：插入 1 行 / 1 列\n· 按住 ＋ 沿"列往右拖 / 行往下拖"：一次插入多个，气泡上会实时显示要插几个\n· 拖过头了按 Esc 取消\n· 插入点落在某个合并格内部时，会自动吸附到那个格子的左边（保证每一行都在同一列边界上插，不会错位）\n\n【选中与合并】\n· 在格子上按住鼠标拖 → 拖选出一片（矩形选区，自动吸附到格子边界）\n· Ctrl / ⌘ + 点某一格 → 把这一格并进当前选区（选区始终是矩形，取并集）\n· Shift + 点 → 从选区左上角拉到你点的那一格\n· 点行号 / 列号 → 选中整行 / 整列\n· Ctrl / ⌘ + A → 全选整张表（所有单元格）\n· 选中后，上面那条操作条会亮起来：合并 / 拆分 / 设为表头 / 删除行 / 删除列\n\n【合并的规则】\n· 只有"选区正好由完整格子拼满"才允许合并；压到已有合并格的边上时，\n  「合并」按钮会灰着并把鼠标停上去写明原因 —— 不会出现"点了没反应"\n· 合并后只有左上角那格的内容保留，其余格子整格消失；用「拆分」还原\n· 可以先把两行各自横向合并、再把它们纵向合并成一块（2×2 一次合上也行）\n\n【删除】\n按 Del / Backspace = 清空选中格子的文字（只动内容，不动结构）。\n要删掉整行 / 整列，请用操作条上的「删行 / 删列」。\n删列时如果那一列正处在某个合并格内部，那一格不会被硬拆（该列在那一行保留）。\n\n【跨度标记】\n合并后的格子右下角会显示 ⇥（跨几列）与 ⇩（跨几行）。'}
+              content={'【插入行 / 列】\n把鼠标移到行与行、列与列之间那条缝上，会浮出一条轨道和加号按钮。\n· 点一下：插入 1 行 / 1 列\n· 按住加号沿"列往右拖 / 行往下拖"：一次插入多个，气泡上会实时显示要插几个\n· 拖过头了按 Esc 取消\n· 插入点落在某个合并格内部时，会自动吸附到那个格子的左边（保证每一行都在同一列边界上插，不会错位）\n\n【选中与合并】\n· 在格子上按住鼠标拖 → 拖选出一片（矩形选区，自动吸附到格子边界）\n· Ctrl + 点某一格 → 把这一格并进当前选区（选区始终是矩形，取并集）\n· Shift + 点 → 从选区左上角拉到你点的那一格\n· 点行号 / 列号 → 选中整行 / 整列\n· Ctrl + A → 全选整张表（所有单元格）\n· 选中后，上面那条操作条会亮起来：合并 / 拆分 / 设为表头 / 删除行 / 删除列\n\n【合并的规则】\n· 只有"选区正好由完整格子拼满"才允许合并；压到已有合并格的边上时，\n  「合并」按钮会灰着并把鼠标停上去写明原因 —— 不会出现"点了没反应"\n· 合并后只有左上角那格的内容保留，其余格子整格消失；用「拆分」还原\n· 可以先把两行各自横向合并、再把它们纵向合并成一块（2×2 一次合上也行）\n\n【删除】\n按 Del / Backspace = 清空选中格子的文字（只动内容，不动结构）。\n要删掉整行 / 整列，请用操作条上的「删行 / 删列」。\n删列时如果那一列正处在某个合并格内部，那一格不会被硬拆（该列在那一行保留）。\n\n【跨度标记】\n合并后的格子右下角会显示跨度标记（跨几列 / 跨几行）。'}
             />
           </div>
           <div className="tbl-stage-tip">
-            缝上悬浮出 <b>＋</b>：点一下插 1 个，按住拖动可一次插多个 · 格子上拖动可拖选一片，<b>Ctrl+点</b> 加选、<b>Del</b> 清空文字
+            缝上悬浮出<b>加号按钮</b>：点一下插 1 个，按住拖动可一次插多个 · 格子上拖动可拖选一片，<b>Ctrl+点</b> 加选、<b>Del</b> 清空文字
             · <b>Ctrl+A</b> 全选整张表 · <b>Ctrl+C</b> 复制选区（Tab 分隔，可直接粘进 Excel）· <b>Ctrl+Shift+C</b> 复制整张表 HTML
           </div>
 
@@ -791,14 +792,14 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                         : '把框选的这一片合并成一格（只有左上角那格的内容会保留）'
                 }
                 onClick={() => anchor && runOp({ kind: 'mergeRange', cellId: anchor.id, width: rect!.c1 - rect!.c0 + 1, height: rect!.r1 - rect!.r0 + 1 })}
-              >⇥⇩ 合并</button>
+              ><Icon name="tab" size={11} /><Icon name="arrowDown" size={11} /> 合并</button>
             )}
             <button
               className="tbl-bar-btn"
               disabled={!merged}
               title={merged ? '把合并过的格子拆回一格一格' : '当前选区里没有合并过的格子'}
               onClick={() => anchor && runOp({ kind: 'unmerge', cellId: anchor.id })}
-            >⇱ 拆分</button>
+            ><Icon name="collapse" size={11} /> 拆分</button>
             <button
               className="tbl-bar-btn"
               disabled={!sel}
@@ -809,7 +810,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                 const toTh = !rectCells.every((c) => c.type === 'th');
                 runOp({ kind: 'setRangeType', cellIds: ids, type: toTh ? 'th' : 'td' });
               }}
-            >◐ 表头</button>
+            ><Icon name="contrast" size={11} /> 表头</button>
             <button
               className="tbl-bar-btn danger"
               disabled={!sel}
@@ -820,7 +821,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                   : parts.rows.slice(rect!.r0, rect!.r1 + 1).map((r) => r.id);
                 runOp({ kind: 'deleteRows', rowIds: ids });
               }}
-            >－ 删行</button>
+            ><Icon name="minus" size={11} /> 删行</button>
             <button
               className="tbl-bar-btn danger"
               disabled={!sel}
@@ -831,7 +832,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                 else for (let c = rect!.c0; c <= rect!.c1; c++) idxs.push(c);
                 runOp({ kind: 'deleteCols', indexes: idxs });
               }}
-            >－ 删列</button>
+            ><Icon name="minus" size={11} /> 删列</button>
           </div>
 
           <div className="tbl-grid-wrap bc-hscroll" ref={wrapRef}>
@@ -840,8 +841,8 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                 <div className="tbl-empty-title">这张表还一行都没有</div>
                 <div className="tbl-empty-sub">先加一行，之后就能用轨道插行列、用格子框选合并了。</div>
                 <div className="tbl-btn-row" style={{ justifyContent: 'center' }}>
-                  <button className="tbl-btn" style={{ flex: '0 0 auto' }} onClick={() => commitRail('row', 0, 1)}>＋ 加第一行</button>
-                  <button className="tbl-btn" style={{ flex: '0 0 auto' }} onClick={() => commitRail('row', 0, 3)}>＋ 加 3 行</button>
+                  <button className="tbl-btn" style={{ flex: '0 0 auto' }} onClick={() => commitRail('row', 0, 1)}><Icon name="plus" size={12} /> 加第一行</button>
+                  <button className="tbl-btn" style={{ flex: '0 0 auto' }} onClick={() => commitRail('row', 0, 3)}><Icon name="plus" size={12} /> 加 3 行</button>
                 </div>
               </div>
             ) : (
@@ -908,7 +909,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                         gridRow: `${3 + 2 * r} / span ${2 * rs - 1}`,
                         ...cellLiveStyle(styleOfCell(cell), table.style)
                       }}
-                      title={`第 ${r + 1} 行 · 第 ${colLetter(c)} 列${cs > 1 ? `（跨 ${cs} 列）` : ''}${rs > 1 ? `（跨 ${rs} 行）` : ''}（按住可拖选一片；Ctrl/⌘ 点 = 并进选区；双击 = 改文字）`}
+                      title={`第 ${r + 1} 行 · 第 ${colLetter(c)} 列${cs > 1 ? `（跨 ${cs} 列）` : ''}${rs > 1 ? `（跨 ${rs} 行）` : ''}（按住可拖选一片；Ctrl+点 = 并进选区；双击 = 改文字）`}
                       onPointerDown={(e) => {
                         if (e.button !== 0) return;
                         // 双击 = 就地改字：先把上一格的编辑收尾，别把改动丢了
@@ -965,8 +966,8 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                           style={{ whiteSpace: cell.style?.whiteSpace === 'nowrap' ? 'nowrap' : 'normal' }}
                         >{(cell.text ?? '').trim() || ' '}</span>
                       )}
-                      {cs > 1 && <span className="tbl-cell-badge">⇥{cs}</span>}
-                      {rs > 1 && <span className="tbl-cell-badge">⇩{rs}</span>}
+                      {cs > 1 && <span className="tbl-cell-badge"><Icon name="tab" size={9} />{cs}</span>}
+                      {rs > 1 && <span className="tbl-cell-badge"><Icon name="arrowDown" size={9} />{rs}</span>}
                     </div>
                   );
                 })}
@@ -984,7 +985,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                     }
                     onPointerDown={(e) => { if (e.button === 0) { e.preventDefault(); startRail('row', j, e); } }}
                   >
-                    <button className="tbl-rail-btn" tabIndex={-1}>＋</button>
+                    <button className="tbl-rail-btn" tabIndex={-1}><Icon name="plus" size={10} /></button>
                   </div>
                 ))}
 
@@ -1001,7 +1002,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                     }
                     onPointerDown={(e) => { if (e.button === 0) { e.preventDefault(); startRail('col', i, e); } }}
                   >
-                    <button className="tbl-rail-btn" tabIndex={-1}>＋</button>
+                    <button className="tbl-rail-btn" tabIndex={-1}><Icon name="plus" size={10} /></button>
                   </div>
                 ))}
 
@@ -1062,7 +1063,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                   ? '表格内部元素都已经有名字了'
                   : `给表格内 ${unnamedInner} 个还没有名字的元素生成精准关系选择器（一条撤销记录）`}
                 onClick={autoNameInner}
-              >⚡ 自动取名表格内的元素{unnamedInner > 0 ? `（${unnamedInner}）` : ''}</button>
+              ><Icon name="bolt" size={13} /> 自动取名表格内的元素{unnamedInner > 0 ? `（${unnamedInner}）` : ''}</button>
               <span className="tbl-hint">
                 {autoNameHint
                   ? autoNameHint
@@ -1258,7 +1259,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                   className="btn-secondary tbl-apply-all"
                   title="把这一格的样式（底色/字色/字号/内边距/对齐/不换行）复制给表格里所有单元格，一次撤销可回退"
                   onClick={() => applyToAllCells()}
-                >⇥ 应用到全部单元格（{grid.cells.length} 格）</button>
+                ><Icon name="tab" size={11} /> 应用到全部单元格（{grid.cells.length} 格）</button>
               </>
             )}
           </div>
@@ -1275,14 +1276,14 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
             <div className="tbl-toggle-row">
               <span className="tbl-toggle-name">表头行</span>
               <span className="tbl-toggle-count">{parts.thead ? parts.thead.children.length : 0} 行</span>
-              <button className="tbl-mini" title="在表头区块末尾加一行 th" onClick={() => runOp({ kind: 'addHeaderRow' })}>＋</button>
-              <button className="tbl-mini danger" title="删掉表头区块最后一行（删空后整个区块移除）" onClick={() => runOp({ kind: 'removeHeaderRow' })}>－</button>
+              <button className="tbl-mini" title="在表头区块末尾加一行 th" onClick={() => runOp({ kind: 'addHeaderRow' })}><Icon name="plus" size={11} /></button>
+              <button className="tbl-mini danger" title="删掉表头区块最后一行（删空后整个区块移除）" onClick={() => runOp({ kind: 'removeHeaderRow' })}><Icon name="minus" size={11} /></button>
             </div>
             <div className="tbl-toggle-row">
               <span className="tbl-toggle-name">表尾行</span>
               <span className="tbl-toggle-count">{parts.tfoot ? parts.tfoot.children.length : 0} 行</span>
-              <button className="tbl-mini" title="在表尾区块末尾加一行 td" onClick={() => runOp({ kind: 'addFooterRow' })}>＋</button>
-              <button className="tbl-mini danger" title="删掉表尾区块最后一行" onClick={() => runOp({ kind: 'removeFooterRow' })}>－</button>
+              <button className="tbl-mini" title="在表尾区块末尾加一行 td" onClick={() => runOp({ kind: 'addFooterRow' })}><Icon name="plus" size={11} /></button>
+              <button className="tbl-mini danger" title="删掉表尾区块最后一行" onClick={() => runOp({ kind: 'removeFooterRow' })}><Icon name="minus" size={11} /></button>
             </div>
             <div className="tbl-toggle-row">
               <span className="tbl-toggle-name">表格标题</span>
@@ -1291,7 +1292,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                 className="tbl-mini"
                 title={parts.caption ? '删掉表格标题' : '给表格加一条 caption 标题'}
                 onClick={() => runOp(parts.caption ? { kind: 'removeCaption' } : { kind: 'addCaption' })}
-              >{parts.caption ? '－' : '＋'}</button>
+              >{parts.caption ? <Icon name="minus" size={11} /> : <Icon name="plus" size={11} />}</button>
             </div>
             {parts.caption && (
               <label className="tbl-field">
@@ -1310,7 +1311,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
               <div className="tbl-card-title">表格设置</div>
               <HelpButton
                 title="表格设置（整张表）怎么调"
-                content={'【预览】上面那块是"大致效果"预览（不是左边那张结构网格）：\n底色 / 字色 / 字号 / 外框线型粗细颜色 / 圆角 / 阴影 / 边框间距 / 标题位置 都会立刻画出来。\n⚠ 预览只画外观：宽度与布局算法（auto / fixed）影响的是真实排版与导出结果，预览里不体现。\n\n【宽度】整张表占容器多宽。100% = 撑满；写 480px 就是固定宽。\n\n【布局算法】\n· auto 自动：浏览器按内容自己分配列宽（内容长的列更宽）\n· fixed 固定：严格按第一行各列的宽度分，之后的列不会再被内容撑变 —— 数据对齐更整齐\n\n【边框合并】\n· collapse 合并：相邻格共用一条线，传统表格的样子\n· separate 分离：每格各自有边框，中间留缝（配合"边框间距"做卡片感）\n\n【边框间距】只在"分离"模式下生效：格子之间留多少空隙，例如 2px。\n\n【外框样式 / 粗细 / 颜色】整张表最外面那一圈边框。\n【圆角】表格四角切圆，配合"边框合并 = 分离"才看得出效果。\n【阴影】整张表底下的投影，例如 0 6px 20px rgba(15,23,42,.08)。\n\n⚠ 这里每改一项，左边表格与上面预览都会立刻跟着变；连续输入算一条撤销记录。'}
+                content={'【预览】上面那块是"大致效果"预览（不是左边那张结构网格）：\n底色 / 字色 / 字号 / 外框线型粗细颜色 / 圆角 / 阴影 / 边框间距 / 标题位置 都会立刻画出来。\n注意：预览只画外观：宽度与布局算法（auto / fixed）影响的是真实排版与导出结果，预览里不体现。\n\n【宽度】整张表占容器多宽。100% = 撑满；写 480px 就是固定宽。\n\n【布局算法】\n· auto 自动：浏览器按内容自己分配列宽（内容长的列更宽）\n· fixed 固定：严格按第一行各列的宽度分，之后的列不会再被内容撑变 —— 数据对齐更整齐\n\n【边框合并】\n· collapse 合并：相邻格共用一条线，传统表格的样子\n· separate 分离：每格各自有边框，中间留缝（配合"边框间距"做卡片感）\n\n【边框间距】只在"分离"模式下生效：格子之间留多少空隙，例如 2px。\n\n【外框样式 / 粗细 / 颜色】整张表最外面那一圈边框。\n【圆角】表格四角切圆，配合"边框合并 = 分离"才看得出效果。\n【阴影】整张表底下的投影，例如 0 6px 20px rgba(15,23,42,.08)。\n\n注意：这里每改一项，左边表格与上面预览都会立刻跟着变；连续输入算一条撤销记录。'}
               />
             </div>
 

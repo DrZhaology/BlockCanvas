@@ -8,9 +8,11 @@ import { SCHEMA, ATTRS_SCHEMA, DEFAULT_VISIBLE_PROPS,
 } from '@lib/propertySchema';
 import { getPluginProperties } from '@lib/pluginHost';
 import { AddPropertyMenu } from './AddPropertyMenu';
+import { Icon } from './Icon';
 import { HelpButton } from './HelpButton';
 import { Box4Input } from './Box4Input';
 import { useShowBr } from '@lib/showBr';
+import { peekPendingPropFocus, subscribePropFocus, takePendingPropFocus, type PropFocusRequest } from '@lib/propFocus';
 import { TrblInput } from './TrblInput';
 import { ColorPicker, ColorField } from './ColorPicker';
 import { NumberUnitInput } from './NumberUnitInput';
@@ -82,6 +84,17 @@ export function Inspector() {
     setJustAddedKey(null);
   }, [selectedIdForSync]);
 
+  // 中键属性搜索：右侧面板可能停在「页面 / 类名 / 变量」页签（ElementPropsBody 未挂载），
+  // 甚至整个 Inspector 刚被 App 从「图层」切过来。这里统一兜底：收到请求就切到「元素」页签，
+  // 真正的定位由 ElementPropsBody 挂载后从缓冲里取走执行（见 lib/propFocus）。
+  useEffect(() => {
+    const toElement = () => {
+      if (peekPendingPropFocus()) setInspectorTabRaw('element');
+    };
+    toElement(); // 挂载瞬间可能已经有排队请求（从图层页切过来的情况）
+    return subscribePropFocus(toElement);
+  }, []);
+
   // 画布/模板刚插入新元素 → 把右侧属性区滚回顶部（顶部就是这个新元素的属性）
   useEffect(() => {
     const onAdded = () => {
@@ -135,7 +148,7 @@ export function Inspector() {
   } else if (!selected) {
     elementBody = (
       <div className="inspector-empty">
-        <div className="empty-icon">👆</div>
+        <div className="empty-icon"><Icon name="target" size={30} /></div>
         <div className="empty-title">未选中元素</div>
         <div className="empty-desc">
           在画布上直接点击任意元素，或在左侧「图层」中点选，即可在此调整大小、颜色、文字与排版。
@@ -145,7 +158,7 @@ export function Inspector() {
   } else if (selected.id === scene.root.id) {
     elementBody = (
       <div className="inspector-empty">
-        <div className="empty-icon">📄</div>
+        <div className="empty-icon"><Icon name="pageReset" size={30} /></div>
         <div className="empty-title">画布根容器</div>
         <div className="empty-desc">
           画布根节点代表整个网页主体。若要修改整页背景色、文字颜色或字体，请切换到上方 <b>「页面」</b> 页签。
@@ -190,11 +203,12 @@ export function Inspector() {
   );
 }
 
-// ============ 页面页签：全局样式（新交互：按需添加属性 + 富颜色选择器） ============
-// 与「元素」页签同构的交互模型：
-//  - 默认显示 4 个常用项；「+ 添加属性」把更多页面级属性加进面板
-//  - 颜色项点色块打开富调色盘：RGB / RGBA / HEX / 英文色名 / 任意 CSS 颜色
-//  - 键存在（含空串）= 已添加，清空文字行不消失；只有 × 才删除该属性
+// ============ 页面页签：body 设置 + 全局样式 ============
+// v0.4.5 重构（按用户要求，与元素 CSS 面板统一）：
+//  · 「添加属性」直接用元素面板同款 AddPropertyMenu：按类别分组 + 中英文/拼音搜索；
+//  · 每个属性都渲染成和元素 CSS 一样的专属卡片 —— 颜色开调色盘、数值有数字框 + 单位、
+//    内外边距是四向输入、枚举是下拉，不再是一排裸文本框；
+//  · body 的 7 个常用项仍走 quickCss（旧工程与导出完全兼容），其余任意 CSS 走 bodyExtra。
 
 type PageQuickKey = keyof NonNullable<SceneGraph['quickCss']> & string;
 
@@ -203,26 +217,33 @@ interface PagePropDef {
   label: string;
   type: 'color' | 'text';
   placeholder?: string;
+  /** 对应元素 SCHEMA 的 key：决定这张卡片用哪种专属编辑器 */
+  schemaKey?: string;
 }
 
 const PAGE_PROPS: PagePropDef[] = [
-  { key: 'bodyBg', label: '页面背景色', type: 'color' },
-  { key: 'textColor', label: '文字颜色', type: 'color' },
-  { key: 'linkColor', label: '链接颜色', type: 'color' },
-  { key: 'fontFamily', label: '页面字体', type: 'text', placeholder: '例如 Arial, sans-serif' },
-  { key: 'bodyFontSize', label: '正文字号', type: 'text', placeholder: '例：16px' },
-  { key: 'bodyLineHeight', label: '正文行高', type: 'text', placeholder: '例：1.6 / 24px' },
-  { key: 'headingColor', label: '标题颜色（h1~h6）', type: 'color' }
+  { key: 'bodyBg', label: '页面背景色', type: 'color', schemaKey: 'backgroundColor' },
+  { key: 'textColor', label: '文字颜色', type: 'color', schemaKey: 'color' },
+  { key: 'linkColor', label: '链接颜色', type: 'color', schemaKey: 'color' },
+  { key: 'fontFamily', label: '页面字体', type: 'text', schemaKey: 'fontFamily' },
+  { key: 'bodyFontSize', label: '正文字号', type: 'text', schemaKey: 'fontSize' },
+  { key: 'bodyLineHeight', label: '正文行高', type: 'text', schemaKey: 'lineHeight' },
+  { key: 'headingColor', label: '标题颜色（h1~h6）', type: 'color', schemaKey: 'color' }
 ];
 
 const PAGE_DEFAULT_KEYS = new Set<string>(['bodyBg', 'textColor', 'linkColor', 'fontFamily']);
 
-// 「全局样式」属性名建议（可自由输入，这里是常用项提示）
-const BODY_EXTRA_SUGGESTIONS = [
-  'background-image', 'background-size', 'background-repeat', 'background-position', 'background-attachment',
-  'text-align', 'letter-spacing', 'word-spacing', 'font-weight', 'text-transform',
-  'min-height', 'padding', 'cursor', 'user-select', 'overflow-x', 'transition'
-];
+const camelToKebab = (k: string) => k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+const kebabToCamel = (k: string) => k.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+
+/** 「添加属性」里选中的 CSS 属性若正好是 body 常用项 → 写回 quickCss，避免两处重复 */
+const CSS_TO_QUICK: Record<string, PageQuickKey> = {
+  backgroundColor: 'bodyBg',
+  color: 'textColor',
+  fontFamily: 'fontFamily',
+  fontSize: 'bodyFontSize',
+  lineHeight: 'bodyLineHeight'
+};
 
 function PageCssBody() {
   const quickCss = useScene((s) => s.scene.quickCss);
@@ -237,73 +258,39 @@ function PageCssBody() {
   const bodyOpen = pageSec?.body ?? true;
   const globalOpen = pageSec?.global ?? false;
   // 「全局样式」添加表单
-  const [extraAddOpen, setExtraAddOpen] = useState(false);
-  const [extraProp, setExtraProp] = useState('');
-  const [extraVal, setExtraVal] = useState('');
   const qc = quickCss ?? {};
   const extraEntries = Object.entries(bodyExtra ?? {}).filter(([, v]) => String(v ?? '').trim() !== '');
   const legacyCss = (useScene.getState().scene.globalCss ?? '').trim();
 
-  // 已显示 = 默认项 ∪ 键已存在（含空串）的项；可添加 = 其余
+  // 已显示 = 默认项 ∪ 键已存在（含空串）的项
   const visibleDefs = PAGE_PROPS.filter((it) => PAGE_DEFAULT_KEYS.has(it.key) || qc[it.key] !== undefined);
-  const addableDefs = PAGE_PROPS.filter((it) => !PAGE_DEFAULT_KEYS.has(it.key) && qc[it.key] === undefined);
 
   // 会话式提交：focus/开 modal 开会话（不入栈），change 流式写 store，blur/关 modal 收尾一次入栈
   const setKey = (key: PageQuickKey, v: string) => setQuickCss({ [key]: v } as Record<string, string | undefined>);
-  const addKey = (key: PageQuickKey) => {
-    beginStyleEdit();
-    setKey(key, '');
-    endStyleEdit();
-  };
   const removeKey = (key: PageQuickKey) => {
     beginStyleEdit();
     setQuickCss({ [key]: undefined } as Record<string, string | undefined>);
     endStyleEdit();
   };
-
-  const row = (item: PagePropDef) => {
-    const value = qc[item.key] ?? '';
-    return (
-      <div className="page-quick-row" key={item.key}>
-        <span className="page-quick-label">{item.label}</span>
-        {item.type === 'color' ? (
-          <ColorField
-            value={value}
-            fallback="#ffffff"
-            inputClassName="page-quick-input"
-            onInputFocus={() => beginStyleEdit()}
-            onChange={(v) => setKey(item.key, v)}
-            onInputBlur={() => endStyleEdit()}
-            onModalOpen={() => beginStyleEdit()}
-            onModalClose={() => endStyleEdit()}
-          />
-        ) : (
-          <input
-            className="page-quick-input"
-            placeholder={item.placeholder ?? '留空 = 不设置'}
-            value={value}
-            spellCheck={false}
-            onFocus={() => beginStyleEdit()}
-            onChange={(e) => setKey(item.key, e.target.value)}
-            onBlur={() => endStyleEdit()}
-          />
-        )}
-        <button className="page-quick-clear" title="删除此属性" onClick={() => removeKey(item.key)}>×</button>
-      </div>
-    );
-  };
-
-  const canAdd = /^[-a-z][a-z0-9-]*$/.test(extraProp.trim().toLowerCase());
-  const commitExtraAdd = () => {
-    const k = extraProp.trim().toLowerCase().replace(/\s+/g, '-');
-    if (!canAdd || !k) return;
+  const setExtra = (k: string, v: string) => setBodyExtra({ [k]: v });
+  const removeExtra = (k: string) => {
     beginStyleEdit();
-    setBodyExtra({ [k]: extraVal });
+    setBodyExtra({ [k]: undefined });
     endStyleEdit();
-    setExtraProp('');
-    setExtraVal('');
-    setExtraAddOpen(false);
   };
+
+  // 「+ 添加属性」：与元素面板同一个菜单；选中的 key 若是 body 常用项就写回 quickCss
+  const addBodyProp = (camelKey: string) => {
+    const quick = CSS_TO_QUICK[camelKey];
+    beginStyleEdit();
+    if (quick) setKey(quick, qc[quick] ?? '');
+    else setBodyExtra({ [camelToKebab(camelKey)]: '' });
+    endStyleEdit();
+  };
+  const visibleCamelKeys = [
+    ...visibleDefs.map((d) => d.schemaKey ?? ''),
+    ...extraEntries.map(([k]) => kebabToCamel(k))
+  ].filter(Boolean);
 
   return (
     <>
@@ -320,7 +307,7 @@ function PageCssBody() {
           title="点击展开或收起 body 设置"
         >
           <span>
-            <span className="sec-caret">{bodyOpen ? '▾' : '▸'}</span>
+            <span className="sec-caret"><Icon name={bodyOpen ? 'chevronDown' : 'chevronRight'} size={12} /></span>
             body 设置
           </span>
           <HelpButton
@@ -361,8 +348,25 @@ function PageCssBody() {
             重置标题/段落默认间距（还原网站时推荐）
           </label>
         </div>
-        {visibleDefs.map((item) => row(item))}
-        <PageAddProp items={addableDefs} onAdd={addKey} />
+        {visibleDefs.map((item) => (
+          <PagePropRow
+            key={item.key}
+            label={item.label}
+            cssKey={camelToKebab(item.schemaKey ?? item.key)}
+            schemaKey={item.schemaKey}
+            value={qc[item.key] ?? ''}
+            onChange={(v) => setKey(item.key, v)}
+            onFocusStart={() => beginStyleEdit()}
+            onFocusEnd={() => endStyleEdit()}
+            onRemove={() => removeKey(item.key)}
+          />
+        ))}
+        <AddPropertyMenu
+          type={'div' as ElementType}
+          elementStyle={{}}
+          visibleKeys={visibleCamelKeys}
+          onAdd={(k) => addBodyProp(k)}
+        />
             </div>
           </div>
         </Collapse>
@@ -376,7 +380,7 @@ function PageCssBody() {
           title="点击展开或收起全局样式"
         >
           <span>
-            <span className="sec-caret">{globalOpen ? '▾' : '▸'}</span>
+            <span className="sec-caret"><Icon name={globalOpen ? 'chevronDown' : 'chevronRight'} size={12} /></span>
             全局样式
           </span>
           <HelpButton
@@ -386,65 +390,31 @@ function PageCssBody() {
         </div>
         <Collapse open={globalOpen}>
           <div className="inspector-sec-body">
-            {extraEntries.length === 0 && !extraAddOpen && (
+            {extraEntries.length === 0 && (
               <div className="hint" style={{ fontSize: 12, opacity: 0.75, marginBottom: 6 }}>
-                还没有额外属性。body 设置不够用时（例如背景图、字距），在这里点「+ 添加属性」。
+                还没有额外属性。body 设置不够用时（例如背景图、字距），点下面「添加属性」。
               </div>
             )}
             {extraEntries.map(([k, v]) => (
-              <div className="page-quick-row" key={k}>
-                <span className="page-quick-label extra-key" title={k}>{k}</span>
-                <input
-                  className="page-quick-input"
-                  value={v}
-                  spellCheck={false}
-                  placeholder="留空 = 不设置"
-                  onFocus={() => beginStyleEdit()}
-                  onChange={(e) => setBodyExtra({ [k]: e.target.value })}
-                  onBlur={() => endStyleEdit()}
-                />
-                <button
-                  className="page-quick-clear"
-                  title="删除此属性"
-                  onClick={() => { beginStyleEdit(); setBodyExtra({ [k]: undefined }); endStyleEdit(); }}
-                >×</button>
-              </div>
+              <PagePropRow
+                key={k}
+                label={getSchemaItem(kebabToCamel(k))?.label ?? k}
+                cssKey={k}
+                value={String(v ?? '')}
+                onChange={(nv) => setExtra(k, nv)}
+                onFocusStart={() => beginStyleEdit()}
+                onFocusEnd={() => endStyleEdit()}
+                onRemove={() => removeExtra(k)}
+                sideGet={(side) => String((bodyExtra ?? {})[side] ?? '')}
+                sideSet={(side, sv) => setExtra(side, sv)}
+              />
             ))}
-            {extraAddOpen ? (
-              <div className="page-quick-row extra-add-row">
-                <input
-                  className="page-quick-input extra-key-input"
-                  list="bc-body-prop-list"
-                  placeholder="属性名，如 letter-spacing"
-                  value={extraProp}
-                  spellCheck={false}
-                  autoFocus
-                  onChange={(e) => setExtraProp(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && canAdd) commitExtraAdd();
-                    if (e.key === 'Escape') setExtraAddOpen(false);
-                  }}
-                />
-                <input
-                  className="page-quick-input"
-                  placeholder="值，如 2px / cover"
-                  value={extraVal}
-                  spellCheck={false}
-                  onChange={(e) => setExtraVal(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && canAdd) commitExtraAdd();
-                    if (e.key === 'Escape') setExtraAddOpen(false);
-                  }}
-                />
-                <button className="btn-mini" disabled={!canAdd} onClick={commitExtraAdd}>添加</button>
-                <button className="page-quick-clear" title="取消" onClick={() => setExtraAddOpen(false)}>×</button>
-                <datalist id="bc-body-prop-list">
-                  {BODY_EXTRA_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
-                </datalist>
-              </div>
-            ) : (
-              <button className="add-prop-trigger" onClick={() => setExtraAddOpen(true)}>+ 添加属性</button>
-            )}
+            <AddPropertyMenu
+              type={'div' as ElementType}
+              elementStyle={{}}
+              visibleKeys={visibleCamelKeys}
+              onAdd={(k) => addBodyProp(k)}
+            />
           </div>
         </Collapse>
       </div>
@@ -464,40 +434,185 @@ function PageCssBody() {
   );
 }
 
-// 「+ 添加属性」下拉（页面版）：复用元素面板的 add-prop 样式，轻量无搜索
-function PageAddProp(props: { items: PagePropDef[]; onAdd: (key: PageQuickKey) => void }) {
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
-  if (props.items.length === 0) return null;
+// ============ 页面属性卡片（与元素 CSS 属性行同一套视觉 / 编辑器） ============
+// 只绑定「值 + 写回」，不碰元素 / 断点，所以能同时服务 body 常用项与任意全局 CSS。
+function PagePropRow(props: {
+  label: string;
+  /** bodyExtra 里存的 kebab CSS 名 */
+  cssKey: string;
+  /** 可选：元素 SCHEMA 的 camelCase key，用来决定卡片形态 */
+  schemaKey?: string;
+  value: string;
+  onChange: (v: string) => void;
+  onFocusStart: () => void;
+  onFocusEnd: () => void;
+  onRemove: () => void;
+  /** 四向属性（padding / margin）的分边读写；不传则退化成简写文本框 */
+  sideGet?: (cssSide: string) => string;
+  sideSet?: (cssSide: string, v: string) => void;
+}) {
+  const schema = getSchemaItem(props.schemaKey ?? kebabToCamel(props.cssKey));
+  const input = schema?.input ?? 'text';
+  const unit = schema?.unit;
+  const value = props.value ?? '';
+  const canSides = Boolean(schema?.sides && props.sideGet && props.sideSet);
+
   return (
-    <div className="add-prop-wrap">
-      <button className="add-prop-trigger" onClick={() => setOpen(!open)} title="添加页面级属性">
-        + 添加属性 {open ? '▴' : '▾'}
-      </button>
-      {open && (
-        <>
-          <div className="add-prop-backdrop" onClick={() => setOpen(false)} />
-          <div className="add-prop-menu">
-            <div className="add-prop-scroll">
-              {props.items.map((it) => (
-                <button
-                  key={it.key}
-                  className="add-prop-item"
-                  title={it.placeholder ? `例：${it.placeholder}` : it.label}
-                  onClick={() => { props.onAdd(it.key); setOpen(false); }}
-                >
-                  {it.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
+    <div className="prop-row page-prop-row" data-cat={schema?.category ?? '其他'}>
+      <div className="prop-row-header">
+        <span>
+          {props.label}
+          {schema?.help && <HelpButton title={schema.help.title} content={schema.help.content} />}
+        </span>
+        <button className="prop-remove" title="删除此属性" onClick={props.onRemove}>
+          <Icon name="close" size={12} />
+        </button>
+      </div>
+      <div className="prop-row-body">
+        {input === 'color' ? (
+          <ColorField
+            value={value}
+            fallback="#ffffff"
+            inputClassName="page-quick-input"
+            onInputFocus={props.onFocusStart}
+            onChange={props.onChange}
+            onInputBlur={props.onFocusEnd}
+            onModalOpen={props.onFocusStart}
+            onModalClose={props.onFocusEnd}
+          />
+        ) : input === 'number' && unit ? (
+          <PageNumUnit
+            value={value}
+            unit={unit}
+            allowAuto={schema?.allowAuto}
+            onChange={props.onChange}
+            onFocusStart={props.onFocusStart}
+            onFocusEnd={props.onFocusEnd}
+          />
+        ) : input === 'select' && schema?.options ? (
+          <select
+            className="page-quick-input"
+            value={value}
+            onChange={(e) => props.onChange(e.target.value)}
+            onFocus={props.onFocusStart}
+            onBlur={props.onFocusEnd}
+          >
+            <option value="">默认</option>
+            {schema.options.map((o) => (
+              <option key={o} value={o}>
+                {schema.optionLabels?.[o] ? `${o} · ${schema.optionLabels[o]}` : o}
+              </option>
+            ))}
+          </select>
+        ) : canSides && schema?.sides ? (
+          <PageBox4
+            sides={schema.sides.map((s) => ({ css: camelToKebab(s.key), label: s.label }))}
+            get={props.sideGet!}
+            set={props.sideSet!}
+            unit={unit ?? 'px'}
+            onFocusStart={props.onFocusStart}
+            onFocusEnd={props.onFocusEnd}
+          />
+        ) : (
+          <input
+            className="page-quick-input"
+            value={value}
+            placeholder={schema?.placeholder ?? '留空 = 不设置'}
+            spellCheck={false}
+            onFocus={props.onFocusStart}
+            onChange={(e) => props.onChange(e.target.value)}
+            onBlur={props.onFocusEnd}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** 数字 + 单位（页面版）：解析 / 拼接规则与元素面板的 NumberUnitInput 一致 */
+function PageNumUnit(props: {
+  value: string;
+  unit: string;
+  allowAuto?: boolean;
+  onChange: (v: string) => void;
+  onFocusStart: () => void;
+  onFocusEnd: () => void;
+}) {
+  const parse = (v: string) => {
+    const s = (v || '').trim();
+    if (!s) return { num: '', unit: props.unit };
+    if (/^auto$/i.test(s)) return { num: 'auto', unit: 'auto' };
+    const m = /^(-?[0-9]*\.?[0-9]+)\s*([a-z%]+)?$/i.exec(s);
+    if (m && m[1] !== '') return { num: m[1], unit: (m[2] ?? '').toLowerCase() || props.unit };
+    return { num: s, unit: 'custom' };
+  };
+  const p = parse(props.value);
+  const units = ['px', '%', 'em', 'rem', 'vw', 'vh', ...(props.allowAuto ? ['auto'] : []), 'custom'];
+  const compose = (num: string, unit: string) => {
+    if (unit === 'auto') return 'auto';
+    if (unit === 'custom') return num;
+    if (num.trim() === '') return '';
+    return num + unit;
+  };
+  return (
+    <div className="num-unit-row">
+      <input
+        type="text"
+        className="num-unit-num"
+        value={p.num}
+        placeholder="只填数字"
+        disabled={p.unit === 'auto'}
+        onFocus={props.onFocusStart}
+        onChange={(e) => props.onChange(compose(e.target.value, p.unit))}
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+        onBlur={props.onFocusEnd}
+      />
+      <select
+        className="unit-select"
+        value={p.unit}
+        onChange={(e) => props.onChange(compose(p.num, e.target.value))}
+        onFocus={props.onFocusStart}
+        onBlur={props.onFocusEnd}
+      >
+        {units.map((u) => (
+          <option key={u} value={u}>{u === 'custom' ? '自定义' : u}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/** 四向数值（页面版 padding / margin）：每个方向一个框 + 共享单位 */
+function PageBox4(props: {
+  sides: { css: string; label: string }[];
+  get: (cssSide: string) => string;
+  set: (cssSide: string, v: string) => void;
+  unit: string;
+  onFocusStart: () => void;
+  onFocusEnd: () => void;
+}) {
+  const [u, setU] = useState(props.unit || 'px');
+  return (
+    <div className="box4">
+      {props.sides.map((s) => (
+        <div className="box4-cell" key={s.css}>
+          <span className="box4-label">{s.label}</span>
+          <input
+            type="text"
+            value={props.get(s.css)}
+            placeholder="—"
+            onFocus={props.onFocusStart}
+            onChange={(e) => props.set(s.css, e.target.value === '' ? '' : applyUnit(e.target.value, u))}
+            onBlur={props.onFocusEnd}
+          />
+        </div>
+      ))}
+      <div className="box4-unit-row">
+        <span className="box4-label">单位</span>
+        <select className="unit-select" value={u} onChange={(e) => setU(e.target.value)} title="没有写单位的数字自动补这个单位">
+          {['px', '%', 'em', 'rem', 'vw', 'vh'].map((x) => <option key={x} value={x}>{x}</option>)}
+        </select>
+      </div>
     </div>
   );
 }
@@ -792,12 +907,11 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   // 画布上对元素按中键 → 敲属性名 → Enter → 这里展开「CSS 样式属性」、确保该行存在、滚动并闪烁高亮。
   const [flashKey, setFlashKey] = useState<string | null>(null);
   useEffect(() => {
-    const onFocusProp = (e: Event) => {
-      const detail = (e as CustomEvent).detail ?? {};
-      const key = detail.key as string | undefined;
+    const apply = (req: PropFocusRequest) => {
+      const key = req.key;
       if (!key) return;
       // add 默认 true（老行为）；中键搜索在"未添加"时按 Enter 会传 false —— 只提示、不偷偷加
-      const shouldAdd = detail.add !== false;
+      const shouldAdd = req.add !== false;
       setSecOpen((p) => ({ ...p, css: true }));
       if (shouldAdd) addVisibleProp(elementId, key);
       setFlashKey(key);
@@ -807,8 +921,10 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
       }, 140);
       window.setTimeout(() => setFlashKey(null), 2000);
     };
-    window.addEventListener('bc:focus-prop', onFocusProp);
-    return () => window.removeEventListener('bc:focus-prop', onFocusProp);
+    // 挂载瞬间先消费缓冲：从「页面 / 类名 / 图层」切过来的请求，事件早就派发完了
+    const first = takePendingPropFocus();
+    if (first) apply(first);
+    return subscribePropFocus((req) => { takePendingPropFocus(); apply(req); });
   }, [elementId, addVisibleProp]);
 
   // ============ "删除属性"回调 ============
@@ -842,7 +958,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
           <span className="panel-title-tag">&lt;{elementType}&gt;</span>
         </div>
         <div className="panel-title-badges">
-          {hasRel && <span className="panel-title-badge is-rel" title={`关系选择器: ${relText}`}>⚡ {relText}</span>}
+          {hasRel && <span className="panel-title-badge is-rel" title={`关系选择器: ${relText}`}><Icon name="bolt" size={11} /> {relText}</span>}
           {hasCls && <span className="panel-title-badge is-cls" title={`类名: .${clsText.split(/\s+/).join(' .')}`}>.{clsText.split(/\s+/).join(' .')}</span>}
           {hasId && <span className="panel-title-badge is-id" title={`ID: #${idText}`}>#{idText}</span>}
           {hasInlineStyle && (
@@ -857,21 +973,20 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
           这里做闪烁提示，尽量在用户"白干一场"之前拦下来。 */}
       {hasInlineStyle && (
         <div className="cls-warn-flash" role="alert">
-          <span className="cls-warn-ico">⚠</span>
+          <span className="cls-warn-ico"><Icon name="warning" size={18} /></span>
           <div className="cls-warn-body">
-            <b>这个元素还没有「类名 / ID / 关系选择器」</b>
-            <div>
-              当前 {stylePropCount} 项样式会以<b>行内样式</b>导出。
-              <b>:hover / :active / :focus 这类伪类样式必须有名字才能在导出的网页里生效</b>
-              ，否则画布上能看到、导出后却失效。
+            <div className="cls-warn-title">样式还没有名字</div>
+            <div className="cls-warn-desc">
+              这 {stylePropCount} 项样式会以<b>行内样式</b>导出；:hover / :active / :focus 这类伪类样式
+              必须有「类名 / ID / 关系选择器」才能在导出后生效。
             </div>
             <div className="cls-warn-actions">
               <button
-                className="btn-mini"
+                className="btn-primary btn-mini"
                 onClick={() => setSecOpen((p) => ({ ...p, identity: true }))}
-              >去起个名字</button>
+              >起个名字</button>
               <button
-                className="btn-mini"
+                className="btn-secondary btn-mini"
                 onClick={() => window.dispatchEvent(new CustomEvent('bc:open-class'))}
                 title="到「类名 · ID 总览」里批量给未命名元素起名"
               >打开类名总览</button>
@@ -888,34 +1003,31 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
             onClick={() => window.dispatchEvent(new CustomEvent('bc:set-device', { detail: 'auto' }))}
             title="自适应：画布铺满编辑区（与工具栏「自适应」同一逻辑）"
           >
-            ↔ 自适应
+            <Icon name="responsive" size={14} /><span>自适应</span>
           </button>
           <button
             className={'bp-tab-btn' + (activeBreakpoint === 'desktop' ? ' active' : '')}
             onClick={() => requestDevice('desktop')}
             title="电脑端基础样式（全局基准，平板/手机自动继承）。点此画布宽度切为 1920px"
           >
-            💻 电脑默认
+            <Icon name="laptop" size={14} /><span>电脑</span>
           </button>
           <button
             className={'bp-tab-btn' + (activeBreakpoint === 'tablet' ? ' active' : '') + (hasTabletOverride ? ' has-override' : '')}
             onClick={() => requestDevice('tablet')}
-            title="平板端 (≤768px) 样式定制。点此画布宽度同步变为 768px，所见即所得"
+            title="平板端 ≤768px 样式定制。点此画布宽度同步变为 768px，所见即所得"
           >
-            📱 平板 (768px)
+            <Icon name="tablet" size={14} /><span>平板</span>
             {hasTabletOverride && <span className="bp-dot" title="已有平板端定制覆盖" />}
           </button>
           <button
             className={'bp-tab-btn' + (activeBreakpoint === 'mobile' ? ' active' : '') + (hasMobileOverride ? ' has-override' : '')}
             onClick={() => requestDevice('mobile')}
-            title="手机端 (≤480px) 样式定制。点此画布宽度同步变为 375px，所见即所得"
+            title="手机端 ≤480px 样式定制。点此画布宽度同步变为 375px，所见即所得"
           >
-            📲 手机 (375px)
+            <Icon name="phone" size={14} /><span>手机</span>
             {hasMobileOverride && <span className="bp-dot" title="已有手机端定制覆盖" />}
           </button>
-        </div>
-        <div className="inspector-bp-tip">
-          设备切换会同步改变画布宽度 —— 也可直接点画布顶部的设备条（未选中元素时同样可用）
         </div>
       </div>
 
@@ -930,9 +1042,9 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
               <button
                 className="btn-mini btn-ghost bp-clear-btn"
                 onClick={() => clearBreakpointOverride(elementId, undefined, activeBreakpoint)}
-                title="清空当前设备上的所有定制覆盖，完全恢复电脑端继承"
+                 title="清空当前设备上的所有定制覆盖，完全恢复电脑端继承"
               >
-                ↺ 还原继承
+                <Icon name="undo" size={12} /> 还原继承
               </button>
             )}
           </div>
@@ -942,7 +1054,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
               onClick={toggleHideOnDevice}
               title={isCurrentHidden ? '取消隐藏，在当前设备重新显示' : '在当前设备上隐藏此元素 (display: none)'}
             >
-              {isCurrentHidden ? '👁️ 取消隐藏' : '🚫 在此设备隐藏'}
+              {isCurrentHidden ? <><Icon name="eye" size={13} /> 取消隐藏</> : <><Icon name="block" size={13} /> 在此设备隐藏</>}
             </button>
             {CONTAINER_TAGS.has(elementType) && (
               <button
@@ -950,7 +1062,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
                 onClick={toggleColumnLayout}
                 title="将容器在当前设备转为上下单列竖排 (适合手机单手阅读)"
               >
-                🔄 一键切竖排
+                <Icon name="refresh" size={13} /> 切竖排
               </button>
             )}
             <button
@@ -958,14 +1070,14 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
               onClick={toggleFullWidth}
               title="将宽度设为 100% 撑满屏幕 (手机端卡片与按钮常用)"
             >
-              ↔ 撑满全宽
+              <Icon name="responsive" size={13} /> 撑满全宽
             </button>
             <button
               className="btn-mini bp-quick-btn bp-autofit-btn"
               onClick={autoFitPage}
               title={`一键把整页按「${activeBreakpoint === 'mobile' ? '手机' : '平板'}」规则重排：过宽元素改自适应、横排容器改竖排、多列网格改单列、内边距与字号适度收紧。只影响当前断点，可整体撤销。`}
             >
-              ✨ 整页自动适配
+              <Icon name="sparkle" size={13} /> 整页自动适配
             </button>
           </div>
         </div>
@@ -989,7 +1101,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
             onClick={() => setShowBr(!showBr)}
             title="开启后，画布的就地编辑框里会用淡灰色标出换行位置（<br>）；换行本来就会自动生成 <br>"
           >
-            {showBr ? '✓ 已显示 <br> 换行标记' : '显示 <br> 换行标记'}
+            {showBr ? <><Icon name="check" size={12} /> 已显示 {'<br>'} 换行标记</> : '显示 <br> 换行标记'}
           </button>
         </div>
       )}
@@ -1000,7 +1112,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
       {tableOwner && (
         <div className="tbl-entry">
           <div className="tbl-entry-text">
-            <b>▦ 这是表格元素</b>
+            <b><Icon name="grid" size={14} /> 这是表格元素</b>
             <span>加行/列、合并拆分单元格、表头表尾与整套样式，都在表格编辑器里一气呵成。</span>
           </div>
           <button
@@ -1018,7 +1130,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
           title="点击展开或收起选择器与标识"
         >
           <span>
-            <span className="sec-caret">{secOpen.identity ? '▾' : '▸'}</span>
+            <span className="sec-caret"><Icon name={secOpen.identity ? 'chevronDown' : 'chevronRight'} size={12} /></span>
             选择器与标识
           </span>
           <HelpButton
@@ -1055,7 +1167,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
           title="点击展开或收起快捷助手"
         >
           <span>
-            <span className="sec-caret">{secOpen.layout ? '▾' : '▸'}</span>
+            <span className="sec-caret"><Icon name={secOpen.layout ? 'chevronDown' : 'chevronRight'} size={12} /></span>
             快捷助手
           </span>
           <span className="prop-scope">排版 / 渐变</span>
@@ -1080,7 +1192,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
           title="编辑 :hover / :active / :focus / :link 状态下的样式与动效"
         >
           <span>
-            <span className="sec-caret">{secOpen.pseudo ? '▾' : '▸'}</span>
+            <span className="sec-caret"><Icon name={secOpen.pseudo ? 'chevronDown' : 'chevronRight'} size={12} /></span>
             交互状态 (伪类)
           </span>
           <HelpButton
@@ -1095,7 +1207,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
               '【怎么做交互动效（三步法）】：\n' +
               '1. 先在「默认」状态下设好基础样式（如蓝色背景）；\n' +
               '2. 切换到「:hover」标签页，点击「+ 添加属性」，选一个更深的背景色（如深蓝）；\n' +
-              '3. 在下方开启「⚡ 0.3s 平滑过渡」，鼠标悬停时颜色就会自然渐变，绝不生硬！'
+              '3. 在下方开启「0.3s 平滑过渡」，鼠标悬停时颜色就会自然渐变。'
             }
           />
         </div>
@@ -1141,7 +1253,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
                       </div>
                       {!hasSelector && (
                         <div className="pseudo-need-selector">
-                          <span>⚠️</span>
+                          <span><Icon name="warning" size={15} /></span>
                           <div>
                             这个元素还没有<b>类名 / 关系选择器 / ID</b>。伪类样式需要挂在一个"名字"上，
                             没有名字的话<b>导出的网页里不会生效</b>（画布上能看到，导出后失效）。
@@ -1322,7 +1434,7 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
           title="点击展开或收起 CSS 样式属性"
         >
           <span>
-            <span className="sec-caret">{secOpen.css ? '▾' : '▸'}</span>
+            <span className="sec-caret"><Icon name={secOpen.css ? 'chevronDown' : 'chevronRight'} size={12} /></span>
             CSS 样式属性
             {visibleSchema.length > 0 && <span className="sec-count">({visibleSchema.length})</span>}
           </span>
@@ -1411,7 +1523,7 @@ function MultiClassNameRow(props: { ids: string[] }) {
           批量类名
           <HelpButton
             title="批量类名"
-            content={`给选中的 ${ids.length} 个元素统一加类名：\n\n· 输入名字回车 → 全部选中元素都加上它\n· 若这个类名已存在，它们会立刻穿上该类的样式\n· 点 chip 上的 × → 从全部选中元素移除这个名字`}
+            content={`给选中的 ${ids.length} 个元素统一加类名：\n\n· 输入名字回车 → 全部选中元素都加上它\n· 若这个类名已存在，它们会立刻穿上该类的样式\n· 点名字上的关闭按钮 → 从全部选中元素移除这个名字`}
           />
         </span>
       </div>
@@ -1479,7 +1591,7 @@ function MultiRelSelectorRow(props: { ids: string[] }) {
               '• 空格（所有后代）：例如 .hero p —— 匹配 .hero 容器内「所有层级」的段落（亲儿子、孙子都生效）；\n' +
               '• +（紧邻弟弟）：例如 h2 + p —— 只匹配紧跟在 h2 后面的第一个段落；\n' +
               '• :first-child / :last-child：只匹配第一个或最后一个子元素。\n\n' +
-              '点击「⚡ 批量关联父级」，系统会自动推导并为您推荐最干净的标准选择器，一键套用！'
+              '点击「批量关联父级」，系统会自动推导并推荐最干净的标准选择器，一键套用！'
             }
           />
           <span className="prop-scope">批量</span>
@@ -1489,7 +1601,7 @@ function MultiRelSelectorRow(props: { ids: string[] }) {
         {commonRel ? (
           <div className="cls-rel-box">
             <div className="cls-rel-badge" title={`全部 ${ids.length} 个元素均使用关系选择器: ${commonRel}`}>
-              <span className="cls-rel-icon">⚡</span>
+              <span className="cls-rel-icon"><Icon name="bolt" size={12} /></span>
               <span className="cls-rel-text">{commonRel}</span>
               <button
                 className="cls-chip-x"
@@ -1505,7 +1617,7 @@ function MultiRelSelectorRow(props: { ids: string[] }) {
             title="根据选中的元素在共同父容器中的结构推导关系选择器"
             onClick={handleOpenInfer}
           >
-            ⚡ 批量关联父级…
+            <Icon name="bolt" size={13} /> 批量关联父级…
           </button>
         )}
       </div>
@@ -1518,8 +1630,8 @@ function MultiRelSelectorRow(props: { ids: string[] }) {
           />
           <div className={'cls-infer-pop bc-pop' + (inferClosing ? ' is-closing' : '')}>
             <div className="cls-infer-head">
-              <span className="cls-infer-title">⚡ 批量关系选择器推荐</span>
-              <button className="cp-close" onClick={() => setInferOpen(false)}>×</button>
+              <span className="cls-infer-title"><Icon name="bolt" size={13} /> 批量关系选择器推荐</span>
+              <button className="cp-close" onClick={() => setInferOpen(false)}><Icon name="close" size={13} /></button>
             </div>
             {inferResult.ok ? (
               <div className="cls-infer-body">
@@ -1665,7 +1777,7 @@ function RelationalSelectorRow(props: { elementId: string; element: SceneElement
               '• +（紧邻弟弟）：例如 h2 + p —— 只匹配紧跟在 h2 后面的第一个段落；\n' +
               '• :first-child / :last-child：只匹配第一个或最后一个子元素。\n\n' +
               '通过父子关系定位元素，无需为每个子元素起 class：\n' +
-              '· 点击「⚡ 自动关联父级」，系统自动向上找父容器（如 .hero、.card），推导生成 .hero > h1、.card > p 等手写级选择器；\n' +
+              '· 点击「自动关联父级」，系统自动向上找父容器（如 .hero、.card），推导生成 .hero > h1、.card > p 等手写级选择器；\n' +
               '· 若选择全部同类（如 .main > div），该容器下所有同标签直接子元素会自动同步该选择器与样式。'
             }
           />
@@ -1676,7 +1788,7 @@ function RelationalSelectorRow(props: { elementId: string; element: SceneElement
         {relSel ? (
           <div className="cls-rel-box">
             <div className="cls-rel-badge" title={`当前关系选择器: ${relSel}`}>
-              <span className="cls-rel-icon">⚡</span>
+              <span className="cls-rel-icon"><Icon name="bolt" size={12} /></span>
               <span className="cls-rel-text">{relSel}</span>
               <button
                 className="cls-chip-x"
@@ -1692,7 +1804,7 @@ function RelationalSelectorRow(props: { elementId: string; element: SceneElement
             title="自动根据在父容器中的位置推导最干净的 CSS 关系选择器（如 .card > h3）"
             onClick={handleOpenInfer}
           >
-            ⚡ 自动关联父级…
+            <Icon name="bolt" size={13} /> 自动关联父级…
           </button>
         )}
       </div>
@@ -1706,8 +1818,8 @@ function RelationalSelectorRow(props: { elementId: string; element: SceneElement
           />
           <div className={'cls-infer-pop bc-pop' + (inferClosing ? ' is-closing' : '')}>
             <div className="cls-infer-head">
-              <span className="cls-infer-title">⚡ 智能关系选择器推荐</span>
-              <button className="cp-close" onClick={() => setInferOpen(false)}>×</button>
+              <span className="cls-infer-title"><Icon name="bolt" size={13} /> 智能关系选择器推荐</span>
+              <button className="cp-close" onClick={() => setInferOpen(false)}><Icon name="close" size={13} /></button>
             </div>
             {inferResult.ok ? (
               <div className="cls-infer-body">
@@ -1840,17 +1952,17 @@ function PropertyRow(props: {
                 clearBreakpointOverride(elementId, schemaItem.key);
               }}
             >
-              📱覆盖 ↺
+              <Icon name="phone" size={10} /> 覆盖 <Icon name="undo" size={10} />
             </span>
           )}
           {!app.applicable && (
             <span className="prop-warn-tag" title={app.disabledReason}>
-              ⚠ {app.disabledReason?.slice(0, 14)}…
+              <Icon name="warning" size={10} /> {app.disabledReason?.slice(0, 14)}…
             </span>
           )}
           {highlight && <span className="prop-new-badge">新</span>}
         </span>
-        <button className="prop-remove" title="删除此属性" onClick={onRemove}>×</button>
+        <button className="prop-remove" title="删除此属性" onClick={onRemove}><Icon name="close" size={12} /></button>
       </div>
       <div className="prop-row-body">
         {schemaItem.input === 'font' && (
@@ -2024,7 +2136,7 @@ function AttrRow(props: {
       walk(root);
       setHint(
         dup
-          ? { text: `⚠ 这个 ID 已被另一个 <${owner}> 使用，浏览器里 ID 必须唯一`, danger: true }
+          ? { text: `注意：这个 ID 已被另一个 <${owner}> 使用，浏览器里 ID 必须唯一`, danger: true }
           : null
       );
     }
@@ -2100,14 +2212,14 @@ function ImgPickerRow(props: { elementId: string }) {
             title="图片路径与 file:// 协议说明"
             content={
               '【图片路径模式说明】：\n\n' +
-              '1. 相对路径（强烈推荐 · ⭐⭐⭐）：\n' +
+              '1. 相对路径（强烈推荐）：\n' +
               '   例如 ./images/photo.png 或 images/photo.png。\n' +
               '   导出的 HTML 文件直接双击在浏览器打开（file:// 协议）或部署上线均能完美显示！\n\n' +
               '2. 网络图片 URL：\n' +
               '   例如 https://example.com/pic.jpg。\n' +
               '   只要电脑能联网，无论本地打开还是线上均能正常显示。\n\n' +
               '3. 本地绝对路径（如 D:\\photo.jpg 或 file://...）：\n' +
-              '   ⚠️ 编辑器内已做专属特权通道强行正常预览；但导出的 HTML 在现代浏览器由于同源安全限制，通过 file:// 协议可能无法跨盘符读取，建议将图片放入与导出的 HTML 相同或子文件夹内，使用相对路径！'
+              '   注意：编辑器内已做专属特权通道强行正常预览；但导出的 HTML 在现代浏览器由于同源安全限制，通过 file:// 协议可能无法跨盘符读取，建议将图片放入与导出的 HTML 相同或子文件夹内，使用相对路径！'
             }
           />
         </span>
@@ -2137,7 +2249,7 @@ function ImgPickerRow(props: { elementId: string }) {
       </div>
       {isAbsOrFileProto && (
         <div style={{ marginTop: 4, fontSize: 11, color: '#d97706', lineHeight: 1.4 }}>
-          ⚠️ 提示：当前为绝对路径。编辑器内已强行支持预览，但导出 HTML 在浏览器中直接双击 (file://) 打开时受跨域安全限制可能无法跨盘显示，推荐使用相对路径 (./images/...)。
+          <Icon name="warning" size={12} /> 提示：当前为绝对路径。编辑器内已强行支持预览，但导出 HTML 在浏览器中直接双击 (file://) 打开时受跨域安全限制可能无法跨盘显示，推荐使用相对路径 (./images/...)。
         </div>
       )}
     </div>

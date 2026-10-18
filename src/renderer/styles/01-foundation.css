@@ -145,3 +145,12 @@ body {
   height: 100vh;
 }
 
+/* 图标组件（Icon.tsx）统一基线：与文字同排时垂直居中，避免高低不齐。
+   颜色一律继承 currentColor，深浅主题自动适配。 */
+.bc-icon {
+  display: inline-block;
+  flex: none;
+  vertical-align: -0.14em;
+  pointer-events: none;
+}
+

@@ -184,6 +184,8 @@ declare global {
       onMenu: (channel: string, cb: () => void) => () => void;
       setNativeTheme: (source: 'dark' | 'light' | 'system') => void;
       pickImageSrc: (mode?: 'abs' | 'rel') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
+      /** 首页背景用：选择图片 / 视频文件（返回绝对路径，渲染层用 bc-img:// 显示） */
+      pickMediaSrc: (kind: 'image' | 'video') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
     };
     __sceneStore?: any;
   }

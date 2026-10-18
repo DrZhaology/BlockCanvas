@@ -2,11 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTabStore, isEmptyProject, type ProjectTab } from '@store/tabStore';
 import { useScene } from '@store/sceneStore';
 import { TipsTicker } from './TipsTicker';
+import { Icon } from './Icon';
 import { appConfirm } from '@lib/appConfirm';
 
 // BlockCanvas · Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
 // 遵循《设计语言规范》与 VS Code 标准交互：
-// - 【✏️ 笔图标前置】：放在项目名称左侧，清晰直观，点击或双击即可就地重命名
+// - 【铅笔图标前置】：放在项目名称左侧，清晰直观，点击或双击即可就地重命名
 // - 【VS Code 一模一样的圆点与叉逻辑】：
 //     * 未保存 (isDirty)：默认展示圆点 ●，鼠标悬停 (hover) 时圆点变为关闭叉 ×（点击关闭前提示保存）；
 //     * 已保存 (!isDirty)：始终直接展示关闭叉 ×，随时可点击关闭，无需等待 hover。
@@ -101,7 +102,7 @@ export function ProjectTabBar() {
         title: '未保存的项目',
         body: `「${tab.name}」还没有保存过（Ctrl+S 可保存为 .bcproj 工程文件）。\n\n` +
           `直接关闭后，这个项目将从标签列表移除且无法找回。\n` +
-          `（提示：不点 ×、直接退出软件的话，未保存草稿仍会在下次打开时恢复）\n\n` +
+          `（提示：不点关闭按钮、直接退出软件的话，未保存草稿仍会在下次打开时恢复）\n\n` +
           `确定要直接关闭吗？`,
         okText: '直接关闭',
         cancelText: '留着',
@@ -128,15 +129,15 @@ export function ProjectTabBar() {
               className={"tab-item" + (isActive ? " active" : "") + (tab.isDirty ? " is-dirty" : "")}
               onClick={() => switchTab(tab.id)}
               onDoubleClick={(e) => startRename(e, tab)}
-              title={tab.filePath ? `${tab.name}\n路径: ${tab.filePath}\n(点击 ✏️ 或双击重命名)` : `${tab.name} (未保存，点击 ✏️ 或双击重命名)`}
+              title={tab.filePath ? `${tab.name}\n路径: ${tab.filePath}\n(点击铅笔按钮或双击重命名)` : `${tab.name} (未保存，点击铅笔按钮或双击重命名)`}
             >
-              {/* ✏️ 笔图标放到前面 */}
+              {/* 铅笔图标放到前面 */}
               <button
                 className="tab-rename-btn-front"
                 onClick={(e) => startRename(e, tab)}
                 title="重命名此项目"
               >
-                ✏️
+                <Icon name="pencil" size={12} />
               </button>
 
               {isEditing ? (
@@ -165,7 +166,7 @@ export function ProjectTabBar() {
                   onClick={(e) => handleClose(e, tab)}
                   title="关闭标签"
                 >
-                  ×
+                  <Icon name="close" size={12} />
                 </button>
               </div>
             </div>
@@ -173,13 +174,13 @@ export function ProjectTabBar() {
         })}
       </div>
 
-      {/* ＋ 新建：不随标签滚动，常驻可见 */}
+      {/* 新建按钮：不随标签滚动，常驻可见 */}
       <button
         className="tab-add-btn"
         onClick={() => newTab()}
         title="新建空白项目工程 (Ctrl+N)"
       >
-        ＋
+        <Icon name="plus" size={15} />
       </button>
 
       {/* 帮助入口统一收进菜单「帮助 → 使用手册」(F1)，标签栏不再重复放一个「?」 */}

@@ -5,6 +5,8 @@ import { getPluginProperties } from '@lib/pluginHost';
 import { searchProperties } from '@lib/propSearch';
 import { useScene, findNode } from '@store/sceneStore';
 import { useClosing } from '@lib/useClosing';
+import { requestPropFocus } from '@lib/propFocus';
+import { Icon } from './Icon';
 
 // ============================================================================
 // BlockCanvas · 画布「中键搜索属性」（v0.4.4g 起 / v0.4.4h 升级）
@@ -93,10 +95,14 @@ export function CanvasPropSearch({ x, y, onClose }: { x: number; y: number; onCl
   const commit = (item: PropertySchema | undefined, forceAdd: boolean) => {
     if (!item) return;
     if (!isAdded(item) && !forceAdd) {
-      setMsg(`「${item.label}」还没有添加到这个元素 —— 按 Ctrl+Enter 添加并定位。`);
+      setMsg(`「${item.label}」还没添加，按 Ctrl+Enter 添加并定位。`);
       return;
     }
-    window.dispatchEvent(new CustomEvent('bc:focus-prop', { detail: { key: item.key, add: forceAdd || isAdded(item) } }));
+    // 先把请求放进缓冲：右侧面板可能停在图层/页面页签，ElementPropsBody 还没挂载，
+    // 光派发事件会落空。Inspector 顶层会据此切到「元素」页签，挂载后再取走执行。
+    const req = { key: item.key, add: forceAdd || isAdded(item) };
+    requestPropFocus(req);
+    window.dispatchEvent(new CustomEvent('bc:focus-prop', { detail: req }));
     close();
   };
 
@@ -108,7 +114,7 @@ export function CanvasPropSearch({ x, y, onClose }: { x: number; y: number; onCl
   return createPortal(
     <div ref={ref} className={'bc-prop-search' + (closing ? ' is-closing' : '')} style={{ left: pos.left, top: pos.top }}>
       <div className="bc-prop-search-row">
-        <span className="bc-prop-search-ico" aria-hidden="true">🔍</span>
+        <span className="bc-prop-search-ico" aria-hidden="true"><Icon name="search" size={14} /></span>
         <input
           ref={inputRef}
           className="bc-prop-search-input"

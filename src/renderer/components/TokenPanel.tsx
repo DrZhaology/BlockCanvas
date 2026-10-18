@@ -8,6 +8,7 @@ import {
 import { appAlert, appConfirm } from '@lib/appConfirm';
 import { ColorField } from './ColorPicker';
 import { HelpButton } from './HelpButton';
+import { Icon } from './Icon';
 
 // BlockCanvas · 设计变量（Token）面板
 //
@@ -320,7 +321,7 @@ export function TokenPanel() {
 
       {list.length === 0 ? (
         <div className="token-empty">
-          <div className="token-empty-icon">🎨</div>
+          <div className="token-empty-icon"><Icon name="palette" size={32} /></div>
           <p>把常用的颜色、圆角、间距定义成变量，改一处就能让整站跟着变。</p>
           <button className="btn-secondary" onClick={resetDefaults}>用默认的一套开始</button>
         </div>
@@ -334,7 +335,7 @@ export function TokenPanel() {
                 onClick={() => toggleGroup(group)}
                 title={open ? '点击收起这组变量' : '点击展开这组变量'}
               >
-                <span className="token-group-caret">{open ? '▾' : '▸'}</span>
+                <span className="token-group-caret"><Icon name={open ? 'chevronDown' : 'chevronRight'} size={11} /></span>
                 {group}
                 <span className="token-group-count">{items.length}</span>
               </button>
@@ -346,7 +347,7 @@ export function TokenPanel() {
                     <div className="token-row-main">
                       {t.kind === 'color'
                         ? <span className="token-preview-swatch" style={{ background: t.value }} title={t.value} />
-                        : <span className="token-preview-glyph" title={t.kind === 'shadow' ? '阴影值' : '尺寸值'}>{t.kind === 'shadow' ? '◲' : '↔'}</span>}
+                        : <span className="token-preview-glyph" title={t.kind === 'shadow' ? '阴影值' : '尺寸值'}>{t.kind === 'shadow' ? <Icon name="note" size={16} /> : <Icon name="responsive" size={16} />}</span>}
                       {editingName === t.name ? (
                         <input
                           className="token-name-input"
@@ -372,7 +373,7 @@ export function TokenPanel() {
                         disabled={used === 0}
                         onClick={() => setExpandedUsage((v) => (v === t.name ? null : t.name))}
                         title={used > 0 ? `有 ${used} 处样式引用了这个变量 —— 点开列表，可跳到画布定位` : '还没有任何样式引用这个变量'}
-                      >引用 {used} {expandedUsage === t.name ? '▴' : '▾'}</button>
+                      >引用 {used} {expandedUsage === t.name ? <Icon name="chevronUp" size={10} /> : <Icon name="chevronDown" size={10} />}</button>
                     </div>
                     <div className="token-row-ctrl">
                       {t.kind === 'color' ? (
@@ -396,8 +397,8 @@ export function TokenPanel() {
                         className="token-copy"
                         onClick={() => { void navigator.clipboard?.writeText(tokenRef(t.name)); }}
                         title={`复制 var(${cssVarName(t.name)}) —— 粘贴到任意样式值里即可使用这个变量`}
-                      >⎘ 复制</button>
-                      <button className="token-del" onClick={() => void remove(t.name)} title="删除这个变量（有引用时会先提示）">×</button>
+                      ><Icon name="copy" size={12} /> 复制</button>
+                      <button className="token-del" onClick={() => void remove(t.name)} title="删除这个变量（有引用时会先提示）"><Icon name="close" size={13} /></button>
                     </div>
                     {expandedUsage === t.name && (
                       <div className="token-usage-list">

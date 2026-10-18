@@ -14,6 +14,7 @@ import { HealthWizard } from './HealthWizard';
 import { AnchoredPanel } from './AnchoredPanel';
 import { TaskButton } from './TaskButton';
 import { appAlert } from '@lib/appConfirm';
+import { Icon, resolveIconName, type IconName } from './Icon';
 
 // BlockCanvas · 顶部工具栏（全按钮自由池 + 二级工具组）
 //
@@ -153,71 +154,71 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   };
 
   type ToolbarOp = {
-    id: string; label: () => string; title: string; cls: string;
+    id: string; label: () => string; title: string; cls: string; icon: IconName;
     onClick: () => void; disabled?: () => boolean; dock?: 'main' | 'right';
   };
 
   // —— 全部内建按钮（注册进 toolbarStore，停靠默认值见 dock 字段）——
   const OPS: ToolbarOp[] = [
     {
-      id: 'undo', cls: 'tb-btn-ghost', dock: 'main', label: () => '↶ 撤销',
+      id: 'undo', cls: 'tb-btn-ghost', dock: 'main', icon: 'undo', label: () => '撤销',
       title: '撤销 (Ctrl+Z) — 回退上一步操作',
       onClick: () => useScene.getState().undo(),
       disabled: () => useScene.getState().history.past.length === 0
     },
     {
-      id: 'redo', cls: 'tb-btn-ghost', dock: 'main', label: () => '↷ 重做',
+      id: 'redo', cls: 'tb-btn-ghost', dock: 'main', icon: 'redo', label: () => '重做',
       title: '重做 (Ctrl+Y / Ctrl+Shift+Z) — 恢复被撤销的操作',
       onClick: () => useScene.getState().redo(),
       disabled: () => useScene.getState().history.future.length === 0
     },
     {
-      id: 'copy', cls: 'tb-btn-ghost', dock: 'main', label: () => {
+      id: 'copy', cls: 'tb-btn-ghost', dock: 'main', icon: 'copy', label: () => {
         const n = useScene.getState().scene.selectedIds.length;
-        return n > 1 ? `⧉ 复制(${n})` : '⧉ 复制';
+        return n > 1 ? `复制(${n})` : '复制';
       },
       title: '复制 (Ctrl+C)\n多选：复制全部选中元素',
       onClick: () => { const st = useScene.getState(); if (st.scene.selectedIds.length) st.copyMany(st.scene.selectedIds); },
       disabled: () => useScene.getState().scene.selectedIds.length === 0
     },
     {
-      id: 'cut', cls: 'tb-btn-ghost', dock: 'main', label: () => {
+      id: 'cut', cls: 'tb-btn-ghost', dock: 'main', icon: 'scissors', label: () => {
         const n = useScene.getState().scene.selectedIds.length;
-        return n > 1 ? `✂ 剪切(${n})` : '✂ 剪切';
+        return n > 1 ? `剪切(${n})` : '剪切';
       },
       title: '剪切 (Ctrl+X)\n多选：剪切全部选中元素',
       onClick: () => { const st = useScene.getState(); if (st.scene.selectedIds.length) st.cutMany(st.scene.selectedIds); },
       disabled: () => useScene.getState().scene.selectedIds.length === 0
     },
     {
-      id: 'paste', cls: 'tb-btn-ghost', dock: 'main', label: () => '⎘ 粘贴',
+      id: 'paste', cls: 'tb-btn-ghost', dock: 'main', icon: 'paste', label: () => '粘贴',
       title: '粘贴 (Ctrl+V) — 插入到当前选中元素内部（无选中时插到画布末尾）',
       onClick: () => { const st = useScene.getState(); st.paste(st.scene.selectedId); },
       disabled: () => useScene.getState().clipboard === null
     },
     {
-      id: 'duplicate', cls: 'tb-btn-ghost', dock: 'main', label: () => '📑 副本', title: '原地创建副本 (Ctrl+D)',
+      id: 'duplicate', cls: 'tb-btn-ghost', dock: 'main', icon: 'plusCircle', label: () => '副本', title: '原地创建副本 (Ctrl+D)',
       onClick: () => { const st = useScene.getState(); if (st.scene.selectedId) st.duplicateElement(st.scene.selectedId); },
       disabled: () => !useScene.getState().scene.selectedId
     },
     {
-      id: 'delete', cls: 'tb-btn-ghost toolbar-del', dock: 'main', label: () => {
+      id: 'delete', cls: 'tb-btn-ghost toolbar-del', dock: 'main', icon: 'trash', label: () => {
         const n = useScene.getState().scene.selectedIds.length;
-        return n > 1 ? `🗑 删除(${n})` : '🗑 删除';
+        return n > 1 ? `删除(${n})` : '删除';
       },
       title: '删除 (Delete) — 多选时批量删除',
       onClick: () => { const st = useScene.getState(); if (st.scene.selectedIds.length) st.removeMany(st.scene.selectedIds); },
       disabled: () => useScene.getState().scene.selectedIds.length === 0
     },
-    { id: 'preview', cls: 'tb-btn-ghost', dock: 'main', label: () => '▶ 预览', title: '在默认浏览器中预览 (Ctrl+P)', onClick: doPreview },
-    { id: 'export-html', cls: 'tb-btn-primary', dock: 'main', label: () => '⬇ 导出 HTML', title: '导出 HTML 网页文件 (Ctrl+E)', onClick: doExport },
+    { id: 'preview', cls: 'tb-btn-ghost', dock: 'main', icon: 'play', label: () => '预览', title: '在默认浏览器中预览 (Ctrl+P)', onClick: doPreview },
+    { id: 'export-html', cls: 'tb-btn-primary', dock: 'main', icon: 'download', label: () => '导出 HTML', title: '导出 HTML 网页文件 (Ctrl+E)', onClick: doExport },
     {
-      id: 'projects-center', cls: 'tb-btn-ghost', dock: 'main', label: () => '📁 全部项目',
+      id: 'projects-center', cls: 'tb-btn-ghost', dock: 'main', icon: 'folderOpen', label: () => '全部项目',
       title: '浏览全部本地项目库与专属快照备份',
       onClick: () => window.dispatchEvent(new CustomEvent('bc:open-projects'))
     },
     {
-      id: 'export-template', cls: 'tb-btn-ghost', dock: 'main', label: () => '🔖 导出元素模板',
+      id: 'export-template', cls: 'tb-btn-ghost', dock: 'main', icon: 'bookmark', label: () => '导出元素模板',
       title: '把选中元素（含子级）导出为模板 JSON 文件',
       onClick: doExportTemplate,
       disabled: () => {
@@ -226,12 +227,12 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
       }
     },
     {
-      id: 'clear-selection', cls: 'tb-btn-ghost', dock: 'main', label: () => '取消选中', title: '取消选中 (Esc)',
+      id: 'clear-selection', cls: 'tb-btn-ghost', dock: 'main', icon: 'close', label: () => '取消选中', title: '取消选中 (Esc)',
       onClick: () => useScene.getState().selectElement(null),
       disabled: () => !useScene.getState().scene.selectedId
     },
     {
-      id: 'outline', cls: 'tb-btn-ghost tb-outline-btn', dock: 'main', label: () => '⬚ 轮廓',
+      id: 'outline', cls: 'tb-btn-ghost tb-outline-btn', dock: 'main', icon: 'outline', label: () => '轮廓',
       title: '显示元素轮廓：给画布所有元素加暗蓝色虚线框，方便看清 div 占位与嵌套；只是程序里的可视化辅助，导出的 HTML 不含',
       onClick: () => setOutlines((v) => !v)
     }
@@ -325,14 +326,14 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
             className={'tb-bp-btn' + (canvasWidth === 'auto' ? ' active' : '')}
             onClick={() => onCanvasWidthChange('auto')}
             title="自适应：画布铺满编辑区，适合日常编辑"
-          >↔ 自适应</button>
+          ><Icon name="responsive" size={14} /> 自适应</button>
           {DEVICE_LIST.map((d) => (
             <button
               key={d.id}
               className={'tb-bp-btn' + (canvasWidth !== 'auto' && device === d.id ? ' active' : '')}
               onClick={() => requestDevice(d.id)}
               title={d.hint}
-            >{d.icon}{d.label}</button>
+            ><Icon name={d.iconName} size={14} /> {d.label}</button>
           ))}
         </div>
         <span className="tb-bp-width" title="当前画布宽度">
@@ -366,7 +367,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
           >{pct}%</span>
         )}
         {zoom !== 1 && (
-          <button className="tb-zoom-reset" onClick={() => onZoomChange(1)} title="恢复 100% 显示">⟲</button>
+          <button className="tb-zoom-reset" onClick={() => onZoomChange(1)} title="恢复 100% 显示"><Icon name="rotate" size={13} /></button>
         )}
       </div>
     ),
@@ -376,7 +377,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
         className={"tb-health-btn" + (issueCount > 0 ? ' has-issue' : '')}
         onClick={() => setHealthOpen(true)}
         title="导出前体检：未命名元素、重复 ID、伪类失效、同名样式不统一……按严重度列出并支持一键修复"
-      >⚠{issueCount > 0 && <span className="tb-health-badge">{issueCount}</span>}</button>
+      ><Icon name="warning" size={16} />{issueCount > 0 && <span className="tb-health-badge">{issueCount}</span>}</button>
     )
   };
 
@@ -392,7 +393,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
           title={op.title}
           onClick={op.onClick}
           disabled={op.disabled ? op.disabled() : false}
-        >{op.label()}</button>
+        >{op.icon && <span className="tb-icon"><Icon name={op.icon} size={15} /></span>}{op.label()}</button>
       );
     }
     // 插件按钮（label 支持函数 → 插件重注册时自动刷新状态文字）
@@ -526,7 +527,7 @@ function ToolbarGroupButton(props: {
   const isDevice = group.id === 'grp.device';
   const deviceId = canvasWidth === 'auto' ? liveDevice : widthToDevice(canvasWidth);
   const deviceDef = DEVICE_LIST.find((d) => d.id === deviceId) ?? DEVICE_LIST[0];
-  const icon = isDevice ? deviceDef.icon : (group.icon ?? '▦');
+  const iconName: IconName = isDevice ? deviceDef.iconName : (resolveIconName(group.icon) ?? 'grid');
   const nowLabel = canvasWidth === 'auto' ? `自适应 · ${deviceDef.label}` : `${deviceDef.label} · ${widthLabel(canvasWidth)}`;
 
   return (
@@ -537,9 +538,9 @@ function ToolbarGroupButton(props: {
         title={isDevice ? `设备：当前 ${nowLabel}（鼠标浮上来切换）` : `${group.label}：鼠标浮上来展开组内 ${members.length} 个工具`}
         onClick={toggle}
       >
-        <span className="tb-grp-ico">{icon}</span>
+        <span className="tb-grp-ico"><Icon name={iconName} size={15} /></span>
         <span className="tb-grp-label">{group.label}</span>
-        <span className="tb-grp-caret">▾</span>
+        <Icon name="chevronDown" size={12} className="tb-grp-caret" />
       </button>
       <AnchoredPanel
         open={open}
@@ -550,7 +551,7 @@ function ToolbarGroupButton(props: {
         onMouseLeave={scheduleClose}
       >
         <div className="tb-grp-pop-title">
-          <span className="tb-grp-ico">{icon}</span>{group.label}
+          <span className="tb-grp-ico"><Icon name={iconName} size={15} /></span>{group.label}
           <span className="tb-grp-pop-count">{isDevice ? `当前：${nowLabel}` : `${members.length} 个工具`}</span>
         </div>
         <div className="tb-grp-pop-body bc-hscroll">{members.map(renderItem)}</div>

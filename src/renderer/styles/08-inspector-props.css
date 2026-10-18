@@ -690,15 +690,18 @@
   max-width: 96px;
 }
 
-/* ↑↓ 微调小按钮（数字与单位之间）：按住左右拖拽调数值，单击 +1 */
+/* 上下微调小按钮（数字与单位之间）：按住左右拖拽调数值，单击 +1。
+   v0.4.5：字形 ↑↓ 换成两枚 SVG 箭头，竖排更清楚。 */
 .step-drag {
   flex: 0 0 auto;
   min-width: 20px;
   height: 26px;
-  padding: 0 4px;
+  padding: 0 3px;
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 0;
   font-size: 12px;
   font-weight: 700;
   color: var(--text-muted);
@@ -707,7 +710,7 @@
   background: var(--bg-panel);
   cursor: ew-resize;
   user-select: none;
-  line-height: 1;
+  line-height: 0;
 }
 .step-drag:hover:not(.disabled) {
   color: var(--accent);

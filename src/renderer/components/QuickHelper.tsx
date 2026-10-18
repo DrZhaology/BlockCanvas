@@ -5,6 +5,7 @@ import { NumberUnitInput } from './NumberUnitInput';
 import { HelpButton } from './HelpButton';
 import { GradientEditor } from './GradientEditor';
 import { Collapse } from './Collapse';
+import { Icon } from './Icon';
 import { useRef } from 'react';
 import { usePersistedBool } from '@lib/usePersisted';
 import {
@@ -186,7 +187,7 @@ export function QuickHelper(props: Props) {
         <div className="qh-block">
           <div className="qh-block-head">
             <button className="qh-block-toggle" onClick={() => setLayoutOpen((v) => !v)}>
-              <span className={'page-advanced-caret' + (layoutOpen ? ' open' : '')}>▸</span>
+              <span className={'page-advanced-caret' + (layoutOpen ? ' open' : '')}><Icon name="chevronRight" size={11} /></span>
               布局 (Flex &amp; Grid)
             </button>
             <span className="qh-block-sub">控制子元素排列</span>
@@ -213,12 +214,12 @@ export function QuickHelper(props: Props) {
                   className={'seg-btn' + (mode === 'flex' ? ' active' : '')}
                   onClick={() => setMode('flex')}
                   title="Flex 弹性布局：支持横竖排、对齐、自动换行"
-                >⭲ 弹性 Flex</button>
+                ><Icon name="indent" size={12} /> 弹性 Flex</button>
                 <button
                   className={'seg-btn' + (mode === 'grid' ? ' active' : '')}
                   onClick={() => setMode('grid')}
                   title="Grid 网格布局：快速分列排版"
-                >⊞ 网格 Grid</button>
+                ><Icon name="grid" size={12} /> 网格 Grid</button>
               </div>
 
               {isFlex && (
@@ -230,12 +231,12 @@ export function QuickHelper(props: Props) {
                         className={'flex-mini-btn' + (flexDir === 'row' ? ' active' : '')}
                         onClick={() => updateStyle(elementId, { flexDirection: 'row' })}
                         title="横排从左到右 (row)"
-                      >⭲ 横排</button>
+                      ><Icon name="indent" size={12} /> 横排</button>
                       <button
                         className={'flex-mini-btn' + (flexDir === 'column' ? ' active' : '')}
                         onClick={() => updateStyle(elementId, { flexDirection: 'column' })}
                         title="竖排从上到下 (column)"
-                      >⭳ 竖排</button>
+                      ><Icon name="outdent" size={12} /> 竖排</button>
                     </div>
                   </div>
 
@@ -353,7 +354,7 @@ export function QuickHelper(props: Props) {
         <div className="qh-block">
           <div className="qh-block-head">
             <button className="qh-block-toggle" onClick={() => setGradOpen((v) => !v)}>
-              <span className={'page-advanced-caret' + (gradOpen ? ' open' : '')}>▸</span>
+              <span className={'page-advanced-caret' + (gradOpen ? ' open' : '')}><Icon name="chevronRight" size={11} /></span>
               文字渐变
             </button>
             <span className="qh-block-sub">让文字本身穿上渐变色</span>

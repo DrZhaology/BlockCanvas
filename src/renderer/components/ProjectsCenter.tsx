@@ -2,13 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import { useTabStore } from '@store/tabStore';
 import { useClosing } from '@lib/useClosing';
 import { appConfirm } from '@lib/appConfirm';
+import { Icon } from './Icon';
 import type { ProjectFileInfo } from '../global';
 
 // BlockCanvas · 本地全部项目库中心 (ProjectsCenter)
 // 遵循《设计语言规范》：
 // - 卡片式浏览 data/projects/ 下所有 .bcproj 工程文件
 // - 点击项目直接载入为新标签页 (可多工程并存)
-// - 点击「⏱️ 快照」滑出专属抽屉，按项目隔离查看历史回退版本
+// - 点击「历史快照」滑出专属抽屉，按项目隔离查看历史回退版本
 // - 删除项目走【三步安全防护】，全程点遮罩不会关闭（只能主动点"取消"退出）：
 //     第 1 关：手动完整输入项目全名（**不提供**点击名字自动填充）
 //     第 2 关：3 个随机方向 / 随机位置的滑块，必须按顺序拖到位
@@ -329,9 +330,9 @@ export function ProjectsCenter(props: {
       <div className="pc-header">
         <div className="pc-header-left">
           <button className="pc-back-btn" onClick={onBack} title="返回画布编辑器">
-            ← 返回编辑器
+            <Icon name="chevronLeft" size={13} /> 返回编辑器
           </button>
-          <span className="pc-title">📁 本地全部项目库</span>
+          <span className="pc-title"><Icon name="folder" size={16} /> 本地全部项目库</span>
           <span className="pc-count-badge">{projects.length} 个工程</span>
         </div>
 
@@ -344,10 +345,10 @@ export function ProjectsCenter(props: {
             placeholder="搜索项目名称…"
           />
           <button className="btn-secondary btn-mini" onClick={handleImportProject} title="打开并导入任意位置的 .bcproj 文件">
-            📂 导入外部项目…
+            <Icon name="folderOpen" size={13} /> 导入外部项目…
           </button>
           <button className="btn-primary btn-mini" onClick={handleNewProject} title="新建空白工程标签 (Ctrl+N)">
-            ＋ 新建项目
+            <Icon name="plus" size={13} /> 新建项目
           </button>
           <button className="btn-secondary btn-mini" onClick={() => window.bc.openDataPath('projects')} title="在文件资源管理器中查看 data/projects/">
             打开项目目录
@@ -375,7 +376,7 @@ export function ProjectsCenter(props: {
                 title={`点击在新标签页打开项目「${p.name}」`}
               >
                 <div className="pc-card-cover">
-                  <span className="pc-cover-icon">📄</span>
+                  <span className="pc-cover-icon"><Icon name="file" size={34} /></span>
                   <span className="pc-cover-badge">{p.elementCount ?? 1} 元素</span>
                 </div>
 
@@ -397,9 +398,9 @@ export function ProjectsCenter(props: {
                       title="输入新的文件名（回车确认，Esc 取消）"
                     />
                   ) : (
-                    <div className="pc-card-file" title={`文件名：${p.fileName}（点 ✏️ 可重命名文件）`}>{p.fileName}</div>
+                    <div className="pc-card-file" title={`文件名：${p.fileName}（点铅笔按钮可重命名文件）`}>{p.fileName}</div>
                   )}
-                  <div className="pc-card-time">📅 {new Date(p.updatedAt).toLocaleDateString()} {new Date(p.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                  <div className="pc-card-time"><Icon name="calendar" size={11} /> {new Date(p.updatedAt).toLocaleDateString()} {new Date(p.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                 </div>
 
                 <div className="pc-card-foot">
@@ -408,7 +409,7 @@ export function ProjectsCenter(props: {
                     onClick={(e) => handleViewBackups(e, p)}
                     title={`查看项目「${p.name}」的专属历史备份与快照`}
                   >
-                    ⏱️ 历史快照 ({p.backupCount || 0})
+                    <Icon name="timer" size={11} /> 历史快照 ({p.backupCount || 0})
                   </button>
                   <span className="spacer" />
                   <button
@@ -416,14 +417,14 @@ export function ProjectsCenter(props: {
                     onClick={(e) => { e.stopPropagation(); setRenamingFile(p.fileName); setRenameValue(p.fileName.replace(/\.bcproj$/i, '')); }}
                     title="重命名此工程文件（只改文件名，不改项目名）"
                   >
-                    ✏️
+                    <Icon name="pencil" size={13} />
                   </button>
                   <button
                     className="pc-card-del-btn"
                     onClick={(e) => openDeleteModal(e, p)}
                     title="删除此项目工程及所有历史备份"
                   >
-                    🗑️
+                    <Icon name="trash" size={13} />
                   </button>
                 </div>
               </div>
@@ -432,7 +433,7 @@ export function ProjectsCenter(props: {
           </div>
         ) : !loading && (
           <div className="pc-empty-full">
-            <div className="pc-empty-icon">📁</div>
+            <div className="pc-empty-icon"><Icon name="folder" size={44} /></div>
             <div className="pc-empty-title">
               {search ? `未找到匹配「${search}」的项目` : '本地项目库暂无已保存工程'}
             </div>
@@ -441,7 +442,7 @@ export function ProjectsCenter(props: {
             </div>
             <div style={{ marginTop: 14 }}>
               <button className="btn-primary btn-mini" onClick={handleNewProject}>
-                ＋ 立即新建项目
+                <Icon name="plus" size={13} /> 立即新建项目
               </button>
             </div>
           </div>
@@ -454,9 +455,9 @@ export function ProjectsCenter(props: {
           <div className="pc-drawer" onClick={(e) => e.stopPropagation()}>
             <div className="pc-drawer-header">
               <div className="pc-drawer-title">
-                <span>⏱️「{selectedProjectForBackups.name}」的专属快照</span>
+                <span><Icon name="timer" size={13} /> 「{selectedProjectForBackups.name}」的专属快照</span>
               </div>
-              <button className="cp-close" onClick={closeDrawer}>×</button>
+              <button className="cp-close" onClick={closeDrawer}><Icon name="close" size={14} /></button>
             </div>
 
             <div className="pc-drawer-hint">
@@ -496,8 +497,8 @@ export function ProjectsCenter(props: {
         <div className={'modal-mask dd-mask-static' + (delClosing ? ' is-closing' : '')}>
           <div className={'double-delete-modal' + (delClosing ? ' is-closing' : '')} onClick={(e) => e.stopPropagation()}>
             <div className="dd-modal-header">
-              <span className="dd-modal-title">⚠️ 删除项目确认（三步安全防护）</span>
-              <button className="cp-close" onClick={closeDeleteModal} title="取消并关闭">×</button>
+              <span className="dd-modal-title"><Icon name="warning" size={15} /> 删除项目确认（三步安全防护）</span>
+              <button className="cp-close" onClick={closeDeleteModal} title="取消并关闭"><Icon name="close" size={14} /></button>
             </div>
 
             {/* 步骤指示 */}
@@ -572,7 +573,11 @@ export function ProjectsCenter(props: {
                             <span className="dd-slider-knob" style={{ left: s.value + '%' }} />
                           </div>
                           <span className="dd-slider-state">
-                            {s.done ? '✓' : isActive ? (s.target > s.value ? '→' : '←') : '待'}
+                            {s.done
+                              ? <Icon name="check" size={13} />
+                              : isActive
+                                ? (s.target > s.value ? <Icon name="arrowRight" size={13} /> : <Icon name="arrowLeft" size={13} />)
+                                : '待'}
                           </span>
                         </div>
                       );

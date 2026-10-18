@@ -5,7 +5,7 @@ import {
   type ToolbarItem, type ToolbarDock, type ToolbarGroupDock
 } from '@store/toolbarStore';
 import { HelpButton } from './HelpButton';
-import { Icon, type IconName } from './Icon';
+import { Icon, resolveIconName, type IconName } from './Icon';
 import logoUrl from '@renderer/assets/logo.svg';
 import { Collapse } from './Collapse';
 import { TIPS, TIPS_KEY, setTipsEnabled } from './CanvasOverlays';
@@ -283,13 +283,13 @@ export function Settings(props: Props) {
 
   const qc = scene.quickCss ?? {};
 
-  const NAV_ITEMS: Array<{ id: SettingsSection; label: string; icon: string; desc: string; svg: IconName }> = [
-    { id: 'personalization', label: '个性化与外观', icon: '🎨', svg: 'palette', desc: '深浅主题、白边重置、同类高亮' },
-    { id: 'editor', label: '编辑器与画布', icon: '🛠️', svg: 'sliders', desc: '布局模式、画布默认宽度、继承机制' },
-    { id: 'storage', label: '存储与自动备份', icon: '💾', svg: 'database', desc: '备份周期、快照数量、便携 data/ 目录' },
-    { id: 'toolbar', label: '工具栏管理', icon: '🔧', svg: 'tool', desc: '每个按钮的停靠区与顺序自由编排' },
-    { id: 'extensions', label: '扩展与插件中心', icon: '🧩', svg: 'puzzle', desc: '管理、启停、导入插件与模板资源包' },
-    { id: 'about', label: '关于与系统', icon: 'ℹ️', svg: 'info', desc: '版本号、开源协议与技术栈' }
+  const NAV_ITEMS: Array<{ id: SettingsSection; label: string; desc: string; svg: IconName }> = [
+    { id: 'personalization', label: '个性化与外观', svg: 'palette', desc: '深浅主题、白边重置、同类高亮' },
+    { id: 'editor', label: '编辑器与画布', svg: 'sliders', desc: '布局模式、画布默认宽度、继承机制' },
+    { id: 'storage', label: '存储与自动备份', svg: 'database', desc: '备份周期、快照数量、便携 data/ 目录' },
+    { id: 'toolbar', label: '工具栏管理', svg: 'tool', desc: '每个按钮的停靠区与顺序自由编排' },
+    { id: 'extensions', label: '扩展与插件中心', svg: 'puzzle', desc: '管理、启停、导入插件与模板资源包' },
+    { id: 'about', label: '关于与系统', svg: 'info', desc: '版本号、开源协议与技术栈' }
   ];
 
   return (
@@ -298,7 +298,7 @@ export function Settings(props: Props) {
       <div className="fluent-sidebar">
         <div className="fluent-sidebar-top">
           <button className="fluent-back-btn" onClick={onBack} title="返回画布编辑器">
-            ← 返回编辑器
+            <Icon name="chevronLeft" size={13} /> 返回编辑器
           </button>
           <div className="fluent-app-brand">
             <img className="fluent-brand-logo" src={logoUrl} alt="BlockCanvas" />
@@ -313,7 +313,7 @@ export function Settings(props: Props) {
               className={"fluent-nav-item" + (section === item.id ? " active" : "")}
               onClick={() => setSection(item.id)}
             >
-              <span className="fluent-nav-icon">{item.icon}</span>
+              <span className="fluent-nav-icon"><Icon name={item.svg} /></span>
               <div className="fluent-nav-meta">
                 <span className="fluent-nav-title">{item.label}</span>
                 <span className="fluent-nav-desc">{item.desc}</span>
@@ -423,7 +423,7 @@ export function Settings(props: Props) {
 
               <div className="fluent-group-title">网页导出基础重置</div>
               <div className="fluent-card">
-                <div className="fluent-card-icon">📄</div>
+                <div className="fluent-card-icon"><Icon name="pageReset" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">去掉浏览器默认白边 (body margin reset)</div>
                   <div className="fluent-card-desc">浏览器默认给页面四周留有 8px 白边。开启后画布与导出将贴边展示。</div>
@@ -445,7 +445,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">🔤</div>
+                <div className="fluent-card-icon"><Icon name="headingReset" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">重置标题/段落默认外边距 (CSS Reset)</div>
                   <div className="fluent-card-desc">将 h1~h6、段落、列表自带的浏览器原始间距清零，还原真实网站排版。</div>
@@ -473,7 +473,7 @@ export function Settings(props: Props) {
             <>
               <div className="fluent-group-title">工作区排版布局</div>
               <div className="fluent-card">
-                <div className="fluent-card-icon">🖥️</div>
+                <div className="fluent-card-icon"><Icon name="layout" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">工作区布局方式 (Workspace Layout)</div>
                   <div className="fluent-card-desc">选择元素面板与画布的相对摆放位置（底部横向背包 / 左侧传统列栏）。</div>
@@ -491,7 +491,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">📏</div>
+                <div className="fluent-card-icon"><Icon name="responsive" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">画布默认基准宽度 (Canvas Width)</div>
                   <div className="fluent-card-desc">自适应铺满当前窗口，或指定固定断点（桌面 1440px / 平板 768px / 手机 375px）。</div>
@@ -511,7 +511,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">💾</div>
+                <div className="fluent-card-icon"><Icon name="save" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">自动保存（默认关闭）</div>
                   <div className="fluent-card-desc">
@@ -546,7 +546,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">⏪</div>
+                <div className="fluent-card-icon"><Icon name="undo" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">撤销历史随工程保存（Ctrl+Z / Ctrl+Y）</div>
                   <div className="fluent-card-desc">
@@ -572,7 +572,7 @@ export function Settings(props: Props) {
 
               <div className="fluent-group-title">插入与构建习惯</div>
               <div className="fluent-card">
-                <div className="fluent-card-icon">🧰</div>
+                <div className="fluent-card-icon"><Icon name="wand" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">快捷助手属性显示到下方 CSS 列表（全局）</div>
                   <div className="fluent-card-desc">
@@ -611,7 +611,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">🏷️</div>
+                <div className="fluent-card-icon"><Icon name="tag" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">元素按钮标签展示模式</div>
                   <div className="fluent-card-desc">控制元素面板中按钮的文字表现形式。</div>
@@ -654,7 +654,7 @@ export function Settings(props: Props) {
                 </div>
                 <div className="fluent-card-ctrl" style={{ display: 'flex', gap: 6, flexShrink: 0, alignSelf: 'center' }}>
                   <button className="btn-secondary btn-mini" onClick={refreshStorageStats} title="重新扫描大小">
-                    ⟳ 刷新
+                    <Icon name="refresh" size={13} /> 刷新
                   </button>
                   <button
                     className="btn-primary btn-mini"
@@ -668,7 +668,7 @@ export function Settings(props: Props) {
 
               {/* 卡片 2：启动时自动清理临时文件 */}
               <div className="fluent-card">
-                <div className="fluent-card-icon">🧹</div>
+                <div className="fluent-card-icon"><Icon name="broom" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">启动时自动清理临时文件 (Auto Clean Temp)</div>
                   <div className="fluent-card-desc">
@@ -709,7 +709,7 @@ export function Settings(props: Props) {
 
               {/* 卡片 4：启动时自动清理孤立快照 */}
               <div className="fluent-card">
-                <div className="fluent-card-icon">🗑️</div>
+                <div className="fluent-card-icon"><Icon name="trash" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">启动时自动清理孤立残留快照 (Auto Clean Orphans)</div>
                   <div className="fluent-card-desc">
@@ -749,7 +749,7 @@ export function Settings(props: Props) {
               <div className="fluent-card" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div className="fluent-card-icon">📁</div>
+                    <div className="fluent-card-icon"><Icon name="folder" /></div>
                     <div>
                       <div className="fluent-card-title">存储总览</div>
                       <div className="fluent-card-desc" style={{ fontFamily: 'Consolas', fontSize: 11 }}>
@@ -833,7 +833,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">📦</div>
+                <div className="fluent-card-icon"><Icon name="package" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">历史快照最大保留数量 (Max Snapshots)</div>
                   <div className="fluent-card-desc">每个项目专属保留的历史版本上限，超出后自动轮转覆盖最旧版本。</div>
@@ -854,7 +854,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">🌐</div>
+                <div className="fluent-card-icon"><Icon name="globe" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">本地全部项目与备份中心</div>
                   <div className="fluent-card-desc">查看全部 .bcproj 项目工程，或按项目载入历史快照。</div>
@@ -873,7 +873,7 @@ export function Settings(props: Props) {
             <>
               <div className="fluent-group-title" style={{ marginTop: 16 }}>自动更新</div>
               <div className="fluent-card">
-                <div className="fluent-card-icon">🔄</div>
+                <div className="fluent-card-icon"><Icon name="refresh" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">更新中心</div>
                   <div className="fluent-card-desc">
@@ -1080,7 +1080,7 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
       {scan?.resources.map((r) => (
         <div key={r.id} className={"fluent-ext-card" + (!r.enabled ? " is-disabled" : "")}>
           <div className="fluent-ext-main">
-            <span className="fluent-ext-icon">📁</span>
+            <span className="fluent-ext-icon"><Icon name="folder" /></span>
             <div className="fluent-ext-text">
               <div className="fluent-ext-name-row">
                 <span className="fluent-ext-name">{r.name}</span>
@@ -1091,7 +1091,7 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
             </div>
             <div className="fluent-ext-actions">
               <button className="btn-secondary btn-mini" onClick={() => toggleExpand(r.id)}>
-                {expanded[r.id] ? '收起模板 ▴' : `查看 ${r.templates.length} 个模板 ▾`}
+                {expanded[r.id] ? <>收起模板 <Icon name="chevronUp" size={13} /></> : <>查看 {r.templates.length} 个模板 <Icon name="chevronDown" size={13} /></>}
               </button>
               <label className="fluent-switch" title={r.enabled ? '已启用（点击禁用）' : '已禁用（点击启用）'}>
                 <input
@@ -1112,7 +1112,7 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
               <div className="fluent-ext-sublist">
                 {r.templates.map((t) => (
                   <div key={t.id} className="fluent-ext-subitem">
-                    <span className="fluent-ext-subname">📄 {t.name}</span>
+                    <span className="fluent-ext-subname"><Icon name="file" size={13} /> {t.name}</span>
                     <span className="fluent-ext-subdesc">{t.description || ''}</span>
                   </div>
                 ))}
@@ -1331,7 +1331,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
           className={'tbman-insert-btn' + (insertArea === area ? ' is-open' : '')}
           onClick={() => setInsertArea(insertArea === area ? null : area)}
           title={`往「${DOCK_LABEL[area]}」插入一个按钮：会列出当前不在这个区域的全部按钮（含插件注册的）`}
-        >＋ 插入按钮</button>
+        ><Icon name="plus" size={13} /> 插入按钮</button>
       </div>
       {insertArea === area && (
         <InsertPicker
@@ -1408,7 +1408,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
             {...(side === 'more' ? {} : rowDragProps(it.id))}
             title={side === 'more' ? '收在工具栏右端「⋯」里，点开才可见' : it.title}
           >
-            {side !== 'more' && <span className="tbman-chip-grip">⠿</span>}
+            {side !== 'more' && <span className="tbman-chip-grip"><Icon name="grip" size={12} /></span>}
             {nameOf(it)}
           </span>
         );
@@ -1416,6 +1416,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
       }
       if (done.has(g.id)) continue;
       done.add(g.id);
+      const gi = resolveIconName(g.icon) ?? 'grid';
       out.push(
         <span
           key={g.id}
@@ -1425,7 +1426,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
             return m ? nameOf(m) : id;
           }).join(' / ')}
         >
-          {g.icon ?? '▦'} {g.label}
+          <Icon name={gi} size={13} /> {g.label}
           <span className="tbman-chip-count">{g.itemIds.length}</span>
         </span>
       );
@@ -1443,12 +1444,12 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
         {...rowDragProps(it.id)}
         title="按住拖动可调整按钮的顺序（跨停靠区有效）"
       >
-        <span className="tbman-grip">⠿</span>
+        <span className="tbman-grip"><Icon name="grip" size={13} /></span>
         <span className="tbman-name">{nameOf(it)}</span>
         {it.id.startsWith('plg.') && <span className="tbman-tag">插件</span>}
         {g ? (
           <>
-            <span className="tbman-tag tbman-tag-group" title={`已收进工具组「${g.label}」`}>{g.icon ?? '▦'} 组·{g.label}</span>
+            <span className="tbman-tag tbman-tag-group" title={`已收进工具组「${g.label}」`}><Icon name={resolveIconName(g.icon) ?? 'grid'} size={12} /> 组·{g.label}</span>
             <button className="btn-mini" onClick={() => removeFromGroup(it.id)} title="移出工具组，回到自身停靠区">移出组</button>
           </>
         ) : (
@@ -1480,7 +1481,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
         )}
         {groups.map((g) => (
           <div key={g.id} className="tbman-grp-row">
-            <span className="tbman-grp-ico">{g.icon ?? '▦'}</span>
+            <span className="tbman-grp-ico"><Icon name={resolveIconName(g.icon) ?? 'grid'} size={14} /></span>
             <input
               className="tbman-grp-name"
               value={g.label}
@@ -1505,7 +1506,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
                 return (
                   <span key={id} className="tbman-grp-chip">
                     {it ? nameOf(it) : id}
-                    <button className="tbman-grp-chip-x" title="移出该按钮" onClick={() => removeFromGroup(id)}>×</button>
+                    <button className="tbman-grp-chip-x" title="移出该按钮" onClick={() => removeFromGroup(id)}><Icon name="close" size={11} /></button>
                   </span>
                 );
               })}

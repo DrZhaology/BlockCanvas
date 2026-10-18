@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useScene } from '@store/sceneStore';
+import { Icon } from './Icon';
 
 // BlockCanvas · 意外退出自动恢复提示条
 // 应用启动时自动检测 data/backups/autosave.bcproj
@@ -40,7 +41,7 @@ export function DisasterRecoveryBanner() {
   return (
     <div className="recovery-banner">
       <div className="recovery-banner-content">
-        <span className="recovery-icon">💡</span>
+        <span className="recovery-icon"><Icon name="lightbulb" size={14} /></span>
         <span className="recovery-txt">
           检测到上次意外退出的自动保存草稿（<b>{timeStr}</b>，包含 {draftInfo.elementCount} 个元素）。是否恢复？
         </span>

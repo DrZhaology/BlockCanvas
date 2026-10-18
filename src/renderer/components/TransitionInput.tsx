@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useScene, findNode } from '@store/sceneStore';
+import { Icon } from './Icon';
 
 // BlockCanvas · 平滑过渡动画可视化组件 (TransitionInput)
 // - 胶囊预设：0.3s 舒适、0.15s 快闪、0.5s 柔和、单属性过渡等
@@ -108,21 +109,21 @@ export function TransitionInput({ elementId }: Props) {
           onClick={() => applyPreset('all 0.3s ease')}
           title="所有样式 0.3 秒平滑过渡 (最自然舒适，推荐)"
         >
-          ⚡ 0.3s 舒适 (推荐)
+          <Icon name="bolt" size={13} /> 0.3s 舒适 (推荐)
         </button>
         <button
           className={'btn-mini' + (currentStr.includes('0.15s') ? ' active' : '')}
           onClick={() => applyPreset('all 0.15s ease')}
           title="0.15 秒快速过渡 (轻盈灵敏)"
         >
-          ⚡ 0.15s 快闪
+          <Icon name="bolt" size={13} /> 0.15s 快闪
         </button>
         <button
           className={'btn-mini' + (currentStr.includes('0.5s') ? ' active' : '')}
           onClick={() => applyPreset('all 0.5s ease')}
           title="0.5 秒柔和过渡"
         >
-          ⚡ 0.5s 柔和
+          <Icon name="bolt" size={13} /> 0.5s 柔和
         </button>
         <button
           className={'btn-mini' + (property === 'transform' ? ' active' : '')}
@@ -137,7 +138,7 @@ export function TransitionInput({ elementId }: Props) {
             onClick={() => applyPreset('')}
             title="关闭过渡动画"
           >
-            🚫 关闭
+            <Icon name="block" size={13} /> 关闭
           </button>
         )}
       </div>

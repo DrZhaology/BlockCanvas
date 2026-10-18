@@ -7,6 +7,7 @@ import {
   buildFamilyValue, quoteFamily,
   type FontLicense
 } from '@lib/fontCatalog';
+import { Icon } from './Icon';
 
 // BlockCanvas · 字体选择库（全屏遮罩 + 中央面板）
 //
@@ -192,7 +193,7 @@ export function FontPickerModal(props: Props) {
         <div className="fp-head">
           <span className="fp-title">字体库</span>
           <span className="fp-sub">点击字体加入右侧字体链：排在前面的优先生效，不支持时自动换下一个</span>
-          <button className="fp-close" onClick={onClose} title="关闭">×</button>
+          <button className="fp-close" onClick={onClose} title="关闭"><Icon name="close" size={15} /></button>
         </div>
 
         {/* —— 工具行 —— */}
@@ -208,7 +209,7 @@ export function FontPickerModal(props: Props) {
             className={'fp-filter-chip' + (freeOnly ? ' active' : '')}
             onClick={() => setFreeOnly((v) => !v)}
             title="只看「可商用」与「通用族」字体"
-          >✓ 只看可商用</button>
+          ><Icon name="check" size={13} /> 只看可商用</button>
           {localLoading && <span className="fp-loading">正在读取本机字体…</span>}
           {!localLoading && !localFonts && (
             <span className="fp-loading" title="本机字体清单需要系统授权，本次未获取——已展示常见字体目录">未获取本机字体清单（需要系统授权）</span>
@@ -244,13 +245,16 @@ export function FontPickerModal(props: Props) {
                   {...chainDragProps(name)}
                   title="按住拖动调整优先级（排前面优先生效）"
                 >
-                  <span className="fp-chain-grip">⠿</span>
+                  <span className="fp-chain-grip"><Icon name="grip" size={12} /></span>
                   <span className="fp-chain-order">{i === 0 ? '主字体' : `备选 ${i}`}</span>
                   <span className="fp-chain-name">{name}</span>
                   <span className="fp-chain-lic" data-lic={licenseOf(name)}>
-                    {licenseOf(name) === 'unknown' ? '？' : licenseOf(name) === 'free' ? '✓' : licenseOf(name) === 'generic' ? 'ℹ' : '⚠'}
+                    <Icon
+                      name={licenseOf(name) === 'free' ? 'check' : licenseOf(name) === 'restricted' ? 'warning' : 'info'}
+                      size={12}
+                    />
                   </span>
-                  <button className="fp-chain-btn fp-chain-del" title="移出字体链" onClick={() => setChain((p) => p.filter((_, j) => j !== i))}>×</button>
+                  <button className="fp-chain-btn fp-chain-del" title="移出字体链" onClick={() => setChain((p) => p.filter((_, j) => j !== i))}><Icon name="close" size={12} /></button>
                 </div>
               ))}
             </div>
@@ -292,7 +296,8 @@ export function FontPickerModal(props: Props) {
                         {it.zh && <span className="fp-item-zh">{it.zh}</span>}
                       </span>
                       <span className={'fp-badge lic-' + it.license}>
-                        {it.license === 'free' ? '✓ 可商用' : it.license === 'restricted' ? '⚠ 需注意' : it.license === 'generic' ? 'ℹ 通用' : '？未收录'}
+                        <Icon name={it.license === 'free' ? 'check' : it.license === 'restricted' ? 'warning' : 'info'} size={11} />{' '}
+                        {it.license === 'free' ? '可商用' : it.license === 'restricted' ? '需注意' : it.license === 'generic' ? '通用' : '未收录'}
                       </span>
                       {it.removable && (
                         <span
@@ -300,9 +305,9 @@ export function FontPickerModal(props: Props) {
                           role="button"
                           title="从自定义字体中删除"
                           onClick={(e) => { e.stopPropagation(); removeCustom(it.name); }}
-                        >×</span>
+                        ><Icon name="close" size={12} /></span>
                       )}
-                      {selected && <span className="fp-item-check">✓</span>}
+                      {selected && <span className="fp-item-check"><Icon name="check" size={12} /></span>}
                     </button>
                   );
                 })}

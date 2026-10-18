@@ -3,6 +3,7 @@ import { SCHEMA, checkApplicability } from '@lib/propertySchema';
 import type { PropertySchema, PropertyCategory } from '@lib/propertySchema';
 import type { ElementType } from '@lib/types';
 import { getPluginProperties } from '@lib/pluginHost';
+import { Icon } from './Icon';
 
 // BlockCanvas · "+ 添加属性"下拉
 // - 按类别分组展示；顶部搜索框支持中英文（中文名 / 英文 key / 类别 / 4 边 key）
@@ -239,7 +240,7 @@ export function AddPropertyMenu(props: Props) {
         disabled={baseCandidates.length === 0 && !open}
         title="添加 CSS 样式属性"
       >
-        + 添加属性 {open ? '▴' : '▾'}
+        <Icon name="plus" size={13} /> 添加属性 <Icon name={open ? 'chevronUp' : 'chevronDown'} size={12} />
       </button>
       {open && (
         <>
@@ -254,7 +255,7 @@ export function AddPropertyMenu(props: Props) {
                 placeholder="搜索属性：中文 / CSS 名（如：过渡、圆角、border、wrap）"
               />
               {search && (
-                <button className="add-prop-search-clear" onClick={() => { setSearch(''); searchRef.current?.focus(); }}>×</button>
+                <button className="add-prop-search-clear" onClick={() => { setSearch(''); searchRef.current?.focus(); }}><Icon name="close" size={12} /></button>
               )}
             </div>
             <div className="add-prop-scroll">

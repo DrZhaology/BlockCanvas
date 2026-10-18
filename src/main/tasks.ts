@@ -358,7 +358,7 @@ async function drive(id: string, from: number): Promise<void> {
   if (res.ok) {
     if (t.kind === 'download') {
       t.status = 'done';
-      t.detail = `✓ 已下载到 ${t.dest}`;
+      t.detail = `已下载到 ${t.dest}`;
       t.pct = 100;
       touch(t);
       broadcastNow();
@@ -377,7 +377,7 @@ async function drive(id: string, from: number): Promise<void> {
     });
     if (up.ok) {
       t.status = 'done';
-      t.detail = '✓ 更新完成，程序正在重启…';
+      t.detail = '更新完成，程序正在重启…';
       touch(t);
       broadcastNow();
       // 替换脚本已就位 —— 主进程退出交锁（与旧流程一致）
@@ -436,7 +436,7 @@ export function resumeTask(id: string): TaskRecord | undefined {
     t.pct = 100;
     if (t.kind === 'download') {
       t.status = 'done';
-      t.detail = `✓ 已下载到 ${t.dest}`;
+      t.detail = `已下载到 ${t.dest}`;
       touch(t);
       broadcastNow();
       return t;
