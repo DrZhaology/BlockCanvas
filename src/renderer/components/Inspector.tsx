@@ -259,7 +259,8 @@ function PageCssBody() {
   const globalOpen = pageSec?.global ?? false;
   // 「全局样式」添加表单
   const qc = quickCss ?? {};
-  const extraEntries = Object.entries(bodyExtra ?? {}).filter(([, v]) => String(v ?? '').trim() !== '');
+  // 注意：值为空串也要保留 —— 刚点「添加属性」加进来的行就是空值，过滤掉会"点了没反应"
+  const extraEntries = Object.entries(bodyExtra ?? {});
   const legacyCss = (useScene.getState().scene.globalCss ?? '').trim();
 
   // 已显示 = 默认项 ∪ 键已存在（含空串）的项
@@ -274,8 +275,12 @@ function PageCssBody() {
   };
   const setExtra = (k: string, v: string) => setBodyExtra({ [k]: v });
   const removeExtra = (k: string) => {
+    // 四向属性（padding / margin）连同四个分边一起删，避免删了简写却留下 padding-top 之类的孤儿键
+    const sc = getSchemaItem(kebabToCamel(k));
+    const patch: Record<string, string | undefined> = { [k]: undefined };
+    sc?.sides?.forEach((s) => { patch[camelToKebab(s.key)] = undefined; });
     beginStyleEdit();
-    setBodyExtra({ [k]: undefined });
+    setBodyExtra(patch);
     endStyleEdit();
   };
 

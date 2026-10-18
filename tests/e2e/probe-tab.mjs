@@ -1,10 +1,12 @@
 import { createRequire } from 'module';
+import { ensureEditor } from './ensure-editor.mjs';
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
 const { _electron: electron } = require('playwright');
 
 const app = await electron.launch({ args: ['.'], cwd: process.cwd(), executablePath: electronPath });
 const win = await app.firstWindow();
+  await ensureEditor(win);
 await win.locator('.app').waitFor({ state: 'visible', timeout: 15000 });
 const dump = () => win.evaluate(() => ({
   tabs: [...document.querySelectorAll('.tab-btn')].map((b) => ({ t: b.textContent, cls: b.className })),

@@ -10,6 +10,7 @@ import { createRequire } from 'module';
 import { resolve, join } from 'path';
 import { tmpdir } from 'os';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, cpSync } from 'fs';
+import { ensureEditor } from './ensure-editor.mjs';
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
 const { _electron: electron } = require('playwright');
@@ -88,6 +89,7 @@ async function main() {
   const win = await app.firstWindow();
   const errs = [];
   win.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
+  await ensureEditor(win);
   await win.waitForSelector('.toolbar', { timeout: 20000 });
   await sleep(1000);
 

@@ -7,6 +7,7 @@ import { createRequire } from 'module';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
 import { mkdirSync, rmSync, cpSync, existsSync } from 'fs';
+import { ensureEditor } from './ensure-editor.mjs';
 
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
@@ -37,6 +38,7 @@ async function main() {
   const errs = [];
   win.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
   win.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
+  await ensureEditor(win);
   await win.waitForSelector('.toolbar', { timeout: 20000 });
   await sleep(1200);
 
@@ -80,7 +82,9 @@ async function main() {
     const states = await win.locator('.update-sec').evaluateAll((els) =>
       els.map((el) => ({
         text: (el.querySelector('.update-sec-name')?.textContent || '').replace(/\s+/g, ''),
-        caret: (el.querySelector('.update-sec-caret')?.textContent || ''),
+        // v0.4.5：▾/▸ 字形换成 SVG 图标 → 用 path 的 d 判断方向
+        // chevronDown: m5.5 9 6.5 6.5L18.5 9  /  chevronRight: m9 5.5 6.5 6.5L9 18.5
+        caret: (el.querySelector('.update-sec-caret svg path')?.getAttribute('d') || ''),
         cursor: getComputedStyle(el).cursor,
         count: (el.querySelector('.update-sec-count')?.textContent || '').replace(/\s+/g, ''),
         // 数量角标是否在整行的右端（而不是紧贴标题）
@@ -91,9 +95,11 @@ async function main() {
         })()
       })));
     const find = (kw) => states.find((s) => s.text.includes(kw));
-    ok('「可更新」默认展开（▾）', find('可更新')?.caret === '▾', JSON.stringify(find('可更新')));
-    ok('「可选择更新」默认折叠（▸）', find('可选择更新')?.caret === '▸', JSON.stringify(find('可选择更新')));
-    ok('「历史版本」默认折叠（▸）', find('历史版本')?.caret === '▸', JSON.stringify(find('历史版本')));
+    const isDown = (s) => /^m5\.5 9/.test(s?.caret || '');
+    const isRight = (s) => /^m9 5\.5/.test(s?.caret || '');
+    ok('「可更新」默认展开（chevronDown）', isDown(find('可更新')), JSON.stringify(find('可更新')));
+    ok('「可选择更新」默认折叠（chevronRight）', isRight(find('可选择更新')), JSON.stringify(find('可选择更新')));
+    ok('「历史版本」默认折叠（chevronRight）', isRight(find('历史版本')), JSON.stringify(find('历史版本')));
     ok('板块标题是手型光标（不是文字光标）', states.every((s) => s.cursor === 'pointer'), JSON.stringify(states.map((s) => s.cursor)));
     ok('数量角标钉在标题行最右端',
       states.every((s) => s.countAtRight && /^\d+$/.test(s.count)),

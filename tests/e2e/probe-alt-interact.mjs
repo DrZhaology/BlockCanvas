@@ -5,6 +5,7 @@ import { createRequire } from 'module';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
 import { mkdirSync, rmSync, cpSync, existsSync } from 'fs';
+import { ensureEditor } from './ensure-editor.mjs';
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
 const { _electron: electron } = require('playwright');
@@ -30,6 +31,7 @@ async function main() {
   const win = await app.firstWindow();
   const errs = [];
   win.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
+  await ensureEditor(win);
   await win.waitForSelector('.toolbar', { timeout: 20000 });
   await sleep(1500);
 
@@ -165,12 +167,28 @@ async function main() {
   await sleep(220);
   const hints = await win.locator('.bc-wall-hint').count();
   ok('Alt 拖动时显示"可达边界"提示线（内边距/外边距）', hints > 0, 'count=' + hints);
+
+  // v0.4.5：F12 式盒模型（四层盒 + 定位方式）
+  const bm = await win.evaluate(() => ({
+    count: document.querySelectorAll('.bc-boxm').length,
+    layers: ['.is-margin', '.is-border', '.is-padding', '.is-content']
+      .filter((s) => !!document.querySelector('.bc-boxm ' + s)).length,
+    pos: (document.querySelector('.bc-boxm-pos')?.textContent || '').trim(),
+    nums: document.querySelectorAll('.bc-boxm-num').length
+  }));
+  ok('Alt 拖动时显示 F12 式盒模型（四层）', bm.count === 1 && bm.layers === 4, JSON.stringify(bm));
+  ok('盒模型中央显示定位方式', /常规流|相对定位|绝对定位|固定定位/.test(bm.pos), bm.pos);
+  ok('盒模型标出了边距数值', bm.nums > 0, 'nums=' + bm.nums);
+
   await win.mouse.up();
   await sleep(250);
   const hintsGone = await win.locator('.bc-wall-hint').count();
   ok('松手后边界提示线消失', hintsGone === 0, 'count=' + hintsGone);
+  ok('松手后盒模型消失', (await win.locator('.bc-boxm').count()) === 0);
 
-  // ============ 4d. 撞墙后继续往外拖 → 快速改父子关系（v0.4.4h）============
+  // ============ 4d. 「撞墙继续拖 → 改父子关系」已按用户要求停用（v0.4.5）============
+  // 旧行为：撞墙后继续往外拖 56px 会进入"拿着元素"模式，悬停目标 1 秒后松开即换父级。
+  // 新行为：ALT_REPARENT_ENABLED=false → 拖到墙边就停住，永远不进入该模式。
   const cid = await win.evaluate(() => {
     const st = window.__sceneStore.getState();
     st.insertTemplate({ id: 'c1', type: 'div', style: { width: '320px', height: '160px', padding: '20px', backgroundColor: '#eef7ff' }, children: [] }, null);
@@ -196,14 +214,14 @@ async function main() {
   await win.mouse.move(re2.x + re2.w / 2 - 130, re2.y + re2.h / 2, { steps: 8 }); // 撞墙后继续往外
   await sleep(250);
   const reparenting = await win.evaluate(() => document.body.classList.contains('bc-reparenting'));
-  ok('撞墙后继续往外拖 → 进入"改父子关系"模式', reparenting === true, String(reparenting));
+  ok('撞墙后继续往外拖 → 不再进入"改父子关系"模式', reparenting === false, String(reparenting));
   const faded = await win.evaluate((eid) => !!document.querySelector(`.canvas [data-bc-id="${eid}"][data-bc-drag-src="1"]`), e2);
-  ok('被拖元素进入淡化态', faded === true, String(faded));
+  ok('被拖元素不会淡化（不再有"拿在手上"状态）', faded === false, String(faded));
 
   await win.mouse.move(rc.x + rc.w / 2, rc.y + rc.h / 2, { steps: 8 });
   await sleep(300);
   const dropBox = await win.locator('.bc-drop-into').count();
-  ok('移到块级元素上方 → 出现"放入此元素"高亮', dropBox === 1, 'count=' + dropBox);
+  ok('移到容器上方也不会出现"放入此元素"高亮', dropBox === 0, 'count=' + dropBox);
 
   await win.mouse.up();
   await sleep(450);
@@ -213,7 +231,40 @@ async function main() {
     const container = find(st.scene.root, c);
     return !!container && container.children.some((k) => k.id === eid);
   }, [e2, cid]);
-  ok('松开后元素真的被放进该容器', parentOk === true, String(parentOk));
+  ok('松开后元素仍在原来的父级（不会偷偷改层级）', parentOk === false, String(parentOk));
+  await win.keyboard.up('Alt');
+
+  // ============ 4e. relative 元素：盒模型显示「相对定位」+ 偏移距离箭头（v0.4.5）============
+  const rid = await win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    st.addElement('div', null);
+    const id = window.__sceneStore.getState().scene.selectedId;
+    st.updateStyle(id, {
+      position: 'relative', left: '0px', top: '0px',
+      width: '160px', height: '60px', backgroundColor: '#fff3cd'
+    });
+    return id;
+  });
+  await sleep(400);
+  await win.evaluate((e) => {
+    document.querySelector(`.canvas [data-bc-id="${e}"]`)?.scrollIntoView({ block: 'center' });
+  }, rid);
+  await sleep(300);
+  const rRel = await rectOf(rid);
+  await win.keyboard.down('Alt');
+  await win.mouse.move(rRel.x + rRel.w / 2, rRel.y + rRel.h / 2);
+  await sleep(220);
+  await win.mouse.down();
+  await win.mouse.move(rRel.x + rRel.w / 2 + 32, rRel.y + rRel.h / 2 + 18, { steps: 6 });
+  await sleep(320);
+  const relBm = await win.evaluate(() => ({
+    pos: (document.querySelector('.bc-boxm-pos')?.textContent || '').trim(),
+    dist: document.querySelectorAll('.bc-boxm-dist').length,
+    distText: Array.from(document.querySelectorAll('.bc-boxm-dist em')).map((n) => n.textContent).join(' / ')
+  }));
+  ok('relative 拖动：盒模型中央显示「相对定位」', /相对定位/.test(relBm.pos), relBm.pos);
+  ok('relative 拖动：出现偏移距离箭头', relBm.dist >= 1 && /left|top/.test(relBm.distText), JSON.stringify(relBm));
+  await win.mouse.up();
   await win.keyboard.up('Alt');
 
   // ============ 5. Alt + 滚轮 = 缩放 ============

@@ -11,10 +11,18 @@
   height: 100vh;
   display: flex;
   justify-content: center;
-  padding: 11vh 24px 32px;
+  padding: clamp(28px, 10vh, 120px) 24px 32px;
   overflow: hidden;
   background: var(--bg);
   animation: ehIn 0.26s var(--ease-standard, ease) both;
+}
+/* 矮窗口（< 700px）：收紧留白、缩小 Logo、先收起「最近打开」，保证搜索框与快捷入口不被挤出屏幕 */
+@media (max-height: 700px) {
+  .empty-home { padding-top: 6vh; }
+  .eh-logo { width: 46px; height: 46px; }
+  .eh-title { font-size: 22px; }
+  .eh-search { margin-top: 16px; }
+  .eh-recent { display: none; }
 }
 .empty-home.is-leaving {
   animation: ehOut 0.15s var(--ease-standard, ease) both;

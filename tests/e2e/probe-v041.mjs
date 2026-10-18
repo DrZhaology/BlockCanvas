@@ -3,6 +3,7 @@ import { createRequire } from 'module';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
 import { mkdirSync, rmSync, cpSync, existsSync } from 'fs';
+import { ensureEditor } from './ensure-editor.mjs';
 
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
@@ -30,6 +31,7 @@ async function main() {
   const errs = [];
   win.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
   win.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
+  await ensureEditor(win);
   await win.waitForSelector('.toolbar', { timeout: 20000 });
   await sleep(1200);
 

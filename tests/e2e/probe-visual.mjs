@@ -1,6 +1,7 @@
 // DOM 几何诊断：找出「导出前体检」按钮徽标 / 向导里被遮挡的元素（不依赖截图）
 import { resolve } from 'path';
 import { launchApp, sleep } from './cdp-launch.mjs';
+import { ensureEditor } from './ensure-editor.mjs';
 const ROOT = process.cwd();
 
 const DIAG = `(() => {
@@ -76,7 +77,8 @@ const DIAG = `(() => {
 async function main() {
   const { win, close } = await launchApp({ root: ROOT });
   try {
-    await win.waitForSelector('.toolbar', { timeout: 20000 });
+    await ensureEditor(win);
+  await win.waitForSelector('.toolbar', { timeout: 20000 });
     await sleep(1500);
     await win.locator('.element-btn', { hasText: '标题' }).first().click();
     await sleep(400);

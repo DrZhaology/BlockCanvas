@@ -4,6 +4,7 @@
 import { createRequire } from 'module';
 import { mkdirSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
+import { ensureEditor } from './ensure-editor.mjs';
 
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
@@ -52,6 +53,7 @@ async function main() {
   const win = await app.firstWindow();
   win.on('console', (m) => { if (m.type() === 'error') logs.push('[console.error] ' + m.text()); });
   win.on('pageerror', (e) => logs.push('[pageerror] ' + e.message));
+  await ensureEditor(win);
   await win.waitForSelector('.toolbar', { timeout: 20000 });
   await sleep(1400);
 

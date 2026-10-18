@@ -6,6 +6,7 @@ import { createRequire } from 'module';
 import { resolve } from 'path';
 import { mkdirSync, rmSync, cpSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
+import { ensureEditor } from './ensure-editor.mjs';
 
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
@@ -55,6 +56,9 @@ export async function launchApp(opts = {}) {
     await sleep(300);
   }
   if (!win) { try { await browser.close(); } catch {} try { child.kill(); } catch {} throw new Error('没等到窗口'); }
+
+  // v0.4.5：启动无标签时先进首页 —— 探针要的是编辑器，这里补一个「新建项目」
+  await ensureEditor(win);
 
   const close = async () => {
     try { await browser.close(); } catch {}

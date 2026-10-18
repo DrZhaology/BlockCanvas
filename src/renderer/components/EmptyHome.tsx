@@ -121,6 +121,14 @@ export function EmptyHome(props: {
     window.setTimeout(action, 150);
   };
 
+  // 「打开工程」会弹原生文件对话框：用户取消时页面还停在首页，
+  // 但已经进入 is-leaving（透明 + 不可点）。窗口重新获得焦点（对话框关闭）时恢复。
+  useEffect(() => {
+    const onFocus = () => setLeaving(false);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
   const applyBg = (spec: BgSpec) => {
     setBg(spec);
     writePersisted(BG_KEY, spec);
