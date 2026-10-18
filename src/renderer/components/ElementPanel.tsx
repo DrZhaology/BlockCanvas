@@ -8,14 +8,16 @@ import { getPluginElements } from '@lib/pluginHost';
 import { TABLE_STYLE_PRESETS, applyTableStylePreset } from '@lib/tablePresets';
 import { uniqueTableClassName } from '@lib/tableOps';
 import { HOVER_OPEN_MS } from '@lib/hoverPop';
+import { appAlert } from '@lib/appConfirm';
+import { Icon } from './Icon';
 
 // BlockCanvas · 元素面板
 // 阶段1：按类别分组，点击插入选中元素的父级（或根）
 // 阶段3・第二批：「元素 | 模板」双页签。模板来自扩展的"资源包"
 // 阶段4・4-F：模板页升级 ——
 //   - 仍在左侧面板内（切到「模板」时面板自动加宽，遮罩删除）
-//   - 每个资源包 = 一个大板块，三角形小箭头（▸/▾）点击折叠/展开，默认展开
-//   - 顶部搜索框：按模板名/描述/资源包名过滤，× 清空
+//   - 每个资源包 = 一个大板块，小箭头图标点击折叠/展开，默认展开
+//   - 顶部搜索框：按模板名/描述/资源包名过滤，清除图标清空
 //   - 模板显示为运行时渲染缩略图：模板树 → exportHTML → iframe srcdoc，
 //     按内容真实比例自动缩放贴合所在列宽（不再固定尺寸拉伸/留白），随窗口宽度自适应列数
 
@@ -45,8 +47,8 @@ const GROUPS: { title: string; items: ElementDef[] }[] = [
   {
     title: '标题与段落',
     items: [
-      { type: 'h1', label: '标题1', help: { tag: 'h1', what: '全页最大的标题（一页只建议一个）', where: '页面顶部；⚠ 它是"标题语义"，别拿它当加大加粗用' } },
-      { type: 'h2', label: '标题2', help: { tag: 'h2', what: '二级标题：章节题目', where: 'h1 之后；⚠ 别为字体效果滥用，加粗请用 strong' } },
+      { type: 'h1', label: '标题1', help: { tag: 'h1', what: '全页最大的标题（一页只建议一个）', where: '页面顶部；它是"标题语义"，别当加大加粗用' } },
+      { type: 'h2', label: '标题2', help: { tag: 'h2', what: '二级标题：章节题目', where: 'h1 之后；加粗请用 strong' } },
       { type: 'h3', label: '标题3', help: { tag: 'h3', what: '三级标题：小节题目（卡片标题常用）', where: '任意容器内；层级要跟在 h2 下面' } },
       { type: 'h4', label: '标题4', help: { tag: 'h4', what: '四级标题：更小的分组题', where: '同上，层级依次递减' } },
       { type: 'p', label: '段落', help: { tag: 'p', what: '一段普通文字，网页里最常用的文本块', where: '任意容器内；一段一个 p' } },
@@ -98,8 +100,9 @@ const GROUPS: { title: string; items: ElementDef[] }[] = [
     items: [
       { type: 'img', label: '图片', help: { tag: 'img', what: '插入一张图片', where: '任意位置；src 选本地文件或填网址' } },
       { type: 'figcaption', label: '图注', help: { tag: 'figcaption', what: 'figure 图文块的说明文字', where: '只能放在 figure 内部' } },
-      { type: 'hr', label: '分割线', help: { tag: 'hr', what: '一条水平分割线，隔开两段内容', where: '任意两个区块之间' } },
-      { type: 'br', label: '换行', help: { tag: 'br', what: '强制换一行（空元素，无样式可调）', where: '文字内部需要断行的地方' } }
+      { type: 'hr', label: '分割线', help: { tag: 'hr', what: '一条水平分割线，隔开两段内容', where: '任意两个区块之间' } }
+      // 「换行 br」已从插入面板移除（v0.4.4）：文本里直接敲回车就会自动生成 <br>，
+      // 单独插一个空 br 没有意义；旧工程里已有的 br 仍然正常渲染与导出。
     ]
   }
 ];
@@ -160,8 +163,7 @@ export function ElementPanel() {
 
   /** 插入元素：统一通知右侧属性面板滚动到新元素（面板顶部就是它的属性） */
   const insertElement = (type: ElementType) => {
-    addElement(type, selectedId);
-    // 表格：新插的空表套上默认预设（跟表格编辑器里看到的样子一致）。
+    addElement(type, selectedId);    // 表格：新插的空表套上默认预设（跟表格编辑器里看到的样子一致）。
     // 以前只给 table 一个 width/背景，插到画布上是"光板"表格，必须手动点一次预设才有样子。
     // ⚠ v0.4.4：默认类名必须**文档内唯一**（data-table / data-table-2 / …）。
     //   以前每张表都叫 data-table，两张表时"自动取名"会生成完全一样的关系选择器，
@@ -176,6 +178,23 @@ export function ElementPanel() {
       }
     }
     window.dispatchEvent(new CustomEvent('bc:element-added', { detail: type }));
+    revealNewElement();
+  };
+
+  /** v0.4.4：新增元素自动定位（可在设置里关）——只滚到可视区，不再额外画橙色闪烁环
+   *（选中框本身已经是橙色，再叠一个环是多余的） */
+  const revealNewElement = () => {
+    let enabled = true;
+    try { enabled = localStorage.getItem('bc-auto-locate-new') !== '0'; } catch { /* ignore */ }
+    if (!enabled) return;
+    const id = useScene.getState().scene.selectedId;
+    if (!id) return;
+    window.setTimeout(() => {
+      const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(id)}"]`) as HTMLElement | null;
+      if (!el) return;
+      try { el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }); }
+      catch { el.scrollIntoView(); }
+    }, 60);
   };
 
   useEffect(() => {
@@ -206,11 +225,12 @@ export function ElementPanel() {
     try {
       const res = await window.bc.readTemplate(resId, tplId);
       if (!res.ok || !res.template) {
-        alert('模板加载失败：' + (res.error ?? '未知错误'));
+        void appAlert('模板加载失败：' + (res.error ?? '未知错误'), '加载失败');
         return;
       }
       insertTemplate(res.template, selectedId);
       window.dispatchEvent(new CustomEvent('bc:element-added', { detail: 'template' }));
+      revealNewElement();
     } finally {
       setBusy(false);
     }
@@ -241,7 +261,7 @@ export function ElementPanel() {
         <div className="elem-main-wrap">
           <div className="elem-top-bar">
             <div className="elem-target-hint">
-              <span>📌 目标:</span>
+              <span><Icon name="pin" size={13} /> 目标:</span>
               <b>{targetLabel}</b>
             </div>
             <div className="elem-inherit-wrap">
@@ -250,18 +270,20 @@ export function ElementPanel() {
                 onClick={cycleLabelMode}
                 title="切换元素按钮展示模式（中文+标签 / 仅中文 / 仅HTML标签）"
               >
-                🏷️ {labelMode === 'both' ? '中文+标签' : labelMode === 'zh' ? '仅中文' : '仅代码标签'}
+                <Icon name="tag" size={13} /> {labelMode === 'both' ? '中文+标签' : labelMode === 'zh' ? '仅中文' : '仅代码标签'}
               </button>
               <button
                 className={"elem-inherit-btn" + (autoInherit ? ' active' : '')}
                 onClick={() => setAutoInherit(!autoInherit)}
                 title="点击切换插入继承模式"
               >
-                <span>{autoInherit ? '⚡ 同级继承: 开' : '⊘ 独立新建: 关'}</span>
+                {autoInherit
+                  ? <span><Icon name="bolt" size={12} /> 同级继承: 开</span>
+                  : <span><Icon name="block" size={12} /> 独立新建: 关</span>}
               </button>
               <HelpButton
                 title="插入时同级样式继承"
-                content={'【同级样式继承】开关作用：\n\n· ⚡ 开启（推荐）：当你在已有子元素的容器内（例如 .card-grid）再次插入相同类型的子元素时，新元素会自动套用同级已有的选择器与样式，省去重复调整！\n\n· ⊘ 关闭：新插入的元素保持默认纯净样式，不继承任何既有样式。\n\n注：画布最外层（根目录）不受影响，永远独立新建。'}
+                content={'开启（推荐）：在已有子元素的容器内插入同类型子元素时，新元素自动套用同级已有的选择器与样式。\n\n关闭：新插入的元素保持默认纯净样式。\n\n画布最外层不受影响，永远独立新建。'}
               />
             </div>
           </div>
@@ -440,9 +462,11 @@ function TemplateLibrary(props: {
         <button
           className={"tpl-pocket-btn" + (pocketExpanded ? " active" : "")}
           onClick={togglePocket}
-          title={pocketExpanded ? "收拢面板（恢复默认尺寸）" : "👝 撑开口袋：大面积展开面板，一次性轻松浏览全部模板"}
+          title={pocketExpanded ? "收拢面板（恢复默认尺寸）" : "撑开口袋：展开面板，一次浏览全部模板"}
         >
-          {pocketExpanded ? "👝 收拢口袋" : "👝 撑开口袋"}
+          {pocketExpanded
+            ? <><Icon name="package" size={13} /> 收拢口袋</>
+            : <><Icon name="package" size={13} /> 撑开口袋</>}
         </button>
       </div>
       <div className="tpl-search-row">
@@ -454,7 +478,9 @@ function TemplateLibrary(props: {
           onChange={(e) => setSearch(e.target.value)}
         />
         {search !== '' && (
-          <button className="tpl-search-clear" title="清空搜索" onClick={() => setSearch('')}>×</button>
+          <button className="tpl-search-clear" title="清空搜索" onClick={() => setSearch('')}>
+            <Icon name="close" size={12} />
+          </button>
         )}
       </div>
       {!scan && <div className="hint">正在扫描扩展目录…</div>}
@@ -490,7 +516,9 @@ function TemplateLibrary(props: {
           <div key={r.id} className="tpl-group">
             {/* 资源包标题 */}
             <div className="tpl-group-header" onClick={(e) => toggleCollapsed(r.id, e.currentTarget)} title={resCollapsed ? '展开此资源包' : '收起此资源包'}>
-              <span className={"tpl-group-caret" + (resCollapsed ? '' : ' open')}>▸</span>
+              <span className={"tpl-group-caret" + (resCollapsed ? '' : ' open')}>
+                <Icon name="chevronRight" size={12} />
+              </span>
               <span className="tpl-group-name">{r.name}</span>
               <span className="tpl-group-meta">
                 {r.templates.length} 个模板{r.version ? ' · v' + r.version : ''}
@@ -510,7 +538,9 @@ function TemplateLibrary(props: {
                           onClick={(e) => toggleCollapsed(`${r.id}::${cat.id}`, e.currentTarget)}
                           title={catCollapsed ? '展开此分类' : '收起此分类'}
                         >
-                          <span className={"tpl-sub-caret" + (catCollapsed ? '' : ' open')}>▸</span>
+                          <span className={"tpl-sub-caret" + (catCollapsed ? '' : ' open')}>
+                            <Icon name="chevronRight" size={11} />
+                          </span>
                           <span className="tpl-sub-cat-badge">{cat.name}</span>
                           <span className="tpl-group-meta">{cat.templates.length} 个模板</span>
                         </div>
@@ -707,10 +737,10 @@ function TemplateCard(props: {
       {menu && (
         <div className="tpl-context-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => { onPreview(); setMenu(null); }}>
-            <span className="tpl-ctx-icon">🔎</span> 预览模板
+            <span className="tpl-ctx-icon"><Icon name="zoomIn" size={13} /></span> 预览模板
           </button>
           <button onClick={() => { if (!disabled) onInsert(); setMenu(null); }}>
-            <span className="tpl-ctx-icon">＋</span> 插入到画布
+            <span className="tpl-ctx-icon"><Icon name="plus" size={13} /></span> 插入到画布
           </button>
         </div>
       )}
@@ -800,7 +830,7 @@ function TemplatePreviewOverlay(props: {
         <div className="tpl-preview-head">
           <span className="tpl-preview-title">{tpl.name}</span>
           <span className="hint">Esc 关闭</span>
-          <button className="tpl-preview-close" onClick={onClose} title="关闭 (Esc)">×</button>
+          <button className="tpl-preview-close" onClick={onClose} title="关闭 (Esc)"><Icon name="close" size={14} /></button>
         </div>
         <div ref={bodyRef} className="tpl-preview-body">
           {ready ? (

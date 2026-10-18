@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
+import { Icon } from './Icon';
 
 // BlockCanvas · 变换与缩放可视化输入组件 (TransformInput)
 // - 小白胶囊预设：悬浮上移、轻微放大、按下回弹、旋转等一键设置
@@ -151,35 +152,35 @@ export function TransformInput({ elementId, pseudo }: Props) {
           onClick={() => applyPreset({ translateX: 0, translateY: -4, scale: 1, rotate: 0 })}
           title="Y轴向上浮起 4px (卡片 hover 最常用)"
         >
-          🎈 悬浮上移 -4px
+          <Icon name="balloon" size={13} /> 悬浮上移 -4px
         </button>
         <button
           className={'btn-mini' + (scale === 1.05 && ty === 0 && rotate === 0 ? ' active' : '')}
           onClick={() => applyPreset({ translateX: 0, translateY: 0, scale: 1.05, rotate: 0 })}
           title="轻微放大 1.05 倍 (按钮 hover 常用)"
         >
-          🔍 放大 1.05x
+          <Icon name="zoomIn" size={13} /> 放大 1.05x
         </button>
         <button
           className={'btn-mini' + (scale === 0.96 && ty === 0 && rotate === 0 ? ' active' : '')}
           onClick={() => applyPreset({ translateX: 0, translateY: 0, scale: 0.96, rotate: 0 })}
           title="缩小 0.96 倍 (点击 active 按下态常用)"
         >
-          🔘 按下态 0.96x
+          <Icon name="circleDot" size={13} /> 按下态 0.96x
         </button>
         <button
           className={'btn-mini' + (scale === 1.05 && ty === -4 ? ' active' : '')}
           onClick={() => applyPreset({ translateX: 0, translateY: -4, scale: 1.05, rotate: 0 })}
           title="放大 + 悬浮组合效果"
         >
-          💥 放大+悬浮
+          <Icon name="burst" size={13} /> 放大+悬浮
         </button>
         <button
           className={'btn-mini' + (rotate === 45 ? ' active' : '')}
           onClick={() => applyPreset({ translateX: 0, translateY: 0, scale: 1, rotate: 45 })}
           title="顺时针旋转 45 度"
         >
-          🔄 旋转 45°
+          <Icon name="rotate" size={13} /> 旋转 45°
         </button>
         {currentStr && (
           <button
@@ -187,7 +188,7 @@ export function TransformInput({ elementId, pseudo }: Props) {
             onClick={() => applyPreset({ translateX: 0, translateY: 0, scale: 1, rotate: 0 })}
             title="复位清除所有变换"
           >
-            ↩️ 复位
+            <Icon name="undo" size={13} /> 复位
           </button>
         )}
       </div>

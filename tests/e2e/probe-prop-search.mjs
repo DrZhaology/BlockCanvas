@@ -6,6 +6,7 @@ import { createRequire } from 'module';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
 import { mkdirSync, rmSync, cpSync, existsSync } from 'fs';
+import { ensureEditor } from './ensure-editor.mjs';
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
 const { _electron: electron } = require('playwright');
@@ -31,6 +32,7 @@ async function main() {
   const win = await app.firstWindow();
   const errs = [];
   win.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
+  await ensureEditor(win);
   await win.waitForSelector('.toolbar', { timeout: 20000 });
   await sleep(1500);
 
@@ -40,13 +42,23 @@ async function main() {
     return window.__sceneStore.getState().scene.selectedId;
   });
   await sleep(500);
-  const rect = await win.evaluate((eid) => {
-    const r = document.querySelector(`.canvas [data-bc-id="${eid}"]`).getBoundingClientRect();
-    return { x: r.x, y: r.y, w: r.width, h: r.height };
-  }, id);
+
+  // 中键点击元素中心：每次重新量一次 rect（前面的步骤可能让画布滚动），
+  // 否则会点到空白处 → 搜索框不弹，属于探针自身的定位问题。
+  const midClickEl = async (eid) => {
+    await win.evaluate((e) => {
+      document.querySelector(`.canvas [data-bc-id="${e}"]`)?.scrollIntoView({ block: 'center' });
+    }, eid);
+    await sleep(260);
+    const r = await win.evaluate((e) => {
+      const b = document.querySelector(`.canvas [data-bc-id="${e}"]`).getBoundingClientRect();
+      return { x: b.x, y: b.y, w: b.width, h: b.height };
+    }, eid);
+    await win.mouse.click(r.x + r.w / 2, r.y + r.h / 2, { button: 'middle' });
+  };
 
   // ============ 1. 中键搜索 ============
-  await win.mouse.click(rect.x + rect.w / 2, rect.y + rect.h / 2, { button: 'middle' });
+  await midClickEl(id);
   await sleep(400);
   ok('中键弹出属性搜索框', (await win.locator('.bc-prop-search').count()) === 1);
 
@@ -111,7 +123,7 @@ async function main() {
 
   // ============ 4. 已添加 / 未添加 两态 + Enter / Ctrl+Enter（v0.4.4h）============
   // 重新打开中键搜索
-  await win.mouse.click(rect.x + rect.w / 2, rect.y + rect.h / 2, { button: 'middle' });
+  await midClickEl(id);
   await sleep(400);
   ok('中键再次弹出属性搜索框', (await win.locator('.bc-prop-search').count()) === 1);
 
@@ -143,7 +155,8 @@ async function main() {
     const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
     return n?.style?.lineHeight ?? '';
   }, id);
-  ok('未添加时按 Enter 只提示"没有添加"（框不关、不写样式）', stillOpen === 1 && /没有添加/.test(msgTxt) && fsAfter === '', `open=${stillOpen} msg=${msgTxt} lh=${fsAfter}`);
+  // 文案是「还没添加，按 Ctrl+Enter 添加并定位」——断言两种写法都接受
+  ok('未添加时按 Enter 只提示"没有添加"（框不关、不写样式）', stillOpen === 1 && /(还没|没有)添加/.test(msgTxt) && fsAfter === '', `open=${stillOpen} msg=${msgTxt} lh=${fsAfter}`);
 
   // Ctrl+Enter → 快捷添加并定位
   await win.locator('.bc-prop-search-input').press('Control+Enter');
@@ -155,7 +168,7 @@ async function main() {
   ok('Ctrl+Enter 快捷添加并定位到该属性行', added.exists === true && added.flash === true, JSON.stringify(added));
 
   // ============ 5. 点别处关闭 + 退场动画（v0.4.4h）============
-  await win.mouse.click(rect.x + rect.w / 2, rect.y + rect.h / 2, { button: 'middle' });
+  await midClickEl(id);
   await sleep(400);
   ok('中键弹出搜索框（第 3 次）', (await win.locator('.bc-prop-search').count()) === 1);
   // 点击远处空白（窗口左下角，肯定在搜索框之外）→ 应关闭

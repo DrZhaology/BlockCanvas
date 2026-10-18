@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { ColorField } from './ColorPicker';
+import { Icon, type IconName } from './Icon';
 
 // BlockCanvas · 盒子阴影可视化组件 (BoxShadowInput)
 //
@@ -91,13 +92,13 @@ function composeBoxShadow(p: ParsedShadow, rest: string[]): string {
   return allZero && !p.inset ? '' : all;
 }
 
-const PRESETS: Array<{ label: string; css: string; hint: string }> = [
-  { label: '☁️ 浅浮雕', css: '0 2px 8px rgba(0, 0, 0, 0.08)', hint: '轻微浮起，适合大区块' },
-  { label: '📦 立体悬浮', css: '0 10px 25px rgba(0, 0, 0, 0.15)', hint: '卡片 hover / 弹层常用' },
-  { label: '🪶 轻柔贴地', css: '0 1px 3px rgba(0, 0, 0, 0.1)', hint: '几乎察觉不到的细腻投影' },
-  { label: '💡 蓝色光晕', css: '0 0 16px rgba(30, 136, 229, 0.4)', hint: '聚焦 / 选中态的发光' },
-  { label: '🏮 弥散深影', css: '0 20px 40px rgba(0, 0, 0, 0.25)', hint: '模态框、抽屉的大范围投影' },
-  { label: '🕳 内凹', css: 'inset 0 3px 8px rgba(0, 0, 0, 0.2)', hint: '像被按进表面的凹陷感' }
+const PRESETS: Array<{ label: string; icon: IconName; css: string; hint: string }> = [
+  { label: '浅浮雕', icon: 'cloud', css: '0 2px 8px rgba(0, 0, 0, 0.08)', hint: '轻微浮起，适合大区块' },
+  { label: '立体悬浮', icon: 'package', css: '0 10px 25px rgba(0, 0, 0, 0.15)', hint: '卡片 hover / 弹层常用' },
+  { label: '轻柔贴地', icon: 'feather', css: '0 1px 3px rgba(0, 0, 0, 0.1)', hint: '几乎察觉不到的细腻投影' },
+  { label: '蓝色光晕', icon: 'lightbulb', css: '0 0 16px rgba(30, 136, 229, 0.4)', hint: '聚焦 / 选中态的发光' },
+  { label: '弥散深影', icon: 'lantern', css: '0 20px 40px rgba(0, 0, 0, 0.25)', hint: '模态框、抽屉的大范围投影' },
+  { label: '内凹', icon: 'hole', css: 'inset 0 3px 8px rgba(0, 0, 0, 0.2)', hint: '像被按进表面的凹陷感' }
 ];
 
 export function BoxShadowInput({ elementId, pseudo }: Props) {
@@ -220,11 +221,11 @@ export function BoxShadowInput({ elementId, pseudo }: Props) {
             className={'btn-mini' + (currentStr === p.css ? ' active' : '')}
             onClick={() => applyPreset(p.css)}
             title={p.hint}
-          >{p.label}</button>
+          ><Icon name={p.icon} size={13} /> {p.label}</button>
         ))}
         {currentStr && (
           <button className="btn-mini btn-danger" onClick={() => applyPreset('')} title="清除阴影">
-            🚫 无阴影
+            <Icon name="block" size={13} /> 无阴影
           </button>
         )}
       </div>

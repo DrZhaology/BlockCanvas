@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { ColorField } from './ColorPicker';
+import { Icon } from './Icon';
 
 // BlockCanvas · 文字阴影可视化组件 (TextShadowInput)
 // - 胶囊预设：柔和黑底、霓虹发光、印刷立体等一键应用
@@ -133,21 +134,21 @@ export function TextShadowInput({ elementId, pseudo }: Props) {
           onClick={() => applyPreset('0 2px 4px rgba(0, 0, 0, 0.4)')}
           title="柔和立体阴影，提升暗色文字辨识度"
         >
-          🕶️ 柔和立体
+          <Icon name="glasses" size={13} /> 柔和立体
         </button>
         <button
           className={'btn-mini' + (currentStr.includes('0 0 10px') ? ' active' : '')}
           onClick={() => applyPreset('0 0 10px rgba(30, 136, 229, 0.8)')}
           title="蓝色霓虹发光文字"
         >
-          ✨ 霓虹发光
+          <Icon name="sparkle" size={13} /> 霓虹发光
         </button>
         <button
           className={'btn-mini' + (currentStr.includes('1px 1px 0') ? ' active' : '')}
           onClick={() => applyPreset('1px 1px 0 rgba(255, 255, 255, 0.8)')}
           title="浅色内雕刻字效果"
         >
-          🖨️ 刻印浮雕
+          <Icon name="printer" size={13} /> 刻印浮雕
         </button>
         {currentStr && (
           <button
@@ -155,7 +156,7 @@ export function TextShadowInput({ elementId, pseudo }: Props) {
             onClick={() => applyPreset('')}
             title="清除文字阴影"
           >
-            🚫 清除
+            <Icon name="block" size={13} /> 清除
           </button>
         )}
       </div>

@@ -6,6 +6,7 @@ import { createRequire } from 'module';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
 import { mkdirSync, rmSync, cpSync, existsSync } from 'fs';
+import { ensureEditor } from './ensure-editor.mjs';
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
 const { _electron: electron } = require('playwright');
@@ -35,6 +36,7 @@ async function main() {
   win.on('requestfailed', (r) => {
     errs.push('requestfailed: ' + ((r.failure() && r.failure().errorText) || '') + ' ' + r.url().slice(0, 120));
   });
+  await ensureEditor(win);
   await win.waitForSelector('.toolbar', { timeout: 20000 });
   await sleep(1200);
 

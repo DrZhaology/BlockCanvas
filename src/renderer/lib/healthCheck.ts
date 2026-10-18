@@ -364,7 +364,7 @@ export function runHealthCheck(root: SceneElement): HealthIssue[] {
       title: `${fixedWide.length} 个元素写了固定宽度且大于 360px`,
       detail:
         '手机屏幕通常只有 375px 宽。宽度写死后窄屏会出现横向滚动条。\n' +
-        '在「手机」断点下用「✨ 整页自动适配」可以一键改成自适应。',
+        '在「手机」断点下用「整页自动适配」可以一键改成自适应。',
       locateId: fixedWide[0].id,
       goto: 'inspector'
     });

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useScene, getEffectiveStyle } from '@store/sceneStore';
 import { tokenRef, cssVarName, tokenNameFromRef, isValidTokenName, uniqueTokenName } from '@lib/designTokens';
+import { appAlert } from '@lib/appConfirm';
 
 // BlockCanvas · ColorField 富颜色选择器（通用内核）
 // 支持：Hex / RGB / RGBA / 英文色名 + 任意 CSS 颜色文本
@@ -337,7 +338,7 @@ export function ColorField(props: ColorFieldProps) {
   const createAndApplyVar = () => {
     const clean = newVarName.trim();
     if (!clean || !isValidTokenName(clean)) {
-      alert('变量名只能用小写字母开头，且只包含小写字母、数字和连字符（例如 brand、bg-soft）。');
+      void appAlert('变量名只能用小写字母开头，且只包含小写字母、数字和连字符（例如 brand、bg-soft）。', '变量名不合法');
       return;
     }
     const list = allTokens ?? [];

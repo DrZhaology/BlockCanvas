@@ -317,18 +317,24 @@ export function collectStyleClasses(root: SceneElement, ctx: StyleClassSet): voi
 
 // 页面快速设置 → CSS 文本（4-D：可视化 body/a 常用项 + 「页面」页签按需添加的扩展项）
 // 顺序：自动样式 → 快速设置 → 高级 CSS（高级在最后，用户写的规则总能覆盖快速设置）
-export function quickCssToCss(q: SceneGraph['quickCss'] | undefined): string {
-  if (!q) return '';
+// v0.4.5：extra = 「全局样式」里任意添加的属性（key=CSS 属性名），一并并进 body 规则
+export function quickCssToCss(q: SceneGraph['quickCss'] | undefined, extra?: Record<string, string>): string {
   const bodyDecls: string[] = [];
-  if (q.bodyBg) bodyDecls.push(`background-color: ${q.bodyBg};`);
-  if (q.textColor) bodyDecls.push(`color: ${q.textColor};`);
-  if (q.fontFamily) bodyDecls.push(`font-family: ${q.fontFamily};`);
-  if (q.bodyFontSize) bodyDecls.push(`font-size: ${q.bodyFontSize};`);
-  if (q.bodyLineHeight) bodyDecls.push(`line-height: ${q.bodyLineHeight};`);
+  if (q?.bodyBg) bodyDecls.push(`background-color: ${q.bodyBg};`);
+  if (q?.textColor) bodyDecls.push(`color: ${q.textColor};`);
+  if (q?.fontFamily) bodyDecls.push(`font-family: ${q.fontFamily};`);
+  if (q?.bodyFontSize) bodyDecls.push(`font-size: ${q.bodyFontSize};`);
+  if (q?.bodyLineHeight) bodyDecls.push(`line-height: ${q.bodyLineHeight};`);
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) {
+      if (!k.trim() || v === undefined || v === null || String(v).trim() === '') continue;
+      bodyDecls.push(`${k.trim()}: ${String(v).trim()};`);
+    }
+  }
   const parts: string[] = [];
   if (bodyDecls.length > 0) parts.push(`body {\n  ${bodyDecls.join('\n  ')}\n}`);
-  if (q.linkColor) parts.push(`a { color: ${q.linkColor}; text-decoration: underline; }`);
-  if (q.headingColor) parts.push(`h1, h2, h3, h4, h5, h6 { color: ${q.headingColor}; }`);
+  if (q?.linkColor) parts.push(`a { color: ${q.linkColor}; text-decoration: underline; }`);
+  if (q?.headingColor) parts.push(`h1, h2, h3, h4, h5, h6 { color: ${q.headingColor}; }`);
   return parts.join('\n\n');
 }
 
@@ -348,6 +354,8 @@ export interface StyleBlockOpts {
   withPageCss?: boolean;
   /** 自动规则段前面的注释（分块时用来写"表 N · .data-table"） */
   autoComment?: string;
+  /** 页面「全局样式」：并进 body 规则的额外属性（SceneGraph.bodyExtra） */
+  bodyExtra?: SceneGraph['bodyExtra'];
 }
 
 export function buildStyleBlock(
@@ -357,7 +365,7 @@ export function buildStyleBlock(
   tokens?: SceneGraph['tokens'],
   opts: StyleBlockOpts = {}
 ): string {
-  const { onlySelectors, excludeSelectors, withTokens = true, withPageCss = true, autoComment } = opts;
+  const { onlySelectors, excludeSelectors, withTokens = true, withPageCss = true, autoComment, bodyExtra } = opts;
   const keep = (sel: string): boolean => {
     if (onlySelectors && !onlySelectors.has(sel)) return false;
     if (excludeSelectors && excludeSelectors.has(sel)) return false;
@@ -366,7 +374,7 @@ export function buildStyleBlock(
   const autoRules = ctx.order.filter(keep).map((sel) => `${sel} { ${ctx.rules.get(sel)} }`);
   const rulesBlock = autoRules.length > 0 ? autoRules.join('\n') : '';
   const userCss = withPageCss ? (globalCss ?? '').trim() : '';
-  const quickBlock = withPageCss ? quickCssToCss(quickCss) : '';
+  const quickBlock = withPageCss ? quickCssToCss(quickCss, bodyExtra) : '';
   const tokenBlock = withTokens ? tokensToCss(tokens ?? []) : '';
   const tabletOrder = ctx.tabletOrder.filter(keep);
   const mobileOrder = ctx.mobileOrder.filter(keep);

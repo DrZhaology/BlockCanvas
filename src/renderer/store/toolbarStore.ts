@@ -96,7 +96,7 @@ export const DEFAULT_GROUPS: ToolbarGroup[] = [
   {
     id: 'grp.ops',
     label: '操作',
-    icon: '🛠️',
+    icon: 'tool',
     // 撤销 / 重做 / 复制 / 剪切 / 粘贴 —— 全部高频编辑动作收进一个组
     itemIds: ['undo', 'redo', 'copy', 'cut', 'paste'],
     dock: 'main',
@@ -105,7 +105,7 @@ export const DEFAULT_GROUPS: ToolbarGroup[] = [
   {
     id: 'grp.device',
     label: '设备',
-    icon: '📱',
+    icon: 'phone',
     itemIds: ['blk.device'],
     dock: 'right',
     order: 59
@@ -159,7 +159,7 @@ function loadGroups(): ToolbarGroup[] {
   const groups = saved.map((g) => {
     if (g.id !== 'grp.clipboard') return g;
     const rest = g.itemIds.filter((x) => x !== 'undo' && x !== 'redo' && x !== 'copy' && x !== 'cut' && x !== 'paste');
-    return { ...g, id: 'grp.ops', label: '操作', icon: '🛠️', itemIds: ['undo', 'redo', 'copy', 'cut', 'paste', ...rest] };
+    return { ...g, id: 'grp.ops', label: '操作', icon: 'tool', itemIds: ['undo', 'redo', 'copy', 'cut', 'paste', ...rest] };
   });
   save(LS_GROUPS, groups);
   save(LS_GROUPS_SCHEMA, GROUPS_SCHEMA);

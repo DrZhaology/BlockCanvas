@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { dragSteps } from '@lib/drag';
+import { Icon } from './Icon';
 
 // BlockCanvas · ↑↓ 微调小按钮（数值输入用）
 // 交互：
@@ -107,7 +108,10 @@ export function StepDrag(props: {
         if (st.current) onDragEnd();
         st.current = null;
       }}
-    >↑↓</span>
+    >
+      <Icon name="chevronUp" size={9} />
+      <Icon name="chevronDown" size={9} />
+    </span>
   );
 }
 

@@ -15,12 +15,15 @@ contextBridge.exposeInMainWorld('bc', {
   // 项目工程管理 (.bcproj)
   listProjects: () =>
     ipcRenderer.invoke('project:list'),
-  saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown }, saveAs = false, customPath?: string) =>
+  saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown; history?: unknown }, saveAs = false, customPath?: string) =>
     ipcRenderer.invoke('project:save', projectData, saveAs, customPath),
   openProjectFile: (customPath?: string) =>
     ipcRenderer.invoke('project:open-file', customPath),
   deleteProject: (fileName: string, projectName?: string) =>
     ipcRenderer.invoke('project:delete', fileName, projectName),
+  /** 重命名工程文件（只改磁盘文件名，不改容器内的项目名） */
+  renameProject: (oldFileName: string, newName: string) =>
+    ipcRenderer.invoke('project:rename', oldFileName, newName),
 
   // 自动备份与灾难恢复
   saveBackupSnapshot: (scene: unknown, projectName?: string, isAuto = true) =>
@@ -43,10 +46,20 @@ contextBridge.exposeInMainWorld('bc', {
     ipcRenderer.invoke('data:get-paths'),
   getStorageStats: () =>
     ipcRenderer.invoke('data:get-storage-stats'),
+  // 分类占用明细（统计与清理同源）
+  getStorageBreakdown: () =>
+    ipcRenderer.invoke('data:get-storage-breakdown'),
+  clearStorageCategory: (id: string) =>
+    ipcRenderer.invoke('data:clear-category', id),
+  clearAllCleanable: () =>
+    ipcRenderer.invoke('data:clear-all-cleanable'),
   clearAppCache: () =>
     ipcRenderer.invoke('data:clear-cache'),
   clearOrphanBackups: () =>
     ipcRenderer.invoke('data:clear-orphan-backups'),
+  /** 预算兜底（L4）：下载目录保留最近 1 个 + 30 天过期清理；临时区预览只留最近 5 个 */
+  enforceStorageBudgets: () =>
+    ipcRenderer.invoke('data:enforce-budgets'),
   openDataPath: (target: string) =>
     ipcRenderer.invoke('data:open-path', target),
   getAppConfig: () =>
@@ -145,5 +158,8 @@ contextBridge.exposeInMainWorld('bc', {
   setNativeTheme: (source: 'dark' | 'light' | 'system') =>
     ipcRenderer.send('theme:set-source', source),
   pickImageSrc: (mode?: 'abs' | 'rel') =>
-    ipcRenderer.invoke('img:pick-src', mode)
+    ipcRenderer.invoke('img:pick-src', mode),
+  /** 首页背景：选择图片 / 视频文件（返回绝对路径） */
+  pickMediaSrc: (kind: 'image' | 'video') =>
+    ipcRenderer.invoke('media:pick-src', kind)
 });

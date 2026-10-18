@@ -1,0 +1,546 @@
+/* ==========================================================================
+   v0.4.5 · 首页（关掉所有标签后的"新标签页"）
+   --------------------------------------------------------------------------
+   · 组件统一偏上：Logo / 标题 / 搜索框 / 快捷入口 / 最近项目
+   · 右上角只有一枚 SVG 齿轮 → 页面设置面板（预设 / 渐变 / 图片 / 视频）
+   · 背景只存 localStorage（外观偏好，不进工程）
+   ========================================================================== */
+
+.empty-home {
+  position: relative;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: clamp(28px, 10vh, 120px) 24px 32px;
+  overflow: hidden;
+  background: var(--bg);
+}
+/* 动画只作用在内容层：整页淡出会把背景一起变透明，用户会看到"窗口突然全白" */
+.empty-home .eh-center,
+.empty-home .eh-settings {
+  animation: ehIn 0.26s var(--ease-standard, ease) both;
+}
+.empty-home.is-leaving {
+  pointer-events: none;
+}
+.empty-home.is-leaving .eh-center,
+.empty-home.is-leaving .eh-settings {
+  animation: ehOut 0.15s var(--ease-standard, ease) both;
+}
+@keyframes ehIn {
+  from { opacity: 0; transform: translateY(7px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes ehOut {
+  to { opacity: 0; transform: translateY(-5px); }
+}
+
+/* 矮窗口（< 700px）：收紧留白、缩小 Logo、先收起「最近打开」，保证搜索框与快捷入口不被挤出屏幕 */
+@media (max-height: 700px) {
+  .empty-home { padding-top: 6vh; }
+  .eh-logo { width: 46px; height: 46px; }
+  .eh-title { font-size: 22px; }
+  .eh-search { margin-top: 16px; }
+  .eh-recent { display: none; }
+}
+
+/* —— 媒体背景层 —— */
+.eh-media {
+  position: absolute;
+  inset: 0;
+  /* v0.4.4：模糊/缩放变化走过渡，不再跳一下 */
+  transition: filter 0.3s ease, transform 0.3s ease;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  z-index: 0;
+}
+.eh-video { width: 100%; height: 100%; object-fit: cover; }
+.eh-dim {
+  position: absolute;
+  inset: 0;
+  background: #0b1220;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* —— 右上角齿轮 —— */
+.eh-settings { position: absolute; top: 14px; right: 16px; z-index: 30; }
+.eh-gear {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: color var(--dur-fast, 0.12s) ease, border-color var(--dur-fast, 0.12s) ease,
+              transform var(--dur-fast, 0.12s) var(--ease-standard, ease);
+}
+.eh-gear:hover, .eh-gear.is-open { color: var(--accent); border-color: var(--accent); }
+.eh-gear:active { transform: scale(0.94); }
+
+/* —— 设置面板 —— */
+.eh-panel {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  width: 344px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 44px rgba(15, 23, 42, 0.18);
+  animation: ehPanelIn 0.16s var(--ease-standard, ease) both;
+  transform-origin: top right;
+}
+/* 面板里的渐变编辑器：缩小内边距，别把 320px 宽的卡片撑爆 */
+.eh-panel .grad-editor { padding: 9px; gap: 9px; }
+.eh-panel .grad-preview { height: 52px; }
+@keyframes ehPanelIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+.eh-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+.eh-panel-x {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.eh-panel-x:hover { color: var(--text); background: var(--hover); }
+
+.eh-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-top: 10px;
+  padding: 3px;
+  background: var(--panel-soft);
+  border-radius: 8px;
+}
+.eh-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 26px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background var(--dur-fast, 0.12s) ease, color var(--dur-fast, 0.12s) ease;
+}
+.eh-tab:hover { color: var(--text); }
+.eh-tab.is-active { color: var(--accent); background: var(--bg-panel); box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08); }
+
+.eh-bggrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 7px;
+  margin-top: 10px;
+}
+.eh-swatch {
+  position: relative;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform var(--dur-fast, 0.12s) var(--ease-standard, ease);
+}
+.eh-swatch:hover { transform: translateY(-1px); }
+.eh-swatch.is-active { outline: 2px solid var(--accent); outline-offset: 1px; }
+.eh-swatch-color {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  background: repeating-conic-gradient(#e8edf3 0% 25%, #ffffff 0% 50%) 50% / 12px 12px;
+}
+.eh-swatch-color input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.eh-saved { display: block; }
+/* 图片 / 视频背景的缩略图：铺满色块，视频再盖一个播放角标 */
+.eh-saved-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background-size: cover;
+  background-position: center;
+  border-radius: inherit;
+}
+.eh-saved-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.32);
+  border-radius: inherit;
+}
+.eh-saved-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  display: none;
+  place-items: center;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.62);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.eh-saved:hover .eh-saved-x { display: grid; }
+
+.eh-sub { margin-top: 12px; font-size: 11px; font-weight: 600; color: var(--text-muted); }
+
+.eh-gradient-preview {
+  height: 52px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.eh-row { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+.eh-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.eh-color input {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+.eh-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text);
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.eh-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.eh-range { flex: 1; min-width: 0; accent-color: var(--accent); }
+.eh-val { width: 38px; text-align: right; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.eh-label { font-size: 11px; color: var(--text-muted); }
+.eh-apply {
+  width: 100%;
+  height: 30px;
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.eh-apply:disabled { opacity: 0.45; cursor: not-allowed; }
+.eh-apply:not(:disabled):hover { filter: brightness(1.06); }
+.eh-save-row { display: flex; gap: 6px; margin-top: 8px; }
+.eh-mini {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 11.5px;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.eh-mini:hover { color: var(--accent); border-color: var(--accent); }
+.eh-panel-foot { margin-top: 10px; font-size: 10.5px; color: var(--text-muted); }
+
+/* —— 中央内容 —— */
+.eh-center {
+  position: relative;
+  z-index: 2;
+  width: min(720px, 94vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.eh-logo { width: 64px; height: 64px; user-select: none; }
+.eh-title { margin-top: 12px; font-size: 27px; font-weight: 700; color: var(--text); letter-spacing: 0.3px; }
+.eh-sub { margin-top: 5px; font-size: 12.5px; color: var(--text-muted); }
+
+/* —— 搜索 —— */
+.eh-search {
+  position: relative;
+  width: 100%;
+  margin-top: 22px;
+}
+.eh-search-ico {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.eh-search input {
+  width: 100%;
+  height: 48px;
+  padding: 0 40px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  outline: none;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(10px);
+  transition: border-color var(--dur-fast, 0.12s) ease, box-shadow var(--dur-fast, 0.12s) ease;
+}
+.eh-search input:focus { border-color: var(--accent); box-shadow: 0 4px 18px rgba(30, 136, 229, 0.18); }
+/* 搜索框 / 按钮 / 卡片的颜色变化都走过渡（深色壁纸切换时不生硬） */
+.eh-search input,
+.eh-btn,
+.eh-card,
+.eh-gear,
+.eh-hit,
+.eh-tab,
+.eh-swatch {
+  transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease,
+              box-shadow 0.25s ease, opacity 0.25s ease, transform 0.12s ease;
+}
+.eh-search-clear {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.eh-search-clear:hover { color: var(--text); background: var(--hover); }
+
+.eh-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 6px;
+  text-align: left;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+  animation: ehPanelIn 0.14s var(--ease-standard, ease) both;
+  z-index: 5;
+}
+.eh-hit-group {
+  padding: 6px 8px 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.eh-hit {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.eh-hit.is-active { background: var(--hover-accent, rgba(30, 136, 229, 0.1)); }
+.eh-hit-main { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 1px; }
+.eh-hit-title { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eh-hit-sub { font-size: 10.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eh-hit-meta { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+.eh-empty-hit { padding: 14px 10px; font-size: 12px; color: var(--text-muted); text-align: center; }
+
+/* —— 快捷入口 —— */
+.eh-actions { display: flex; gap: 10px; margin-top: 18px; }
+.eh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.05);
+  backdrop-filter: blur(8px);
+  transition: transform var(--dur-fast, 0.12s) var(--ease-standard, ease),
+              box-shadow var(--dur-fast, 0.12s) ease, border-color var(--dur-fast, 0.12s) ease;
+}
+.eh-btn:hover { transform: translateY(-1px); border-color: var(--accent); box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1); }
+.eh-btn.is-primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+.eh-btn.is-primary:hover { box-shadow: 0 8px 22px rgba(30, 136, 229, 0.32); }
+
+/* —— 最近项目 —— */
+.eh-recent { width: 100%; margin-top: 26px; text-align: left; }
+.eh-recent-title { margin-bottom: 8px; font-size: 11px; font-weight: 600; color: var(--text-muted); }
+.eh-recent-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.eh-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  text-align: left;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.66);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: border-color var(--dur-fast, 0.12s) ease, transform var(--dur-fast, 0.12s) var(--ease-standard, ease);
+}
+.eh-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.eh-card-ico { color: var(--text-muted); display: inline-flex; }
+.eh-card-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.eh-card-sub { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+
+/* —— 深色主题 —— */
+html[data-bc-dark] .eh-gear,
+html[data-bc-dark] .eh-btn,
+html[data-bc-dark] .eh-card { background: rgba(30, 41, 59, 0.72); }
+html[data-bc-dark] .eh-search input { background: rgba(24, 32, 46, 0.82); }
+html[data-bc-dark] .eh-btn.is-primary { background: var(--accent); }
+html[data-bc-dark] .eh-tabs { background: rgba(255, 255, 255, 0.05); }
+html[data-bc-dark] .eh-tab.is-active { background: var(--bg-panel); }
+
+/* ==========================================================================
+   深色壁纸：文字与玻璃控件自动转白（按背景平均亮度实时切换，见 EmptyHome.tsx）
+   ========================================================================== */
+.empty-home.is-dark-bg { color: #fff; }
+.empty-home.is-dark-bg .eh-title {
+  color: #fff;
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.35);
+}
+.empty-home.is-dark-bg .eh-sub,
+.empty-home.is-dark-bg .eh-recent-title,
+.empty-home.is-dark-bg .eh-card-sub,
+.empty-home.is-dark-bg .eh-hit-sub,
+.empty-home.is-dark-bg .eh-hit-meta { color: rgba(255, 255, 255, 0.74); }
+.empty-home.is-dark-bg .eh-search input {
+  color: #fff;
+  background: rgba(15, 23, 42, 0.46);
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.28);
+}
+.empty-home.is-dark-bg .eh-search input::placeholder { color: rgba(255, 255, 255, 0.58); }
+.empty-home.is-dark-bg .eh-search-ico { color: rgba(255, 255, 255, 0.68); }
+.empty-home.is-dark-bg .eh-search-clear { color: rgba(255, 255, 255, 0.75); }
+.empty-home.is-dark-bg .eh-btn,
+.empty-home.is-dark-bg .eh-card {
+  color: #fff;
+  background: rgba(15, 23, 42, 0.44);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.empty-home.is-dark-bg .eh-btn:hover,
+.empty-home.is-dark-bg .eh-card:hover { border-color: rgba(255, 255, 255, 0.55); }
+.empty-home.is-dark-bg .eh-btn.is-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.empty-home.is-dark-bg .eh-gear {
+  color: #fff;
+  background: rgba(15, 23, 42, 0.46);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+.empty-home.is-dark-bg .eh-card-ico { color: rgba(255, 255, 255, 0.72); }
+.empty-home.is-dark-bg .eh-results {
+  background: rgba(17, 24, 39, 0.94);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.empty-home.is-dark-bg .eh-hit { color: #fff; }
+.empty-home.is-dark-bg .eh-hit.is-active { background: rgba(255, 255, 255, 0.1); }
+.empty-home.is-dark-bg .eh-hit-group,
+.empty-home.is-dark-bg .eh-empty-hit { color: rgba(255, 255, 255, 0.6); }
+
+/* —— 全局轻提示（toast）—— */
+.bc-toast-wrap {
+  position: fixed;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  /* 高于面板（700），低于模态（900+） */
+  z-index: 800;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.bc-toast {
+  max-width: 460px;
+  padding: 9px 16px;
+  font-size: 12.5px;
+  color: #fff;
+  background: rgba(17, 24, 39, 0.92);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.25);
+  animation: bcToastIn 0.18s var(--ease-standard, ease) both;
+}
+.bc-toast.is-err { background: rgba(190, 32, 32, 0.94); }
+.bc-toast.is-info { background: rgba(30, 60, 110, 0.94); }
+@keyframes bcToastIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

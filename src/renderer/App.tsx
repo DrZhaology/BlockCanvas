@@ -23,6 +23,10 @@ import { withViewTransition } from '@lib/viewTransition';
 import { useHorizontalWheel } from '@lib/hScroll';
 import { DEVICE_LIST, widthToBreakpoint, type DeviceId } from '@lib/device';
 import { tokensToRootCss } from '@lib/designTokens';
+import { applySelHighlightClass } from '@lib/selHighlight';
+import { showToast, type ToastType } from '@lib/toast';
+import { requestPropFocus } from '@lib/propFocus';
+import { EmptyHome } from '@comp/EmptyHome';
 
 // BlockCanvas · 主界面
 // - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
@@ -60,6 +64,12 @@ export default function App() {
   const [leftWidth, setLeftWidth] = usePersistentState<number>(LEFT_WIDTH_KEY, LEFT_WIDTH_DEFAULT);
   const [zoom, setZoom] = useState(1);
   const [view, setView] = useState<AppView>('editor');
+  // 标签数（用于空页面判断）。⚠ 必须在组件顶部调用 —— 不能放进 JSX 的 view 分支里，
+  // 否则切到"表格编辑器/设置"等视图时这个 hook 不执行，hooks 数量前后不一致，
+  // React 直接抛 #300 把整个视图渲染崩掉（踩过一次，表格编辑器打不开就是它）。
+  const tabCount = useTabStore((s) => s.tabs.length);
+  // 自动保存节流锚点：手动 Ctrl+S / 自动保存成功都会刷新（见下方自动保存循环）
+  const autoSaveLastRef = useRef(0);
   // 全局快捷键在一个"依赖里没有 view"的 useEffect 里注册 → 闭包里的 view 永远是首次渲染的值。
   // 用 ref 读当前视图，否则在表格编辑器 / 设置 / 项目中心里按 Del、Ctrl+A 会悄悄打到画布上。
   const viewRef = useRef<AppView>(view);
@@ -68,6 +78,8 @@ export default function App() {
   const [tableEditId, setTableEditId] = useState<string>('');
   // 帮助中心默认打开哪份文档（菜单「使用手册」→ manual；别处要开特定文档可先 setHelpDoc）
   const [helpDoc, setHelpDoc] = useState<DocKey>('manual');
+  // 首页搜索点中某节文档时，带一个精确跳转目标（文档 + 段落 id）
+  const [helpTarget, setHelpTarget] = useState<{ doc: DocKey; id: string } | null>(null);
   // 所有「整页切换」都走原生视图过渡：旧页面淡出 + 新页面淡入
   // （不重挂载视图、不丢状态；宿主不支持或系统开了"减少动态效果"时自动降级为直接切换）
   const switchView = useCallback((next: AppView) => {
@@ -115,11 +127,14 @@ export default function App() {
     if (useScene.getState().activeBreakpoint !== bp) {
       useScene.getState().setActiveBreakpoint(bp);
     }
+    // 广播给关心"画布是否自适应"的组件（如属性面板断点栏的「自适应」按钮高亮）
+    window.dispatchEvent(new CustomEvent('bc:canvas-width-changed', { detail: canvasWidth }));
   }, [canvasWidth]);
 
   useEffect(() => {
     const onSetDevice = (e: Event) => {
-      const d = (e as CustomEvent).detail as DeviceId;
+      const d = (e as CustomEvent).detail as DeviceId | 'auto';
+      if (d === 'auto') { setCanvasWidth('auto'); return; } // 与工具栏「自适应」同一逻辑
       const target = DEVICE_LIST.find((x) => x.id === d);
       if (target) setCanvasWidth(target.width);
     };
@@ -145,6 +160,9 @@ export default function App() {
   }, [tokens]);
 
   // 1. 启动时像 Windows 11 记事本一样秒级恢复上次会话
+  // v0.4.4 修：恢复是异步的 —— 如果先渲染首页、再恢复出标签，用户会看到"首页一闪 → 画布"。
+  // 这里加一个 ready 闸门：会话读回来之前只显示纯背景，读完再一次性渲染正确视图。
+  const [sessionReady, setSessionReady] = useState(false);
   useEffect(() => {
     (async () => {
       try {
@@ -154,6 +172,8 @@ export default function App() {
         }
       } catch (e) {
         console.warn('恢复会话失败:', e);
+      } finally {
+        setSessionReady(true);
       }
     })();
   }, []);
@@ -189,6 +209,44 @@ export default function App() {
     const onPluginsChanged = () => refreshPlugins();
     window.addEventListener('bc:plugins-changed', onPluginsChanged);
     return () => window.removeEventListener('bc:plugins-changed', onPluginsChanged);
+  }, []);
+
+  // 3b. 启动时恢复"选中高亮样式"（橙色光晕闪烁 / 蓝色细线，设置里可切换）
+  useEffect(() => {
+    applySelHighlightClass();
+  }, []);
+
+  // 3c. 自动保存循环（v0.4.4，默认**关**）：
+  //  · 面向"写入次数有限"的场景：默认绝不自动写盘，保存 = Ctrl+S（首次弹位置选择框）；
+  //  · 开启后相当于每隔 N 秒替用户按一次 Ctrl+S：**只保存已有文件路径的脏标签**，
+  //    完全没有修改（不脏）就不写，第一次保存仍由用户手动完成（要选位置）；
+  //  · 与历史快照备份完全无关 —— 它只是"定时 Ctrl+S"。
+  useEffect(() => {
+    const tick = async () => {
+      try {
+        if (useUpdateBusy.getState().busy) return;
+        const cfg = await window.bc.getAppConfig();
+        if (cfg.autoSaveOn !== true) return;
+        const sec = Math.max(30, Math.floor(Number(cfg.autoSaveSec) || 300));
+        const now = Date.now();
+        if (now - autoSaveLastRef.current < sec * 1000) return;
+        const st = useTabStore.getState();
+        const tab = st.tabs.find((t) => t.id === st.activeTabId);
+        if (!tab || !tab.isDirty || !tab.filePath) return;   // 没修改 / 没存过位置 → 不写
+        const hist = useScene.getState().history;
+        const res = await window.bc.saveProject(
+          { name: tab.name, scene: useScene.getState().scene, history: { past: hist.past, future: hist.future } },
+          false,
+          tab.filePath
+        );
+        if (res.ok) {
+          st.setTabSaved(tab.id, tab.filePath, tab.name);
+          autoSaveLastRef.current = Date.now();
+        }
+      } catch { /* 自动保存失败不打扰用户，下一轮再试 */ }
+    };
+    const timer = window.setInterval(tick, 5000);
+    return () => window.clearInterval(timer);
   }, []);
 
   // 4. 启动延迟检测更新（5秒后静默检查，有更新则打开软件内更新中心页面）
@@ -237,15 +295,22 @@ export default function App() {
     };
     const openAbout = () => setShowAbout(true);
     // 「使用手册」入口统一打开《使用手册》文档（不是项目介绍）
-    const openHelp = (doc: DocKey = 'manual') => {
+    const openHelp = (doc: DocKey = 'manual', target: { doc: DocKey; id: string } | null = null) => {
       if (useUpdateBusy.getState().busy) return;
       setHelpDoc(doc);
+      setHelpTarget(target);
       setView('help');
     };
     // 事件回调：允许携带 detail 指定文档（默认 manual）
     const onOpenHelpEvent = (e: Event) => {
       const d = (e as CustomEvent).detail as DocKey | undefined;
       openHelp(d === 'intro' || d === 'history' || d === 'manual' ? d : 'manual');
+    };
+    // 首页搜索：直达某份文档的某一节
+    const onOpenHelpDocEvent = (e: Event) => {
+      const d = (e as CustomEvent).detail as { doc?: DocKey; id?: string } | undefined;
+      if (!d?.doc) return;
+      openHelp(d.doc, d.id ? { doc: d.doc, id: d.id } : null);
     };
 
     const onNewTab = () => {
@@ -261,13 +326,14 @@ export default function App() {
       const curTab = tabs.find((t) => t.id === activeId);
       if (!curTab) return;
       const curScene = useScene.getState().scene;
+      const hist = useScene.getState().history;
 
       if (curTab.filePath) {
-        const res = await window.bc.saveProject({ name: curTab.name, scene: curScene }, false, curTab.filePath);
-        if (res.ok) useTabStore.getState().setTabSaved(curTab.id, curTab.filePath, curTab.name);
+        const res = await window.bc.saveProject({ name: curTab.name, scene: curScene, history: { past: hist.past, future: hist.future } }, false, curTab.filePath);
+        if (res.ok) { useTabStore.getState().setTabSaved(curTab.id, curTab.filePath, curTab.name); autoSaveLastRef.current = Date.now(); }
       } else {
-        const res = await window.bc.saveProject({ name: curTab.name, scene: curScene }, true);
-        if (res.ok && res.path) useTabStore.getState().setTabSaved(curTab.id, res.path, res.name);
+        const res = await window.bc.saveProject({ name: curTab.name, scene: curScene, history: { past: hist.past, future: hist.future } }, true);
+        if (res.ok && res.path) { useTabStore.getState().setTabSaved(curTab.id, res.path, res.name); autoSaveLastRef.current = Date.now(); }
       }
     };
 
@@ -278,16 +344,30 @@ export default function App() {
       const curTab = tabs.find((t) => t.id === activeId);
       if (!curTab) return;
       const curScene = useScene.getState().scene;
-      const res = await window.bc.saveProject({ name: curTab.name, scene: curScene }, true);
-      if (res.ok && res.path) useTabStore.getState().setTabSaved(curTab.id, res.path, res.name);
+      const hist = useScene.getState().history;
+      const res = await window.bc.saveProject({ name: curTab.name, scene: curScene, history: { past: hist.past, future: hist.future } }, true);
+      if (res.ok && res.path) { useTabStore.getState().setTabSaved(curTab.id, res.path, res.name); autoSaveLastRef.current = Date.now(); }
     };
 
     const onOpenProject = async () => {
       if (blocked()) return;
       const res = await window.bc.openProjectFile();
       if (res.ok && res.project?.scene) {
-        useTabStore.getState().newTab(res.project.name || '已打开工程', res.project.scene, res.path);
-        switchView('editor');
+        // v0.4.4：同一个文件重复打开 → 不再开新标签，切到已打开的那个并轻提示
+        const st = useTabStore.getState();
+        const norm = (p: string) => String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
+        const existing = st.tabs.find((t) => t.filePath && norm(t.filePath) === norm(res.path || ''));
+        if (existing) {
+          st.switchTab(existing.id);
+          showToast(`「${existing.name}」已经打开着，已为你切换到那个标签页`, 'info');
+          switchView('editor');
+        } else {
+          // v0.4.4：从首页打开工程也走视图过渡（旧帧=首页，新帧=编辑器），背景丝滑交叉淡入
+          withViewTransition(() => {
+            st.newTab(res.project.name || '已打开工程', res.project.scene, res.path, res.history);
+            setView('editor');
+          });
+        }
       }
     };
 
@@ -317,6 +397,7 @@ export default function App() {
     window.addEventListener('menu:about', openAbout);
     window.addEventListener('menu:help', onOpenHelpEvent);
     window.addEventListener('bc:open-help', onOpenHelpEvent);
+    window.addEventListener('bc:open-help-doc', onOpenHelpDocEvent);
     window.addEventListener('menu:shortcuts', () => setShowShortcuts(true));
     window.addEventListener('menu:check-update', openUpdateCenter);
     const onOpenTable = (e: Event) => {
@@ -328,7 +409,14 @@ export default function App() {
     };
     window.addEventListener('bc:open-table-editor', onOpenTable);
     // 中键搜索属性 → 切到「属性」页签并回到编辑器（定位/高亮由 Inspector 负责）
-    const onFocusProp = () => { setRightTab('inspector'); switchView('editor'); };
+    // 中键属性搜索：先把请求写进缓冲（lib/propFocus），再切页签。
+    // 这样无论右侧当前在「图层」还是「页面 / 类名 / 变量」，Inspector 挂载后都能补上定位。
+    const onFocusProp = (e: Event) => {
+      const d = (e as CustomEvent).detail as { key?: string; add?: boolean } | undefined;
+      if (d?.key) requestPropFocus({ key: d.key, add: d.add !== false });
+      setRightTab('inspector');
+      switchView('editor');
+    };
     window.addEventListener('bc:focus-prop', onFocusProp);
     window.addEventListener('menu:new-tab', onNewTab);
     window.addEventListener('menu:save-project', onSaveProject);
@@ -370,6 +458,7 @@ export default function App() {
       window.removeEventListener('menu:about', openAbout);
       window.removeEventListener('menu:help', onOpenHelpEvent);
       window.removeEventListener('bc:open-help', onOpenHelpEvent);
+      window.removeEventListener('bc:open-help-doc', onOpenHelpDocEvent);
       window.removeEventListener('menu:check-update', openUpdateCenter);
       window.removeEventListener('bc:open-table-editor', onOpenTable);
       window.removeEventListener('bc:focus-prop', onFocusProp);
@@ -383,6 +472,11 @@ export default function App() {
     };
   }, [setLayout, switchView, openUpdateCenter]);
 
+  // 会话还没读回来：先只铺一层背景，避免"首页一闪 → 画布"的跳变
+  if (!sessionReady) {
+    return <div className="app bc-booting" />;
+  }
+
   return (
     <div className="app">
       {view === 'table' && tableEditId ? (
@@ -394,7 +488,7 @@ export default function App() {
           onBack={() => switchView('editor')}
         />
       ) : view === 'help' ? (
-        <HelpCenter initialDoc={helpDoc} onBack={() => switchView('editor')} />
+        <HelpCenter initialDoc={helpDoc} initialTarget={helpTarget} onBack={() => switchView('editor')} />
       ) : view === 'settings' ? (
         <Settings
           onBack={() => switchView('editor')}
@@ -408,8 +502,17 @@ export default function App() {
         />
       ) : (
         <>
-          <ProjectTabBar />
-          <Toolbar
+          {tabCount === 0 ? (
+            /* 空页面：所有标签都关掉了 —— 类似浏览器新标签页的首页 */
+            <EmptyHome
+              onOpen={() => window.dispatchEvent(new CustomEvent('menu:open-project'))}
+              onNew={() => { useTabStore.getState().newTab(); }}
+              onProjects={() => switchView('projects')}
+            />
+          ) : (
+            <>
+              <ProjectTabBar />
+              <Toolbar
             canvasWidth={canvasWidth}
             onCanvasWidthChange={setCanvasWidth}
             zoom={zoom}
@@ -499,11 +602,39 @@ export default function App() {
               </div>
             );
           })()}
+            </>
+          )}
         </>
       )}
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
       <ShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       <UpdateBusyOverlay />
+      <AppToasts />
+    </div>
+  );
+}
+
+// ============ 全局轻提示（toast，v0.4.4） ============
+// "不要生硬的弹窗"：重复打开已打开的项目这类小事，只在底部飘一条提示，几秒自动消失。
+function AppToasts() {
+  const [items, setItems] = useState<{ id: number; text: string; type: ToastType }[]>([]);
+  useEffect(() => {
+    let seq = 1;
+    const onToast = (e: Event) => {
+      const d = (e as CustomEvent).detail || {};
+      const id = seq++;
+      setItems((prev) => [...prev.slice(-3), { id, text: String(d.text || ''), type: d.type || 'ok' }]);
+      window.setTimeout(() => setItems((prev) => prev.filter((t) => t.id !== id)), 3400);
+    };
+    window.addEventListener('bc:toast', onToast);
+    return () => window.removeEventListener('bc:toast', onToast);
+  }, []);
+  if (items.length === 0) return null;
+  return (
+    <div className="bc-toast-wrap">
+      {items.map((t) => (
+        <div key={t.id} className={'bc-toast' + (t.type === 'ok' ? '' : ' is-' + t.type)}>{t.text}</div>
+      ))}
     </div>
   );
 }

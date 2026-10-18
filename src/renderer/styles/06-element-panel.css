@@ -116,6 +116,9 @@ body.bc-resizing-col, body.bc-resizing-col * { cursor: col-resize; user-select: 
 .canvas-resize-handle:hover { background: rgba(30, 136, 229, 0.16); }
 .canvas-resize-handle-l { left: -5px; }
 .canvas-resize-handle-r { right: -5px; }
+/* 按住 Alt（元素交互模式）期间：画布宽度手柄彻底让位 —— 隐藏 + 不响应任何指针事件。
+   否则 Alt 贴边调元素尺寸时，元素边缘和画布边缘重叠，宽度竖线会抢走操作（用户反馈）。 */
+body.bc-alt-down .canvas-resize-handle { opacity: 0; pointer-events: none; }
 
 /* 画布宽度只读（#6）：拖画布边缘时在上方「画布」旁实时显示当前宽度 */
 .toolbar .canvas-width-readout {

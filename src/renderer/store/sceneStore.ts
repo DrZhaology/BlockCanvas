@@ -414,6 +414,16 @@ export interface SceneStore {
   /** 当前编辑所处的响应式断点（桌面 / 平板 / 手机） */
   activeBreakpoint: Breakpoint;
   setActiveBreakpoint: (bp: Breakpoint) => void;
+  /**
+   * 伪类实时预览（v0.4.4）：在右侧选中 :hover / :active / :focus / :link 时，
+   * 画布把该伪类的样式**临时叠加**到选中元素上，让用户立刻看到效果。
+   * 纯编辑器状态，不进工程文件、不进撤销栈。
+   *
+   * 为什么需要：没有类名/ID 的元素在画布上是**内联样式**，内联永远压过 `:hover` 规则，
+   * 所以"伪类设置完全没用"（用户反馈）。有类名时真实 :hover 仍可正常悬停预览。
+   */
+  previewPseudo: string | null;
+  setPreviewPseudo: (p: string | null) => void;
 
   // 增删
   addElement: (type: ElementType, parentId?: string | null) => void;
@@ -519,6 +529,14 @@ export interface SceneStore {
 
   // 整体
   setScene: (s: SceneGraph) => void;
+  /** 右侧面板板块开合记忆（存进 scene.uiState → 随工程文件保存；不触发脏标记、不进撤销栈） */
+  setInspectorSec: (key: string, val: { identity: boolean; layout: boolean; css: boolean; pseudo: boolean }) => void;
+  /** 「页面」栏两大板块开合记忆（body 设置 / 全局样式），同样存 scene.uiState */
+  setPageSec: (patch: { body?: boolean; global?: boolean }) => void;
+  /** 变量面板分组开合记忆（按分组名），同样存 scene.uiState */
+  setTokenGroupOpen: (group: string, open: boolean) => void;
+  /** 页面「全局样式」：任意 CSS 属性（key=属性名），undefined/空串 = 删除该属性；走撤销栈 */
+  setBodyExtra: (patch: Record<string, string | undefined>) => void;
 }
 
 // 初始空场景：一个 body 根
@@ -541,6 +559,8 @@ export const useScene = create<SceneStore>((set) => ({
   styleEditPending: false,
   activeBreakpoint: 'desktop',
   setActiveBreakpoint: (bp) => set({ activeBreakpoint: bp }),
+  previewPseudo: null,
+  setPreviewPseudo: (p) => set({ previewPseudo: p }),
   autoInherit: typeof localStorage !== 'undefined' ? localStorage.getItem('bc-auto-inherit') !== '0' : true,
   setAutoInherit: (v) => {
     try { localStorage.setItem('bc-auto-inherit', v ? '1' : '0'); } catch {}
@@ -1512,7 +1532,60 @@ export const useScene = create<SceneStore>((set) => ({
 
   // 撤销栈属于当前文档：切换 / 打开 / 新建标签一律清空（沿用上一个标签的历史会导致
   // 切标签后 Ctrl+Z 把别的标签的内容恢复进来，也会让"这个空画布有没有历史"判断失真）。
-  setScene: (s) => set(() => ({ scene: s, history: { past: [], future: [] }, styleEditPending: false }))
+  setScene: (s) => set(() => ({ scene: s, history: { past: [], future: [] }, styleEditPending: false })),
+
+  // 面板板块开合记忆（v0.4.4）：写入 scene.uiState，随工程文件 / 会话草稿一起保存。
+  // 刻意**不走 beginStyleEdit/pushPast**：折叠个面板不该产生撤销记录，也不该让工程
+  // 挂上"未保存"圆点（subscribe 的脏判断只看 root/globalCss/quickCss/撤销栈，不会误伤）。
+  // 页面「全局样式」：任意 CSS 属性（并进 body 规则）。与 setQuickCss 同一套会话语义：
+  // focus/blur 之间用 beginStyleEdit/endStyleEdit 收束，一条撤销。
+  setBodyExtra: (patch) => {
+    set((st) => {
+      const push = !st.styleEditPending;
+      const next: Record<string, string> = { ...(st.scene.bodyExtra ?? {}) };
+      for (const [k, v] of Object.entries(patch)) {
+        // v0.4.4 修：**空串要保留** —— 「添加属性」先写入空值再等用户填，
+        // 以前这里把空串当成删除，导致点了添加按钮什么也不出现（全局样式加不了属性）。
+        // 导出时会跳过空值，所以保留空键不会污染 CSS。
+        if (v === undefined) delete next[k];
+        else next[k] = v;
+      }
+      return {
+        scene: { ...st.scene, bodyExtra: next },
+        history: push ? pushPast(st.history, st.scene) : st.history
+      };
+    });
+  },
+
+  setPageSec: (patch) => set((st) => ({
+    scene: {
+      ...st.scene,
+      uiState: {
+        ...(st.scene.uiState || {}),
+        pageSec: { ...(st.scene.uiState?.pageSec || {}), ...patch }
+      }
+    }
+  })),
+
+  setTokenGroupOpen: (group, open) => set((st) => ({
+    scene: {
+      ...st.scene,
+      uiState: {
+        ...(st.scene.uiState || {}),
+        tokenGroups: { ...(st.scene.uiState?.tokenGroups || {}), [group]: open }
+      }
+    }
+  })),
+
+  setInspectorSec: (key, val) => set((st) => ({
+    scene: {
+      ...st.scene,
+      uiState: {
+        ...(st.scene.uiState || {}),
+        inspectorSec: { ...(st.scene.uiState?.inspectorSec || {}), [key]: val }
+      }
+    }
+  }))
 }));
 
 function pushPast(h: History, snapshot: SceneGraph): History {
@@ -1598,6 +1671,7 @@ if (typeof window !== 'undefined') {
       prev.root !== state.scene.root ||
       prev.globalCss !== state.scene.globalCss ||
       prev.quickCss !== state.scene.quickCss ||
+      prev.bodyExtra !== state.scene.bodyExtra ||
       curPastLen > lastPastLen;
 
     lastPastLen = curPastLen;

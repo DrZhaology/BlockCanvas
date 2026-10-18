@@ -11,6 +11,7 @@ import { createRequire } from 'module';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
 import { mkdirSync, rmSync, cpSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { ensureEditor } from './ensure-editor.mjs';
 
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
@@ -67,6 +68,7 @@ async function main() {
   const errs = [];
   win.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
   win.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
+  await ensureEditor(win);
   await win.waitForSelector('.toolbar', { timeout: 20000 });
   await sleep(1400);
 
@@ -157,7 +159,11 @@ async function main() {
   await sleep(700);
   const pvMax = await win.evaluate(() => {
     const el = document.querySelector('.tbman-preview');
-    return el ? el.scrollWidth - el.clientWidth : -1;
+    if (!el) return -1;
+    // v0.4.5：按钮文字去掉 Emoji、换成 13px 线性图标后，预览条在宽屏下已经放得下，
+    // 不再天然溢出。这里主动把预览条压窄，专门验证「竖向滚轮 → 横向滚动」这条桥接逻辑。
+    el.style.maxWidth = '320px';
+    return el.scrollWidth - el.clientWidth;
   });
   ok('工具栏管理预览条出现横向溢出', pvMax > 8, String(pvMax));
   const pvBox = await win.locator('.tbman-preview').first().boundingBox();
@@ -168,8 +174,9 @@ async function main() {
     await sleep(320);
   }
   const pvSl = await win.evaluate(() => document.querySelector('.tbman-preview').scrollLeft);
-  // 预览条拆成主区/右区/更多三行后，主区自身溢出量不大 → 断言"滚轮把它推到了末端"
-  ok('竖向滚轮直接横向滚动（无需 Shift）', pvSl > pvBefore + 5 && pvSl >= pvMax - 1.5,
+  // 预览条拆成主区/右区/更多三行后，主区自身溢出量不大 → 断言"滚轮确实推动了横向滚动"
+  // （v0.4.5：预览条被压窄到 320px 后溢出量变大，一次 wheel 不一定到底，这里只看方向与幅度）
+  ok('竖向滚轮直接横向滚动（无需 Shift）', pvSl > pvBefore + 5,
     `before=${pvBefore} after=${pvSl} max=${pvMax}`);
 
   // 设置页里也能看到「工具组」编辑区

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { exportHTML } from '@lib/exporter';
+import { appAlert } from '@lib/appConfirm';
+import { Icon } from './Icon';
 
 // BlockCanvas · 扩展管理（全页界面）
 // 取代旧的弹窗式 ExtensionsDialog：
@@ -32,11 +34,11 @@ export function ExtensionManager(props: { onBack: () => void }) {
     try {
       const r = await fn();
       if (r.ok) {
-        if (r.path) alert(label + '成功：' + r.path);
+        if (r.path) void appAlert(label + '成功：' + r.path, label + '成功');
       } else if (r.canceled) {
         // 用户取消，静默
       } else {
-        alert(label + '失败：' + (r.error ?? '未知错误'));
+        void appAlert(label + '失败：' + (r.error ?? '未知错误'), label + '失败');
       }
       rescan();
       return r.ok;
@@ -76,18 +78,18 @@ export function ExtensionManager(props: { onBack: () => void }) {
   const onExportResource = (id: string, format: 'folder' | 'zip') =>
     run(format === 'zip' ? '导出 zip 资源包' : '导出资源包文件夹', () => window.bc.exportResource(id, format));
 
-  const onOpenDir = async () => { const r = await window.bc.openExtensionsDir(); if (!r.ok) alert('打开扩展文件夹失败：' + (r.error ?? '')); };
+  const onOpenDir = async () => { const r = await window.bc.openExtensionsDir(); if (!r.ok) void appAlert('打开扩展文件夹失败：' + (r.error ?? ''), '打开失败'); };
 
   const onCreatePackage = async () => {
-    if (!makeForm.name.trim()) { alert('请填写资源包名称'); return; }
+    if (!makeForm.name.trim()) { void appAlert('请填写资源包名称', '缺少名称'); return; }
     const r = await window.bc.createResourcePackage({ ...makeForm, id: makeForm.id || undefined });
     if (r.ok) {
-      alert('已生成资源包结构：\n' + (r.path ?? ''));
+      void appAlert('已生成资源包结构：\n' + (r.path ?? ''), '生成成功');
       setCreating(false);
       setMakeForm({ name: '', id: '', version: '1.0.0', author: '', description: '' });
       rescan();
     } else {
-      alert('生成失败：' + (r.error ?? '未知错误'));
+      void appAlert('生成失败：' + (r.error ?? '未知错误'), '生成失败');
     }
   };
 
@@ -103,11 +105,17 @@ export function ExtensionManager(props: { onBack: () => void }) {
   return (
     <div className="extm">
       <div className="extm-topbar">
-        <button className="extm-back" onClick={onBack}>← 返回编辑</button>
+        <button className="extm-back" onClick={onBack}>
+          <Icon name="chevronLeft" size={14} /> 返回编辑
+        </button>
         <span className="extm-title">扩展管理</span>
         <span className="spacer" />
-        <button className="extm-btn" onClick={() => rescan()} disabled={busy}>⟳ 重新扫描</button>
-        <button className="extm-btn" onClick={onOpenDir}>📂 打开扩展文件夹</button>
+        <button className="extm-btn" onClick={() => rescan()} disabled={busy}>
+          <Icon name="refresh" size={14} /> 重新扫描
+        </button>
+        <button className="extm-btn" onClick={onOpenDir}>
+          <Icon name="folderOpen" size={14} /> 打开扩展文件夹
+        </button>
       </div>
 
       <div className="extm-scroll">
@@ -133,7 +141,9 @@ export function ExtensionManager(props: { onBack: () => void }) {
         </div>
         <div className="extm-action-group">
           <span className="extm-action-label">生成</span>
-          <button className="extm-btn" onClick={() => setCreating(!creating)}>{creating ? '收起' : '＋ 生成资源包结构'}</button>
+          <button className="extm-btn" onClick={() => setCreating(!creating)}>
+            {creating ? '收起' : <><Icon name="plus" size={14} /> 生成资源包结构</>}
+          </button>
         </div>
       </div>
 
@@ -162,8 +172,8 @@ export function ExtensionManager(props: { onBack: () => void }) {
             </label>
           </div>
           <div className="extm-maker-tip">
-            生成后在 <code>extensions\resources\&lt;id&gt;\</code> 得到 <code>manifest.json</code> + <code>templates\\</code> 空目录。
-            把单个模板 JSON 放进 templates\\ ，并在 manifest.json 的 templates 数组加一条即可。
+            生成后得到 <code>manifest.json</code> 与空的 <code>templates</code> 目录；把模板 JSON 放进
+            templates，并在 manifest.json 里登记一条即可。
           </div>
           <button className="extm-btn extm-btn-primary" onClick={onCreatePackage} disabled={busy}>生成</button>
         </div>
@@ -177,7 +187,9 @@ export function ExtensionManager(props: { onBack: () => void }) {
         <div key={r.id} className={"extm-card" + (r.enabled ? '' : ' extm-card-disabled')}>
           <div className="extm-card-head">
             <button className="extm-caret" onClick={() => toggleExpand(r.id)} title={expanded[r.id] ? '收起预览' : '展开预览模板'}>
-              <span className={expanded[r.id] ? 'open' : ''}>▸</span>
+              <span className={expanded[r.id] ? 'open' : ''}>
+                <Icon name="chevronRight" size={13} />
+              </span>
             </button>
             <div className="extm-card-title">
               <span className="extm-name">{r.name}</span>
@@ -215,7 +227,7 @@ export function ExtensionManager(props: { onBack: () => void }) {
       {/* 插件列表 */}
       <div className="extm-section-title" style={{ marginTop: 18 }}>插件（改界面与功能）</div>
       {scan && scan.plugins.length === 0 && (
-        <div className="hint">还没有插件。可导入包含 manifest.json（type: plugin + main 入口）的插件文件夹或 zip，启用后插件代码随即生效。</div>
+        <div className="hint">还没有插件。可导入插件文件夹或 zip，启用后立即生效。</div>
       )}
       {scan && scan.plugins.map((p) => (
         <div key={p.id} className={"extm-card" + (p.enabled ? '' : ' extm-card-disabled')}>
@@ -252,11 +264,11 @@ export function ExtensionManager(props: { onBack: () => void }) {
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <span className="modal-title">确认删除</span>
-              <button className="modal-close" onClick={() => setConfirmDelete(null)}>×</button>
+              <button className="modal-close" onClick={() => setConfirmDelete(null)} title="关闭"><Icon name="close" size={14} /></button>
             </div>
             <div className="modal-body">
               <p>确定要删除「{confirmDelete.name}」（{confirmDelete.kind === 'resources' ? '资源包' : '插件'}）吗？</p>
-              <p className="hint">删除会将其移到<strong>回收站</strong>，可以恢复。此操作不可撤销在程序内的显示。</p>
+              <p className="hint">删除会移到<strong>回收站</strong>，之后可以恢复。</p>
             </div>
             <div className="modal-footer">
               <button className="btn-secondary" onClick={() => setConfirmDelete(null)}>取消</button>

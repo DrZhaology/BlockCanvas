@@ -11,6 +11,7 @@ import {
   type GradientSpec
 } from '@lib/gradient';
 import { ColorField } from './ColorPicker';
+import { Icon } from './Icon';
 import { Collapse } from './Collapse';
 import { usePersistedBool } from '@lib/usePersisted';
 
@@ -275,7 +276,7 @@ export function GradientEditor(props: Props) {
               className="grad-angle-btn grad-angle-swap"
               onClick={() => { push({ ...spec, angle: (spec.angle + 180) % 360 }); onCommit(); }}
               title="把方向反过来（角度 +180°）"
-            >⇄ 反向</button>
+            ><Icon name="swap" size={13} /> 反向</button>
           </div>
         </div>
       )}
@@ -348,10 +349,10 @@ export function GradientEditor(props: Props) {
               (stopDrop === i ? (stopDropBefore ? ' is-drop-before' : ' is-drop-after') : '')
             }
             {...stopDropProps(i)}
-            title="按住左侧 ⠿ 握把拖动可调整色标上下顺序"
+            title="按住左侧握把拖动可调整色标上下顺序"
           >
             <div className="grad-stop-top">
-              <span className="grad-stop-grip" {...stopGripProps(i)} title="按住拖动调整色标顺序">⠿</span>
+              <span className="grad-stop-grip" {...stopGripProps(i)} title="按住拖动调整色标顺序"><Icon name="grip" size={12} /></span>
               <ColorField
                 value={s.color}
                 fallback="#667eea"
@@ -367,7 +368,7 @@ export function GradientEditor(props: Props) {
                 disabled={spec.stops.length <= 2}
                 onClick={() => removeStop(i)}
                 title={spec.stops.length <= 2 ? '至少保留 2 个色标' : '删除这个色标'}
-              >×</button>
+              ><Icon name="close" size={12} /></button>
             </div>
             <div className="grad-stop-bottom">
               <span className="grad-stop-pos-label">位置</span>
@@ -391,7 +392,7 @@ export function GradientEditor(props: Props) {
       {/* 预制渐变画廊 */}
       <div className="grad-presets-head">
         <button className="grad-presets-toggle" onClick={() => setPresetOpen((v) => !v)}>
-          <span className={'page-advanced-caret' + (presetOpen ? ' open' : '')}>▸</span>
+          <span className={'page-advanced-caret' + (presetOpen ? ' open' : '')}><Icon name="chevronRight" size={11} /></span>
           预制渐变配色（{GRADIENT_PRESETS.length} 款）
         </button>
         <button className="btn-mini grad-clear-btn" onClick={onRemove} title="移除渐变，恢复纯色">移除渐变</button>

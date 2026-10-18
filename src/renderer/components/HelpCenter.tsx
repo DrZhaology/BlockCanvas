@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
-import README_BUNDLED from '../../../README.md?raw';
-import MANUAL_BUNDLED from '../../../docs/使用手册.md?raw';
-import HISTORY_BUNDLED from '../../../docs/开发历程.md?raw';
+import { Icon } from './Icon';
+import {
+  DOCS,
+  headingId,
+  parseSections,
+  searchDocs,
+  type DocKey,
+  type DocHit as Hit,
+  type DocSection as Section
+} from '@lib/docSearch';
+export type { DocKey } from '@lib/docSearch';
 // README 里引用的截图：显式 import 进来后会被 vite 打进产物，
 // 于是**打包版**也能看到截图（否则 docs/ 不在 asar 里，图会全挂）。
 import shotLogo from '../../../docs/screenshots/logo.png';
@@ -27,16 +35,6 @@ import shotLayout from '../../../docs/screenshots/layout-底部模板页.png';
 //   · 弹出一个结果框，点某条 → 自动切到对应文档并**跳到具体段落**（同时高亮命中词）。
 // ============================================================================
 
-export type DocKey = 'intro' | 'manual' | 'history';
-
-interface DocDef { key: DocKey; label: string; icon: string; bundled: string; fileName: string }
-
-const DOCS: DocDef[] = [
-  { key: 'intro', label: '项目介绍', icon: '🏠', bundled: README_BUNDLED, fileName: 'README.md' },
-  { key: 'manual', label: '使用手册', icon: '📖', bundled: MANUAL_BUNDLED, fileName: 'docs/使用手册.md' },
-  { key: 'history', label: '开发历程', icon: '🕘', bundled: HISTORY_BUNDLED, fileName: 'docs/开发历程.md' }
-];
-
 /** 文档内部超链接 → 本帮助中心里的哪份文档（无法映射的返回 null，走"在 GitHub 查看"提示） */
 function resolveDocLink(href: string): DocKey | null {
   let h = href;
@@ -49,7 +47,6 @@ function resolveDocLink(href: string): DocKey | null {
 }
 
 interface TocItem { id: string; text: string; level: number }
-interface Section { doc: DocKey; id: string; title: string; level: number; text: string }
 
 const SHOT_MAP: Record<string, string> = {
   'docs/screenshots/logo.png': shotLogo,
@@ -78,14 +75,6 @@ function rewriteAssetSrc(html: string): string {
 /** 目录里不显示的章节（开发向内容，对普通用户没意义） */
 const TOC_SKIP = ['项目声明', '许可证'];
 
-function slugOf(text: string): string {
-  return text.replace(/[^\w\u4e00-\u9fa5]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'sec';
-}
-/** 标题 id：文档 key + 序号 + 文字 slug（建索引与 DOM 赋值用同一套公式，保证一致） */
-function headingId(doc: DocKey, i: number, text: string): string {
-  return `hc-${doc}-${i}-${slugOf(text)}`;
-}
-
 /**
  * GitHub 风格的标题锚点（用于把文档里 `[xx](#某标题)` 的锚点链接对上）。
  * 例："13. 快捷键速查" → "13-快捷键速查"；"0. 五分钟上手" → "0-五分钟上手"。
@@ -99,89 +88,17 @@ function anchorSlug(text: string): string {
 }
 
 /** 把 markdown 按标题切成"段落块"（用于建搜索索引）；先剥掉围栏代码块避免误判标题 */
-function parseSections(md: string, doc: DocKey): Section[] {
-  const withoutCode = md.replace(/```[\s\S]*?```/g, '');
-  const lines = withoutCode.split(/\r?\n/);
-  const out: Section[] = [];
-  let cur: Section | null = null;
-  let i = 0;
-  for (const line of lines) {
-    const m = /^(#{1,4})\s+(.*)$/.exec(line);
-    if (m) {
-      if (cur) out.push(cur);
-      const title = m[2].replace(/[*`_]/g, '').trim();
-      cur = { doc, id: headingId(doc, i, title), title, level: m[1].length, text: '' };
-      i += 1;
-    } else if (cur) {
-      cur.text += line + '\n';
-    }
-  }
-  if (cur) out.push(cur);
-  return out;
-}
 
-/** 把正文里的 markdown 记号抹掉，做成适合检索/展示的纯文本 */
-function plain(text: string): string {
-  return text
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]*)`/g, '$1')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[*_>#|]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function countOcc(hay: string, needle: string): number {
-  if (!needle) return 0;
-  let n = 0, from = 0;
-  for (;;) {
-    const at = hay.indexOf(needle, from);
-    if (at < 0) break;
-    n += 1; from = at + needle.length;
-    if (n > 50) break;
-  }
-  return n;
-}
-
-interface Hit { doc: DocKey; docLabel: string; id: string; title: string; level: number; snippet: string; score: number }
-
-/** 按权重给"段落块"打分并排序 */
-function searchDocs(index: Section[], rawQuery: string): Hit[] {
-  const q = rawQuery.trim().toLowerCase();
-  if (!q) return [];
-  const tokens = q.split(/\s+/).filter(Boolean);
-  const hits: Hit[] = [];
-  for (const s of index) {
-    const title = s.title.toLowerCase();
-    const body = plain(s.text).toLowerCase();
-    let score = 0;
-    if (title === q) score += 200;
-    if (title.includes(q)) score += 90 - Math.min(60, title.indexOf(q));
-    for (const t of tokens) {
-      if (t && title.includes(t)) score += 26;
-    }
-    const occ = countOcc(body, q);
-    if (occ > 0) { score += 18 + Math.min(occ, 15) * 6; }
-    else if (tokens.every((t) => body.includes(t))) { score += 10; }
-    if (score <= 0) continue;
-    score += Math.max(0, 6 - s.level) * 4; // 层级越高越优先
-    // 摘要：命中词前后各取一段
-    const plainBody = plain(s.text);
-    const at = plainBody.toLowerCase().indexOf(q);
-    const snippet = at >= 0
-      ? (at > 18 ? '…' : '') + plainBody.slice(Math.max(0, at - 18), at + q.length + 42).trim() + '…'
-      : plainBody.slice(0, 60) + (plainBody.length > 60 ? '…' : '');
-    hits.push({ doc: s.doc, docLabel: DOCS.find((d) => d.key === s.doc)!.label, id: s.id, title: s.title, level: s.level, snippet, score });
-  }
-  return hits.sort((a, b) => b.score - a.score).slice(0, 14);
-}
-
-export function HelpCenter({ initialDoc = 'manual', onBack }: { initialDoc?: DocKey; onBack: () => void }) {
-  const [docKey, setDocKey] = useState<DocKey>(initialDoc);
-  const [mdMap, setMdMap] = useState<Record<DocKey, string>>(() => ({
-    intro: README_BUNDLED, manual: MANUAL_BUNDLED, history: HISTORY_BUNDLED
-  }));
+export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack }: {
+  initialDoc?: DocKey;
+  /** 从首页搜索直达某份文档的某一节 */
+  initialTarget?: { doc: DocKey; id: string } | null;
+  onBack: () => void;
+}) {
+  const [docKey, setDocKey] = useState<DocKey>(initialTarget?.doc ?? initialDoc);
+  const [mdMap, setMdMap] = useState<Record<DocKey, string>>(
+    () => Object.fromEntries(DOCS.map((d) => [d.key, d.bundled])) as Record<DocKey, string>
+  );
   const [toc, setToc] = useState<TocItem[]>([]);
   const [activeId, setActiveId] = useState<string>('');
   const [queryInput, setQueryInput] = useState('');
@@ -193,7 +110,7 @@ export function HelpCenter({ initialDoc = 'manual', onBack }: { initialDoc?: Doc
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
   const tocJson = useRef('');
-  const pendingJump = useRef<string>('');
+  const pendingJump = useRef<string>(initialTarget?.id ?? '');
   /** 标题锚点 slug → 元素 id（文档里的 `[x](#锚点)` 靠它跳转） */
   const slugMap = useRef<Map<string, string>>(new Map());
 
@@ -486,9 +403,11 @@ export function HelpCenter({ initialDoc = 'manual', onBack }: { initialDoc?: Doc
   return (
     <div className={'help-page' + (closing ? ' is-closing' : '')}>
       <div className="help-topbar">
-        <button className="fluent-back-btn" onClick={close} title="返回编辑器 (Esc)">← 返回编辑器</button>
+        <button className="fluent-back-btn" onClick={close} title="返回编辑器 (Esc)">
+          <Icon name="chevronLeft" size={14} /> 返回编辑器
+        </button>
         <div className="help-brand">
-          <span className="help-brand-logo">{docDef.icon}</span>
+          <span className="help-brand-logo"><Icon name={docDef.icon} size={18} /></span>
           <span className="help-brand-text">{docDef.label}</span>
         </div>
         <div className="help-doc-tabs">
@@ -499,12 +418,12 @@ export function HelpCenter({ initialDoc = 'manual', onBack }: { initialDoc?: Doc
               onClick={() => switchDoc(d.key)}
               title={`查看《${d.label}》`}
             >
-              <span className="help-doc-tab-ico">{d.icon}</span>{d.label}
+              <span className="help-doc-tab-ico"><Icon name={d.icon} size={15} /></span>{d.label}
             </button>
           ))}
         </div>
         <div className="help-search" ref={searchRef}>
-          <span className="help-search-ico" aria-hidden="true">🔍</span>
+          <span className="help-search-ico" aria-hidden="true"><Icon name="search" size={15} /></span>
           <input
             className="help-search-input"
             type="text"
@@ -520,7 +439,7 @@ export function HelpCenter({ initialDoc = 'manual', onBack }: { initialDoc?: Doc
           {queryInput.trim() && (
             <span
               className={'help-search-count' + (hits === 0 ? ' is-empty' : '')}
-              title={`当前文档命中 ${hits} 处；下方结果框按权重列出全部三份文档的相关段落`}
+              title={hits === 0 ? '当前文档没有匹配' : `当前文档命中 ${hits} 处`}
             >
               {hits === 0 ? '没有匹配' : `${hits} 处`}
             </span>

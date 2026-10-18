@@ -56,6 +56,9 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; padding: 0; }
+/* 首页 ↔ 编辑器切换时，滚动条出现/消失会让整页横向抖一下 —— 干脆不让 body 出现滚动条
+   （编辑器各面板自己滚；首页固定 100vh） */
+html, body { overflow: hidden; }
 
 /* 错误边界：渲染出错时显示可读报错，而不是白屏 */
 .error-boundary {
@@ -124,6 +127,15 @@ body {
   pointer-events: auto;
 }
 
+/* 数值框占位"穿模"修复（v0.4.4）：margin/padding 等灰色的 0 占位符，
+   聚焦后光标竖线正好从"0"字形中间穿过去，非常难看。
+   规则：**聚焦后隐藏占位符**（未聚焦时照常显示灰色的 0 / auto / 提示文字）——
+   这也是各家设计系统的通行做法：占位符只在"空且未聚焦"时有意义。 */
+.app input:focus::placeholder,
+.app textarea:focus::placeholder {
+  color: transparent;
+}
+
 /* 光标形状：:where() 让 :not() 链不贡献特异性，各处可按需覆盖 */
 .app input:where(:not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"])),
 .app textarea {
@@ -134,5 +146,17 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+}
+
+/* 启动闸门：会话还没恢复完时只铺背景，避免"首页一闪 → 画布" */
+.bc-booting { background: var(--bg); }
+
+/* 图标组件（Icon.tsx）统一基线：与文字同排时垂直居中，避免高低不齐。
+   颜色一律继承 currentColor，深浅主题自动适配。 */
+.bc-icon {
+  display: inline-block;
+  flex: none;
+  vertical-align: -0.14em;
+  pointer-events: none;
 }
 

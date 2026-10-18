@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useTabStore, isEmptyProject, type ProjectTab } from '@store/tabStore';
 import { useScene } from '@store/sceneStore';
 import { TipsTicker } from './TipsTicker';
+import { Icon } from './Icon';
+import { appConfirm } from '@lib/appConfirm';
 
 // BlockCanvas · Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
 // 遵循《设计语言规范》与 VS Code 标准交互：
-// - 【✏️ 笔图标前置】：放在项目名称左侧，清晰直观，点击或双击即可就地重命名
+// - 【铅笔图标前置】：放在项目名称左侧，清晰直观，点击或双击即可就地重命名
 // - 【VS Code 一模一样的圆点与叉逻辑】：
 //     * 未保存 (isDirty)：默认展示圆点 ●，鼠标悬停 (hover) 时圆点变为关闭叉 ×（点击关闭前提示保存）；
 //     * 已保存 (!isDirty)：始终直接展示关闭叉 ×，随时可点击关闭，无需等待 hover。
@@ -17,6 +19,9 @@ export function ProjectTabBar() {
   const activeTabId = useTabStore((s) => s.activeTabId);
   const switchTab = useTabStore((s) => s.switchTab);
   const closeTab = useTabStore((s) => s.closeTab);
+  /** v0.4.4：关标签直接关。View Transition 在无 GPU / 软件渲染环境里会让 GPU 进程崩，
+   *  关标签的过渡交给首页内容自带的淡入（打开工程仍保留视图过渡）。 */
+  const closeTabAnimated = (id: string) => closeTab(id);
   const newTab = useTabStore((s) => s.newTab);
 
   // 双击/点击铅笔重命名状态
@@ -50,7 +55,7 @@ export function ProjectTabBar() {
     }
   };
 
-  const handleClose = (e: React.MouseEvent, tab: ProjectTab) => {
+  const handleClose = async (e: React.MouseEvent, tab: ProjectTab) => {
     e.stopPropagation();
 
     // —— v0.4.1 修复：未保存标签关闭保护（模仿记事本）——
@@ -75,36 +80,43 @@ export function ProjectTabBar() {
     //（保持原来的静默关闭行为，不因此弹窗）。
     const hasUndoHistory = isActiveTab && useScene.getState().history.past.length > 0;
     if (isEmptyProject(liveScene) && !hasUndoHistory) {
-      closeTab(tab.id);
+      closeTabAnimated(tab.id);
       return;
     }
 
     if (tab.isDirty) {
       if (tab.filePath) {
-        const saveFirst = confirm(
-          `项目「${tab.name}」有未保存的修改。\n\n` +
-            `确定 = 保存并关闭\n取消 = 保持打开（不关闭）`
-        );
+        const saveFirst = await appConfirm({
+          title: '关闭前保存',
+          body: `项目「${tab.name}」有未保存的修改。\n\n确定 = 保存并关闭\n取消 = 保持打开（不关闭）`,
+          okText: '保存并关闭',
+          cancelText: '保持打开'
+        });
         if (!saveFirst) return;
         const curScene = useScene.getState().scene;
-        window.bc.saveProject({ name: tab.name, scene: curScene }, false, tab.filePath).then(() => {
+        const hist = useScene.getState().history;
+        window.bc.saveProject({ name: tab.name, scene: curScene, history: { past: hist.past, future: hist.future } }, false, tab.filePath).then(() => {
           useTabStore.getState().setTabSaved(tab.id, tab.filePath!, tab.name);
-          closeTab(tab.id);
+          closeTabAnimated(tab.id);
         });
         return;
       }
-      const abandon = confirm(
-        `「${tab.name}」还没有保存过（Ctrl+S 可保存为 .bcproj 工程文件）。\n\n` +
+      const abandon = await appConfirm({
+        title: '未保存的项目',
+        body: `「${tab.name}」还没有保存过（Ctrl+S 可保存为 .bcproj 工程文件）。\n\n` +
           `直接关闭后，这个项目将从标签列表移除且无法找回。\n` +
-          `（提示：不点 ×、直接退出软件的话，未保存草稿仍会在下次打开时恢复）\n\n` +
-          `确定要直接关闭吗？`
-      );
+          `（提示：不点关闭按钮、直接退出软件的话，未保存草稿仍会在下次打开时恢复）\n\n` +
+          `确定要直接关闭吗？`,
+        okText: '直接关闭',
+        cancelText: '留着',
+        danger: true
+      });
       if (!abandon) return;
-      closeTab(tab.id);
+      closeTabAnimated(tab.id);
       return;
     }
 
-    closeTab(tab.id);
+    closeTabAnimated(tab.id);
   };
 
   return (
@@ -120,15 +132,15 @@ export function ProjectTabBar() {
               className={"tab-item" + (isActive ? " active" : "") + (tab.isDirty ? " is-dirty" : "")}
               onClick={() => switchTab(tab.id)}
               onDoubleClick={(e) => startRename(e, tab)}
-              title={tab.filePath ? `${tab.name}\n路径: ${tab.filePath}\n(点击 ✏️ 或双击重命名)` : `${tab.name} (未保存，点击 ✏️ 或双击重命名)`}
+              title={tab.filePath ? `${tab.name}\n路径: ${tab.filePath}\n(点击铅笔按钮或双击重命名)` : `${tab.name} (未保存，点击铅笔按钮或双击重命名)`}
             >
-              {/* ✏️ 笔图标放到前面 */}
+              {/* 铅笔图标放到前面 */}
               <button
                 className="tab-rename-btn-front"
                 onClick={(e) => startRename(e, tab)}
                 title="重命名此项目"
               >
-                ✏️
+                <Icon name="pencil" size={12} />
               </button>
 
               {isEditing ? (
@@ -157,7 +169,7 @@ export function ProjectTabBar() {
                   onClick={(e) => handleClose(e, tab)}
                   title="关闭标签"
                 >
-                  ×
+                  <Icon name="close" size={12} />
                 </button>
               </div>
             </div>
@@ -165,13 +177,13 @@ export function ProjectTabBar() {
         })}
       </div>
 
-      {/* ＋ 新建：不随标签滚动，常驻可见 */}
+      {/* 新建按钮：不随标签滚动，常驻可见 */}
       <button
         className="tab-add-btn"
         onClick={() => newTab()}
         title="新建空白项目工程 (Ctrl+N)"
       >
-        ＋
+        <Icon name="plus" size={15} />
       </button>
 
       {/* 帮助入口统一收进菜单「帮助 → 使用手册」(F1)，标签栏不再重复放一个「?」 */}

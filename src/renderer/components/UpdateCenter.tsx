@@ -2,7 +2,9 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useUpdateBusy } from '@store/updateStore';
 import { useTasks } from '@store/taskStore';
 import { InlineTaskStrip } from './TaskButton';
+import { Icon } from './Icon';
 import { RESUMABLE_STATUS, type BgTask } from '@lib/taskTypes';
+import logoUrl from '@renderer/assets/logo.svg';
 
 // BlockCanvas · 更新中心（v0.4.4 第三版）
 //
@@ -200,7 +202,9 @@ function SectionTitle(props: {
       aria-expanded={open}
       title={countHint ?? `${title}：${count} 项，点击${open ? '收起' : '展开'}`}
     >
-      <span className="update-sec-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
+      <span className="update-sec-caret" aria-hidden="true">
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={14} />
+      </span>
       <span className="update-sec-name">{title}</span>
       <span className="update-sec-count">{count}</span>
     </button>
@@ -290,7 +294,7 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
    * 版本卡片下方的任务条：
    *   · update 任务 → 显示"更新进行中"的阶段与进度
    *   · download 任务 → 进行中/可继续/失败都显示
-   *   · 下载完成 → 「✓ 已下到 data/downloads」+「打开 zip 所在的文件夹」
+   *   · 下载完成 → 「已下载到 data/downloads」+「打开 zip 所在的文件夹」
    * 数据全部来自主进程，所以**下次打开这一页它还在**。
    */
   const renderTaskStrip = (tag: string) => {
@@ -338,7 +342,9 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
       if (dlTask.status === 'done') {
         strips.push(
           <div key={`dl-${dlTask.id}`} className="update-dl-strip is-done">
-            <span className="update-dl-done">✓ 已下载 <b title={dlTask.dest}>{dlTask.fileName}</b></span>
+            <span className="update-dl-done">
+              <Icon name="check" size={13} /> 已下载 <b title={dlTask.dest}>{dlTask.fileName}</b>
+            </span>
             <button
               className="btn-mini"
               onClick={() => void window.bc.revealTask(dlTask.id)}
@@ -363,9 +369,11 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
     <div className="update-page">
       {/* 顶栏 */}
       <div className="update-topbar">
-        <button className="fluent-back-btn" onClick={onBack} disabled={busy}>← 返回编辑器</button>
+        <button className="fluent-back-btn" onClick={onBack} disabled={busy}>
+          <Icon name="chevronLeft" size={14} /> 返回编辑器
+        </button>
         <div className="update-brand">
-          <span className="update-brand-logo">⚡</span>
+          <img className="update-brand-logo" src={logoUrl} alt="BlockCanvas" />
           <span className="update-brand-text">BlockCanvas 更新中心</span>
         </div>
         <span className="update-topbar-plat">
@@ -388,11 +396,11 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
                 : result?.ok
                   ? result.hasUpdate && latest
                     ? <span className="update-status-inline ok">发现新版本 {latest.version}，可在下面更新</span>
-                    : <span className="update-status-inline ok">✓ 已是最新版本</span>
+                    : <span className="update-status-inline ok"><Icon name="check" size={13} /> 已是最新版本</span>
                   : <span className="update-status-inline err">连接失败</span>}
             </div>
             <button className="btn-primary update-recheck-btn" onClick={check} disabled={checking}>
-              {checking ? '正在检测…' : '↻ 重新检测'}
+              {checking ? '正在检测…' : <><Icon name="refresh" size={14} /> 重新检测</>}
             </button>
           </div>
           {/* 技术细节默认收起：用户只关心"能不能更新、快不快" */}
@@ -401,9 +409,11 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
             className={'update-detail-toggle' + (detailOpen ? ' is-open' : '')}
             onClick={() => setDetailOpen((v) => !v)}
             aria-expanded={detailOpen}
-            title="展开后可看到这次的读取源 / 下载源与回退顺序"
+            title="查看读取源 / 下载源与回退顺序"
           >
-            <span className="update-sec-caret" aria-hidden="true">{detailOpen ? '▾' : '▸'}</span>
+            <span className="update-sec-caret" aria-hidden="true">
+              <Icon name={detailOpen ? 'chevronDown' : 'chevronRight'} size={14} />
+            </span>
             检测详情
             <span className="update-detail-sub">（读取源 / 下载源）</span>
           </button>
@@ -466,7 +476,9 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
             {openUpdatable && (
               <>
                 {newer.length === 0 && (
-                  <div className="update-card update-up-to-date">✓ 已是最新版本，没有可更新的内容。</div>
+                  <div className="update-card update-up-to-date">
+                    <Icon name="check" size={13} /> 已是最新版本，没有可更新的内容。
+                  </div>
                 )}
                 {newer.map((e, i) => (
                   <div key={e.tag} className={'update-card update-release-card' + (i === 0 && latest ? ' is-latest' : '')}>
@@ -495,7 +507,7 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
                         disabled={!e.asset || busy || Boolean(taskOfTag(e.tag, 'update') && taskOfTag(e.tag, 'update')!.status === 'running')}
                         onClick={() => install(e)}
                       >
-                        {`⬇ 更新到 v${e.version}`}
+                        <><Icon name="download" size={14} /> 更新到 v{e.version}</>
                       </button>
                       {!e.asset && <span className="update-asset-none">（本平台无对应安装包）</span>}
                       <span className="update-asset-none">点击即开始，无需二次确认</span>
@@ -541,7 +553,7 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
                         disabled={!e.asset || busy}
                         onClick={() => install(e)}
                       >
-                        ⟲ 重新安装此版本
+                        <><Icon name="refresh" size={14} /> 重新安装此版本</>
                       </button>
                     </div>
                     {renderTaskStrip(e.tag)}
@@ -581,7 +593,9 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
                                 onClick={() => setNotesOpen(notesOpen === e.tag ? null : e.tag)}
                                 aria-expanded={notesOpen === e.tag}
                               >
-                                {notesOpen === e.tag ? '▾ 收起说明' : '▸ 发行说明'}
+                                {notesOpen === e.tag
+                                  ? <><Icon name="chevronDown" size={13} /> 收起说明</>
+                                  : <><Icon name="chevronRight" size={13} /> 发行说明</>}
                               </button>
                               <button
                                 className="btn-mini update-dl-btn"
@@ -589,7 +603,11 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
                                 title={asset ? `下载 ${asset.name}（${fmtSize(asset.size)}）到 data/downloads/` : '这个版本没有可下载的附件'}
                                 onClick={() => downloadZip(e)}
                               >
-                                {isDownloading ? '下载中…' : saved ? '重新下载' : '⬇ 下载 zip'}
+                                {isDownloading
+                                  ? '下载中…'
+                                  : saved
+                                    ? '重新下载'
+                                    : <><Icon name="download" size={13} /> 下载 zip</>}
                               </button>
                               {saved && <span className="update-history-saved" title={dlTask?.dest}>已下载</span>}
                             </div>

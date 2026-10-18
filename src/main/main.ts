@@ -1,13 +1,23 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net, shell, nativeTheme, session, type MenuItemConstructorOptions } from 'electron';
 import { join, basename, dirname, relative } from 'node:path';
-import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync, renameSync, openSync, readSync, closeSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { isAbsolutePathAny, resolveInside, toWebPath, previewDir, runtimeTempDir } from './paths';
+import * as pathUtils from './paths';
 import { zipCreate, zipList } from './zip';
 import {
   dataRoot, initDataDirectories, readAppConfig, writeAppConfig, listProjects,
-  listProjectBackups, saveProjectSnapshotFile, deleteProjectBackupFolder,
-  readSession, writeSession, getStorageStats, clearAppCache, clearOrphanBackups
+  listProjectBackups, saveProjectSnapshotFile, deleteProjectBackupFolder
 } from './userData';
+import { readSession, writeSession } from './session';
+import {
+  getStorageStats, getStorageBreakdown, clearStorageCategory, clearAllCleanable,
+  clearOrphanBackups, runStartupCleanup, enforceStorageBudgets, DEFAULT_PREVIEW_KEEP
+} from './storage';
+import {
+  readProject, writeProject, readManifestOnly, migrateAllProjectFilesAsync
+} from './projectFile';
+import * as projectFileApi from './projectFile';
 import {
   getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo,
   resolveInstallDir
@@ -19,6 +29,23 @@ import {
 
 // 启动最优先：初始化纯便携数据区 data/，隔离系统盘
 initDataDirectories();
+
+// 把运行时临时目录也收进程序目录（便携化）：Chromium 内核/下载暂存等一律写 <data>/tmp/system。
+// 必须在 app ready **之前**设置才生效；不可写时自动退回系统 Temp（resolveWritableDir 已兜底）。
+try {
+  if (readAppConfig().usePortableTemp !== false) {
+    const rt = runtimeTempDir();
+    mkdirSync(rt, { recursive: true });
+    app.setPath('temp', rt);
+  }
+} catch { /* 失败就用系统 Temp，不影响功能 */ }
+
+// 探针钩子：开发态把跨平台路径工具挂到主进程 global，E2E 可用 app.evaluate 直接验证
+// （打包态不挂，避免把内部工具暴露给正式产物）
+if (!app.isPackaged) {
+  (globalThis as unknown as Record<string, unknown>)['__bcPaths'] = pathUtils;
+  (globalThis as unknown as Record<string, unknown>)['__bcProjectFile'] = projectFileApi;
+}
 
 // electron-vite 在 dev 模式下注入 ELECTRON_RENDERER_URL；
 const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
@@ -101,10 +128,10 @@ function buildMenu(win: BrowserWindow): Menu {
     {
       label: '帮助',
       submenu: [
-        { label: '📖 使用手册（帮助中心）', accelerator: 'F1', click: () => win.webContents.send('menu:help') },
+        { label: '使用手册（帮助中心）', accelerator: 'F1', click: () => win.webContents.send('menu:help') },
         { type: 'separator' },
-        { label: '⌨️ 键盘快捷键速查表', accelerator: 'Shift+/', click: () => win.webContents.send('menu:shortcuts') },
-        { label: '🔄 检测更新…', click: () => win.webContents.send('menu:check-update') },
+        { label: '键盘快捷键速查表', accelerator: 'Shift+/', click: () => win.webContents.send('menu:shortcuts') },
+        { label: '检测更新…', click: () => win.webContents.send('menu:check-update') },
         { type: 'separator' },
         { label: '关于 BlockCanvas', click: () => win.webContents.send('menu:about') }
       ]
@@ -112,7 +139,7 @@ function buildMenu(win: BrowserWindow): Menu {
     {
       label: '设置',
       submenu: [
-        { label: '⚙️ 偏好设置…', accelerator: 'CmdOrCtrl+,', click: () => win.webContents.send('menu:settings') },
+        { label: '偏好设置…', accelerator: 'CmdOrCtrl+,', click: () => win.webContents.send('menu:settings') },
         { type: 'separator' },
         { label: '左侧布局（元素面板在左）', click: () => win.webContents.send('menu:layout-left') },
         { label: '底部布局（元素面板在下方）', click: () => win.webContents.send('menu:layout-bottom') },
@@ -121,7 +148,7 @@ function buildMenu(win: BrowserWindow): Menu {
         { label: '打开便携数据文件夹 (data/)…', click: () => shell.openPath(dataRoot()) },
         { label: '打开扩展文件夹 (extensions/)…', click: () => shell.openPath(extRoot()) },
         { type: 'separator' },
-        { label: '🔄 检测更新…', click: () => win.webContents.send('menu:check-update') },
+        { label: '检测更新…', click: () => win.webContents.send('menu:check-update') },
         { type: 'separator' },
         { label: '类名 / ID 总览…', click: () => win.webContents.send('menu:class-manager') }
       ]
@@ -138,7 +165,13 @@ async function createWindow() {
     callback((permission as string) === 'local-fonts');
   });
 
-  const iconPath = join(app.getAppPath(), 'build', 'icon.png');
+  // 窗口/任务栏图标：统一用三色 Logo。
+  // · 开发态：build/icon.png（仓库里就是三色 Logo）
+  // · 打包态：electron-builder 通过 extraResources 把它复制到 resources/icon.png ——
+  //   因为 build/** 不进 asar，以前打包后这里找不到文件，任务栏就回落到 exe 的旧图标。
+  const iconPath = app.isPackaged
+    ? join(process.resourcesPath, 'icon.png')
+    : join(app.getAppPath(), 'build', 'icon.png');
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -154,6 +187,8 @@ async function createWindow() {
       sandbox: false
     }
   });
+  // Windows 任务栏分组/图标缓存按 AppUserModelID 走，显式设成和 electron-builder 一致的 appId
+  if (process.platform === 'win32') app.setAppUserModelId('com.blockcanvas.app');
 
   Menu.setApplicationMenu(buildMenu(win));
 
@@ -193,8 +228,15 @@ ipcMain.handle('data:get-paths', () => ({
 }));
 
 ipcMain.handle('data:get-storage-stats', () => getStorageStats());
-ipcMain.handle('data:clear-cache', () => clearAppCache());
+// 分类占用明细（统计与清理共用同一份清单 → 不会再出现"显示的和清的不是一回事"）
+ipcMain.handle('data:get-storage-breakdown', () => getStorageBreakdown());
+ipcMain.handle('data:clear-category', (_e, id: string) => clearStorageCategory(id as never));
+ipcMain.handle('data:clear-all-cleanable', () => clearAllCleanable());
+// 兼容旧入口（一键清缓存 = 清"可清"的那几类）
+ipcMain.handle('data:clear-cache', () => clearAllCleanable());
 ipcMain.handle('data:clear-orphan-backups', () => clearOrphanBackups());
+// 预算兜底（探针可直接调，验证"下载目录 / 临时区有上限"）
+ipcMain.handle('data:enforce-budgets', () => enforceStorageBudgets());
 
 // ============ 自动更新 IPC ============
 ipcMain.handle('update:get-version', () => getLocalVersion());
@@ -345,10 +387,41 @@ ipcMain.handle('cfg:set', (_evt, patch: Record<string, any>) => writeAppConfig(p
 // ============ 项目工程管理 (.bcproj) ============
 ipcMain.handle('project:list', () => listProjects());
 
+/**
+ * 工程名 → 安全文件名：**保留中文等 Unicode 字符**，只剔除 Windows 文件名的非法字符。
+ * （修复：以前用 sanitizeId 只留 a-z0-9，中文名整个被清空 → 首次保存弹出的默认文件名
+ *   永远是 "project.bcproj"。文件名不是元素 ID，就该让"演示站点"存成"演示站点.bcproj"。）
+ */
+function safeFileName(s: string): string {
+  return (s || '')
+    .replace(/[\\/:*?"<>|\r\n\t]+/g, ' ')   // Windows 非法字符 → 空格
+    .replace(/\s+/g, ' ')
+    .replace(/^[.\s]+|[.\s]+$/g, '')        // 首尾的点/空格（Windows 不允许结尾带点）
+    .slice(0, 80);
+}
+
+// 重命名工程文件（项目中心里的"改文件名"）：只改磁盘文件名，**不改**容器内的项目名
+// —— 项目名（标签页）与文件名是两个东西，分开管理（用户口径）。
+ipcMain.handle('project:rename', async (_evt, oldFileName: string, newName: string) => {
+  try {
+    const base = safeFileName(String(newName || '').replace(/\.bcproj$/i, ''));
+    if (!base) return { ok: false, error: '文件名无效' };
+    const dir = join(dataRoot(), 'projects');
+    const from = join(dir, oldFileName);
+    const to = join(dir, `${base}.bcproj`);
+    if (!existsSync(from)) return { ok: false, error: '找不到工程文件' };
+    if (to !== from && existsSync(to)) return { ok: false, error: '同名文件已存在' };
+    renameSync(from, to);
+    return { ok: true, fileName: `${base}.bcproj`, path: to };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
 ipcMain.handle('project:save', async (_evt, projectData: { name?: string; scene: any; meta?: any }, saveAs = false, customPath?: string) => {
   try {
     const pName = (projectData.name || '未命名网页').trim();
-    const cleanName = sanitizeId(pName) || 'project';
+    const cleanName = safeFileName(pName) || 'project';
     const defaultFullDir = join(dataRoot(), 'projects');
     let targetPath = customPath;
 
@@ -368,20 +441,34 @@ ipcMain.handle('project:save', async (_evt, projectData: { name?: string; scene:
       }
     }
 
-    const payload = {
-      format: 'BlockCanvas-Project',
-      version: '1.0.0',
+    // 撤销历史随工程保存（v0.4.4）：sections.history = { past, future }，条数受
+    // config.undoHistoryLimit 控制（默认 100，设 0 = 不保存）。ZIP 容器的多 section
+    // 能力在这里派上用场：老版本程序读到不认识的 section 会忽略但保留，不会丢数据。
+    const sections: Record<string, unknown> = {};
+    try {
+      const limit = Math.max(0, Math.floor(Number(readAppConfig().undoHistoryLimit ?? 100) || 0));
+      const h = (projectData as any).history;
+      if (limit > 0 && h && Array.isArray(h.past) && h.past.length > 0) {
+        sections.history = {
+          savedAt: new Date().toISOString(),
+          limit,
+          past: h.past.slice(-limit),
+          future: (Array.isArray(h.future) ? h.future : []).slice(0, Math.min(limit, 50))
+        };
+      }
+    } catch { /* 历史保存失败不影响工程保存 */ }
+
+    // v2：写 ZIP 容器（manifest.json + scene.json），原子替换、自动继承 createdAt
+    const w = writeProject(targetPath, {
       name: pName,
-      updatedAt: new Date().toISOString(),
+      scene: projectData.scene,
       meta: {
         ...(projectData.meta || {}),
         elementCount: countNodes(projectData.scene?.root)
       },
-      scene: projectData.scene
-    };
-
-    mkdirSync(dirname(targetPath), { recursive: true });
-    writeFileSync(targetPath, JSON.stringify(payload, null, 2), 'utf-8');
+      sections
+    });
+    if (!w.ok) return { ok: false, error: w.error || '写入工程文件失败' };
     return { ok: true, path: targetPath, name: pName };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
@@ -402,11 +489,14 @@ ipcMain.handle('project:open-file', async (_evt, customPath?: string) => {
       targetPath = res.filePaths[0];
     }
     if (!existsSync(targetPath)) return { ok: false, error: '文件不存在' };
-    const raw = JSON.parse(readFileSync(targetPath, 'utf-8'));
-    if (!raw || !raw.scene || typeof raw.scene !== 'object') {
-      return { ok: false, error: '文件不是有效的 BlockCanvas 工程文件' };
-    }
-    return { ok: true, project: raw, path: targetPath };
+    // v1（纯 JSON）与 v2（ZIP 容器）都能读
+    const r = readProject(targetPath);
+    if (!r.ok || !r.payload) return { ok: false, error: r.error || '文件不是有效的 BlockCanvas 工程文件' };
+    return {
+      ok: true, project: r.payload, path: targetPath, container: r.container,
+      // 随工程保存的撤销历史（老工程没有这一节 → undefined）
+      history: (r.payload as any)?.extraSections?.history
+    };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -417,10 +507,9 @@ ipcMain.handle('project:delete', async (_evt, fileName: string, projectName?: st
     const full = join(dataRoot(), 'projects', fileName);
     let innerName = '';
     if (existsSync(full)) {
-      try {
-        const raw = JSON.parse(readFileSync(full, 'utf-8'));
-        innerName = raw.name || '';
-      } catch {}
+      // 容器或旧 JSON 都能取到内部 name（只读 manifest，不解 scene）
+      const m = readManifestOnly(full);
+      innerName = m.ok && m.manifest ? m.manifest.name : '';
       unlinkSync(full);
     }
     // 1. 按文件名清理对应快照目录
@@ -459,9 +548,10 @@ ipcMain.handle('backup:get-autosave', (_evt, projectName?: string) => {
     const folder = (projectName || '_general').trim().replace(/[\\/:*?"<>|]+/g, '_');
     const f = join(dataRoot(), 'backups', folder, 'autosave.bcproj');
     if (!existsSync(f)) return { ok: false };
-    const raw = JSON.parse(readFileSync(f, 'utf-8'));
+    const r = readProject(f);
+    if (!r.ok || !r.payload) return { ok: false };
     const stat = statSync(f);
-    return { ok: true, autosave: raw, updatedAt: stat.mtime.toISOString(), elementCount: countNodes(raw.scene?.root) };
+    return { ok: true, autosave: r.payload, updatedAt: stat.mtime.toISOString(), elementCount: countNodes((r.payload.scene as any)?.root) };
   } catch {
     return { ok: false };
   }
@@ -527,15 +617,12 @@ ipcMain.handle('export:html-with-project', async (_evt, html: string, scene: any
 
     writeFileSync(htmlPath, html, 'utf-8');
 
-    const projectPayload = {
-      format: 'BlockCanvas-Project',
-      version: '1.0.0',
+    const w = writeProject(projectPath, {
       name: projectName,
-      updatedAt: new Date().toISOString(),
-      meta: { elementCount: countNodes(scene?.root) },
-      scene
-    };
-    writeFileSync(projectPath, JSON.stringify(projectPayload, null, 2), 'utf-8');
+      scene,
+      meta: { elementCount: countNodes(scene?.root) }
+    });
+    if (!w.ok) return { ok: false, error: w.error || '写入工程文件失败' };
 
     return { ok: true, htmlPath, projectPath };
   } catch (e) {
@@ -780,9 +867,11 @@ ipcMain.handle('ext:import-zip', async (_evt, kind: 'plugins' | 'resources') => 
     for (const e of entries) {
       if (e.name.endsWith('/')) continue;
       const rel = e.name.replace(/^\/+/, '').split('/').map(sanitizeId).join('/');
-      const out = join(target, rel);
-      if (!out.startsWith(target + '\\') && out !== target) continue;
-      mkdirSync(join(out, '..'), { recursive: true });
+      // 防 zip-slip：用 isInside（基于 path.relative）而不是 `startsWith(target + '\\')` ——
+      // 后者在 macOS/Linux 上恒为假，会导致扩展 zip 一个文件都解不出来（v0.4.4 修）。
+      const out = resolveInside(target, rel);
+      if (!out) continue;
+      mkdirSync(dirname(out), { recursive: true });
       writeFileSync(out, e.data);
     }
     return { ok: true, id, name: String(mf.name ?? id) };
@@ -886,8 +975,13 @@ ipcMain.handle('ext:create-package', async (_evt, meta: { id?: string; name?: st
 
 ipcMain.handle('preview:open', async (_evt, html: string) => {
   try {
-    const file = join(app.getPath('temp'), `bc-preview-${Date.now()}.html`);
+    // v0.4.4：预览页收进 <data>/tmp/preview，并只保留最近 N 个 —— 不再散落系统 Temp、不再无限增长。
+    // 为什么仍带时间戳而不是固定文件名：浏览器会按 URL 缓存，复用同一文件名可能显示上一次的内容。
+    const dir = previewDir();
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `bc-preview-${Date.now()}.html`);
     writeFileSync(file, html, 'utf-8');
+    pruneOldPreviews(dir, PREVIEW_KEEP);
     const err = await shell.openPath(file);
     if (err) return { ok: false, error: err };
     return { ok: true, path: file };
@@ -895,6 +989,27 @@ ipcMain.handle('preview:open', async (_evt, html: string) => {
     return { ok: false, error: (e as Error).message };
   }
 });
+
+/** 预览目录只保留最近 N 个（防止"每预览一次就多一个文件"）——阈值与存储预算共用一处 */
+const PREVIEW_KEEP = DEFAULT_PREVIEW_KEEP;
+function pruneOldPreviews(dir: string, keep: number): number {
+  let n = 0;
+  try {
+    const files = readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && /^bc-preview-.*\.html$/i.test(e.name))
+      .map((e) => {
+        const full = join(dir, e.name);
+        let mtime = 0;
+        try { mtime = statSync(full).mtimeMs; } catch { /* 忽略 */ }
+        return { full, mtime };
+      })
+      .sort((a, b) => b.mtime - a.mtime);          // 新的在前
+    for (const f of files.slice(keep)) {
+      try { unlinkSync(f.full); n += 1; } catch { /* 忽略 */ }
+    }
+  } catch { /* 忽略 */ }
+  return n;
+}
 
 ipcMain.handle('img:pick-src', async (_evt, mode: 'abs' | 'rel' = 'rel') => {
   const res = await dialog.showOpenDialog({
@@ -908,11 +1023,25 @@ ipcMain.handle('img:pick-src', async (_evt, mode: 'abs' | 'rel' = 'rel') => {
   const absPath = res.filePaths[0];
   if (mode === 'rel') {
     const base = app.isPackaged ? dirname(process.execPath) : app.getAppPath();
-    let rel = relative(base, absPath).replace(/\\/g, '/');
+    let rel = toWebPath(relative(base, absPath));
     if (!rel.startsWith('.') && !rel.startsWith('/')) rel = './' + rel;
     return { ok: true, path: rel, absPath };
   }
   return { ok: true, path: absPath, absPath };
+});
+
+// 首页背景：选择图片 / 视频文件（只返回路径，不复制；渲染层用 bc-img:// 预览）
+ipcMain.handle('media:pick-src', async (_evt, kind: 'image' | 'video' = 'image') => {
+  const isVideo = kind === 'video';
+  const res = await dialog.showOpenDialog({
+    title: isVideo ? '选择本地视频' : '选择本地图片',
+    properties: ['openFile'],
+    filters: isVideo
+      ? [{ name: '视频文件', extensions: ['mp4', 'webm', 'ogv', 'ogg', 'mov', 'm4v'] }]
+      : [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] }]
+  });
+  if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
+  return { ok: true, path: res.filePaths[0], absPath: res.filePaths[0] };
 });
 
 function countNodes(node: any): number {
@@ -924,6 +1053,17 @@ function countNodes(node: any): number {
   return count;
 }
 
+/** bc-img 协议要按扩展名给 Content-Type（视频缺它会被 Chromium 当二进制拒绝播放） */
+const MEDIA_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif',
+  mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', ogg: 'video/ogg', mov: 'video/quicktime'
+};
+function mediaMimeOf(p: string): string {
+  const ext = (p.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]) ?? '';
+  return MEDIA_MIME[ext] ?? 'application/octet-stream';
+}
+
 app.whenReady().then(() => {
   protocol.handle('bc-img', async (request) => {
     try {
@@ -932,7 +1072,8 @@ app.whenReady().then(() => {
       if (!rawPath) return new Response(null, { status: 400 });
 
       // 如果是相对路径，自动基于当前项目目录 / app 根目录 / data 目录解析
-      if (!/^[a-zA-Z]:[\\/]/.test(rawPath) && !rawPath.startsWith('\\\\')) {
+      // （绝对路径判断用跨平台版：Windows 盘符 / UNC 与 POSIX 的 `/xxx` 都算绝对路径）
+      if (!isAbsolutePathAny(rawPath)) {
         const cleanRel = rawPath.replace(/^\.?\/+/, '');
         const candidates = [
           join(dataRoot(), 'projects', cleanRel),
@@ -948,16 +1089,80 @@ app.whenReady().then(() => {
         }
       }
 
-      if (existsSync(rawPath)) {
-        return await net.fetch(pathToFileURL(rawPath).toString());
+      if (!existsSync(rawPath)) return new Response(null, { status: 404 });
+      const mime = mediaMimeOf(rawPath);
+      // CORS 放开：首页要采样画面算平均亮度（canvas.getImageData 不能读跨域污染的画布）；
+      // 图片/视频都是用户自己机器上的文件，放开只读没有安全影响。
+      const cors: Record<string, string> = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
+        'Accept-Ranges': 'bytes'
+      };
+
+      // —— Range 请求（视频拖动进度 / 边下边播）——
+      // 以前直接 net.fetch(file://) 不支持 206，Chromium 的视频解码器拿不到分段 → 一片白。
+      const range = request.headers.get('Range');
+      if (range) {
+        const st = statSync(rawPath);
+        const m = /bytes=(\d*)-(\d*)/.exec(range);
+        let start = m && m[1] ? parseInt(m[1], 10) : 0;
+        let end = m && m[2] ? parseInt(m[2], 10) : st.size - 1;
+        if (!Number.isFinite(start) || start < 0) start = 0;
+        if (!Number.isFinite(end) || end >= st.size) end = st.size - 1;
+        if (start > end) {
+          return new Response(null, { status: 416, headers: { ...cors, 'Content-Range': `bytes */${st.size}` } });
+        }
+        const len = end - start + 1;
+        const buf = Buffer.alloc(len);
+        const fd = openSync(rawPath, 'r');
+        try { readSync(fd, buf, 0, len, start); } finally { closeSync(fd); }
+        return new Response(buf as any, {
+          status: 206,
+          headers: {
+            ...cors,
+            'Content-Type': mime,
+            'Content-Length': String(len),
+            'Content-Range': `bytes ${start}-${end}/${st.size}`
+          }
+        });
       }
-      return new Response(null, { status: 404 });
+
+      const res = await net.fetch(pathToFileURL(rawPath).toString());
+      const headers = new Headers(res.headers);
+      for (const [k, v] of Object.entries(cors)) headers.set(k, v);
+      const ct = headers.get('Content-Type');
+      if (!ct || ct === 'application/octet-stream') headers.set('Content-Type', mime);
+      return new Response(res.body, { status: res.status, headers });
     } catch {
       return new Response(null, { status: 400 });
     }
   });
 
   createWindow();
+
+  // 启动自愈：清我们自己在系统 Temp 里留下的文件（默认开）/ Chromium 缓存 / 孤立快照。
+  // 必须在这里（app ready 之后）：storage 里要用到 session，且 userData 已重定向到 data/user-data。
+  void runStartupCleanup();
+
+  // 后台静默迁移：老版本留下的纯 JSON .bcproj → v2 ZIP 容器。
+  // 幂等（已是容器的只看 4 字节就跳过），**这段代码长期保留**。
+  //
+  // ⚠ 两个约束（都踩过坑，别改回去）：
+  //   1. 必须**分片让出事件循环**（migrateAllProjectFilesAsync）——同步跑满会把主进程占住，
+  //      那一瞬 Chromium 的输入事件会丢，表现为"鼠标在上面悬停提示却不弹"；
+  //   2. 延迟到启动 3 秒后 —— 躲开"窗口刚出来、用户/探针正在交互"的那一段。
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const stats = await migrateAllProjectFilesAsync(join(dataRoot(), 'projects'), join(dataRoot(), 'backups'));
+        if (stats.migrated > 0 || stats.failed > 0) {
+          console.log('[project-migrate]', JSON.stringify(stats));
+        }
+      } catch (e) {
+        console.warn('[project-migrate] 失败：', (e as Error).message);
+      }
+    })();
+  }, 3000);
 });
 
 app.on('window-all-closed', () => {

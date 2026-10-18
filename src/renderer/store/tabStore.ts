@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import type { SceneGraph } from '@lib/types';
-import { DEFAULT_TOKENS } from '@lib/designTokens';
 import { useScene } from './sceneStore';
 
 // BlockCanvas · Windows Notepad 风格多工程标签页状态机 (TabStore)
@@ -26,9 +25,10 @@ export function createEmptyScene(): SceneGraph {
     },
     selectedId: null,
     selectedIds: [],
-    // 新项目预置一套设计变量：让「主色改一处全站变」开箱可用，
-    // 不需要用户先去面板里手动添加（不想要可以在变量面板清空）
-    tokens: DEFAULT_TOKENS.map((t) => ({ ...t }))
+    // v0.4.5：新工程**不再预载**一套全局默认变量。
+    // 以前每个新工程都自带同样的 15 个变量，看起来像"变量在项目之间共享"（用户反馈）。
+    // 变量现在严格跟着工程走：空工程就是空的，需要默认集时到变量面板点「载入默认集」。
+    tokens: []
   };
 }
 
@@ -50,6 +50,10 @@ export function isEmptyProject(scene: SceneGraph | null | undefined): boolean {
   if (JSON.stringify(scene.root.style ?? {}) !== JSON.stringify(fresh.root.style)) return false;
   const qc = scene.quickCss ?? {};
   for (const v of Object.values(qc)) {
+    if (v !== undefined && v !== null && String(v).trim() !== '') return false;
+  }
+  const be = scene.bodyExtra ?? {};
+  for (const v of Object.values(be)) {
     if (v !== undefined && v !== null && String(v).trim() !== '') return false;
   }
   const cur = scene.tokens ?? [];
@@ -86,32 +90,37 @@ function debouncePersistSession(get: () => TabState) {
 
 interface TabState {
   tabs: ProjectTab[];
-  activeTabId: string;
+  activeTabId: string | null;
 
-  newTab: (name?: string, scene?: SceneGraph, filePath?: string | null) => string;
+  loadSceneSilently: (scene: SceneGraph) => void;
+  newTab: (name?: string, scene?: SceneGraph, filePath?: string | null, history?: { past?: SceneGraph[]; future?: SceneGraph[] }) => string;
   closeTab: (tabId: string) => boolean;
   switchTab: (tabId: string) => void;
   updateActiveTabScene: (scene: SceneGraph, markDirty?: boolean) => void;
   onSceneChange: (scene: SceneGraph, isContentModified: boolean) => void;
   markActiveTabDirty: (isDirty?: boolean) => void;
   setTabSaved: (tabId: string, filePath: string, name?: string) => void;
+  /** 工程文件在磁盘上被重命名后，同步更新打开了它的标签的 filePath */
+  renameTabFilePath: (oldPath: string, newPath: string) => void;
   initFromSession: (session: { activeTabId: string | null; tabs: any[] }) => void;
 }
 
-const initialScene = createEmptyScene();
-const initialTab: ProjectTab = {
-  id: 'tab-default',
-  name: '未命名项目 1',
-  filePath: null,
-  isDirty: false,
-  scene: initialScene
-};
-
 export const useTabStore = create<TabState>((set, get) => ({
-  tabs: [initialTab],
-  activeTabId: initialTab.id,
+  // v0.4.5：启动时不预置「未命名项目 1」——没有标签就直接进首页（浏览器新标签页的体验）。
+  // 会话恢复（initFromSession）拿到上次的标签时会自动填回来。
+  tabs: [],
+  activeTabId: null,
 
-  newTab: (name, customScene, filePath = null) => {
+  // 静默载入场景：切 tab / 打开工程 / 恢复会话都用它 ——
+  // setScene 会触发 sceneStore.subscribe，若不打 isSwitchingTab 标记，
+  // "打开一个项目"会被误判成"内容修改" → 刚打开就挂着未保存圆点（用户反馈的混淆来源）。
+  loadSceneSilently: (scene: SceneGraph) => {
+    isSwitchingTab = true;
+    useScene.getState().setScene(scene);
+    requestAnimationFrame(() => { isSwitchingTab = false; });
+  },
+
+  newTab: (name, customScene, filePath = null, history) => {
     const st = get();
     const curIndex = st.tabs.length + 1;
     const tabName = name || `未命名项目 ${curIndex}`;
@@ -135,8 +144,15 @@ export const useTabStore = create<TabState>((set, get) => ({
       activeTabId: newId
     });
 
-    // 让画布渲染器载入新场景
-    useScene.getState().setScene(scene);
+    // 让画布渲染器载入新场景（静默：不算内容修改）
+    get().loadSceneSilently(scene);
+    // 撤销历史随工程保存（v0.4.4）：工程文件里带了 history 节就恢复 ——
+    // 下次打开还能 Ctrl+Z 回退到上次关闭前的状态（条数由设置里的阈值控制）
+    if (history && Array.isArray(history.past) && history.past.length > 0) {
+      useScene.setState({
+        history: { past: history.past.slice(), future: (history.future || []).slice() }
+      });
+    }
     debouncePersistSession(get);
     return newId;
   },
@@ -144,21 +160,10 @@ export const useTabStore = create<TabState>((set, get) => ({
   closeTab: (tabId: string) => {
     const st = get();
     if (st.tabs.length <= 1) {
-      // 最后一个标签关闭：自动重置为新的空白网页
-      const empty = createEmptyScene();
-      const newId = genTabId();
-      const freshTab: ProjectTab = {
-        id: newId,
-        name: '未命名网页 1',
-        filePath: null,
-        isDirty: false,
-        scene: empty
-      };
-      set({
-        tabs: [freshTab],
-        activeTabId: newId
-      });
-      useScene.getState().setScene(empty);
+      // v0.4.4：关掉最后一个标签 → 进入「空页面」状态（一个标签都不留），
+      // 不再自动补一个"未命名网页 1"—— 空页面上有大按钮，想开随时开。
+      set({ tabs: [], activeTabId: null });
+      useScene.getState().setScene(createEmptyScene());
       debouncePersistSession(get);
       return true;
     }
@@ -257,8 +262,24 @@ export const useTabStore = create<TabState>((set, get) => ({
     debouncePersistSession(get);
   },
 
+  renameTabFilePath: (oldPath: string, newPath: string) => {
+    const norm = (p: string) => String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
+    set((st) => ({
+      tabs: st.tabs.map((t) =>
+        t.filePath && norm(t.filePath) === norm(oldPath) ? { ...t, filePath: newPath } : t
+      )
+    }));
+    debouncePersistSession(get);
+  },
+
   initFromSession: (session: { activeTabId: string | null; tabs: any[] }) => {
-    if (!session || !Array.isArray(session.tabs) || session.tabs.length === 0) return;
+    if (!session || !Array.isArray(session.tabs)) return;
+    // 空会话（上次退出时关掉了所有标签）→ 恢复成「空页面」状态，不自动补标签
+    if (session.tabs.length === 0) {
+      set({ tabs: [], activeTabId: null });
+      useScene.getState().setScene(createEmptyScene());
+      return;
+    }
     const loadedTabs: ProjectTab[] = session.tabs.map((t, idx) => ({
       id: t.id || genTabId(),
       name: t.name || `未命名网页 ${idx + 1}`,
@@ -278,7 +299,7 @@ export const useTabStore = create<TabState>((set, get) => ({
       activeTabId: activeId
     });
 
-    useScene.getState().setScene(activeTab.scene);
+    get().loadSceneSilently(activeTab.scene);
   }
 }));
 

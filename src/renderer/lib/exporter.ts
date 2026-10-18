@@ -162,7 +162,7 @@ export function exportHTML(scene: SceneGraph): ExportResult {
   let styleHtml: string;
   if (tables.length === 0) {
     // 没有表格：完全保持原来的单块输出（不打扰既有工程）
-    const full = [...resets, buildStyleBlock(ctx, scene.globalCss, scene.quickCss, scene.tokens)].filter(Boolean).join('\n\n');
+    const full = [...resets, buildStyleBlock(ctx, scene.globalCss, scene.quickCss, scene.tokens, { bodyExtra: scene.bodyExtra })].filter(Boolean).join('\n\n');
     styleHtml = indentBlock(full);
   } else {
     // ① 主块：重置 + 设计变量 + 非表格的自动规则 + 非表格响应式
@@ -188,7 +188,8 @@ export function exportHTML(scene: SceneGraph): ExportResult {
     // ③ 尾块：快速设置 + 用户全局 CSS（放最后 → 仍然可以覆盖表格样式）
     const tailCss = buildStyleBlock(ctx, scene.globalCss, scene.quickCss, undefined, {
       onlySelectors: new Set<string>(),
-      withTokens: false
+      withTokens: false,
+      bodyExtra: scene.bodyExtra
     });
     styleHtml = indentBlock(mainCss) + tableBlocks + indentBlock(tailCss);
   }

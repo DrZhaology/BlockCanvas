@@ -30,6 +30,29 @@ export interface StorageStatsInfo {
   orphanBackupsCount: number;
 }
 
+/** 存储分类（统计与清理同源，口径互斥可加和） */
+export type StorageCategoryId =
+  | 'chromiumCache' | 'temp' | 'downloads'
+  | 'userState' | 'projects' | 'backups' | 'extensions' | 'other';
+
+export interface StorageCategoryInfo {
+  id: StorageCategoryId;
+  label: string;
+  bytes: number;
+  cleanable: boolean;
+  hint: string;
+}
+
+export interface StorageBreakdownInfo {
+  dataRoot: string;
+  dataTotal: number;
+  tempTotal: number;
+  systemTempBytes: number;
+  grandTotal: number;
+  categories: StorageCategoryInfo[];
+  orphanBackupsCount: number;
+}
+
 declare global {
   interface ScanResult {
     plugins: { id: string; name: string; version: string; author: string; description: string; enabled: boolean; error: string | null }[];
@@ -50,9 +73,10 @@ declare global {
 
       // 项目工程管理 (.bcproj)
       listProjects: () => Promise<ProjectFileInfo[]>;
-      saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown }, saveAs?: boolean, customPath?: string) => Promise<{ ok: boolean; path?: string; name?: string; error?: string; canceled?: boolean }>;
-      openProjectFile: (customPath?: string) => Promise<{ ok: boolean; project?: any; path?: string; error?: string; canceled?: boolean }>;
+      saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown; history?: { past?: unknown[]; future?: unknown[] } }, saveAs?: boolean, customPath?: string) => Promise<{ ok: boolean; path?: string; name?: string; error?: string; canceled?: boolean }>;
+      openProjectFile: (customPath?: string) => Promise<{ ok: boolean; project?: any; path?: string; error?: string; canceled?: boolean; container?: string; history?: { past?: any[]; future?: any[] } }>;
       deleteProject: (fileName: string, projectName?: string) => Promise<{ ok: boolean; error?: string }>;
+      renameProject: (oldFileName: string, newName: string) => Promise<{ ok: boolean; fileName?: string; path?: string; error?: string }>;
 
       // 自动备份与灾难恢复
       saveBackupSnapshot: (scene: unknown, projectName?: string, isAuto?: boolean) => Promise<{ ok: boolean; timestamp?: string; error?: string }>;
@@ -67,8 +91,13 @@ declare global {
       // 便携数据区与配置
       getDataPaths: () => Promise<DataPathsInfo>;
       getStorageStats: () => Promise<StorageStatsInfo>;
+      getStorageBreakdown: () => Promise<StorageBreakdownInfo>;
+      clearStorageCategory: (id: StorageCategoryId) => Promise<{ ok: boolean; freedBytes: number; error?: string }>;
+      clearAllCleanable: () => Promise<{ ok: boolean; freedBytes: number }>;
       clearAppCache: () => Promise<{ ok: boolean; freedBytes: number }>;
       clearOrphanBackups: () => Promise<{ ok: boolean; cleanedCount: number; freedBytes: number }>;
+      /** 预算兜底（L4）：下载目录 + 临时区上限 */
+      enforceStorageBudgets: () => Promise<{ removed: number; freedBytes: number; detail: { downloadsRemoved: number; previewsRemoved: number; tmpEvicted: number } }>;
       openDataPath: (target: string) => Promise<string | undefined>;
       getAppConfig: () => Promise<Record<string, any>>;
       setAppConfig: (patch: Record<string, unknown>) => Promise<Record<string, any>>;
@@ -155,6 +184,8 @@ declare global {
       onMenu: (channel: string, cb: () => void) => () => void;
       setNativeTheme: (source: 'dark' | 'light' | 'system') => void;
       pickImageSrc: (mode?: 'abs' | 'rel') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
+      /** 首页背景用：选择图片 / 视频文件（返回绝对路径，渲染层用 bc-img:// 显示） */
+      pickMediaSrc: (kind: 'image' | 'video') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
     };
     __sceneStore?: any;
   }

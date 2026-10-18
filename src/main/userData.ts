@@ -3,6 +3,9 @@ import { join, dirname } from 'node:path';
 import {
   existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync, rmSync, copyFileSync
 } from 'node:fs';
+import { portableBaseDir, resolveWritableDir } from './paths';
+import { zipCreate, type ZipEntry } from './zip';
+import { readManifestOnly, sceneHash, SCHEMA_VERSION } from './projectFile';
 
 // BlockCanvas · 纯便携数据区与项目备份中枢 (data/)
 // 目录结构（绿色便携版，全部在 data/ 下）：
@@ -17,19 +20,39 @@ import {
 //   └── extensions/      (运行时插件/资源包：用户第三方扩展存储位置)
 //   注意：所有扩展（内置种子 + 用户安装）均统一在 data/extensions/，exe 旁不再保留扩展目录。
 
+/** 已解析的 data 根目录（首次初始化时确定；之后保持不变，避免运行中路径漂移） */
+let resolvedDataRoot: string | null = null;
+
 export function dataRoot(): string {
   // 测试隔离：E2E / CI 可通过 BC_DATA_DIR 指向临时目录，绝不污染用户的真实 data/。
   // 仅在显式设置该环境变量时生效，正常使用（双击 exe / pnpm dev）完全不受影响。
   const override = process.env['BC_DATA_DIR'];
   if (override && override.trim()) return override.trim();
-  const base = app.isPackaged
-    ? (process.env['PORTABLE_EXECUTABLE_DIR'] || dirname(process.execPath))
-    : app.getAppPath();
-  return join(base, 'data');
+  if (resolvedDataRoot) return resolvedDataRoot;
+  // 默认落在「便携目录 / data」；若该处不可写，initDataDirectories() 会改成用户级目录。
+  resolvedDataRoot = join(portableBaseDir(), 'data');
+  return resolvedDataRoot;
+}
+
+/**
+ * 确定 data/ 的最终落点（跨平台安全版）：
+ *   · 优先「程序所在目录 / data」= 真·绿色便携；
+ *   · 若该处不可写（macOS 把 App 放进 /Applications、程序装在只读盘…），
+ *     自动退到用户级目录（`<appData>/BlockCanvas/data`），保证任何平台都能正常跑起来。
+ * 开发态 / BC_DATA_DIR 覆盖时行为与以前完全一致。
+ */
+function resolveDataRoot(): string {
+  const override = process.env['BC_DATA_DIR'];
+  if (override && override.trim()) {
+    resolvedDataRoot = override.trim();
+    return resolvedDataRoot;
+  }
+  resolvedDataRoot = resolveWritableDir('data');
+  return resolvedDataRoot;
 }
 
 export function initDataDirectories(): { dataDir: string; extDir: string; projectsDir: string; backupsDir: string } {
-  const dRoot = dataRoot();
+  const dRoot = resolveDataRoot();
   const userDataDir = join(dRoot, 'user-data');
   const extDir = join(dRoot, 'extensions');
   const projectsDir = join(dRoot, 'projects');
@@ -54,14 +77,8 @@ export function initDataDirectories(): { dataDir: string; extDir: string; projec
   ensureInitialConfig();
   seedExtensionsFromZip(extDir);
 
-  // 启动自愈与自动清洁检查
-  const cfg = readAppConfig();
-  if (cfg.autoCleanCacheOnStartup) {
-    clearAppCache();
-  }
-  if (cfg.autoCleanOrphansOnStartup) {
-    clearOrphanBackups();
-  }
+  // 启动自愈（清缓存 / 孤立快照 / 我们自己的临时文件）挪到了 main.ts：
+  // 必须等 app.setPath('userData') 生效后再做，见 storage.ts 的 runStartupCleanup()。
 
   return { dataDir: dRoot, extDir, projectsDir, backupsDir };
 }
@@ -77,28 +94,66 @@ function ensureInitialConfig() {
 
 // ============ 配置文件 config.json ============
 export interface AppConfig {
+  /** 配置结构版本（整数）。改结构时 +1，并在 migrateConfig() 里补一条升级分支。 */
+  schemaVersion?: number;
   autoBackupInterval?: number;       // 毫秒，默认 60000 (1分钟)
   maxSnapshots?: number;             // 每个项目保留快照数量，默认 15
+  maxBackupBytes?: number;           // 每个项目快照总体积上限，默认 200 MB
   autoRestoreSession?: boolean;       // 默认 true (类似 Notepad 原地恢复)
   autoCleanCacheOnStartup?: boolean; // 默认 false (开启后每次启动自动清理 Chromium 临时缓存)
   autoCleanOrphansOnStartup?: boolean; // 默认 true (启动时自动清理已删除项目的残留快照)
+  autoCleanTempOnStartup?: boolean;   // 默认 true (启动时清理我们自己在系统 Temp 里留下的文件)
+  usePortableTemp?: boolean;          // 默认 true (把运行时/内核临时目录也收进 <data>/tmp/system)
   lastCheckUpdate?: string;          // 上次检测更新的时间戳 ISO 字符串
   [key: string]: any;
 }
 
+/** 当前配置结构版本 */
+const CONFIG_SCHEMA_VERSION = 2;
+
 const DEFAULT_CONFIG: AppConfig = {
+  schemaVersion: CONFIG_SCHEMA_VERSION,
   autoBackupInterval: 60000,
   maxSnapshots: 15,
+  maxBackupBytes: 200 * 1024 * 1024,
   autoRestoreSession: true,
   autoCleanCacheOnStartup: false,
-  autoCleanOrphansOnStartup: true
+  autoCleanOrphansOnStartup: true,
+  autoCleanTempOnStartup: true,
+  usePortableTemp: true
 };
+
+/**
+ * 配置结构升级：`config.json` 保持**人类可读的 JSON**（用户会手改），
+ * 但必须有版本号，否则将来改结构没有迁移入口。
+ * 返回 { cfg, changed }，changed=true 时调用方负责回写。
+ */
+function migrateConfig(raw: Record<string, any>): { cfg: AppConfig; changed: boolean } {
+  let changed = false;
+  const v = typeof raw.schemaVersion === 'number' ? raw.schemaVersion : 1;
+
+  // v1 → v2：补上快照体积预算
+  if (v < 2) {
+    if (raw.maxBackupBytes === undefined) raw.maxBackupBytes = 200 * 1024 * 1024;
+    raw.schemaVersion = 2;
+    changed = true;
+  }
+  // 未来的 v3 / v4 … 在这里继续往下加分支即可（旧文件逐级升上来）
+
+  return { cfg: { ...DEFAULT_CONFIG, ...raw }, changed };
+}
 
 export function readAppConfig(): AppConfig {
   const cfgPath = join(dataRoot(), 'config.json');
   if (!existsSync(cfgPath)) return { ...DEFAULT_CONFIG };
   try {
-    return { ...DEFAULT_CONFIG, ...JSON.parse(readFileSync(cfgPath, 'utf-8')) };
+    const raw = JSON.parse(readFileSync(cfgPath, 'utf-8')) as Record<string, any>;
+    const { cfg, changed } = migrateConfig(raw);
+    if (changed) {
+      // 升级后立刻回写，避免每次启动都重复迁移
+      try { writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf-8'); } catch { /* 忽略 */ }
+    }
+    return cfg;
   } catch {
     return { ...DEFAULT_CONFIG };
   }
@@ -114,44 +169,9 @@ export function writeAppConfig(patch: Partial<AppConfig>): AppConfig {
   return updated;
 }
 
-// ============ 会话记忆 session.json ============
-export interface SessionTab {
-  id: string;
-  name: string;
-  filePath?: string | null;
-  isDirty?: boolean;
-  scene: any;
-}
-
-export interface AppSession {
-  activeTabId: string | null;
-  tabs: SessionTab[];
-  updatedAt: string;
-}
-
-export function readSession(): AppSession | null {
-  const sPath = join(dataRoot(), 'session.json');
-  if (!existsSync(sPath)) return null;
-  try {
-    const raw = JSON.parse(readFileSync(sPath, 'utf-8'));
-    if (raw && Array.isArray(raw.tabs) && raw.tabs.length > 0) return raw;
-  } catch {}
-  return null;
-}
-
-export function writeSession(session: { activeTabId: string | null; tabs: SessionTab[] }): boolean {
-  const sPath = join(dataRoot(), 'session.json');
-  try {
-    const payload: AppSession = {
-      ...session,
-      updatedAt: new Date().toISOString()
-    };
-    writeFileSync(sPath, JSON.stringify(payload, null, 2), 'utf-8');
-    return true;
-  } catch {
-    return false;
-  }
-}
+// ============ 会话记忆 ============
+// 已迁到 src/main/session.ts（轻量索引 session.json + 按需草稿 data/session/<tabId>.bcproj）。
+// 这里不再保留实现，避免出现"两份会话逻辑"。
 
 // ============ 项目与备份管理 ============
 export interface ProjectFileInfo {
@@ -178,8 +198,10 @@ export function listProjects(): ProjectFileInfo[] {
     const full = join(dir, f.name);
     try {
       const stat = statSync(full);
-      const raw = JSON.parse(readFileSync(full, 'utf-8'));
-      const projName = raw.name || f.name.replace(/\.bcproj$/i, '');
+      // 只读 manifest（zip 容器只需解压 manifest.json 一个条目，不解 scene）
+      const m = readManifestOnly(full);
+      if (!m.ok || !m.manifest) continue;
+      const projName = m.manifest.name || f.name.replace(/\.bcproj$/i, '');
       const backupDir = join(dataRoot(), 'backups', sanitizeProjectFolder(projName));
       const backupCount = existsSync(backupDir)
         ? readdirSync(backupDir).filter((x) => x.endsWith('.bcproj')).length
@@ -191,8 +213,8 @@ export function listProjects(): ProjectFileInfo[] {
         name: projName,
         size: stat.size,
         updatedAt: stat.mtime.toISOString(),
-        elementCount: raw.meta?.elementCount ?? countNodes(raw.scene?.root),
-        previewText: raw.meta?.description || '',
+        elementCount: m.manifest.meta?.elementCount ?? 0,
+        previewText: m.manifest.meta?.description || '',
         backupCount
       });
     } catch {}
@@ -211,63 +233,119 @@ export function listProjectBackups(projectName?: string): ProjectFileInfo[] {
     const full = join(dir, f.name);
     try {
       const stat = statSync(full);
-      const raw = JSON.parse(readFileSync(full, 'utf-8'));
+      const m = readManifestOnly(full);
+      if (!m.ok || !m.manifest) continue;
       list.push({
         fileName: f.name,
         filePath: full,
-        name: f.name === 'autosave.bcproj' ? '自动保存草稿 (最新)' : (raw.name || f.name),
+        name: f.name === 'autosave.bcproj' ? '自动保存草稿 (最新)' : (m.manifest.name || f.name),
         size: stat.size,
         updatedAt: stat.mtime.toISOString(),
-        elementCount: countNodes(raw.scene?.root)
+        elementCount: m.manifest.meta?.elementCount ?? 0
       });
     } catch {}
   }
   return list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
-/** 保存项目专属快照 */
+/**
+ * 保存项目专属快照（v2 ZIP 容器）。
+ *
+ * 相对旧实现的三个关键优化：
+ *  1. **内容没变就不写**（内存里记住上次的场景哈希）—— 定时器照跑，磁盘不动；
+ *  2. **一次压缩、两处落盘**：`zipCreate()` 只做一次，同一个 Buffer 写 `autosave` 与 `snapshot`，
+ *     不再"两份全量各自序列化一遍"；
+ *  3. **数量 + 体积双预算**（`maxSnapshots` 与 `maxBackupBytes`），防止某个大工程把磁盘吃满。
+ *
+ * 返回值：本次写入的时间戳；**内容未变时返回空串**（调用方无需区分，仅用于测试断言）。
+ */
+const lastSnapshotHash = new Map<string, string>();
+
 export function saveProjectSnapshotFile(scene: any, projectName?: string, isAuto = true): string {
   const folderName = sanitizeProjectFolder(projectName || '_general');
   const bDir = join(dataRoot(), 'backups', folderName);
   if (!existsSync(bDir)) mkdirSync(bDir, { recursive: true });
 
-  const payload = {
-    format: 'BlockCanvas-Project',
-    version: '1.0.0',
-    name: projectName || (isAuto ? '自动保存草稿' : '历史快照'),
-    updatedAt: new Date().toISOString(),
-    scene
-  };
+  // 1. 内容去重：和上次一模一样就不写盘
+  const hash = sceneHash(scene);
+  if (lastSnapshotHash.get(folderName) === hash) {
+    // 仍然按配置清理一次（避免"没变化 → 不清理 → 超额文件永远留着"）
+    const cfg0 = readAppConfig();
+    cleanOldProjectSnapshots(folderName, typeof cfg0.maxSnapshots === 'number' ? cfg0.maxSnapshots : 15, cfg0.maxBackupBytes);
+    return '';
+  }
+  lastSnapshotHash.set(folderName, hash);
 
-  // 1. 最新快照
-  const latestFile = join(bDir, 'autosave.bcproj');
-  writeFileSync(latestFile, JSON.stringify(payload, null, 2), 'utf-8');
-
-  // 2. 时间戳轮转快照
+  const name = projectName || (isAuto ? '自动保存草稿' : '历史快照');
   const now = new Date();
+  const updatedAt = now.toISOString();
+
+  // 2. 生成**一次**容器内容，然后复用同一个 Buffer 写两处
+  const entries: ZipEntry[] = [
+    {
+      name: 'manifest.json',
+      data: Buffer.from(JSON.stringify({
+        format: 'BlockCanvas-Project',
+        schemaVersion: SCHEMA_VERSION,
+        name,
+        createdAt: updatedAt,
+        updatedAt,
+        app: { name: 'BlockCanvas', version: '' },
+        meta: { elementCount: countNodes(scene?.root) },
+        sections: { scene: 'scene.json' },
+        assets: [],
+        version: `${SCHEMA_VERSION}.0.0`
+      }, null, 2), 'utf8')
+    },
+    { name: 'scene.json', data: Buffer.from(JSON.stringify(scene), 'utf8') }
+  ];
+  const zipBuf = zipCreate(entries);
+
+  // 最新快照（崩溃恢复用）
+  const latestFile = join(bDir, 'autosave.bcproj');
+  writeFileSync(latestFile, zipBuf);
+
+  // 时间戳轮转快照
   const timeTag = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
   const snapFile = join(bDir, `snapshot-${timeTag}.bcproj`);
-  writeFileSync(snapFile, JSON.stringify(payload, null, 2), 'utf-8');
+  writeFileSync(snapFile, zipBuf);
 
-  // 3. 按配置清理该项目的超额快照
+  // 3. 按配置清理该项目的超额快照（数量 + 体积双预算）
   const cfg = readAppConfig();
-  const maxLimit = typeof cfg.maxSnapshots === 'number' ? cfg.maxSnapshots : 15;
-  cleanOldProjectSnapshots(folderName, maxLimit);
+  cleanOldProjectSnapshots(folderName, typeof cfg.maxSnapshots === 'number' ? cfg.maxSnapshots : 15, cfg.maxBackupBytes);
 
-  return payload.updatedAt;
+  return updatedAt;
 }
 
-export function cleanOldProjectSnapshots(folderName: string, maxLimit: number) {
+/**
+ * 清理超额快照：**数量**上限 + **体积**上限（两个都要满足）。
+ * 体积上限默认 200 MB/项目（可在 config.json 里用 maxBackupBytes 覆盖）。
+ */
+export function cleanOldProjectSnapshots(folderName: string, maxLimit: number, maxBytes?: number) {
   const bDir = join(dataRoot(), 'backups', folderName);
   if (!existsSync(bDir)) return;
+  const budget = typeof maxBytes === 'number' && maxBytes > 0 ? maxBytes : 200 * 1024 * 1024;
   try {
     const snaps = readdirSync(bDir)
       .filter((f) => f.startsWith('snapshot-') && f.endsWith('.bcproj'))
-      .sort();
-    if (snaps.length > maxLimit) {
-      for (const old of snaps.slice(0, snaps.length - maxLimit)) {
-        try { unlinkSync(join(bDir, old)); } catch {}
-      }
+      .sort();                                    // 时间戳命名 → 字典序即时间序
+    // ① 数量预算
+    const over = snaps.length - maxLimit;
+    const toDelete = over > 0 ? snaps.slice(0, over) : [];
+    for (const old of toDelete) {
+      try { unlinkSync(join(bDir, old)); } catch {}
+    }
+    // ② 体积预算：从最老的开始删，直到总量达标（至少保留 1 份）
+    let kept = snaps.slice(toDelete.length);
+    let total = 0;
+    const sizes = new Map<string, number>();
+    for (const f of kept) {
+      try { const s = statSync(join(bDir, f)).size; sizes.set(f, s); total += s; } catch { /* 忽略 */ }
+    }
+    while (total > budget && kept.length > 1) {
+      const oldest = kept.shift()!;
+      try { unlinkSync(join(bDir, oldest)); } catch {}
+      total -= sizes.get(oldest) || 0;
     }
   } catch {}
 }
@@ -278,197 +356,6 @@ export function deleteProjectBackupFolder(projectName: string) {
   if (existsSync(bDir)) {
     try { rmSync(bDir, { recursive: true, force: true }); } catch {}
   }
-}
-
-// ============ 缓存与磁盘占用统计及自动清理 ============
-export interface StorageStats {
-  cacheSize: number;          // Chromium 渲染/字节码/GPU 临时缓存字节数
-  backupsSize: number;        // 历史快照与备份总占用
-  projectsSize: number;       // 项目工程文件占用
-  extensionsSize: number;     // 扩展与插件占用
-  totalSize: number;          // data/ 总占用字节数
-  orphanBackupsCount: number; // 孤立无主的快照文件夹数量
-}
-
-export function getDirSize(dirPath: string): number {
-  if (!existsSync(dirPath)) return 0;
-  let total = 0;
-  try {
-    const entries = readdirSync(dirPath, { withFileTypes: true });
-    for (const e of entries) {
-      const full = join(dirPath, e.name);
-      if (e.isDirectory()) {
-        total += getDirSize(full);
-      } else if (e.isFile()) {
-        try { total += statSync(full).size; } catch {}
-      }
-    }
-  } catch {}
-  return total;
-}
-
-export function getStorageStats(): StorageStats {
-  const dRoot = dataRoot();
-  const uData = join(dRoot, 'user-data');
-  const cacheDirs = [
-    join(uData, 'Cache'),
-    join(uData, 'Code Cache'),
-    join(uData, 'GPUCache'),
-    join(uData, 'DawnGraphiteCache'),
-    join(uData, 'DawnWebGPUCache'),
-    join(uData, 'blob_storage')
-  ];
-
-  let cacheSize = 0;
-  for (const d of cacheDirs) cacheSize += getDirSize(d);
-
-  const backupsDir = join(dRoot, 'backups');
-  const backupsSize = getDirSize(backupsDir);
-
-  const projectsDir = join(dRoot, 'projects');
-  const projectsSize = getDirSize(projectsDir);
-
-  const extensionsDir = join(dRoot, 'extensions');
-  const extensionsSize = getDirSize(extensionsDir);
-
-  const totalSize = getDirSize(dRoot);
-
-  // 统计已删除项目的孤立残留备份数
-  const projects = listProjects();
-  const validNames = new Set(projects.map((p) => sanitizeProjectFolder(p.name)));
-  for (const p of projects) {
-    validNames.add(sanitizeProjectFolder(p.fileName.replace(/\.bcproj$/i, '')));
-  }
-  validNames.add('_general');
-
-  let orphanBackupsCount = 0;
-  if (existsSync(backupsDir)) {
-    try {
-      for (const e of readdirSync(backupsDir, { withFileTypes: true })) {
-        if (e.isDirectory()) {
-          if (!validNames.has(e.name)) orphanBackupsCount++;
-        } else if (e.isFile() && e.name.endsWith('.bcproj')) {
-          orphanBackupsCount++;
-        }
-      }
-    } catch {}
-  }
-
-  return {
-    cacheSize,
-    backupsSize,
-    projectsSize,
-    extensionsSize,
-    totalSize,
-    orphanBackupsCount
-  };
-}
-
-/**
- * 递归深度清理目录下的所有文件，保留空目录结构；遇锁跳过，最大化安全释放空间
- */
-function cleanDirFilesRecursively(dir: string): number {
-  if (!existsSync(dir)) return 0;
-  let freed = 0;
-  try {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    for (const e of entries) {
-      const full = join(dir, e.name);
-      if (e.isDirectory()) {
-        freed += cleanDirFilesRecursively(full);
-        try { rmSync(full, { recursive: false }); } catch {}
-      } else if (e.isFile()) {
-        try {
-          const sz = statSync(full).size;
-          unlinkSync(full);
-          freed += sz;
-        } catch {}
-      }
-    }
-  } catch {}
-  return freed;
-}
-
-export async function clearAppCache(): Promise<{ ok: boolean; freedBytes: number }> {
-  // 1. 调用 Chromium 内部 session 清理接口（清除内存与活动网络缓存）
-  try {
-    const { session } = await import('electron');
-    if (session && session.defaultSession) {
-      await session.defaultSession.clearCache();
-      await session.defaultSession.clearStorageData({
-        storages: ['shadercache', 'cachestorage']
-      });
-    }
-  } catch {}
-
-  const uData = join(dataRoot(), 'user-data');
-  const cacheDirs = [
-    join(uData, 'Cache'),
-    join(uData, 'Code Cache'),
-    join(uData, 'GPUCache'),
-    join(uData, 'DawnGraphiteCache'),
-    join(uData, 'DawnWebGPUCache'),
-    join(uData, 'blob_storage')
-  ];
-
-  let freedBytes = 0;
-
-  // 2. 递归深度逐文件清空缓存目录（保留目录壳防重构报错）
-  for (const d of cacheDirs) {
-    if (existsSync(d)) {
-      freedBytes += cleanDirFilesRecursively(d);
-    }
-  }
-
-  // 3. 顺带清理 backups 根目录下早期残留的孤立文件（非文件夹）
-  const bRoot = join(dataRoot(), 'backups');
-  if (existsSync(bRoot)) {
-    try {
-      for (const e of readdirSync(bRoot, { withFileTypes: true })) {
-        if (e.isFile() && e.name.endsWith('.bcproj')) {
-          try {
-            const f = join(bRoot, e.name);
-            freedBytes += statSync(f).size;
-            unlinkSync(f);
-          } catch {}
-        }
-      }
-    } catch {}
-  }
-
-  return { ok: true, freedBytes };
-}
-
-export function clearOrphanBackups(): { ok: boolean; cleanedCount: number; freedBytes: number } {
-  const projects = listProjects();
-  const validNames = new Set(projects.map((p) => sanitizeProjectFolder(p.name)));
-  for (const p of projects) {
-    validNames.add(sanitizeProjectFolder(p.fileName.replace(/\.bcproj$/i, '')));
-  }
-  validNames.add('_general');
-
-  const bRoot = join(dataRoot(), 'backups');
-  if (!existsSync(bRoot)) return { ok: true, cleanedCount: 0, freedBytes: 0 };
-
-  let count = 0;
-  let freed = 0;
-
-  try {
-    for (const e of readdirSync(bRoot, { withFileTypes: true })) {
-      const full = join(bRoot, e.name);
-      if (e.isDirectory()) {
-        if (!validNames.has(e.name)) {
-          freed += getDirSize(full);
-          try { rmSync(full, { recursive: true, force: true }); count++; } catch {}
-        }
-      } else if (e.isFile() && e.name.endsWith('.bcproj')) {
-        freed += statSync(full).size;
-        try { unlinkSync(full); count++; } catch {}
-      }
-    }
-  } catch {}
-
-  return { ok: true, cleanedCount: count, freedBytes: freed };
 }
 
 function countNodes(node: any): number {

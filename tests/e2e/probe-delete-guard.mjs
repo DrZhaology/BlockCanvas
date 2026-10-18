@@ -8,6 +8,7 @@ import { createRequire } from 'module';
 import { resolve, join } from 'path';
 import { tmpdir } from 'os';
 import { mkdirSync, rmSync, writeFileSync, existsSync, cpSync } from 'fs';
+import { ensureEditor } from './ensure-editor.mjs';
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
 const { _electron: electron } = require('playwright');
@@ -44,6 +45,7 @@ async function main() {
   const win = await app.firstWindow();
   const errs = [];
   win.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
+  await ensureEditor(win);
   await win.waitForSelector('.toolbar', { timeout: 20000 });
   await sleep(1500);
 
@@ -105,28 +107,45 @@ async function main() {
   });
   ok('未轮到的滑块拖不动（必须按顺序）', Math.abs(afterLocked - beforeLocked) < 0.01, `${beforeLocked} → ${afterLocked}`);
 
-  // 按顺序把 3 个滑块拖到位
+  // 按顺序把 3 个滑块拖到位：第 i 次拖动后，应该**恰好** i 个滑块打勾（证明"按顺序"）
   let orderOk = true;
-  for (let i = 0; i < 3; i += 1) {
-    const info = await win.evaluate(() => {
-      const item = document.querySelector('.dd-slider-item.is-active');
-      if (!item) return null;
-      const track = item.querySelector('.dd-slider-track');
-      const target = item.querySelector('.dd-slider-target');
-      const tr = track.getBoundingClientRect();
-      return { x: tr.x, y: tr.y, w: tr.width, h: tr.height, targetLeft: parseFloat(target.style.left) };
-    });
-    if (!info) { orderOk = false; break; }
-    const targetX = info.x + (info.targetLeft / 100) * info.w;
-    await win.mouse.move(info.x + info.w * 0.5, info.y + info.h / 2);
-    await win.mouse.down();
-    await win.mouse.move(targetX, info.y + info.h / 2, { steps: 16 });
-    await win.mouse.up();
-    await sleep(320);
+  const orderLog = [];
+  for (let i = 1; i <= 3; i += 1) {
+    let done = 0;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const info = await win.evaluate(() => {
+        const item = document.querySelector('.dd-slider-item.is-active');
+        if (!item) return null;
+        const track = item.querySelector('.dd-slider-track');
+        const target = item.querySelector('.dd-slider-target');
+        const tr = track.getBoundingClientRect();
+        return { x: tr.x, y: tr.y, w: tr.width, h: tr.height, targetLeft: parseFloat(target.style.left) };
+      });
+      if (!info) break;
+      const targetX = info.x + (info.targetLeft / 100) * info.w;
+      await win.mouse.move(info.x + info.w * 0.5, info.y + info.h / 2);
+      await win.mouse.down();
+      await win.mouse.move(targetX, info.y + info.h / 2, { steps: 16 });
+      await win.mouse.up();
+      await sleep(360);
+      // 注意：第 3 个滑块通过后，界面会在 ~420ms 后自动切到第 3 关 → 滑块列表被卸载。
+      // 所以"全部完成"有两种表现：① 3 个都带 is-done；② 已经进入第 3 关。
+      const st = await win.evaluate(() => ({
+        done: document.querySelectorAll('.dd-slider-item.is-done').length,
+        final: !!document.querySelector('.dd-final-warn')
+      }));
+      done = st.final ? 3 : st.done;
+      if (done >= i) break;
+    }
+    orderLog.push(`${i}→${done}`);
+    if (done !== i) { orderOk = false; break; }
   }
-  ok('3 个滑块可按 1→2→3 顺序拖到位', orderOk === true);
-  const doneCount = await win.locator('.dd-slider-item.is-done').count();
-  ok('三个滑块全部打勾', doneCount === 3, 'done=' + doneCount);
+  ok('3 个滑块可按 1→2→3 顺序逐关通过（第 i 次恰好 i 个打勾）', orderOk === true, orderLog.join(' '));
+  const doneCount = await win.evaluate(() => ({
+    done: document.querySelectorAll('.dd-slider-item.is-done').length,
+    final: !!document.querySelector('.dd-final-warn')
+  }));
+  ok('三个滑块全部打勾（或已自动进入第 3 关）', doneCount.final || doneCount.done === 3, JSON.stringify(doneCount));
 
   // ⑤ 自动进入第 3 关
   await sleep(900);

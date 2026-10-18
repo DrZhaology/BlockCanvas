@@ -47,7 +47,12 @@ export function HelpButton(props: Props) {
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        // v0.4.4：Esc 只关气泡，不能顺手把画布选中也取消掉（全局 Esc 会清选中）
+        e.stopPropagation();
+        e.preventDefault();
+        setOpen(false);
+      }
     };
     const onWheel = (e: WheelEvent) => {
       const t = e.target as Node;

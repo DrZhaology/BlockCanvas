@@ -5,10 +5,13 @@ import {
   type ToolbarItem, type ToolbarDock, type ToolbarGroupDock
 } from '@store/toolbarStore';
 import { HelpButton } from './HelpButton';
-import { Icon, type IconName } from './Icon';
+import { Icon, resolveIconName, type IconName } from './Icon';
+import logoUrl from '@renderer/assets/logo.svg';
 import { Collapse } from './Collapse';
 import { TIPS, TIPS_KEY, setTipsEnabled } from './CanvasOverlays';
-import type { DataPathsInfo, StorageStatsInfo } from '../global';
+import { readSelHighlight, writeSelHighlight } from '@lib/selHighlight';
+import { appAlert, appConfirm } from '@lib/appConfirm';
+import type { DataPathsInfo, StorageStatsInfo, StorageBreakdownInfo, StorageCategoryId } from '../global';
 
 function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return '0 B';
@@ -45,7 +48,9 @@ export function Settings(props: Props) {
   const [section, setSection] = useState<SettingsSection>(initialSection || 'personalization');
   const [paths, setPaths] = useState<DataPathsInfo | null>(null);
   const [storageStats, setStorageStats] = useState<StorageStatsInfo | null>(null);
+  const [breakdown, setBreakdown] = useState<StorageBreakdownInfo | null>(null);
   const [cleaningCache, setCleaningCache] = useState(false);
+  const [cleaningId, setCleaningId] = useState<string>('');
   const [appVersion, setAppVersion] = useState<string>('');
 
   useEffect(() => {
@@ -54,8 +59,12 @@ export function Settings(props: Props) {
 
   const refreshStorageStats = async () => {
     try {
-      const stats = await window.bc.getStorageStats();
+      const [stats, bd] = await Promise.all([
+        window.bc.getStorageStats(),
+        window.bc.getStorageBreakdown()
+      ]);
       setStorageStats(stats);
+      setBreakdown(bd);
     } catch {}
   };
 
@@ -65,31 +74,65 @@ export function Settings(props: Props) {
   }, [initialSection]);
 
   const handleClearCache = async () => {
-    if (!confirm('确定要清理运行缓存吗？\n\n· 只删除 Chromium/V8 生成的临时缓存文件；\n· 不会碰你的项目工程、快照与任何设计数据。')) return;
+    const okClear = await appConfirm({
+      title: '清理运行缓存',
+      body: '确定要清理运行缓存吗？\n\n· 只删除 Chromium/V8 生成的临时缓存文件；\n· 不会碰你的项目工程、快照与任何设计数据。',
+      okText: '清理'
+    });
+    if (!okClear) return;
     setCleaningCache(true);
     try {
-      const res = await window.bc.clearAppCache();
+      const res = await window.bc.clearAllCleanable();
       if (res.ok) {
-        alert(`✨ 运行缓存清理成功！\n\n本次已安全释放 ${formatBytes(res.freedBytes)} 临时空间。`);
+        void appAlert(`运行缓存清理成功！\n\n本次已安全释放 ${formatBytes(res.freedBytes)} 临时空间。`, '清理成功');
         refreshStorageStats();
       }
     } catch (e: any) {
-      alert('清理失败: ' + (e.message || '未知错误'));
+      void appAlert('清理失败: ' + (e.message || '未知错误'), '清理失败');
     } finally {
       setCleaningCache(false);
     }
   };
 
+  /** 按分类清理（可清的三类：Chromium 缓存 / 临时文件 / 更新包下载） */
+  const handleClearCategory = async (id: StorageCategoryId, label: string) => {
+    const okClear = await appConfirm({
+      title: `清理「${label}」`,
+      body: `确定要清理「${label}」吗？\n\n只删除可再生成的临时文件，不会影响项目工程、快照与界面设置。`,
+      okText: '清理'
+    });
+    if (!okClear) return;
+    setCleaningId(id);
+    try {
+      const res = await window.bc.clearStorageCategory(id);
+      if (res.ok) {
+        void appAlert(`已清理「${label}」，释放 ${formatBytes(res.freedBytes)}。`, '清理完成');
+        refreshStorageStats();
+      } else {
+        void appAlert('未能清理：' + (res.error || '未知原因'), '清理失败');
+      }
+    } catch (e: any) {
+      void appAlert('清理失败: ' + (e.message || '未知错误'), '清理失败');
+    } finally {
+      setCleaningId('');
+    }
+  };
+
   const handleClearOrphanBackups = async () => {
-    if (!confirm('确定要清理所有已删除项目遗留的孤立历史快照吗？')) return;
+    const okClear = await appConfirm({
+      title: '清理孤立快照',
+      body: '确定要清理所有已删除项目遗留的孤立历史快照吗？',
+      okText: '清理'
+    });
+    if (!okClear) return;
     try {
       const res = await window.bc.clearOrphanBackups();
       if (res.ok) {
-        alert(`✨ 已成功清理 ${res.cleanedCount} 处孤立历史快照，释放 ${formatBytes(res.freedBytes)} 空间！`);
+        void appAlert(`已成功清理 ${res.cleanedCount} 处孤立历史快照，释放 ${formatBytes(res.freedBytes)} 空间！`, '清理完成');
         refreshStorageStats();
       }
     } catch (e: any) {
-      alert('清理失败: ' + (e.message || '未知错误'));
+      void appAlert('清理失败: ' + (e.message || '未知错误'), '清理失败');
     }
   };
 
@@ -100,6 +143,14 @@ export function Settings(props: Props) {
   const endStyleEdit = useScene((s) => s.endStyleEdit);
   const autoInherit = useScene((s) => s.autoInherit);
   const setAutoInherit = useScene((s) => s.setAutoInherit);
+  // v0.4.4：新增元素自动定位（滚到可视区 + 橙色闪烁），默认开
+  const [autoLocateNew, setAutoLocateNew] = useState<boolean>(() => {
+    try { return localStorage.getItem('bc-auto-locate-new') !== '0'; } catch { return true; }
+  });
+  const changeAutoLocateNew = (v: boolean) => {
+    setAutoLocateNew(v);
+    try { localStorage.setItem('bc-auto-locate-new', v ? '1' : '0'); } catch { /* ignore */ }
+  };
 
   // 轮廓开关
   const [outlines, setOutlines] = useState<boolean>(() => {
@@ -109,6 +160,34 @@ export function Settings(props: Props) {
     setOutlines(v);
     document.body.classList.toggle('bc-outlines-on', v);
     try { localStorage.setItem('bc-outlines', v ? '1' : '0'); } catch {}
+  };
+
+  // 选中高亮样式（v0.4.4）：橙色光晕闪烁（默认·最醒目）/ 蓝色细线（原始）
+  const [selStyle, setSelStyle] = useState<'glow' | 'plain'>(() => readSelHighlight());
+  const changeSelStyle = (v: 'glow' | 'plain') => {
+    setSelStyle(v);
+    writeSelHighlight(v);
+  };
+
+  // 自动保存（默认关）+ 撤销历史阈值 —— 都走 config.json（userData.writeAppConfig）
+  const [autoSaveOn, setAutoSaveOn] = useState<boolean>(false);
+  const [autoSaveSec, setAutoSaveSec] = useState<number>(300);
+  const [undoLimit, setUndoLimit] = useState<number>(100);
+  useEffect(() => {
+    window.bc.getAppConfig().then((cfg) => {
+      setAutoSaveOn(cfg.autoSaveOn === true);
+      if (typeof cfg.autoSaveSec === 'number') setAutoSaveSec(cfg.autoSaveSec);
+      if (typeof cfg.undoHistoryLimit === 'number') setUndoLimit(cfg.undoHistoryLimit);
+    }).catch(() => {});
+  }, []);
+  const changeAutoSave = (on: boolean, sec: number) => {
+    setAutoSaveOn(on);
+    setAutoSaveSec(sec);
+    void window.bc.setAppConfig({ autoSaveOn: on, autoSaveSec: sec });
+  };
+  const changeUndoLimit = (n: number) => {
+    setUndoLimit(n);
+    void window.bc.setAppConfig({ undoHistoryLimit: n });
   };
 
   // 元素面板模式
@@ -147,6 +226,7 @@ export function Settings(props: Props) {
   const [maxSnapshots, setMaxSnapshots] = useState<number>(15);
   const [autoCleanCache, setAutoCleanCache] = useState<boolean>(false);
   const [autoCleanOrphans, setAutoCleanOrphans] = useState<boolean>(true);
+  const [autoCleanTemp, setAutoCleanTemp] = useState<boolean>(true);
 
   useEffect(() => {
     window.bc.getAppConfig().then((cfg) => {
@@ -154,6 +234,7 @@ export function Settings(props: Props) {
       if (typeof cfg.maxSnapshots === 'number') setMaxSnapshots(cfg.maxSnapshots);
       setAutoCleanCache(!!cfg.autoCleanCacheOnStartup);
       setAutoCleanOrphans(cfg.autoCleanOrphansOnStartup !== false);
+      setAutoCleanTemp(cfg.autoCleanTempOnStartup !== false);
     });
     window.bc.getDataPaths().then((p) => setPaths(p));
   }, []);
@@ -176,6 +257,11 @@ export function Settings(props: Props) {
   const toggleAutoCleanOrphans = (v: boolean) => {
     setAutoCleanOrphans(v);
     window.bc.setAppConfig({ autoCleanOrphansOnStartup: v });
+  };
+
+  const toggleAutoCleanTemp = (v: boolean) => {
+    setAutoCleanTemp(v);
+    window.bc.setAppConfig({ autoCleanTempOnStartup: v });
   };
 
   // 工具栏管理（独立组件 ToolbarManagerSection，见文件末尾）
@@ -205,13 +291,13 @@ export function Settings(props: Props) {
 
   const qc = scene.quickCss ?? {};
 
-  const NAV_ITEMS: Array<{ id: SettingsSection; label: string; icon: string; desc: string; svg: IconName }> = [
-    { id: 'personalization', label: '个性化与外观', icon: '🎨', svg: 'palette', desc: '深浅主题、白边重置、同类高亮' },
-    { id: 'editor', label: '编辑器与画布', icon: '🛠️', svg: 'sliders', desc: '布局模式、画布默认宽度、继承机制' },
-    { id: 'storage', label: '存储与自动备份', icon: '💾', svg: 'database', desc: '备份周期、快照数量、便携 data/ 目录' },
-    { id: 'toolbar', label: '工具栏管理', icon: '🔧', svg: 'tool', desc: '每个按钮的停靠区与顺序自由编排' },
-    { id: 'extensions', label: '扩展与插件中心', icon: '🧩', svg: 'puzzle', desc: '管理、启停、导入插件与模板资源包' },
-    { id: 'about', label: '关于与系统', icon: 'ℹ️', svg: 'info', desc: '版本号、开源协议与技术栈' }
+  const NAV_ITEMS: Array<{ id: SettingsSection; label: string; desc: string; svg: IconName }> = [
+    { id: 'personalization', label: '个性化与外观', svg: 'palette', desc: '深浅主题、白边重置、同类高亮' },
+    { id: 'editor', label: '编辑器与画布', svg: 'sliders', desc: '布局模式、画布默认宽度、继承机制' },
+    { id: 'storage', label: '存储与自动备份', svg: 'database', desc: '备份周期、快照数量、便携 data/ 目录' },
+    { id: 'toolbar', label: '工具栏管理', svg: 'tool', desc: '每个按钮的停靠区与顺序自由编排' },
+    { id: 'extensions', label: '扩展与插件中心', svg: 'puzzle', desc: '管理、启停、导入插件与模板资源包' },
+    { id: 'about', label: '关于与系统', svg: 'info', desc: '版本号、开源协议与技术栈' }
   ];
 
   return (
@@ -220,10 +306,10 @@ export function Settings(props: Props) {
       <div className="fluent-sidebar">
         <div className="fluent-sidebar-top">
           <button className="fluent-back-btn" onClick={onBack} title="返回画布编辑器">
-            ← 返回编辑器
+            <Icon name="chevronLeft" size={13} /> 返回编辑器
           </button>
           <div className="fluent-app-brand">
-            <span className="fluent-brand-logo">⚡</span>
+            <img className="fluent-brand-logo" src={logoUrl} alt="BlockCanvas" />
             <span className="fluent-brand-text">BlockCanvas 设置</span>
           </div>
         </div>
@@ -235,7 +321,7 @@ export function Settings(props: Props) {
               className={"fluent-nav-item" + (section === item.id ? " active" : "")}
               onClick={() => setSection(item.id)}
             >
-              <span className="fluent-nav-icon">{item.icon}</span>
+              <span className="fluent-nav-icon"><Icon name={item.svg} /></span>
               <div className="fluent-nav-meta">
                 <span className="fluent-nav-title">{item.label}</span>
                 <span className="fluent-nav-desc">{item.desc}</span>
@@ -302,6 +388,29 @@ export function Settings(props: Props) {
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="sparkle" /></div>
                 <div className="fluent-card-info">
+                  <div className="fluent-card-title">选中元素的高亮样式</div>
+                  <div className="fluent-card-desc">
+                    点选元素后画布上的"选中框"用哪种画法：
+                    <b>橙色光晕 + 呼吸闪烁</b>（默认，复杂页面里也一眼可见）或
+                    <b>蓝色细线</b>（v0.4.4 之前的原始样式，安静无动效）。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <select
+                    className="fluent-select"
+                    value={selStyle}
+                    onChange={(e) => changeSelStyle(e.target.value as 'glow' | 'plain')}
+                    title="切换画布选中框的样式"
+                  >
+                    <option value="glow">橙色光晕 + 闪烁（醒目）</option>
+                    <option value="plain">蓝色细线（原始）</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="sparkle" /></div>
+                <div className="fluent-card-info">
                   <div className="fluent-card-title">画布左上角技巧提示 (Tips)</div>
                   <div className="fluent-card-desc">
                     在画布左上角每 30 秒轮播一条编辑器使用小技巧（共 <b>{TIPS.length}</b> 条）。
@@ -322,7 +431,7 @@ export function Settings(props: Props) {
 
               <div className="fluent-group-title">网页导出基础重置</div>
               <div className="fluent-card">
-                <div className="fluent-card-icon">📄</div>
+                <div className="fluent-card-icon"><Icon name="pageReset" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">去掉浏览器默认白边 (body margin reset)</div>
                   <div className="fluent-card-desc">浏览器默认给页面四周留有 8px 白边。开启后画布与导出将贴边展示。</div>
@@ -344,7 +453,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">🔤</div>
+                <div className="fluent-card-icon"><Icon name="headingReset" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">重置标题/段落默认外边距 (CSS Reset)</div>
                   <div className="fluent-card-desc">将 h1~h6、段落、列表自带的浏览器原始间距清零，还原真实网站排版。</div>
@@ -372,7 +481,7 @@ export function Settings(props: Props) {
             <>
               <div className="fluent-group-title">工作区排版布局</div>
               <div className="fluent-card">
-                <div className="fluent-card-icon">🖥️</div>
+                <div className="fluent-card-icon"><Icon name="layout" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">工作区布局方式 (Workspace Layout)</div>
                   <div className="fluent-card-desc">选择元素面板与画布的相对摆放位置（底部横向背包 / 左侧传统列栏）。</div>
@@ -390,7 +499,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">📏</div>
+                <div className="fluent-card-icon"><Icon name="responsive" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">画布默认基准宽度 (Canvas Width)</div>
                   <div className="fluent-card-desc">自适应铺满当前窗口，或指定固定断点（桌面 1440px / 平板 768px / 手机 375px）。</div>
@@ -409,9 +518,69 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="save" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">自动保存（默认关闭）</div>
+                  <div className="fluent-card-desc">
+                    面向<b>写入次数有限</b>的场景（如 U 盘 / 部分固态盘）：默认<b>绝不自动写盘</b>，
+                    保存只看 Ctrl+S（第一次保存会弹位置选择框）。开启后相当于每隔一段时间自动按一次
+                    Ctrl+S —— <b>只对已保存过、且有实际修改的工程生效</b>；完全没有更改就不写盘。
+                    与历史快照备份无关。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <select
+                    className="fluent-select"
+                    value={String(autoSaveSec)}
+                    onChange={(e) => changeAutoSave(autoSaveOn, Number(e.target.value))}
+                    title="自动保存间隔"
+                  >
+                    <option value="60">每 1 分钟</option>
+                    <option value="120">每 2 分钟</option>
+                    <option value="300">每 5 分钟</option>
+                    <option value="600">每 10 分钟</option>
+                    <option value="1800">每 30 分钟</option>
+                  </select>
+                  <label className="fluent-switch">
+                    <input
+                      type="checkbox"
+                      checked={autoSaveOn}
+                      onChange={(e) => changeAutoSave(e.target.checked, autoSaveSec)}
+                    />
+                    <span className="fluent-slider" />
+                  </label>
+                </div>
+              </div>
+
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="undo" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">撤销历史随工程保存（Ctrl+Z / Ctrl+Y）</div>
+                  <div className="fluent-card-desc">
+                    保存工程时把最近的操作历史一起写进 .bcproj —— 下次打开还能继续撤销 / 重做，
+                    不会一关就清零。条数越多文件越大：默认 100 步；设为 0 = 不保存历史（文件最小）。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <select
+                    className="fluent-select"
+                    value={String(undoLimit)}
+                    onChange={(e) => changeUndoLimit(Number(e.target.value))}
+                    title="随工程保存的撤销历史条数"
+                  >
+                    <option value="0">不保存历史</option>
+                    <option value="25">最近 25 步</option>
+                    <option value="50">最近 50 步</option>
+                    <option value="100">最近 100 步（默认）</option>
+                    <option value="200">最近 200 步</option>
+                  </select>
+                </div>
+              </div>
+
               <div className="fluent-group-title">插入与构建习惯</div>
               <div className="fluent-card">
-                <div className="fluent-card-icon">🧰</div>
+                <div className="fluent-card-icon"><Icon name="wand" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">快捷助手属性显示到下方 CSS 列表（全局）</div>
                   <div className="fluent-card-desc">
@@ -449,8 +618,27 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
+              {/* v0.4.4：新增元素自动定位（滚到可视区 + 橙色闪烁） */}
               <div className="fluent-card">
-                <div className="fluent-card-icon">🏷️</div>
+                <div className="fluent-card-icon"><Icon name="target" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">新增元素自动定位</div>
+                  <div className="fluent-card-desc">插入元素后自动滚动画布到它所在位置，并用橙色边框闪两下，方便立刻调整。</div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <label className="fluent-switch">
+                    <input
+                      type="checkbox"
+                      checked={autoLocateNew}
+                      onChange={(e) => changeAutoLocateNew(e.target.checked)}
+                    />
+                    <span className="fluent-slider" />
+                  </label>
+                </div>
+              </div>
+
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="tag" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">元素按钮标签展示模式</div>
                   <div className="fluent-card-desc">控制元素面板中按钮的文字表现形式。</div>
@@ -486,14 +674,14 @@ export function Settings(props: Props) {
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="broom" /></div>
                 <div className="fluent-card-info">
-                  <div className="fluent-card-title">运行临时缓存 (Chromium Cache)</div>
+                  <div className="fluent-card-title">一键清理运行缓存与临时文件</div>
                   <div className="fluent-card-desc">
-                    当前检测占用: <b style={{ color: 'var(--accent)', fontFamily: 'Consolas' }}>{storageStats ? formatBytes(storageStats.cacheSize) : '扫描中…'}</b>（安全清理，不影响项目工程）
+                    当前可清理: <b style={{ color: 'var(--accent)', fontFamily: 'Consolas' }}>{breakdown ? formatBytes(breakdown.categories.filter((c) => c.cleanable).reduce((a, c) => a + c.bytes, 0)) : (storageStats ? formatBytes(storageStats.cacheSize) : '扫描中…')}</b>（只清可再生成的临时文件，不碰项目工程与界面设置）
                   </div>
                 </div>
                 <div className="fluent-card-ctrl" style={{ display: 'flex', gap: 6, flexShrink: 0, alignSelf: 'center' }}>
                   <button className="btn-secondary btn-mini" onClick={refreshStorageStats} title="重新扫描大小">
-                    ⟳ 刷新
+                    <Icon name="refresh" size={13} /> 刷新
                   </button>
                   <button
                     className="btn-primary btn-mini"
@@ -505,7 +693,29 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
-              {/* 卡片 2：启动时自动清理缓存 */}
+              {/* 卡片 2：启动时自动清理临时文件 */}
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="broom" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">启动时自动清理临时文件 (Auto Clean Temp)</div>
+                  <div className="fluent-card-desc">
+                    每次启动自动回收程序留在系统 Temp 里的文件（浏览器预览页、更新脚本工作目录）。
+                    关闭后这些文件会一直留着，需要你自己去系统临时目录删。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <label className="fluent-switch">
+                    <input
+                      type="checkbox"
+                      checked={autoCleanTemp}
+                      onChange={(e) => toggleAutoCleanTemp(e.target.checked)}
+                    />
+                    <span className="fluent-slider" />
+                  </label>
+                </div>
+              </div>
+
+              {/* 卡片 3：启动时自动清理缓存 */}
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="bolt" /></div>
                 <div className="fluent-card-info">
@@ -524,9 +734,9 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
-              {/* 卡片 3：启动时自动清理孤立快照 */}
+              {/* 卡片 4：启动时自动清理孤立快照 */}
               <div className="fluent-card">
-                <div className="fluent-card-icon">🗑️</div>
+                <div className="fluent-card-icon"><Icon name="trash" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">启动时自动清理孤立残留快照 (Auto Clean Orphans)</div>
                   <div className="fluent-card-desc">
@@ -554,19 +764,23 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
-              {/* 分组 2：纯便携 data/ 目录占用 */}
+              {/* 分组 2：存储占用明细（分类互斥、可加和） */}
               <div className="fluent-group-title">
-                <span>纯便携数据目录占用 (data/)</span>
+                <span>存储占用明细</span>
+                <HelpButton
+                  title="这些分类是什么？"
+                  content={'【占用明细说明】：\n\n· 每一类都是**互斥**的，加起来正好等于总占用（不会出现"对不上账"）。\n· 标了「可清理」的三类只包含可再生成的临时文件，清掉不会丢任何数据。\n· 「界面偏好与会话」「项目工程文件」「历史快照」「扩展」属于你的数据，只能自己手动删。'}
+                />
               </div>
 
               <div className="fluent-card" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div className="fluent-card-icon">📁</div>
+                    <div className="fluent-card-icon"><Icon name="folder" /></div>
                     <div>
-                      <div className="fluent-card-title">便携数据根目录</div>
+                      <div className="fluent-card-title">存储总览</div>
                       <div className="fluent-card-desc" style={{ fontFamily: 'Consolas', fontSize: 11 }}>
-                        {paths?.dataRoot || '正在获取…'} · 总占用: <b style={{ color: 'var(--text)' }}>{storageStats ? formatBytes(storageStats.totalSize) : '…'}</b>
+                        {breakdown?.dataRoot || paths?.dataRoot || '正在获取…'}
                       </div>
                     </div>
                   </div>
@@ -577,31 +791,44 @@ export function Settings(props: Props) {
                   </div>
                 </div>
 
-                <div className="fluent-storage-grid">
-                  <div className="fluent-storage-item">
-                    <span className="fluent-storage-label">临时与编译缓存</span>
-                    <span className="fluent-storage-val" style={{ color: 'var(--accent)' }}>
-                      {storageStats ? formatBytes(storageStats.cacheSize) : '…'}
-                    </span>
-                  </div>
-                  <div className="fluent-storage-item">
-                    <span className="fluent-storage-label">历史快照与备份</span>
-                    <span className="fluent-storage-val">
-                      {storageStats ? formatBytes(storageStats.backupsSize) : '…'}
-                    </span>
-                  </div>
-                  <div className="fluent-storage-item">
-                    <span className="fluent-storage-label">项目工程文件 (.bcproj)</span>
-                    <span className="fluent-storage-val">
-                      {storageStats ? formatBytes(storageStats.projectsSize) : '…'}
-                    </span>
-                  </div>
-                  <div className="fluent-storage-item">
-                    <span className="fluent-storage-label">扩展与插件包</span>
-                    <span className="fluent-storage-val">
-                      {storageStats ? formatBytes(storageStats.extensionsSize) : '…'}
-                    </span>
-                  </div>
+                {/* 明细行：标签 / 说明 / 大小 / 清理按钮 */}
+                <div className="bc-storage-list">
+                  {(breakdown?.categories ?? []).map((c) => (
+                    <div key={c.id} className={'bc-storage-row' + (c.cleanable ? ' is-cleanable' : '')} data-storage-cat={c.id}>
+                      <div className="bc-storage-main">
+                        <span className="bc-storage-name">{c.label}</span>
+                        <span className="bc-storage-hint">{c.hint}</span>
+                      </div>
+                      <span className="bc-storage-size" style={{ color: c.cleanable ? 'var(--accent)' : 'var(--text)' }}>
+                        {formatBytes(c.bytes)}
+                      </span>
+                      {c.cleanable ? (
+                        <button
+                          className="btn-secondary btn-mini bc-storage-btn"
+                          disabled={cleaningId === c.id || c.bytes === 0}
+                          onClick={() => handleClearCategory(c.id, c.label)}
+                          title={`清理「${c.label}」`}
+                        >
+                          {cleaningId === c.id ? '清理中…' : '清理'}
+                        </button>
+                      ) : (
+                        <span className="bc-storage-keep" title="这是你的数据，只能手动删除">保留</span>
+                      )}
+                    </div>
+                  ))}
+                  {!breakdown && <div className="hint" style={{ padding: 12 }}>正在扫描占用…</div>}
+                </div>
+
+                {/* 合计：data/ + 系统 Temp（我们自己的文件） */}
+                <div className="bc-storage-total">
+                  <span>
+                    data/ 目录 <b>{formatBytes(breakdown?.dataTotal ?? 0)}</b>
+                    <span className="bc-storage-plus">+</span>
+                    系统 Temp 遗留 <b>{formatBytes(breakdown?.systemTempBytes ?? 0)}</b>
+                  </span>
+                  <span>
+                    合计 <b style={{ color: 'var(--accent)' }}>{formatBytes(breakdown?.grandTotal ?? storageStats?.totalSize ?? 0)}</b>
+                  </span>
                 </div>
               </div>
 
@@ -633,7 +860,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">📦</div>
+                <div className="fluent-card-icon"><Icon name="package" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">历史快照最大保留数量 (Max Snapshots)</div>
                   <div className="fluent-card-desc">每个项目专属保留的历史版本上限，超出后自动轮转覆盖最旧版本。</div>
@@ -654,7 +881,7 @@ export function Settings(props: Props) {
               </div>
 
               <div className="fluent-card">
-                <div className="fluent-card-icon">🌐</div>
+                <div className="fluent-card-icon"><Icon name="globe" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">本地全部项目与备份中心</div>
                   <div className="fluent-card-desc">查看全部 .bcproj 项目工程，或按项目载入历史快照。</div>
@@ -673,7 +900,7 @@ export function Settings(props: Props) {
             <>
               <div className="fluent-group-title" style={{ marginTop: 16 }}>自动更新</div>
               <div className="fluent-card">
-                <div className="fluent-card-icon">🔄</div>
+                <div className="fluent-card-icon"><Icon name="refresh" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">更新中心</div>
                   <div className="fluent-card-desc">
@@ -707,7 +934,7 @@ export function Settings(props: Props) {
               <div className="fluent-group-title">软件信息</div>
               <div className="fluent-about-box">
                 <div className="fluent-about-hero">
-                  <span className="fluent-hero-logo">⚡</span>
+                  <img className="fluent-hero-logo" src={logoUrl} alt="BlockCanvas" />
                   <div className="fluent-hero-text">
                     <div className="fluent-hero-title">BlockCanvas 积木画布</div>
                     <div className="fluent-hero-ver">版本 {appVersion || '…'}</div>
@@ -754,14 +981,14 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
     try {
       const r = await fn();
       if (r.ok) {
-        if (r.path) alert(label + '成功：' + r.path);
+        if (r.path) void appAlert(label + '成功：' + r.path, label + '成功');
       } else if (!r.canceled) {
-        alert(label + '失败：' + (r.error ?? '未知错误'));
+        void appAlert(label + '失败：' + (r.error ?? '未知错误'), label + '失败');
       }
       rescan();
       return r.ok;
     } catch (e) {
-      alert(label + '异常：' + (e as Error).message);
+      void appAlert(label + '异常：' + (e as Error).message, label + '异常');
       return false;
     }
   };
@@ -774,22 +1001,28 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
   };
 
   const onDelete = async (kind: 'plugins' | 'resources', id: string) => {
-    if (confirm(`确定要删除扩展「${id}」吗？`)) {
+    const okDel = await appConfirm({
+      title: '删除扩展',
+      body: `确定要删除扩展「${id}」吗？`,
+      okText: '删除',
+      danger: true
+    });
+    if (okDel) {
       const ok = await run('删除', () => window.bc.deleteExtension(kind, id));
       if (kind === 'plugins' && ok) pluginsChanged();
     }
   };
 
   const onCreatePackage = async () => {
-    if (!makeForm.name.trim()) { alert('请填写资源包名称'); return; }
+    if (!makeForm.name.trim()) { void appAlert('请填写资源包名称', '缺少名称'); return; }
     const r = await window.bc.createResourcePackage({ ...makeForm, id: makeForm.id || undefined });
     if (r.ok) {
-      alert('已生成资源包结构：\n' + (r.path ?? ''));
+      void appAlert('已生成资源包结构：\n' + (r.path ?? ''), '生成成功');
       setCreating(false);
       setMakeForm({ name: '', id: '', version: '1.0.0', author: '', description: '' });
       rescan();
     } else {
-      alert('生成失败：' + (r.error ?? '未知错误'));
+      void appAlert('生成失败：' + (r.error ?? '未知错误'), '生成失败');
     }
   };
 
@@ -874,7 +1107,7 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
       {scan?.resources.map((r) => (
         <div key={r.id} className={"fluent-ext-card" + (!r.enabled ? " is-disabled" : "")}>
           <div className="fluent-ext-main">
-            <span className="fluent-ext-icon">📁</span>
+            <span className="fluent-ext-icon"><Icon name="folder" /></span>
             <div className="fluent-ext-text">
               <div className="fluent-ext-name-row">
                 <span className="fluent-ext-name">{r.name}</span>
@@ -885,7 +1118,7 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
             </div>
             <div className="fluent-ext-actions">
               <button className="btn-secondary btn-mini" onClick={() => toggleExpand(r.id)}>
-                {expanded[r.id] ? '收起模板 ▴' : `查看 ${r.templates.length} 个模板 ▾`}
+                {expanded[r.id] ? <>收起模板 <Icon name="chevronUp" size={13} /></> : <>查看 {r.templates.length} 个模板 <Icon name="chevronDown" size={13} /></>}
               </button>
               <label className="fluent-switch" title={r.enabled ? '已启用（点击禁用）' : '已禁用（点击启用）'}>
                 <input
@@ -906,7 +1139,7 @@ function EmbeddedExtensionsSection(props: { onOpenDir: () => void }) {
               <div className="fluent-ext-sublist">
                 {r.templates.map((t) => (
                   <div key={t.id} className="fluent-ext-subitem">
-                    <span className="fluent-ext-subname">📄 {t.name}</span>
+                    <span className="fluent-ext-subname"><Icon name="file" size={13} /> {t.name}</span>
                     <span className="fluent-ext-subdesc">{t.description || ''}</span>
                   </div>
                 ))}
@@ -1125,7 +1358,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
           className={'tbman-insert-btn' + (insertArea === area ? ' is-open' : '')}
           onClick={() => setInsertArea(insertArea === area ? null : area)}
           title={`往「${DOCK_LABEL[area]}」插入一个按钮：会列出当前不在这个区域的全部按钮（含插件注册的）`}
-        >＋ 插入按钮</button>
+        ><Icon name="plus" size={13} /> 插入按钮</button>
       </div>
       {insertArea === area && (
         <InsertPicker
@@ -1202,7 +1435,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
             {...(side === 'more' ? {} : rowDragProps(it.id))}
             title={side === 'more' ? '收在工具栏右端「⋯」里，点开才可见' : it.title}
           >
-            {side !== 'more' && <span className="tbman-chip-grip">⠿</span>}
+            {side !== 'more' && <span className="tbman-chip-grip"><Icon name="grip" size={12} /></span>}
             {nameOf(it)}
           </span>
         );
@@ -1210,6 +1443,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
       }
       if (done.has(g.id)) continue;
       done.add(g.id);
+      const gi = resolveIconName(g.icon) ?? 'grid';
       out.push(
         <span
           key={g.id}
@@ -1219,7 +1453,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
             return m ? nameOf(m) : id;
           }).join(' / ')}
         >
-          {g.icon ?? '▦'} {g.label}
+          <Icon name={gi} size={13} /> {g.label}
           <span className="tbman-chip-count">{g.itemIds.length}</span>
         </span>
       );
@@ -1237,12 +1471,12 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
         {...rowDragProps(it.id)}
         title="按住拖动可调整按钮的顺序（跨停靠区有效）"
       >
-        <span className="tbman-grip">⠿</span>
+        <span className="tbman-grip"><Icon name="grip" size={13} /></span>
         <span className="tbman-name">{nameOf(it)}</span>
         {it.id.startsWith('plg.') && <span className="tbman-tag">插件</span>}
         {g ? (
           <>
-            <span className="tbman-tag tbman-tag-group" title={`已收进工具组「${g.label}」`}>{g.icon ?? '▦'} 组·{g.label}</span>
+            <span className="tbman-tag tbman-tag-group" title={`已收进工具组「${g.label}」`}><Icon name={resolveIconName(g.icon) ?? 'grid'} size={12} /> 组·{g.label}</span>
             <button className="btn-mini" onClick={() => removeFromGroup(it.id)} title="移出工具组，回到自身停靠区">移出组</button>
           </>
         ) : (
@@ -1274,7 +1508,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
         )}
         {groups.map((g) => (
           <div key={g.id} className="tbman-grp-row">
-            <span className="tbman-grp-ico">{g.icon ?? '▦'}</span>
+            <span className="tbman-grp-ico"><Icon name={resolveIconName(g.icon) ?? 'grid'} size={14} /></span>
             <input
               className="tbman-grp-name"
               value={g.label}
@@ -1299,7 +1533,7 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
                 return (
                   <span key={id} className="tbman-grp-chip">
                     {it ? nameOf(it) : id}
-                    <button className="tbman-grp-chip-x" title="移出该按钮" onClick={() => removeFromGroup(id)}>×</button>
+                    <button className="tbman-grp-chip-x" title="移出该按钮" onClick={() => removeFromGroup(id)}><Icon name="close" size={11} /></button>
                   </span>
                 );
               })}
@@ -1348,8 +1582,13 @@ function ToolbarManagerSection(props: { resetToolbar: () => void }) {
           </span>
           <button
             className="btn-mini"
-            onClick={() => {
-              if (!confirm('确定要恢复默认布局吗？\n\n· 会清空全部「排序 / 停靠区 / 工具组」的自定义记忆；\n· 按钮回到出厂位置与分组（操作组、设备组），\n  收进「⋯更多」的按钮也会重新显示；\n· 此操作立即生效，且没有撤销。')) return;
+            onClick={async () => {
+              const okReset = await appConfirm({
+                title: '恢复默认布局',
+                body: '确定要恢复默认布局吗？\n\n· 会清空全部「排序 / 停靠区 / 工具组」的自定义记忆；\n· 按钮回到出厂位置与分组（操作组、设备组），\n  收进「⋯更多」的按钮也会重新显示；\n· 此操作立即生效，且没有撤销。',
+                okText: '恢复默认'
+              });
+              if (!okReset) return;
               resetToolbar();
             }}
             title="清除排序 / 停靠 / 分组记忆，恢复出厂布局（会二次确认）"

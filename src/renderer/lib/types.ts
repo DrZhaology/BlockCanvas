@@ -267,7 +267,20 @@ export interface SceneGraph {
     resetMargin?: string; // '1' = 导出时加 html,body 边距重置（去掉浏览器默认 8px 白边）；缺省 = 不加
     resetHeadingMargin?: string; // '1' = 重置标题/段落/列表等的浏览器默认外边距（等价于网站的 CSS Reset）；缺省 = 不加
   };
+  // 页面「全局样式」（v0.4.5）：可视化添加任意 CSS 属性，导出/画布都作用于 body。
+  // key = CSS 属性名（kebab-case），value = 值；空值或空串 = 不输出。
+  bodyExtra?: Record<string, string>;
   // 设计变量 / Token（v0.4.0）：项目级统一定义，元素样式里写 var(--bc-xxx) 引用。
   // 导出时在 <style> 最前面生成 :root{...}，脱离本软件同样生效；改一处全站跟着变。
   tokens?: import('./designTokens').TokenEntry[];
+  // 编辑器 UI 状态（v0.4.4）：**随工程文件保存**，但不参与导出、也不触发"未保存"脏标记 ——
+  // 目前只有右侧面板各板块的展开/折叠记忆（按元素的类名/选择器/ID 记）。
+  // 用户要求：这类"每个元素的开关"存在项目文件里，不再存 localStorage。
+  uiState?: {
+    inspectorSec?: Record<string, { identity: boolean; layout: boolean; css: boolean; pseudo: boolean }>;
+    /** 「页面」栏两大板块（body 设置 / 全局样式）的开合记忆 */
+    pageSec?: { body?: boolean; global?: boolean };
+    /** 变量面板各分组的开合记忆（按分组名记） */
+    tokenGroups?: Record<string, boolean>;
+  };
 }

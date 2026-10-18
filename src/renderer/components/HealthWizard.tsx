@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useScene } from '@store/sceneStore';
+import { Icon, type IconName } from './Icon';
 import {
   runHealthCheck, countBySeverity, hasBlocking, countSkippedTables,
   type HealthIssue, type Severity
@@ -14,10 +15,10 @@ import {
 //   走完全部 = 这一页可以放心导出。
 // 导出 HTML 前若存在「严重」问题会先弹出本向导，避免导出一份效果丢失的网页。
 
-const SEV_META: Record<Severity, { icon: string; label: string; cls: string }> = {
-  critical: { icon: '⛔', label: '严重', cls: 'sev-critical' },
-  warn: { icon: '⚠️', label: '提醒', cls: 'sev-warn' },
-  info: { icon: '💡', label: '提示', cls: 'sev-info' }
+const SEV_META: Record<Severity, { icon: IconName; label: string; cls: string }> = {
+  critical: { icon: 'block', label: '严重', cls: 'sev-critical' },
+  warn: { icon: 'warning', label: '提醒', cls: 'sev-warn' },
+  info: { icon: 'lightbulb', label: '提示', cls: 'sev-info' }
 };
 
 interface Props {
@@ -112,7 +113,7 @@ export function HealthWizard(props: Props) {
         {/* —— 头部 —— */}
         <div className="hc-head">
           <div className="hc-head-left">
-            <span className="hc-head-icon">🩺</span>
+            <span className="hc-head-icon"><Icon name="health" size={22} /></span>
             <div>
               <div className="hc-title">导出前体检</div>
               <div className="hc-sub">
@@ -122,7 +123,7 @@ export function HealthWizard(props: Props) {
                 {skippedTables > 0 && (
                   <span
                     className="hc-sub-note"
-                    title={'表格默认不参与体检：一格一个 td/th，正常做表格既不给格子起类名也不写 CSS，参与只会刷出一堆"未命名元素"。\n想把某张表纳入体检：打开表格编辑器 → 右侧「导出前体检」→ 打开开关。'}
+                    title={'表格默认不参与体检；想纳入可在表格编辑器里打开开关。'}
                   >
                     （已跳过 {skippedTables} 张表格）
                   </span>
@@ -130,12 +131,12 @@ export function HealthWizard(props: Props) {
               </div>
             </div>
           </div>
-          <button className="cp-close" onClick={onClose} title="关闭（Esc）">×</button>
+          <button className="cp-close" onClick={onClose} title="关闭（Esc）"><Icon name="close" size={14} /></button>
         </div>
 
         {issues.length === 0 ? (
           <div className="hc-clean">
-            <div className="hc-clean-icon">✅</div>
+            <div className="hc-clean-icon"><Icon name="check" size={30} /></div>
             <div className="hc-clean-title">没有发现任何问题</div>
             <div className="hc-clean-desc">
               所有元素都有名字、没有重复 ID、同名样式也统一。可以放心导出。
@@ -163,7 +164,9 @@ export function HealthWizard(props: Props) {
                       }
                       onClick={() => setStep(i)}
                     >
-                      <span className={'hc-dot ' + meta.cls}>{done.has(it.id) ? '✓' : meta.icon}</span>
+                      <span className={'hc-dot ' + meta.cls}>
+                        {done.has(it.id) ? <Icon name="check" size={12} /> : <Icon name={meta.icon} size={12} />}
+                      </span>
                       <span className="hc-list-text">{it.title}</span>
                     </button>
                   );
@@ -176,7 +179,7 @@ export function HealthWizard(props: Props) {
                   <>
                     <div className="hc-detail-head">
                       <span className={'hc-sev-tag ' + SEV_META[current.severity].cls}>
-                        {SEV_META[current.severity].icon} {SEV_META[current.severity].label}
+                        <Icon name={SEV_META[current.severity].icon} size={13} /> {SEV_META[current.severity].label}
                       </span>
                       <span className="hc-step">第 {safeStep + 1} / {issues.length} 项</span>
                     </div>
@@ -187,7 +190,9 @@ export function HealthWizard(props: Props) {
                       ))}
                     </div>
                     {done.has(current.id) && (
-                      <div className="hc-fixed-badge">✓ 这一项已经处理过了（再扫一次若仍出现，说明需要手动微调）</div>
+                      <div className="hc-fixed-badge">
+                        <Icon name="check" size={13} /> 这一项已经处理过了（再扫一次仍出现，说明需要手动微调）
+                      </div>
                     )}
                   </>
                 )}
@@ -200,16 +205,16 @@ export function HealthWizard(props: Props) {
                 className="btn-mini"
                 disabled={safeStep === 0}
                 onClick={() => setStep(safeStep - 1)}
-              >← 上一项</button>
+              ><Icon name="chevronLeft" size={13} /> 上一项</button>
               <button
                 className="btn-mini"
                 disabled={safeStep >= issues.length - 1}
                 onClick={() => setStep(safeStep + 1)}
-              >下一项 →</button>
+              >下一项 <Icon name="chevronRight" size={13} /></button>
               <span className="hc-foot-spacer" />
               {fixableCount > 0 && (
                 <button className="btn-secondary" onClick={fixAll} title="把所有能自动修的一次性修好（算一步撤销）">
-                  🪄 一键修复全部（{fixableCount} 项）
+                  <Icon name="wand" size={14} /> 一键修复全部（{fixableCount} 项）
                 </button>
               )}
               {current?.fix ? (

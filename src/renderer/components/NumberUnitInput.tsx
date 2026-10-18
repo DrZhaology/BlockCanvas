@@ -27,6 +27,7 @@ interface Props {
 
 export function NumberUnitInput(props: Props) {
   const scene = useScene((s) => s.scene);
+  const tokens = useScene((s) => s.scene.tokens);
   const beginStyleEdit = useScene((s) => s.beginStyleEdit);
   const endStyleEdit = useScene((s) => s.endStyleEdit);
   const updateStyleTransient = useScene((s) => s.updateStyleTransient);
@@ -34,6 +35,8 @@ export function NumberUnitInput(props: Props) {
   const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
   const activeBreakpoint = useScene((s) => s.activeBreakpoint);
   const { elementId, schemaKey, unit: defaultUnit, allowAuto, pseudo } = props;
+  // 设计变量菜单（v0.4.5）：边距 / 尺寸等数值项可直接引用 var(--bc-xxx)
+  const [varOpen, setVarOpen] = useState(false);
 
   const isPseudo = Boolean(pseudo);
   const node = findNode(scene.root, elementId);
@@ -98,6 +101,16 @@ export function NumberUnitInput(props: Props) {
 
   const isAuto = u === 'auto';
   const dragDisabled = isAuto || u === 'custom';
+  const isVarRef = /^\s*var\(\s*--bc-[^)]+\)\s*$/.test(value);
+
+  /** 选用设计变量：值直接写成 var(--bc-xxx)（一条撤销） */
+  const applyVar = (name: string) => {
+    const v = `var(--bc-${name})`;
+    setNum(v);
+    setU('custom');
+    commit(v);
+    setVarOpen(false);
+  };
 
   // —— 滚轮调数值（替代原 ↑↓ 按钮，也替代早先的长按拖动）——
   const numRef = useRef(num);
@@ -166,6 +179,40 @@ export function NumberUnitInput(props: Props) {
           </option>
         ))}
       </select>
+      <div className="num-unit-var-wrap">
+        <button
+          className={'num-unit-var-btn' + (isVarRef || varOpen ? ' active' : '')}
+          onClick={() => setVarOpen((v) => !v)}
+          title={tokens && tokens.length > 0
+            ? '使用设计变量：写入 var(--bc-xxx)，改变量值全站一起变'
+            : '还没有定义变量 —— 到右侧「变量」页签点「＋ 新建变量」'}
+          tabIndex={-1}
+        >var</button>
+        {varOpen && (
+          <>
+            <div className="num-unit-var-backdrop" onClick={() => setVarOpen(false)} />
+            <div className="num-unit-var-menu">
+              {(!tokens || tokens.length === 0) && (
+                <div className="num-unit-var-empty">
+                  还没有变量。到右侧「变量」页签点「＋ 新建变量」后，这里就能直接选用。
+                </div>
+              )}
+              {(tokens ?? []).map((t) => (
+                <button
+                  key={t.name}
+                  className="num-unit-var-item"
+                  onClick={() => applyVar(t.name)}
+                  title={`var(--bc-${t.name}) = ${t.value}`}
+                >
+                  {t.kind === 'color' && <span className="num-unit-var-swatch" style={{ background: t.value }} />}
+                  <span className="num-unit-var-name">--bc-{t.name}</span>
+                  <span className="num-unit-var-val">{t.value}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

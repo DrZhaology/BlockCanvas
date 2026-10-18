@@ -3,6 +3,7 @@ import { SCHEMA, checkApplicability } from '@lib/propertySchema';
 import type { PropertySchema, PropertyCategory } from '@lib/propertySchema';
 import type { ElementType } from '@lib/types';
 import { getPluginProperties } from '@lib/pluginHost';
+import { Icon } from './Icon';
 
 // BlockCanvas · "+ 添加属性"下拉
 // - 按类别分组展示；顶部搜索框支持中英文（中文名 / 英文 key / 类别 / 4 边 key）
@@ -88,27 +89,64 @@ const SEARCH_ALIASES: Record<string, string[]> = {
 
 export function AddPropertyMenu(props: Props) {
   const [open, setOpen] = useState(false);
-  // 关闭时先播出场动画再卸载（0.18s）
+  // 关闭时先播出场动画再卸载（v0.4.4：0.18s → 0.11s，用户反馈关闭"卡一下"）
   const [closing, setClosing] = useState(false);
   const closeTimer = useRef(0);
   const [search, setSearch] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
+  // v0.4.4：触发按钮贴着面板底部时，菜单自动向上展开，并把按钮滚到能看全的位置
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [dropUp, setDropUp] = useState(false);
 
-  const closeMenu = () => {
-    setClosing(true);
+  const closeMenu = (immediate = false) => {
     window.clearTimeout(closeTimer.current);
+    if (immediate) {
+      setClosing(false);
+      setOpen(false);
+      return;
+    }
+    setClosing(true);
     closeTimer.current = window.setTimeout(() => {
       setClosing(false);
       setOpen(false);
-    }, 180);
+    }, 110);
   };
 
-  // 打开菜单：清空搜索并聚焦搜索框
+  // 打开菜单：清空搜索并聚焦搜索框；量一次空间决定向上还是向下，并保证整个菜单可见
   useEffect(() => {
-    if (open) {
-      setSearch('');
-      setTimeout(() => searchRef.current?.focus(), 0);
-    }
+    if (!open) return;
+    setSearch('');
+    setTimeout(() => searchRef.current?.focus(), 0);
+    const id = window.setTimeout(() => {
+      const wrap = wrapRef.current;
+      const menu = menuRef.current;
+      if (!wrap || !menu) return;
+      // 右侧是嵌套滚动：真正能滚的是"内容超出"的那一层（通常是 .panel，不是 .tab-body）
+      const findScroller = (start: HTMLElement | null): HTMLElement | null => {
+        let cur = start?.parentElement ?? null;
+        while (cur) {
+          const oy = getComputedStyle(cur).overflowY;
+          if ((oy === 'auto' || oy === 'scroll') && cur.scrollHeight > cur.clientHeight + 1) return cur;
+          cur = cur.parentElement;
+        }
+        return null;
+      };
+      const scroller = findScroller(wrap);
+      const box = scroller ? scroller.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+      const wr = wrap.getBoundingClientRect();
+      const need = Math.min(menu.scrollHeight + 10, 380);
+      const below = box.bottom - wr.bottom - 8;
+      const above = wr.top - box.top - 8;
+      const up = below < need && above > below;
+      setDropUp(up);
+      if (!up && below < need && scroller) {
+        scroller.scrollBy({ top: need - below + 14, behavior: 'smooth' });
+      } else if (up && above < need && scroller) {
+        scroller.scrollBy({ top: -(need - above + 14), behavior: 'smooth' });
+      }
+    }, 0);
+    return () => window.clearTimeout(id);
   }, [open]);
 
   // Escape 关闭
@@ -202,7 +240,8 @@ export function AddPropertyMenu(props: Props) {
   const addAndClose = (key: string, value?: string) => {
     props.onAdd(key, value);
     setSearch('');
-    closeMenu();
+    // 选中即关（不等动画）：属性行马上出现，避免"点了还挂在那儿"的滞后感
+    closeMenu(true);
   };
 
   const renderItem = (s: PropertySchema) => {
@@ -211,9 +250,12 @@ export function AddPropertyMenu(props: Props) {
       <button
         key={s.key}
         className={"add-prop-item" + (!app.applicable ? " is-disabled" : "")}
-        onClick={() => { if (app.applicable) addAndClose(s.key); }}
-        disabled={!app.applicable}
-        title={!app.applicable ? `暂不可用: ${app.disabledReason}` : s.help ? `${s.label}\n${s.help.content}` : s.label}
+        // v0.4.4 修：以前"当前不适用"的属性是**禁用**的（点了没反应），
+        // 导致 left/right/top/bottom 在 position:static 时根本加不进来（用户反馈）。
+        // 现在改成**可以添加**，只是加完行上标「不生效」并提示原因 —— 用户可以先加属性、
+        // 再把 position 设好，属性立刻生效，不用来回找菜单。
+        onClick={() => addAndClose(s.key)}
+        title={!app.applicable ? `现在不生效：${app.disabledReason}（仍可添加，等条件满足后自动生效）` : s.help ? `${s.label}\n${s.help.content}` : s.label}
       >
         <div className="add-prop-item-left">
           {s.scope ? (
@@ -232,19 +274,19 @@ export function AddPropertyMenu(props: Props) {
   };
 
   return (
-    <div className="add-prop-wrap">
+    <div className="add-prop-wrap" ref={wrapRef}>
       <button
         className="add-prop-trigger"
         onClick={() => setOpen(!open)}
         disabled={baseCandidates.length === 0 && !open}
         title="添加 CSS 样式属性"
       >
-        + 添加属性 {open ? '▴' : '▾'}
+        <Icon name="plus" size={13} /> 添加属性 <Icon name={open ? 'chevronUp' : 'chevronDown'} size={12} />
       </button>
       {open && (
         <>
-          <div className="add-prop-backdrop" onClick={closeMenu} />
-          <div className={'add-prop-menu' + (closing ? ' is-closing' : '')}>
+          <div className="add-prop-backdrop" onClick={() => closeMenu()} />
+          <div className={'add-prop-menu' + (closing ? ' is-closing' : '') + (dropUp ? ' drop-up' : '')} ref={menuRef}>
             <div className="add-prop-search">
               <input
                 ref={searchRef}
@@ -254,7 +296,7 @@ export function AddPropertyMenu(props: Props) {
                 placeholder="搜索属性：中文 / CSS 名（如：过渡、圆角、border、wrap）"
               />
               {search && (
-                <button className="add-prop-search-clear" onClick={() => { setSearch(''); searchRef.current?.focus(); }}>×</button>
+                <button className="add-prop-search-clear" onClick={() => { setSearch(''); searchRef.current?.focus(); }}><Icon name="close" size={12} /></button>
               )}
             </div>
             <div className="add-prop-scroll">

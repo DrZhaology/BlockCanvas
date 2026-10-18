@@ -1,0 +1,740 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import logoUrl from '@renderer/assets/logo.svg';
+import { readPersisted, writePersisted } from '@lib/usePersisted';
+import { Icon } from './Icon';
+import { GradientEditor } from './GradientEditor';
+import { DOC_INDEX, searchDocs, type DocHit } from '@lib/docSearch';
+import { useTabStore } from '@store/tabStore';
+import { showToast } from '@lib/toast';
+import { withViewTransition } from '@lib/viewTransition';
+import type { ProjectFileInfo } from '../global';
+
+// ============================================================================
+// BlockCanvas · 首页
+// ----------------------------------------------------------------------------
+// 关掉所有项目标签后进入这里 —— 做成浏览器"新标签页"的样子：
+//   · 组件统一偏上：Logo / 标题 / 大搜索框 / 快捷入口 / 最近项目
+//   · 搜索框同时搜「本地工程」和「三份内置文档」，回车或点击直达
+//   · 右上角只有一枚 SVG 齿轮，点开是背景设置
+//   · 背景 = 预设 / 渐变（复用画布同款渐变编辑器）/ 图片 / 视频，**改动实时生效**
+//   · 文字颜色按背景亮度自动切换（视频每 1.8s 采样一次），深色壁纸也看得清
+//   · 背景是"软件外观偏好"，存 localStorage，不进工程文件
+// ============================================================================
+
+const BG_KEY = 'bc-empty-home-bg';
+const SAVED_KEY = 'bc-empty-home-saved';
+
+type BgSpec =
+  | { kind: 'preset'; value: string }
+  | { kind: 'gradient'; css: string }
+  | { kind: 'image'; src: string; dim: number; blur: number }
+  | { kind: 'video'; src: string; dim: number; blur: number };
+
+interface SavedBg { id: string; name: string; spec: BgSpec }
+
+const BG_PRESETS: { label: string; value: string }[] = [
+  { label: '晴空', value: 'linear-gradient(160deg, #eaf3ff 0%, #f4f9ff 55%, #ffffff 100%)' },
+  { label: '晨雾', value: 'linear-gradient(160deg, #eef4f6 0%, #f7fbfc 55%, #ffffff 100%)' },
+  { label: '暖阳', value: 'linear-gradient(160deg, #fdf3e7 0%, #fff8ee 55%, #ffffff 100%)' },
+  { label: '薄荷', value: 'linear-gradient(160deg, #e9f8ef 0%, #f4fdf8 55%, #ffffff 100%)' },
+  { label: '薰衣草', value: 'linear-gradient(160deg, #f1ecfb 0%, #f9f6ff 55%, #ffffff 100%)' },
+  { label: '极简白', value: '#ffffff' },
+  { label: '浅灰', value: '#f3f5f8' },
+  { label: '米色', value: '#faf6ef' }
+];
+
+const DEFAULT_BG: BgSpec = { kind: 'preset', value: BG_PRESETS[0].value };
+const DEFAULT_GRADIENT = 'linear-gradient(160deg, #dbeafe 0%, #ffffff 100%)';
+
+/** 本地路径 → bc-img://（与画布同一套协议；相对路径由主进程按 data / app 目录解析） */
+function mediaSrc(src: string): string {
+  const s = (src || '').trim();
+  if (!s) return '';
+  if (/^(https?:|data:|blob:|bc-img:)/i.test(s)) return s;
+  if (/^file:\/\//i.test(s)) {
+    const p = decodeURIComponent(s.replace(/^file:\/\//i, '')).replace(/^\//, '');
+    return 'bc-img://file/' + encodeURIComponent(p);
+  }
+  return 'bc-img://file/' + encodeURIComponent(s);
+}
+
+/** 需要走自定义协议（本地文件）才加 crossorigin，避免把普通 https 图片/视频搞挂 */
+function isLocalMedia(src: string): boolean {
+  const s = (src || '').trim();
+  return !/^https?:\/\//i.test(s) && !/^(data:|blob:)/i.test(s);
+}
+
+function bgCss(spec: BgSpec): string {
+  if (spec.kind === 'preset') return spec.value;
+  if (spec.kind === 'gradient') return spec.css || DEFAULT_GRADIENT;
+  return 'var(--bg)';
+}
+
+function loadBg(): BgSpec {
+  const raw = readPersisted<unknown>(BG_KEY, null);
+  if (!raw) return DEFAULT_BG;
+  if (typeof raw === 'string') return { kind: 'preset', value: raw }; // 旧版只存一个 CSS 值
+  if (typeof raw === 'object' && raw && 'kind' in (raw as Record<string, unknown>)) {
+    const s = raw as Record<string, any>;
+    // 旧版渐变 {from,to,angle} → 新的 css 字符串
+    if (s.kind === 'gradient' && !s.css && s.from && s.to) {
+      return { kind: 'gradient', css: `linear-gradient(${s.angle ?? 160}deg, ${s.from} 0%, ${s.to} 100%)` };
+    }
+    if (s.kind === 'image' || s.kind === 'video') {
+      return { kind: s.kind, src: String(s.src ?? ''), dim: Number(s.dim) || 0, blur: Number(s.blur) || 0 };
+    }
+    return s as BgSpec;
+  }
+  return DEFAULT_BG;
+}
+
+function loadSaved(): SavedBg[] {
+  const raw = readPersisted<unknown>(SAVED_KEY, []);
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((x): x is SavedBg =>
+    !!x && typeof x === 'object' && typeof (x as SavedBg).id === 'string' && typeof (x as SavedBg).name === 'string');
+}
+
+function normPath(p: string) {
+  return String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
+}
+
+/** 从 CSS 颜色（hex / rgb）里估一个平均亮度（0~1），用于自动切换文字颜色 */
+function cssLuminance(css: string): number | null {
+  const lums: number[] = [];
+  const toLum = (r: number, g: number, b: number) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  for (const m of css.matchAll(/#([0-9a-f]{3}|[0-9a-f]{6})\b/gi)) {
+    let h = m[1];
+    if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    lums.push(toLum(r, g, b));
+  }
+  for (const m of css.matchAll(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/gi)) {
+    lums.push(toLum(Number(m[1]), Number(m[2]), Number(m[3])));
+  }
+  if (lums.length === 0) return null;
+  return lums.reduce((a, b) => a + b, 0) / lums.length;
+}
+
+/** 把一帧画面缩到 24×24 取平均亮度；取不到（跨域/未加载）返回 null */
+function frameLuminance(source: CanvasImageSource): number | null {
+  try {
+    const c = document.createElement('canvas');
+    c.width = 24;
+    c.height = 24;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    ctx.drawImage(source, 0, 0, 24, 24);
+    const d = ctx.getImageData(0, 0, 24, 24).data;
+    let sum = 0;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const a = d[i + 3] / 255;
+      if (a <= 0) continue;
+      sum += ((0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255) * a;
+      n += 1;
+    }
+    return n ? sum / n : null;
+  } catch {
+    return null; // canvas 被跨域污染
+  }
+}
+
+type PanelTab = 'preset' | 'gradient' | 'image' | 'video';
+
+export function EmptyHome(props: {
+  onOpen: () => void;
+  onNew: () => void;
+  onProjects: () => void;
+}) {
+  const [bg, setBg] = useState<BgSpec>(loadBg);
+  const [saved, setSaved] = useState<SavedBg[]>(loadSaved);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [tab, setTab] = useState<PanelTab>('preset');
+  const [leaving, setLeaving] = useState(false);
+  // 深色背景 → 文字/玻璃控件自动转白
+  const [onDark, setOnDark] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // 图片 / 视频的草稿参数（输入即生效，所以直接跟 bg 同步）
+  const [imgSrc, setImgSrc] = useState(() => (bg.kind === 'image' ? bg.src : ''));
+  const [vidSrc, setVidSrc] = useState(() => (bg.kind === 'video' ? bg.src : ''));
+  const [dim, setDim] = useState(() => (bg.kind === 'image' || bg.kind === 'video' ? bg.dim : 12));
+  const [blur, setBlur] = useState(() => (bg.kind === 'image' || bg.kind === 'video' ? bg.blur : 0));
+  const [gradCss, setGradCss] = useState(() => (bg.kind === 'gradient' ? bg.css : DEFAULT_GRADIENT));
+  const [saveName, setSaveName] = useState('');
+
+  // —— 搜索 ——
+  const [projects, setProjects] = useState<ProjectFileInfo[]>([]);
+  const [query, setQuery] = useState('');
+  const [focused, setFocused] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    window.bc.listProjects().then(setProjects).catch(() => setProjects([]));
+  }, []);
+
+  // 离开首页：先淡出内容，再执行动作（背景保持不动，避免"窗口全白"）
+  const leave = (action: () => void) => {
+    if (leaving) return;
+    setLeaving(true);
+    window.setTimeout(action, 150);
+  };
+
+  // 「打开工程」会弹原生文件对话框：取消时页面还停在首页，但已进入 is-leaving。
+  // 窗口重新获得焦点（对话框关闭）时恢复可交互。
+  useEffect(() => {
+    const onFocus = () => setLeaving(false);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
+  const applyBg = (spec: BgSpec) => {
+    setBg(spec);
+    writePersisted(BG_KEY, spec);
+  };
+
+  // 面板点外部 / Esc 关闭
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setPanelOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPanelOpen(false); };
+    document.addEventListener('mousedown', onDown, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [panelOpen]);
+
+  // 搜索框点外部 → 收起结果
+  useEffect(() => {
+    if (!focused) return;
+    const onDown = (e: MouseEvent) => {
+      if (searchRef.current?.contains(e.target as Node)) return;
+      setFocused(false);
+    };
+    document.addEventListener('mousedown', onDown, true);
+    return () => document.removeEventListener('mousedown', onDown, true);
+  }, [focused]);
+
+  // —— 视频背景：窗口不可见 / 首页卸载时暂停，避免后台空转 ——
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (bg.kind !== 'video') return;
+    const onVis = () => {
+      const v = videoRef.current;
+      if (!v) return;
+      if (document.hidden) v.pause();
+      else void v.play().catch(() => { /* 自动播放被拦时保持静帧 */ });
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [bg.kind]);
+
+  // —— 文字颜色自动反色 ——
+  // 预设 / 渐变：直接解析颜色算亮度
+  useEffect(() => {
+    if (bg.kind !== 'preset' && bg.kind !== 'gradient') return;
+    const lum = cssLuminance(bgCss(bg));
+    if (lum !== null) setOnDark(lum < 0.5);
+  }, [bg]);
+  // 图片：加载后采样一次
+  useEffect(() => {
+    if (bg.kind !== 'image' || !bg.src.trim()) return;
+    let alive = true;
+    const img = new Image();
+    if (isLocalMedia(bg.src)) img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (!alive) return;
+      const lum = frameLuminance(img);
+      if (lum !== null) setOnDark(lum < 0.5);
+    };
+    img.onerror = () => { if (alive) setOnDark(true); };
+    img.src = mediaSrc(bg.src);
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bg.kind === 'image' ? bg.src : '', bg.kind]);
+  // 视频：每 1.8s 采一帧（成本很低：24×24 缩放）
+  useEffect(() => {
+    if (bg.kind !== 'video') return;
+    const tick = () => {
+      const v = videoRef.current;
+      if (!v || v.readyState < 2) return;
+      const lum = frameLuminance(v);
+      if (lum !== null) setOnDark(lum < 0.5);
+    };
+    const t = window.setInterval(tick, 1800);
+    window.setTimeout(tick, 600);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bg.kind === 'video' ? bg.src : '', bg.kind]);
+
+  // —— 搜索结果 ——
+  const q = query.trim();
+  const projectHits = useMemo(() => {
+    if (!q) return [];
+    const k = q.toLowerCase();
+    return projects
+      .filter((p) => (p.name || '').toLowerCase().includes(k) || (p.fileName || '').toLowerCase().includes(k))
+      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+      .slice(0, 6);
+  }, [projects, q]);
+  const docHits = useMemo<DocHit[]>(() => (q ? searchDocs(DOC_INDEX, q, 8) : []), [q]);
+
+  const recent = useMemo(
+    () => [...projects].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0, 6),
+    [projects]
+  );
+
+  const totalHits = projectHits.length + docHits.length;
+  useEffect(() => { setActiveIdx(0); }, [q]);
+
+  const openProject = async (p: ProjectFileInfo) => {
+    try {
+      const res = await window.bc.openProjectFile(p.filePath);
+      if (!res.ok || !res.project?.scene) {
+        showToast('打开失败：' + (res.error || '文件可能已损坏'), 'err');
+        return;
+      }
+      const st = useTabStore.getState();
+      const existing = st.tabs.find((t) => t.filePath && normPath(t.filePath) === normPath(p.filePath));
+      if (existing) {
+        st.switchTab(existing.id);
+        showToast(`「${existing.name}」已经打开着，已为你切换过去`);
+      } else {
+        withViewTransition(() => st.newTab(p.name, res.project.scene, p.filePath));
+      }
+      setFocused(false);
+    } catch (e) {
+      showToast('打开失败：' + String(e), 'err');
+    }
+  };
+
+  const openDocHit = (h: DocHit) => {
+    window.dispatchEvent(new CustomEvent('bc:open-help-doc', { detail: { doc: h.doc, id: h.id } }));
+    setFocused(false);
+  };
+
+  const activate = (idx: number) => {
+    if (idx < projectHits.length) void openProject(projectHits[idx]);
+    else {
+      const h = docHits[idx - projectHits.length];
+      if (h) openDocHit(h);
+    }
+  };
+
+  const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIdx((i) => (totalHits ? (i + 1) % totalHits : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIdx((i) => (totalHits ? (i - 1 + totalHits) % totalHits : 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (totalHits) activate(activeIdx);
+    } else if (e.key === 'Escape') {
+      setQuery('');
+      setFocused(false);
+      inputRef.current?.blur();
+    }
+  };
+
+  // —— 背景面板动作 ——
+  const pickFile = async (kind: 'image' | 'video') => {
+    try {
+      const res = await window.bc.pickMediaSrc(kind);
+      if (!res?.ok || !res.path) return;
+      if (kind === 'image') {
+        setImgSrc(res.path);
+        applyBg({ kind: 'image', src: res.path, dim, blur });
+        setTab('image');
+      } else {
+        setVidSrc(res.path);
+        applyBg({ kind: 'video', src: res.path, dim, blur });
+        setTab('video');
+      }
+    } catch {
+      showToast('选择文件失败', 'err');
+    }
+  };
+
+  const setImage = (src: string, d = dim, b = blur) => {
+    setImgSrc(src);
+    if (src.trim()) applyBg({ kind: 'image', src: src.trim(), dim: d, blur: b });
+  };
+  const setVideo = (src: string, d = dim, b = blur) => {
+    setVidSrc(src);
+    if (src.trim()) applyBg({ kind: 'video', src: src.trim(), dim: d, blur: b });
+  };
+
+  const saveCurrent = () => {
+    const name = saveName.trim() || `我的背景 ${saved.length + 1}`;
+    const item: SavedBg = { id: 'bg-' + Date.now().toString(36), name, spec: bg };
+    const next = [item, ...saved].slice(0, 24);
+    setSaved(next);
+    writePersisted(SAVED_KEY, next);
+    setSaveName('');
+    showToast(`已保存背景「${name}」`);
+  };
+
+  const removeSaved = (id: string) => {
+    const next = saved.filter((s) => s.id !== id);
+    setSaved(next);
+    writePersisted(SAVED_KEY, next);
+  };
+
+  const isMedia = bg.kind === 'image' || bg.kind === 'video';
+  const media = bg.kind === 'image' ? bg.src : bg.kind === 'video' ? bg.src : '';
+  const mediaDim = bg.kind === 'image' || bg.kind === 'video' ? bg.dim : 0;
+  const mediaBlur = bg.kind === 'image' || bg.kind === 'video' ? bg.blur : 0;
+
+  return (
+    <div
+      className={'empty-home' + (leaving ? ' is-leaving' : '') + (onDark ? ' is-dark-bg' : '')}
+      style={{ background: bgCss(bg) }}
+    >
+      {bg.kind === 'image' && (
+        <div
+          className="eh-media"
+          style={{
+            backgroundImage: `url("${mediaSrc(media)}")`,
+            filter: mediaBlur > 0 ? `blur(${mediaBlur}px)` : undefined,
+            transform: mediaBlur > 0 ? `scale(${(1 + mediaBlur / 400).toFixed(3)})` : undefined
+          }}
+        />
+      )}
+      {bg.kind === 'video' && (
+        <video
+          ref={videoRef}
+          className="eh-media eh-video"
+          src={mediaSrc(media)}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="auto"
+          disablePictureInPicture
+          crossOrigin={isLocalMedia(media) ? 'anonymous' : undefined}
+          style={{
+            filter: mediaBlur > 0 ? `blur(${mediaBlur}px)` : undefined,
+            transform: mediaBlur > 0 ? `scale(${(1 + mediaBlur / 400).toFixed(3)})` : undefined
+          }}
+        />
+      )}
+      {isMedia && <div className="eh-dim" style={{ opacity: mediaDim / 100 }} />}
+
+      {/* 右上角：只有一枚齿轮，不写文字 */}
+      <div className="eh-settings" ref={panelRef}>
+        <button
+          className={'eh-gear' + (panelOpen ? ' is-open' : '')}
+          onClick={() => setPanelOpen((v) => !v)}
+          title="页面设置"
+          aria-label="页面设置"
+        >
+          <Icon name="gear" size={16} />
+        </button>
+        {panelOpen && (
+          <div className="eh-panel">
+            <div className="eh-panel-head">
+              <span>页面设置</span>
+              <button className="eh-panel-x" onClick={() => setPanelOpen(false)} title="关闭">
+                <Icon name="close" size={13} />
+              </button>
+            </div>
+            <div className="eh-tabs">
+              {([
+                ['preset', '预设', 'palette'],
+                ['gradient', '渐变', 'gradient'],
+                ['image', '图片', 'image'],
+                ['video', '视频', 'video']
+              ] as const).map(([id, label, icon]) => (
+                <button
+                  key={id}
+                  className={'eh-tab' + (tab === id ? ' is-active' : '')}
+                  onClick={() => setTab(id)}
+                >
+                  <Icon name={icon} size={13} /> {label}
+                </button>
+              ))}
+            </div>
+
+            {tab === 'preset' && (
+              <>
+                <div className="eh-bggrid">
+                  {BG_PRESETS.map((p) => (
+                    <button
+                      key={p.value}
+                      className={'eh-swatch' + (bg.kind === 'preset' && bg.value === p.value ? ' is-active' : '')}
+                      style={{ background: p.value }}
+                      title={p.label}
+                      onClick={() => applyBg({ kind: 'preset', value: p.value })}
+                    />
+                  ))}
+                  <label className="eh-swatch eh-swatch-color" title="自定义纯色">
+                    <Icon name="plus" size={14} />
+                    <input
+                      type="color"
+                      value={bg.kind === 'preset' && /^#[0-9a-f]{6}$/i.test(bg.value) ? bg.value : '#f4f7fb'}
+                      onChange={(e) => applyBg({ kind: 'preset', value: e.target.value })}
+                    />
+                  </label>
+                </div>
+                {saved.length > 0 && (
+                  <>
+                    <div className="eh-sub">我的背景</div>
+                    <div className="eh-bggrid">
+                      {saved.map((s) => (
+                        <span
+                          key={s.id}
+                          className="eh-swatch eh-saved"
+                          title={s.name}
+                          style={s.spec.kind === 'preset' || s.spec.kind === 'gradient'
+                            ? { background: bgCss(s.spec) }
+                            : undefined}
+                          onClick={() => applyBg(s.spec)}
+                        >
+                          {s.spec.kind === 'image' && (
+                            <i className="eh-saved-media" style={{ backgroundImage: `url("${mediaSrc(s.spec.src)}")` }} />
+                          )}
+                          {s.spec.kind === 'video' && (
+                            <>
+                              <video className="eh-saved-media" src={mediaSrc(s.spec.src)} muted preload="metadata" />
+                              <span className="eh-saved-play"><Icon name="play" size={9} /></span>
+                            </>
+                          )}
+                          <button
+                            className="eh-saved-x"
+                            title="删除这个背景"
+                            onClick={(e) => { e.stopPropagation(); removeSaved(s.id); }}
+                          >
+                            <Icon name="close" size={10} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+
+            {tab === 'gradient' && (
+              <div className="eh-gradient-wrap">
+                <GradientEditor
+                  value={bg.kind === 'gradient' ? bg.css : gradCss}
+                  onChange={(css) => {
+                    setGradCss(css);
+                    applyBg({ kind: 'gradient', css });
+                  }}
+                  onCommit={() => { /* 首页没有撤销栈，实时生效即可 */ }}
+                  onRemove={() => applyBg(DEFAULT_BG)}
+                  scope="background"
+                />
+                <div className="eh-save-row">
+                  <input
+                    className="eh-input"
+                    placeholder="给这个背景起个名字"
+                    value={saveName}
+                    onChange={(e) => setSaveName(e.target.value)}
+                  />
+                  <button className="eh-mini" onClick={saveCurrent}>保存</button>
+                </div>
+              </div>
+            )}
+
+            {tab === 'image' && (
+              <>
+                <div className="eh-row">
+                  <input
+                    className="eh-input"
+                    placeholder="相对路径 / 绝对路径 / https 链接"
+                    value={imgSrc}
+                    onChange={(e) => setImage(e.target.value)}
+                  />
+                  <button className="eh-mini" onClick={() => pickFile('image')}>选择</button>
+                </div>
+                <div className="eh-row">
+                  <span className="eh-label">遮罩</span>
+                  <input
+                    className="eh-range"
+                    type="range"
+                    min={0}
+                    max={80}
+                    value={dim}
+                    onChange={(e) => { const v = Number(e.target.value); setDim(v); setImage(imgSrc, v, blur); }}
+                  />
+                  <span className="eh-val">{dim}%</span>
+                </div>
+                <div className="eh-row">
+                  <span className="eh-label">模糊</span>
+                  <input
+                    className="eh-range"
+                    type="range"
+                    min={0}
+                    max={24}
+                    value={blur}
+                    onChange={(e) => { const v = Number(e.target.value); setBlur(v); setImage(imgSrc, dim, v); }}
+                  />
+                  <span className="eh-val">{blur}px</span>
+                </div>
+                <div className="eh-save-row">
+                  <input className="eh-input" placeholder="给这个背景起个名字" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
+                  <button className="eh-mini" onClick={saveCurrent}>保存</button>
+                </div>
+                <div className="eh-panel-foot">填了路径 / 选了文件就立即生效，不需要再点「应用」。</div>
+              </>
+            )}
+
+            {tab === 'video' && (
+              <>
+                <div className="eh-row">
+                  <input
+                    className="eh-input"
+                    placeholder="视频路径 / https 链接（mp4 / webm / ogv）"
+                    value={vidSrc}
+                    onChange={(e) => setVideo(e.target.value)}
+                  />
+                  <button className="eh-mini" onClick={() => pickFile('video')}>选择</button>
+                </div>
+                <div className="eh-row">
+                  <span className="eh-label">遮罩</span>
+                  <input
+                    className="eh-range"
+                    type="range"
+                    min={0}
+                    max={80}
+                    value={dim}
+                    onChange={(e) => { const v = Number(e.target.value); setDim(v); setVideo(vidSrc, v, blur); }}
+                  />
+                  <span className="eh-val">{dim}%</span>
+                </div>
+                <div className="eh-row">
+                  <span className="eh-label">模糊</span>
+                  <input
+                    className="eh-range"
+                    type="range"
+                    min={0}
+                    max={24}
+                    value={blur}
+                    onChange={(e) => { const v = Number(e.target.value); setBlur(v); setVideo(vidSrc, dim, v); }}
+                  />
+                  <span className="eh-val">{blur}px</span>
+                </div>
+                <div className="eh-save-row">
+                  <input className="eh-input" placeholder="给这个背景起个名字" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
+                  <button className="eh-mini" onClick={saveCurrent}>保存</button>
+                </div>
+                <div className="eh-panel-foot">支持 mp4 / webm / ogv；窗口不可见时自动暂停，不占显卡。</div>
+              </>
+            )}
+
+            <div className="eh-panel-foot">只影响首页，不会进入工程导出</div>
+          </div>
+        )}
+      </div>
+
+      {/* 中央偏上：Logo / 标题 / 搜索 / 快捷入口 / 最近项目 */}
+      <div className="eh-center">
+        <img className="eh-logo" src={logoUrl} alt="BlockCanvas" draggable={false} />
+        <div className="eh-title">BlockCanvas</div>
+        <div className="eh-sub">像搭积木一样做网页</div>
+
+        <div className="eh-search" ref={searchRef}>
+          <Icon name="search" size={17} className="eh-search-ico" />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setFocused(true); }}
+            onFocus={() => setFocused(true)}
+            onKeyDown={onSearchKey}
+            placeholder="搜索项目、使用手册、开发历程…"
+            spellCheck={false}
+          />
+          {q && (
+            <button className="eh-search-clear" onClick={() => { setQuery(''); inputRef.current?.focus(); }} title="清空">
+              <Icon name="close" size={13} />
+            </button>
+          )}
+
+          {focused && q && (
+            <div className="eh-results">
+              {totalHits === 0 && <div className="eh-empty-hit">没有找到「{q}」相关内容</div>}
+              {projectHits.length > 0 && <div className="eh-hit-group">项目</div>}
+              {projectHits.map((p, i) => (
+                <button
+                  key={p.filePath}
+                  className={'eh-hit' + (activeIdx === i ? ' is-active' : '')}
+                  onMouseEnter={() => setActiveIdx(i)}
+                  onClick={() => void openProject(p)}
+                >
+                  <Icon name="file" size={14} />
+                  <span className="eh-hit-main">
+                    <span className="eh-hit-title">{p.name}</span>
+                    <span className="eh-hit-sub">{p.fileName}</span>
+                  </span>
+                  <span className="eh-hit-meta">{String(p.updatedAt).slice(0, 10)}</span>
+                </button>
+              ))}
+              {docHits.length > 0 && <div className="eh-hit-group">文档</div>}
+              {docHits.map((h, i) => {
+                const idx = projectHits.length + i;
+                return (
+                  <button
+                    key={h.doc + h.id}
+                    className={'eh-hit' + (activeIdx === idx ? ' is-active' : '')}
+                    onMouseEnter={() => setActiveIdx(idx)}
+                    onClick={() => openDocHit(h)}
+                  >
+                    <Icon name={h.doc === 'manual' ? 'book' : h.doc === 'history' ? 'history' : 'home'} size={14} />
+                    <span className="eh-hit-main">
+                      <span className="eh-hit-title">{h.title}</span>
+                      <span className="eh-hit-sub">{h.snippet}</span>
+                    </span>
+                    <span className="eh-hit-meta">{h.docLabel}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="eh-actions">
+          <button className="eh-btn is-primary" onClick={() => props.onOpen()}>
+            <Icon name="folderOpen" size={17} />
+            <span>打开工程</span>
+          </button>
+          <button className="eh-btn" onClick={() => leave(props.onNew)}>
+            <Icon name="plus" size={17} />
+            <span>新建项目</span>
+          </button>
+          <button className="eh-btn" onClick={() => leave(props.onProjects)}>
+            <Icon name="folderTree" size={17} />
+            <span>全部项目</span>
+          </button>
+        </div>
+
+        {recent.length > 0 && (
+          <div className="eh-recent">
+            <div className="eh-recent-title">最近打开</div>
+            <div className="eh-recent-grid">
+              {recent.map((p) => (
+                <button key={p.filePath} className="eh-card" onClick={() => void openProject(p)} title={p.filePath}>
+                  <span className="eh-card-ico"><Icon name="file" size={16} /></span>
+                  <span className="eh-card-name">{p.name}</span>
+                  <span className="eh-card-sub">{String(p.updatedAt).slice(0, 10)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

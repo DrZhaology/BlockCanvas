@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useScene, findNode } from '@store/sceneStore';
 import { applyUnit, CSS_UNITS, UNIT_LABELS } from '@lib/propertySchema';
+import { useWheelAdjust } from '@lib/wheelAdjust';
 
 // BlockCanvas · Box4 输入组件（4 个输入框，分别填 上 右 下 左）
 // 目前用于 border-width；margin/padding/border-radius 已改用 TrblInput 简写输入
@@ -93,13 +94,39 @@ function Box4Cell(props: {
     if (!editingRef.current) setV(props.current);
   }, [props.current]);
 
+  // v0.4.4 修：margin/padding 四个小框以前没有接滚轮调值 —— 滚轮落到外层容器上，
+  // 页面跟着滚、输入框失焦，看起来就是"数字消失"。现在每个小框都能滚轮调（Shift ×10）。
+  const numOnly = (raw: string) => {
+    const m = /^\s*(-?\d*\.?\d+)/.exec(raw);
+    return m ? parseFloat(m[1]) : 0;
+  };
+  const wheel = useWheelAdjust({
+    getBase: () => numOnly(props.current),
+    precision: /\.\d/.test(props.current) ? 2 : 0,
+    onStart: () => { editingRef.current = true; props.beginStyleEdit(); },
+    onPreview: (n) => {
+      const next = String(n);
+      setV(next);
+      props.updateStyleTransient(props.elementId, { [props.keyName]: applyUnit(next, props.unit) });
+    },
+    onCommit: (n) => {
+      const next = String(n);
+      setV(next);
+      props.updateStyle(props.elementId, { [props.keyName]: applyUnit(next, props.unit) });
+      props.endStyleEdit();
+      editingRef.current = false;
+    }
+  });
+
   return (
     <div className="box4-cell">
       <span className="box4-label">{props.label}</span>
       <input
+        ref={wheel.ref}
         type="text"
         value={v}
         placeholder={props.fallback}
+        title="聚焦后滚动滚轮调数值（Shift ×10）；也可以直接输入"
         onFocus={() => {
           editingRef.current = true;
           props.beginStyleEdit();
@@ -110,6 +137,7 @@ function Box4Cell(props: {
           props.updateStyleTransient(props.elementId, { [props.keyName]: applyUnit(next, props.unit) });
         }}
         onBlur={() => {
+          wheel.finish();
           editingRef.current = false;
           props.updateStyle(props.elementId, { [props.keyName]: applyUnit(v, props.unit) });
           props.endStyleEdit();

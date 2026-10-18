@@ -100,6 +100,26 @@ export function zipCreate(entries: ZipEntry[]): Buffer {
 
 // ============ 读 zip ============
 export function zipList(buf: Buffer): ZipEntry[] {
+  const metas = zipEntriesMeta(buf);
+  return metas.map((m) => ({ name: m.name, data: readEntryData(buf, m) }));
+}
+
+export interface ZipEntryMeta {
+  name: string;
+  method: number;
+  crc: number;
+  csize: number;
+  usize: number;
+  /** 本地头偏移 */
+  local: number;
+}
+
+/**
+ * 只解析**中央目录**，不解压任何数据。
+ * 用途：ZIP 容器格式里"只想知道里面有什么 / 只想读 manifest.json"时，
+ * 不必把整个工程解压出来（这是 ZIP 容器相对纯 JSON 的关键优势之一）。
+ */
+export function zipEntriesMeta(buf: Buffer): ZipEntryMeta[] {
   let eocd = -1;
   for (let i = buf.length - 22; i >= 0; i--) {
     if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
@@ -108,7 +128,7 @@ export function zipList(buf: Buffer): ZipEntry[] {
 
   const count = buf.readUInt16LE(eocd + 10);
   const cdStart = buf.readUInt32LE(eocd + 16);
-  const entries: ZipEntry[] = [];
+  const out: ZipEntryMeta[] = [];
   let p = cdStart;
 
   for (let i = 0; i < count; i++) {
@@ -118,29 +138,55 @@ export function zipList(buf: Buffer): ZipEntry[] {
     const method = buf.readUInt16LE(p + 10);
     const crc = buf.readUInt32LE(p + 16);
     const csize = buf.readUInt32LE(p + 20);
+    const usize = buf.readUInt32LE(p + 24);
     const nameLen = buf.readUInt16LE(p + 28);
     const extraLen = buf.readUInt16LE(p + 30);
     const commentLen = buf.readUInt16LE(p + 32);
     const local = buf.readUInt32LE(p + 42);
     const name = buf.slice(p + 46, p + 46 + nameLen).toString('utf8');
 
-    if (local + 30 > buf.length || buf.readUInt32LE(local) !== 0x04034b50) {
-      throw new Error('zip 本地头损坏');
-    }
-    const lNameLen = buf.readUInt16LE(local + 26);
-    const lExtraLen = buf.readUInt16LE(local + 28);
-    const dataStart = local + 30 + lNameLen + lExtraLen;
-    const raw = buf.subarray(dataStart, dataStart + csize);
-
-    let data: Buffer;
-    if (method === 0) data = Buffer.from(raw);
-    else if (method === 8) data = inflateRawSync(raw);
-    else throw new Error('不支持的压缩方式: ' + method);
-
-    if (crc32(data) !== crc) throw new Error('zip 校验失败: ' + name);
-
-    entries.push({ name, data });
+    out.push({ name, method, crc, csize, usize, local });
     p = p + 46 + nameLen + extraLen + commentLen;
   }
-  return entries;
+  return out;
+}
+
+/** 按中央目录记录解压单个条目（带 CRC 校验） */
+function readEntryData(buf: Buffer, m: ZipEntryMeta): Buffer {
+  const { local } = m;
+  if (local + 30 > buf.length || buf.readUInt32LE(local) !== 0x04034b50) {
+    throw new Error('zip 本地头损坏: ' + m.name);
+  }
+  const lNameLen = buf.readUInt16LE(local + 26);
+  const lExtraLen = buf.readUInt16LE(local + 28);
+  const dataStart = local + 30 + lNameLen + lExtraLen;
+  const raw = buf.subarray(dataStart, dataStart + m.csize);
+
+  let data: Buffer;
+  if (m.method === 0) data = Buffer.from(raw);
+  else if (m.method === 8) data = inflateRawSync(raw);
+  else throw new Error('不支持的压缩方式: ' + m.method);
+
+  if (crc32(data) !== m.crc) throw new Error('zip 校验失败: ' + m.name);
+  return data;
+}
+
+/**
+ * 只读 zip 里的**某一个条目**（不存在的返回 null）。
+ * 例如只取 `manifest.json` 就能列出工程名 / 元素数，无需解压 scene。
+ */
+export function zipReadEntry(buf: Buffer, name: string): Buffer | null {
+  const meta = zipEntriesMeta(buf).find((m) => m.name === name);
+  if (!meta) return null;
+  return readEntryData(buf, meta);
+}
+
+/** 列出 zip 内所有条目名（不解压） */
+export function zipNames(buf: Buffer): string[] {
+  return zipEntriesMeta(buf).map((m) => m.name);
+}
+
+/** 是不是 zip（前 4 字节魔数 PK\x03\x04）—— 用于容器格式嗅探 */
+export function looksLikeZip(buf: Buffer): boolean {
+  return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04;
 }

@@ -7,6 +7,7 @@ import { createRequire } from 'module';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, cpSync } from 'fs';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
+import { ensureEditor } from './ensure-editor.mjs';
 
 const require = createRequire(import.meta.url);
 const electronPath = require('electron');
@@ -142,6 +143,7 @@ async function main() {
     })()
   });
   const win = await app.firstWindow();
+  await ensureEditor(win);
   // 默认等待 8s（和文件里 waitFor 的默认值一致）：
   // Playwright 原生默认 30s，一旦某步选择器过期就要干等半分钟 —— 一轮下来能白烧好几分钟。
   win.setDefaultTimeout(8000);

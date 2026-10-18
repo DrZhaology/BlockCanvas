@@ -3,6 +3,7 @@ import { join, dirname, basename } from 'node:path';
 import {
   existsSync, mkdirSync, readdirSync, rmSync, writeFileSync, chmodSync, readFileSync
 } from 'node:fs';
+import { installUnitDir } from './paths';
 
 // ============================================================================
 // BlockCanvas · 自动更新中枢（v0.4.3 重写）
@@ -345,14 +346,12 @@ function findExtractRoot(stagingDir: string): string | null {
   return walk(stagingDir, 0);
 }
 
-/** 程序主目录（要被替换的目标） */
+/** 程序主目录（要被替换的目标所在的**上一层**）—— 用于放 `.update` 与生成改名计划 */
 export function resolveInstallDir(): string {
+  const unit = installUnitDir();               // macOS = /Applications/Xxx.app；Win/Linux = exe 所在目录
   const execDir = dirname(process.execPath);
-  // macOS：execPath 在 Xxx.app/Contents/MacOS 里面 → 替换目标是包含 .app 的那一层目录
-  if (process.platform === 'darwin' && /\.app[\\/]Contents[\\/]MacOS$/i.test(execDir)) {
-    return dirname(dirname(dirname(execDir)));
-  }
-  return execDir;
+  // macOS：unit 是 .app 本身 → 返回它所在的那一层（/Applications）
+  return unit === execDir ? execDir : dirname(unit);
 }
 
 /**
@@ -390,8 +389,18 @@ export async function finishUpdateFromZip(
   const stagingDir = join(updateDir, 'staging');
   const workDir = join(app.getPath('temp'), `bc-updater-${Date.now().toString(36)}`);
 
+  /**
+   * 失败收尾：解压出来的 staging 一律清掉（**保留 `.update/update.zip`** —— 用户点重试不用重新下载）。
+   * 失败路径不清理的话，`.update/` 会一次比一次大（老版本就是这样留残渣的）。
+   */
+  const fail = (error: string): { ok: false; error: string } => {
+    try { rmSync(stagingDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
+    try { rmSync(workDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
+    return { ok: false, error };
+  };
+
   try {
-    if (!existsSync(zipPath)) return { ok: false, error: '更新包不存在（可能已被清理），请重新下载。' };
+    if (!existsSync(zipPath)) return fail('更新包不存在（可能已被清理），请重新下载。');
     rmSync(stagingDir, { recursive: true, force: true });
     mkdirSync(stagingDir, { recursive: true });
     mkdirSync(workDir, { recursive: true });
@@ -399,24 +408,43 @@ export async function finishUpdateFromZip(
     // 1. 解压
     onProgress?.('正在解压更新包…', 100);
     const unz = await unzipUpdate(zipPath, stagingDir);
-    if (!unz.ok) return { ok: false, error: `解压失败：${unz.error}` };
+    if (!unz.ok) return fail(`解压失败：${unz.error}`);
 
     // 2. 找到程序本体所在层
     const extractRoot = findExtractRoot(stagingDir);
     if (!extractRoot) {
-      return { ok: false, error: '更新包内容异常：没有找到程序本体（Windows 找 BlockCanvas.exe / macOS 找 BlockCanvas.app / Linux 找 blockcanvas），下载可能不完整。' };
+      return fail('更新包内容异常：没有找到程序本体（Windows 找 BlockCanvas.exe / macOS 找 BlockCanvas.app / Linux 找 blockcanvas），下载可能不完整。');
+    }
+
+    // 2b. 计算"真正要覆盖的目标"（三平台语义不同，见 paths.ts）
+    //   · Windows / Linux：目标 = exe 所在目录（extractRoot 与 installDir 同层）
+    //   · macOS：目标 = **Xxx.app 包本身**。旧实现把目标设成 installDir（= /Applications），
+    //     再对它做 `rsync --delete`，会把用户其它 App 全删掉 —— 这里修掉。
+    const isMac = process.platform === 'darwin';
+    let syncSrc = extractRoot;
+    let syncDst = installDir;
+    if (isMac) {
+      const bundle = readdirSync(extractRoot, { withFileTypes: true })
+        .find((e) => e.isDirectory() && /\.app$/i.test(e.name));
+      if (bundle) {
+        syncSrc = join(extractRoot, bundle.name);
+        syncDst = join(installDir, bundle.name);
+      }
     }
 
     // 3. 目标文件夹名（带版本号）；已一致就不改名
-    const parent = dirname(installDir);
-    const oldName = basename(installDir);
-    const newName = versionedFolderName(oldName, version);
+    //    macOS 改的是 `.app` 包名（不能去改 /Applications 这个名字），其它平台改程序文件夹名
+    const parent = isMac ? installDir : dirname(installDir);
+    const oldName = isMac ? basename(syncDst) : basename(installDir);
+    const newName = isMac
+      ? `${versionedFolderName(basename(syncDst, '.app'), version)}.app`
+      : versionedFolderName(oldName, version);
 
     // 4. 生成替换脚本（放在临时目录，不随程序文件夹改名而失效）
     onProgress?.('正在准备替换脚本…', 100);
     const scriptPath = process.platform === 'win32'
       ? writeWindowsScript(workDir, updateDir, extractRoot, installDir, { parent, oldName, newName })
-      : writePosixScript(workDir, updateDir, extractRoot, installDir, { parent, oldName, newName });
+      : writePosixScript(workDir, updateDir, syncSrc, syncDst, { parent, oldName, newName });
 
     // 5. 拉起独立进程执行替换；主进程随后退出交出文件锁
     onProgress?.('准备就绪，正在重启以完成更新…', 100);
@@ -427,8 +455,7 @@ export async function finishUpdateFromZip(
     child.unref();
     return { ok: true };
   } catch (e: any) {
-    try { rmSync(workDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
-    return { ok: false, error: e?.message || '更新失败' };
+    return fail(e?.message || '更新失败');
   }
 }
 
@@ -475,6 +502,8 @@ function writeWindowsScript(workDir: string, updateDir: string, src: string, dst
     'rem robocopy 退出码 0-7 都算成功，8 以上才是错误',
     'if errorlevel 8 (',
     '  echo 更新失败：文件替换出错。程序未受影响，可重开软件重试。',
+    `  rem 清掉解压出来的临时文件（.update\\update.zip 留着，重试不用重新下载）`,
+    `  rmdir /s /q "${join(updateDir, 'staging')}"`,
     '  pause',
     '  exit /b 1',
     ')',
@@ -487,8 +516,14 @@ function writeWindowsScript(workDir: string, updateDir: string, src: string, dst
     ...(needRename ? [`if exist "${join(targetNew, exeName)}" set "TARGET=${targetNew}"`] : []),
     `if not defined TARGET set "TARGET=${dst}"`,
     'start "" "%TARGET%\\' + exeName + '"',
-    'exit /b 0',
-    'del "%~f0"'
+    'rem —— 收尾：把整个工作目录（apply-update.bat + rename-folder.ps1）删干净 ——',
+    'rem 两个坑（都踩过，别改回去）：',
+    'rem   ① 不能写在 exit 之后 —— 那样永远执行不到（老版本就是这么留了一行死代码）；',
+    'rem   ② 不能在同一个 cmd 里直接删自己 —— 脚本正在被 cmd 读，文件是锁着的，',
+    'rem      所以用 start /b 起一个**独立进程**，等 3 秒后连目录一起删。',
+    'set "BC_WORKDIR=%~dp0."',
+    'start "" /b powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 3; Remove-Item -LiteralPath $env:BC_WORKDIR -Recurse -Force -ErrorAction SilentlyContinue"',
+    'exit /b 0'
   ].join('\r\n');
   writeFileSync(batPath, bat, 'utf-8');
   return batPath;
@@ -527,11 +562,14 @@ function writePosixScript(workDir: string, updateDir: string, src: string, dst: 
     lines.push(`TARGET="${dst}"`);
   }
   if (process.platform === 'darwin') {
-    lines.push(`open -n "$TARGET/BlockCanvas.app" 2>/dev/null || (nohup "${execPath}" >/dev/null 2>&1 &)`);
+    // macOS：TARGET 就是 .app 包路径本身（见 finishUpdateFromZip 里 syncDst 的计算）
+    lines.push(`open -n "$TARGET" 2>/dev/null || (nohup "${execPath}" >/dev/null 2>&1 &)`);
   } else {
     lines.push(`nohup "$TARGET/$(basename "${execPath}")" >/dev/null 2>&1 &`);
   }
-  lines.push('rm -f "$0"');
+  // 收尾：连工作目录一起删（不只是脚本自己）——POSIX 允许删除正在执行的脚本本身，
+  // 文件句柄在 unlink 后依然有效，后面的行照样能跑完。
+  lines.push('rm -rf "$(dirname "$0")"');
   writeFileSync(shPath, lines.join('\n') + '\n', 'utf-8');
   try { chmodSync(shPath, 0o755); } catch { /* 忽略 */ }
   return shPath;

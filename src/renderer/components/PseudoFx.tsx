@@ -9,6 +9,7 @@ import {
   parseRadius
 } from '@lib/fx';
 import { HelpButton } from './HelpButton';
+import { Icon, type IconName } from './Icon';
 
 // BlockCanvas · 伪类预制动效库 + 滑块微调
 // 过去 hover / active 只有「+ 添加属性」这一条冷启动路径，新手完全不知道从哪下手，
@@ -20,41 +21,41 @@ export type PseudoClass = 'hover' | 'active' | 'focus' | 'link';
 export interface FxPreset {
   id: string;
   name: string;
-  icon: string;
+  icon: IconName;
   desc: string;
   patch: Record<string, string>;
 }
 
 export const PSEUDO_PRESETS: Record<PseudoClass, FxPreset[]> = {
   hover: [
-    { id: 'lift', name: '上浮', icon: '⬆', desc: '向上抬起并加深投影', patch: { transform: 'translateY(-6px)', boxShadow: '0 12px 26px rgba(0, 0, 0, 0.16)' } },
-    { id: 'zoom', name: '放大', icon: '⤢', desc: '整体轻微放大', patch: { transform: 'scale(1.05)', boxShadow: '0 10px 22px rgba(0, 0, 0, 0.14)' } },
-    { id: 'glow', name: '发光', icon: '✨', desc: '外圈品牌色光晕', patch: { boxShadow: '0 0 0 3px rgba(30, 136, 229, 0.28), 0 8px 22px rgba(30, 136, 229, 0.32)' } },
-    { id: 'liftZoom', name: '浮起放大', icon: '🚀', desc: '上浮 + 放大，卡片最常用', patch: { transform: 'translateY(-4px) scale(1.03)', boxShadow: '0 16px 32px rgba(0, 0, 0, 0.18)' } },
-    { id: 'tilt', name: '轻微倾斜', icon: '🌀', desc: '带一点俏皮的旋转', patch: { transform: 'rotate(-2deg) scale(1.03)' } },
-    { id: 'deep', name: '投影加深', icon: '🌑', desc: '原地加深立体感', patch: { boxShadow: '0 18px 36px rgba(0, 0, 0, 0.24)' } },
-    { id: 'darken', name: '变暗', icon: '🌗', desc: '整体压暗一档', patch: { filter: 'brightness(0.92)' } },
-    { id: 'brighten', name: '变亮', icon: '🔆', desc: '整体提亮一档', patch: { filter: 'brightness(1.08)' } },
-    { id: 'underline', name: '出现下划线', icon: '▁', desc: '文字链接常用', patch: { textDecoration: 'underline' } }
+    { id: 'lift', name: '上浮', icon: 'arrowUp', desc: '向上抬起并加深投影', patch: { transform: 'translateY(-6px)', boxShadow: '0 12px 26px rgba(0, 0, 0, 0.16)' } },
+    { id: 'zoom', name: '放大', icon: 'expand', desc: '整体轻微放大', patch: { transform: 'scale(1.05)', boxShadow: '0 10px 22px rgba(0, 0, 0, 0.14)' } },
+    { id: 'glow', name: '发光', icon: 'sparkle', desc: '外圈品牌色光晕', patch: { boxShadow: '0 0 0 3px rgba(30, 136, 229, 0.28), 0 8px 22px rgba(30, 136, 229, 0.32)' } },
+    { id: 'liftZoom', name: '浮起放大', icon: 'rocket', desc: '上浮 + 放大，卡片最常用', patch: { transform: 'translateY(-4px) scale(1.03)', boxShadow: '0 16px 32px rgba(0, 0, 0, 0.18)' } },
+    { id: 'tilt', name: '轻微倾斜', icon: 'swirl', desc: '带一点俏皮的旋转', patch: { transform: 'rotate(-2deg) scale(1.03)' } },
+    { id: 'deep', name: '投影加深', icon: 'moonDark', desc: '原地加深立体感', patch: { boxShadow: '0 18px 36px rgba(0, 0, 0, 0.24)' } },
+    { id: 'darken', name: '变暗', icon: 'contrast', desc: '整体压暗一档', patch: { filter: 'brightness(0.92)' } },
+    { id: 'brighten', name: '变亮', icon: 'sun', desc: '整体提亮一档', patch: { filter: 'brightness(1.08)' } },
+    { id: 'underline', name: '出现下划线', icon: 'text', desc: '文字链接常用', patch: { textDecoration: 'underline' } }
   ],
   active: [
-    { id: 'sink', name: '按下下沉', icon: '⬇', desc: '按钮被按下去', patch: { transform: 'translateY(2px)' } },
-    { id: 'shrink', name: '按压缩小', icon: '⤡', desc: '点击瞬间收紧', patch: { transform: 'scale(0.96)' } },
-    { id: 'pressDark', name: '按压变暗', icon: '🌚', desc: '按下时压暗', patch: { filter: 'brightness(0.9)' } },
-    { id: 'inner', name: '内凹阴影', icon: '🕳', desc: '像被按进表面里', patch: { boxShadow: 'inset 0 3px 8px rgba(0, 0, 0, 0.2)' } },
-    { id: 'sinkShrink', name: '下沉并缩小', icon: '🔽', desc: '最真实的按压反馈', patch: { transform: 'translateY(2px) scale(0.97)' } }
+    { id: 'sink', name: '按下下沉', icon: 'arrowDown', desc: '按钮被按下去', patch: { transform: 'translateY(2px)' } },
+    { id: 'shrink', name: '按压缩小', icon: 'shrink', desc: '点击瞬间收紧', patch: { transform: 'scale(0.96)' } },
+    { id: 'pressDark', name: '按压变暗', icon: 'moon', desc: '按下时压暗', patch: { filter: 'brightness(0.9)' } },
+    { id: 'inner', name: '内凹阴影', icon: 'hole', desc: '像被按进表面里', patch: { boxShadow: 'inset 0 3px 8px rgba(0, 0, 0, 0.2)' } },
+    { id: 'sinkShrink', name: '下沉并缩小', icon: 'arrowDown', desc: '最真实的按压反馈', patch: { transform: 'translateY(2px) scale(0.97)' } }
   ],
   focus: [
-    { id: 'ring', name: '外圈光晕', icon: '◎', desc: '聚焦时的标准外环', patch: { boxShadow: '0 0 0 3px rgba(30, 136, 229, 0.35)' } },
-    { id: 'softRing', name: '柔光扩散', icon: '🔵', desc: '更柔和的聚焦提示', patch: { boxShadow: '0 0 0 6px rgba(30, 136, 229, 0.16)' } },
-    { id: 'borderHi', name: '边框高亮', icon: '▢', desc: '描边变品牌色', patch: { borderStyle: 'solid', borderWidth: '1px', borderColor: '#1e88e5' } },
-    { id: 'bottomLine', name: '底部横线', icon: '▁', desc: '输入框经典下划线', patch: { borderStyle: 'solid', borderWidth: '0 0 2px 0', borderColor: '#1e88e5' } }
+    { id: 'ring', name: '外圈光晕', icon: 'circleDot', desc: '聚焦时的标准外环', patch: { boxShadow: '0 0 0 3px rgba(30, 136, 229, 0.35)' } },
+    { id: 'softRing', name: '柔光扩散', icon: 'circle', desc: '更柔和的聚焦提示', patch: { boxShadow: '0 0 0 6px rgba(30, 136, 229, 0.16)' } },
+    { id: 'borderHi', name: '边框高亮', icon: 'square', desc: '描边变品牌色', patch: { borderStyle: 'solid', borderWidth: '1px', borderColor: '#1e88e5' } },
+    { id: 'bottomLine', name: '底部横线', icon: 'minus', desc: '输入框经典下划线', patch: { borderStyle: 'solid', borderWidth: '0 0 2px 0', borderColor: '#1e88e5' } }
   ],
   link: [
-    { id: 'underline', name: '加下划线', icon: '▁', desc: '未访问链接的默认表现', patch: { textDecoration: 'underline' } },
-    { id: 'none', name: '去掉下划线', icon: '—', desc: '导航链接常用', patch: { textDecoration: 'none' } },
-    { id: 'bold', name: '加粗', icon: '𝐁', desc: '强调未访问链接', patch: { fontWeight: '600' } },
-    { id: 'blue', name: '变品牌蓝', icon: '🔷', desc: '统一链接色', patch: { color: '#1e88e5' } }
+    { id: 'underline', name: '加下划线', icon: 'text', desc: '未访问链接的默认表现', patch: { textDecoration: 'underline' } },
+    { id: 'none', name: '去掉下划线', icon: 'minus', desc: '导航链接常用', patch: { textDecoration: 'none' } },
+    { id: 'bold', name: '加粗', icon: 'bold', desc: '强调未访问链接', patch: { fontWeight: '600' } },
+    { id: 'blue', name: '变品牌蓝', icon: 'diamond', desc: '统一链接色', patch: { color: '#1e88e5' } }
   ]
 };
 
@@ -129,7 +130,7 @@ export function PseudoFxPanel(props: Props) {
     <>
       <div className="pseudo-presets">
         <div className="pseudo-presets-title">
-          <span>⚡ :{pseudo} 预制动效（点一下就能用）</span>
+          <span><Icon name="bolt" size={13} /> :{pseudo} 预制动效</span>
           <HelpButton
             title={`${PSEUDO_LABEL[pseudo]} 预制动效怎么用？`}
             content={
@@ -166,7 +167,7 @@ export function PseudoFxPanel(props: Props) {
               onClick={() => onApplyPreset(p.patch)}
               title={`${p.name}：${p.desc}`}
             >
-              <span className="pseudo-preset-ico">{p.icon}</span>
+              <span className="pseudo-preset-ico"><Icon name={p.icon} size={16} /></span>
               <span>{p.name}</span>
               <span className="pseudo-preset-desc">{p.desc}</span>
             </button>
@@ -177,7 +178,7 @@ export function PseudoFxPanel(props: Props) {
       {/* —— 微调滑块 —— */}
       <div className="fx-sliders">
         <div className="pseudo-presets-title" style={{ marginBottom: 2 }}>
-          <span>🎚 微调滑块（高度自定义）</span>
+          <span><Icon name="sliders" size={13} /> 微调滑块</span>
         </div>
 
         <FxSlider
