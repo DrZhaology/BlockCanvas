@@ -143,6 +143,14 @@ export function Settings(props: Props) {
   const endStyleEdit = useScene((s) => s.endStyleEdit);
   const autoInherit = useScene((s) => s.autoInherit);
   const setAutoInherit = useScene((s) => s.setAutoInherit);
+  // v0.4.4：新增元素自动定位（滚到可视区 + 橙色闪烁），默认开
+  const [autoLocateNew, setAutoLocateNew] = useState<boolean>(() => {
+    try { return localStorage.getItem('bc-auto-locate-new') !== '0'; } catch { return true; }
+  });
+  const changeAutoLocateNew = (v: boolean) => {
+    setAutoLocateNew(v);
+    try { localStorage.setItem('bc-auto-locate-new', v ? '1' : '0'); } catch { /* ignore */ }
+  };
 
   // 轮廓开关
   const [outlines, setOutlines] = useState<boolean>(() => {
@@ -604,6 +612,25 @@ export function Settings(props: Props) {
                       type="checkbox"
                       checked={autoInherit}
                       onChange={(e) => setAutoInherit(e.target.checked)}
+                    />
+                    <span className="fluent-slider" />
+                  </label>
+                </div>
+              </div>
+
+              {/* v0.4.4：新增元素自动定位（滚到可视区 + 橙色闪烁） */}
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="target" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">新增元素自动定位</div>
+                  <div className="fluent-card-desc">插入元素后自动滚动画布到它所在位置，并用橙色边框闪两下，方便立刻调整。</div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <label className="fluent-switch">
+                    <input
+                      type="checkbox"
+                      checked={autoLocateNew}
+                      onChange={(e) => changeAutoLocateNew(e.target.checked)}
                     />
                     <span className="fluent-slider" />
                   </label>

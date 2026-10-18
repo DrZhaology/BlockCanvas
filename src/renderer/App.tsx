@@ -360,10 +360,14 @@ export default function App() {
         if (existing) {
           st.switchTab(existing.id);
           showToast(`「${existing.name}」已经打开着，已为你切换到那个标签页`, 'info');
+          switchView('editor');
         } else {
-          st.newTab(res.project.name || '已打开工程', res.project.scene, res.path, res.history);
+          // v0.4.4：从首页打开工程也走视图过渡（旧帧=首页，新帧=编辑器），背景丝滑交叉淡入
+          withViewTransition(() => {
+            st.newTab(res.project.name || '已打开工程', res.project.scene, res.path, res.history);
+            setView('editor');
+          });
         }
-        switchView('editor');
       }
     };
 

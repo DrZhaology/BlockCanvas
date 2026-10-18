@@ -1346,3 +1346,13 @@ html[data-bc-dark] .update-mirror-tip { color: var(--text-muted); }
   max-width: 100%;
 }
 .update-release-noasset { font-size: 10.5px; color: var(--text-muted); }
+
+
+/* ==========================================================================
+   v0.4.4 · 更新中心：整页滚动
+   --------------------------------------------------------------------------
+   以前只有中间的 .update-body 能滚，发行说明一长、或窗口较矮时，
+   页面顶部/底部信息会超出屏幕且无法整页浏览。现在整页一条滚动条。
+   ========================================================================== */
+.update-page { overflow-y: auto; }
+.update-body { overflow: visible; min-height: auto; }

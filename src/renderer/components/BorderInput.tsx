@@ -205,7 +205,7 @@ export function BorderInput({ elementId, pseudo }: Props) {
         <span className="be-label">颜色</span>
         <div className="be-color">
           <ColorField
-            value={S.borderColor ?? sh?.color ?? ''}
+            value={S.borderColor ?? sh?.color ?? '#e2e8f0'}
             fallback="#e2e8f0"
             onInputFocus={() => beginStyleEdit()}
             onChange={(c) => commit({ borderColor: c }, true)}

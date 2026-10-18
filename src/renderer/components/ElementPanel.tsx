@@ -163,8 +163,7 @@ export function ElementPanel() {
 
   /** 插入元素：统一通知右侧属性面板滚动到新元素（面板顶部就是它的属性） */
   const insertElement = (type: ElementType) => {
-    addElement(type, selectedId);
-    // 表格：新插的空表套上默认预设（跟表格编辑器里看到的样子一致）。
+    addElement(type, selectedId);    // 表格：新插的空表套上默认预设（跟表格编辑器里看到的样子一致）。
     // 以前只给 table 一个 width/背景，插到画布上是"光板"表格，必须手动点一次预设才有样子。
     // ⚠ v0.4.4：默认类名必须**文档内唯一**（data-table / data-table-2 / …）。
     //   以前每张表都叫 data-table，两张表时"自动取名"会生成完全一样的关系选择器，
@@ -179,6 +178,23 @@ export function ElementPanel() {
       }
     }
     window.dispatchEvent(new CustomEvent('bc:element-added', { detail: type }));
+    revealNewElement();
+  };
+
+  /** v0.4.4：新增元素自动定位（可在设置里关）——只滚到可视区，不再额外画橙色闪烁环
+   *（选中框本身已经是橙色，再叠一个环是多余的） */
+  const revealNewElement = () => {
+    let enabled = true;
+    try { enabled = localStorage.getItem('bc-auto-locate-new') !== '0'; } catch { /* ignore */ }
+    if (!enabled) return;
+    const id = useScene.getState().scene.selectedId;
+    if (!id) return;
+    window.setTimeout(() => {
+      const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(id)}"]`) as HTMLElement | null;
+      if (!el) return;
+      try { el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }); }
+      catch { el.scrollIntoView(); }
+    }, 60);
   };
 
   useEffect(() => {
@@ -214,6 +230,7 @@ export function ElementPanel() {
       }
       insertTemplate(res.template, selectedId);
       window.dispatchEvent(new CustomEvent('bc:element-added', { detail: 'template' }));
+      revealNewElement();
     } finally {
       setBusy(false);
     }

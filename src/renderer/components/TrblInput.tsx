@@ -135,9 +135,12 @@ function Trbl4Cell(props: {
   const wheel = useWheelAdjust({
     getBase: () => parseFloat(splitVal(value, unit).num) || 0,
     precision: /\./.test(splitVal(value, unit).num) ? 2 : 0,
-    onStart: () => { editingRef.current = true; props.onBegin(); },
-    onPreview: (v) => { props.onChange(String(v)); },
+    onStart: () => { editingRef.current = true; setDraft(splitVal(value, unit).num || ''); props.onBegin(); },
+    // v0.4.4 修：以前只把新值写进 store，没有同步 draft —— 而聚焦后输入框显示的是 draft，
+    // 于是滚轮调值时数字"消失"（空值时直接变成占位符 0），看起来像输入框坏了。
+    onPreview: (v) => { setDraft(String(v)); props.onChange(String(v)); },
     onCommit: (v) => {
+      setDraft(String(v));
       props.onCommit(String(v));
       props.onEnd();
       editingRef.current = false;

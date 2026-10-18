@@ -6,6 +6,7 @@ import { GradientEditor } from './GradientEditor';
 import { DOC_INDEX, searchDocs, type DocHit } from '@lib/docSearch';
 import { useTabStore } from '@store/tabStore';
 import { showToast } from '@lib/toast';
+import { withViewTransition } from '@lib/viewTransition';
 import type { ProjectFileInfo } from '../global';
 
 // ============================================================================
@@ -308,7 +309,7 @@ export function EmptyHome(props: {
         st.switchTab(existing.id);
         showToast(`「${existing.name}」已经打开着，已为你切换过去`);
       } else {
-        st.newTab(p.name, res.project.scene, p.filePath);
+        withViewTransition(() => st.newTab(p.name, res.project.scene, p.filePath));
       }
       setFocused(false);
     } catch (e) {
@@ -406,7 +407,7 @@ export function EmptyHome(props: {
           style={{
             backgroundImage: `url("${mediaSrc(media)}")`,
             filter: mediaBlur > 0 ? `blur(${mediaBlur}px)` : undefined,
-            transform: mediaBlur > 0 ? 'scale(1.04)' : undefined
+            transform: mediaBlur > 0 ? `scale(${(1 + mediaBlur / 400).toFixed(3)})` : undefined
           }}
         />
       )}
@@ -424,7 +425,7 @@ export function EmptyHome(props: {
           crossOrigin={isLocalMedia(media) ? 'anonymous' : undefined}
           style={{
             filter: mediaBlur > 0 ? `blur(${mediaBlur}px)` : undefined,
-            transform: mediaBlur > 0 ? 'scale(1.04)' : undefined
+            transform: mediaBlur > 0 ? `scale(${(1 + mediaBlur / 400).toFixed(3)})` : undefined
           }}
         />
       )}

@@ -770,13 +770,40 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       if (Number.isFinite(d.bounds.maxY) && targetTop > d.bounds.maxY) { targetTop = d.bounds.maxY; hit = bar('b'); }
       const ax = targetLeft - d.rect.left;
       const ay = targetTop - d.rect.top;
-      const patch: Record<string, string> = {};
+      const patch: Record<string, string | undefined> = {};
       if (d.positioned) {
         patch.left = Math.round(d.startLeft + ax) + 'px';
         patch.top = Math.round(d.startTop + ay) + 'px';
       } else {
         patch.marginLeft = Math.round(d.startMarginL + ax) + 'px';
         patch.marginTop = Math.round(d.startMarginT + ay) + 'px';
+      }
+
+      // —— v0.4.4：中线自动 margin:auto 改成**实时**生效（以前松手才变）——
+      // 拖到父容器水平中线：立刻切 margin-left/right:auto；离开中线：立刻删掉没用的 auto 一边。
+      // 只对"比父容器窄"的元素做，否则 auto 两边都是 0，等于没居中。
+      const elNow = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
+      const parentNow = elNow?.parentElement;
+      if (parentNow && elNow) {
+        const pr = parentNow.getBoundingClientRect();
+        const pcs = getComputedStyle(parentNow);
+        const cL = pr.left + parentNow.clientLeft + (parseFloat(pcs.paddingLeft) || 0);
+        const cR = pr.right - parentNow.clientLeft - (parseFloat(pcs.paddingRight) || 0);
+        const innerW = cR - cL;
+        const centered = innerW > 0 && d.rect.width < innerW - 2
+          && Math.abs((targetLeft + d.rect.width / 2) - (cL + innerW / 2)) <= 3;
+        if (centered) {
+          patch.marginLeft = 'auto';
+          patch.marginRight = 'auto';
+          if (d.positioned) patch.left = undefined; // 居中后不再需要 left 偏移
+        } else if (d.positioned) {
+          // 离开中线：把 auto 清掉，回到 left 定位
+          patch.marginLeft = undefined;
+          patch.marginRight = undefined;
+        } else {
+          // 常规流：右边留 auto 会让元素被挤到奇怪的位置
+          patch.marginRight = undefined;
+        }
       }
 
       // —— Alt 拖动时自动加长画布：往下拖不再被"画布高度"卡住（松手自动缩回）——
@@ -1427,6 +1454,9 @@ const CanvasNode = React.memo(function CanvasNode(props: {
 }) {
   const { node, selectedIds, onSelect, onSelectParent, onToggleSelect, onTextMenu } = props;
 
+  // v0.4.4：伪类实时预览（必须在任何提前 return 之前声明 hook）
+  const previewPseudo = useScene((s) => s.previewPseudo);
+
   // hidden：画布不渲染（导出也不渲染，见 exporter）
   if (node.hidden) return null;
 
@@ -1571,6 +1601,12 @@ const CanvasNode = React.memo(function CanvasNode(props: {
       const eff = getEffectiveStyle(node, activeBreakpoint);
       Object.assign(baseStyle, simplifyStyle(eff));
     }
+  }
+  // v0.4.4：正在编辑某个伪类时，把它的样式**内联叠加**到选中元素上 ——
+  // 无类名元素本来是内联样式，`:hover` 规则永远被压住，用户看不到任何变化。
+  // 这里只是编辑器预览，不写进 node.style、不导出（导出仍由 :hover 规则承担）。
+  if (previewPseudo && isSelected && node.pseudoStyles?.[previewPseudo]) {
+    Object.assign(baseStyle, simplifyStyle(node.pseudoStyles[previewPseudo] as Record<string, string | undefined>));
   }
   // flex 横排容器里，空的无宽子容器会被压缩到 0 宽 → 完全不可见不可点（"插进去看不到"）。
   // 编辑器专用兜底：无显式 width 的容器/hr 补 min-width 60px（不进 node.style、不导出）；

@@ -414,6 +414,16 @@ export interface SceneStore {
   /** 当前编辑所处的响应式断点（桌面 / 平板 / 手机） */
   activeBreakpoint: Breakpoint;
   setActiveBreakpoint: (bp: Breakpoint) => void;
+  /**
+   * 伪类实时预览（v0.4.4）：在右侧选中 :hover / :active / :focus / :link 时，
+   * 画布把该伪类的样式**临时叠加**到选中元素上，让用户立刻看到效果。
+   * 纯编辑器状态，不进工程文件、不进撤销栈。
+   *
+   * 为什么需要：没有类名/ID 的元素在画布上是**内联样式**，内联永远压过 `:hover` 规则，
+   * 所以"伪类设置完全没用"（用户反馈）。有类名时真实 :hover 仍可正常悬停预览。
+   */
+  previewPseudo: string | null;
+  setPreviewPseudo: (p: string | null) => void;
 
   // 增删
   addElement: (type: ElementType, parentId?: string | null) => void;
@@ -549,6 +559,8 @@ export const useScene = create<SceneStore>((set) => ({
   styleEditPending: false,
   activeBreakpoint: 'desktop',
   setActiveBreakpoint: (bp) => set({ activeBreakpoint: bp }),
+  previewPseudo: null,
+  setPreviewPseudo: (p) => set({ previewPseudo: p }),
   autoInherit: typeof localStorage !== 'undefined' ? localStorage.getItem('bc-auto-inherit') !== '0' : true,
   setAutoInherit: (v) => {
     try { localStorage.setItem('bc-auto-inherit', v ? '1' : '0'); } catch {}

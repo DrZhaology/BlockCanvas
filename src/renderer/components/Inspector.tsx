@@ -21,6 +21,9 @@ import { TransformInput } from './TransformInput';
 import { BorderInput } from './BorderInput';
 import { BoxShadowInput } from './BoxShadowInput';
 import { TextShadowInput } from './TextShadowInput';
+import { FilterInput } from './FilterInput';
+import { OutlineInput } from './OutlineInput';
+import { GridSpanInput } from './GridSpanInput';
 import { TransitionInput } from './TransitionInput';
 import { OpacityInput } from './OpacityInput';
 import { LineHeightInput } from './LineHeightInput';
@@ -366,12 +369,9 @@ function PageCssBody() {
             onRemove={() => removeKey(item.key)}
           />
         ))}
-        <AddPropertyMenu
-          type={'div' as ElementType}
-          elementStyle={{}}
-          visibleKeys={visibleCamelKeys}
-          onAdd={(k) => addBodyProp(k)}
-        />
+        {/* v0.4.4 修：body 区不再放「添加属性」。
+            以前这里也有一个添加菜单，但 bodyExtra 的卡片渲染在「全局样式」区，
+            用户点 body 区的按钮 → 属性跑到下面去了（反馈 #6）。现在只保留全局样式区一个入口。 */}
             </div>
           </div>
         </Collapse>
@@ -854,6 +854,14 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
     }
   };
 
+  // v0.4.4：把"正在编辑的伪类"同步给画布做实时预览。
+  // 无类名元素走内联样式，:hover 规则永远被内联压住 → 以前画布上完全看不出效果。
+  const setPreviewPseudo = useScene((s) => s.setPreviewPseudo);
+  useEffect(() => {
+    setPreviewPseudo(activePseudo);
+    return () => setPreviewPseudo(null);
+  }, [activePseudo, elementId, setPreviewPseudo]);
+
   const removePseudoStyle = (pseudo: PseudoClass | null, key?: string) => {
     if (pseudo === null) {
       if (key) {
@@ -883,7 +891,9 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   // 不再在下方「CSS 样式属性」里重复出现一条（用户若从 + 添加属性 显式加过，仍然显示）
   const PSEUDO_MANAGED_KEYS = new Set(['transition']);
   for (const s of allSchema) {
-    if (!isApplicable(s, selected.type)) continue;
+    // v0.4.4：显式添加过的属性即使"当前条件不满足"也要渲染出来（行上标「不生效」），
+    // 否则 left/right/top/bottom 在 position:static 时加进来会直接消失（用户反馈）。
+    if (!isApplicable(s, selected.type) && !visiblePropList.includes(s.key)) continue;
     const extraBg = s.key === 'backgroundColor' && isGradient(selected.style.backgroundImage) && !isTextGradientEl;
     const byValue = hasStyleValue(selected.style, s as any) || extraBg;
     const helperHidden =
@@ -2013,8 +2023,8 @@ function PropertyRow(props: {
             </span>
           )}
           {!app.applicable && (
-            <span className="prop-warn-tag" title={app.disabledReason}>
-              <Icon name="warning" size={10} /> {app.disabledReason?.slice(0, 14)}…
+            <span className="prop-warn-tag" title={`${app.disabledReason}\n（属性已保留，条件满足后自动生效）`}>
+              <Icon name="warning" size={10} /> 不生效
             </span>
           )}
           {highlight && <span className="prop-new-badge">新</span>}
@@ -2025,7 +2035,8 @@ function PropertyRow(props: {
         {schemaItem.input === 'font' && (
           <FontFamilyInput elementId={elementId} />
         )}
-        {schemaItem.input === 'text' && (
+        {schemaItem.input === 'text'
+          && !['filter', 'backdropFilter', 'outline', 'gridColumn', 'gridRow'].includes(schemaItem.key) && (
           <input
             type="text"
             value={localValue}
@@ -2040,6 +2051,35 @@ function PropertyRow(props: {
               updateStyle(elementId, { [schemaItem.key]: applyUnit(localValue, schemaItem.unit) } as any);
               endStyleEdit();
             }}
+          />
+        )}
+        {/* v0.4.4：滤镜 / 背景模糊 → 预设 + 滑杆（不再是一个裸文本框） */}
+        {(schemaItem.key === 'filter' || schemaItem.key === 'backdropFilter') && (
+          <FilterInput
+            elementId={elementId}
+            schemaKey={schemaItem.key as 'filter' | 'backdropFilter'}
+            value={localValue}
+            onFocusStart={() => { /* beginStyleEdit 由组件内部调用 */ }}
+            onFocusEnd={() => { /* endStyleEdit 由组件内部调用 */ }}
+          />
+        )}
+        {/* v0.4.4：外轮廓线 → 粗细 / 线型 / 颜色 */}
+        {schemaItem.key === 'outline' && (
+          <OutlineInput
+            elementId={elementId}
+            value={localValue}
+            onFocusStart={() => { /* 组件内部处理 */ }}
+            onFocusEnd={() => { /* 组件内部处理 */ }}
+          />
+        )}
+        {/* v0.4.4：跨列 / 跨行 → 常用档位 + 自定义 */}
+        {(schemaItem.key === 'gridColumn' || schemaItem.key === 'gridRow') && (
+          <GridSpanInput
+            elementId={elementId}
+            schemaKey={schemaItem.key as 'gridColumn' | 'gridRow'}
+            value={localValue}
+            onFocusStart={() => beginStyleEdit()}
+            onFocusEnd={() => endStyleEdit()}
           />
         )}
         {schemaItem.input === 'number' && schemaItem.unit && (

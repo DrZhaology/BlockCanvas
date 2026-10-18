@@ -854,10 +854,15 @@
   background: var(--hover-accent);
   color: var(--accent);
 }
+/* v0.4.4：不适用 ≠ 不可点。现在允许添加（加完标「不生效」），所以不再灰到看不清、也不显示禁用光标 */
 .add-prop-item.is-disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  background: var(--muted-bg);
+  opacity: 0.62;
+  cursor: pointer;
+  background: transparent;
+}
+.add-prop-item.is-disabled:hover {
+  background: var(--hover);
+  color: var(--text);
 }
 .add-prop-item-left {
   display: flex;
@@ -983,7 +988,10 @@
    实际位置由固定定位 inline style 控制（见 HelpButton） */
 .help-pop {
   position: fixed;
-  z-index: 400;
+  /* v0.4.4：面板/工具栏已升到 700，帮助气泡是 Portal 到 body 的固定层，
+     必须比面板高，否则会被面板整块盖住 —— 这就是"所有问号都坏了"的根因。
+     层级顺序：画布覆盖层 400~410 < 面板 700 < 浮动层 750 < 帮助气泡 820 < toast 800+ < 模态 900+ */
+  z-index: 820;
   width: 320px;
   max-width: calc(100vw - 40px);
   background: var(--bg-panel);
@@ -1250,3 +1258,69 @@
 
 
 
+
+
+/* ==========================================================================
+   v0.4.4 · 属性专属卡片补充：滤镜 / 背景模糊、外轮廓、跨列跨行、边框颜色行
+   ========================================================================== */
+.fx-editor { display: flex; flex-direction: column; gap: 7px; }
+.fx-presets { display: flex; flex-wrap: wrap; gap: 5px; }
+.fx-preset {
+  height: 24px; padding: 0 8px; font-size: 11px;
+  color: var(--text); background: var(--panel-soft);
+  border: 1px solid var(--border); border-radius: 5px; cursor: pointer;
+}
+.fx-preset:hover { border-color: var(--accent); color: var(--accent); }
+.fx-row { display: flex; align-items: center; gap: 8px; }
+.fx-label { flex: 0 0 44px; font-size: 11px; color: var(--text-muted); }
+.fx-range { flex: 1; min-width: 0; accent-color: var(--accent); }
+.fx-val { width: 44px; text-align: right; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.fx-custom {
+  height: 26px; padding: 0 8px; font-size: 11.5px;
+  color: var(--text); background: var(--panel-soft);
+  border: 1px solid var(--border); border-radius: 5px;
+}
+.fx-custom:focus { border-color: var(--accent); outline: none; }
+
+.outline-editor { display: flex; flex-direction: column; gap: 8px; }
+.outline-preview {
+  height: 48px; display: grid; place-items: center;
+  font-size: 11px; color: var(--text-muted);
+  background: var(--panel-soft); border: 1px dashed var(--border); border-radius: 8px;
+}
+.outline-row { display: flex; align-items: center; gap: 8px; }
+.outline-label { flex: 0 0 34px; font-size: 11px; color: var(--text-muted); }
+.outline-range { flex: 1; min-width: 0; accent-color: var(--accent); }
+.outline-val { width: 38px; text-align: right; font-size: 11px; color: var(--text-muted); }
+.outline-styles { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
+.outline-style-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 24px; padding: 0 7px; font-size: 11px;
+  color: var(--text); background: var(--panel-soft);
+  border: 1px solid var(--border); border-radius: 5px; cursor: pointer;
+}
+.outline-style-btn.active { border-color: var(--accent); color: var(--accent); background: var(--hover-accent); }
+.outline-sample { width: 18px; height: 0; border-top: 2px solid currentColor; }
+.outline-sample.is-dashed { border-top-style: dashed; }
+.outline-sample.is-dotted { border-top-style: dotted; }
+.outline-sample.is-double { border-top-style: double; border-top-width: 3px; }
+.outline-color { flex: 1; min-width: 0; }
+
+.grid-span { display: flex; flex-direction: column; gap: 6px; }
+.grid-span-seg { display: flex; gap: 4px; flex-wrap: wrap; }
+.grid-span-btn {
+  height: 24px; padding: 0 8px; font-size: 11px;
+  color: var(--text); background: var(--panel-soft);
+  border: 1px solid var(--border); border-radius: 5px; cursor: pointer;
+}
+.grid-span-btn.active { border-color: var(--accent); color: var(--accent); background: var(--hover-accent); }
+.grid-span-custom {
+  height: 26px; padding: 0 8px; font-size: 11.5px;
+  color: var(--text); background: var(--panel-soft);
+  border: 1px solid var(--border); border-radius: 5px;
+}
+.grid-span-hint { font-size: 10.5px; color: var(--text-muted); }
+
+/* 边框颜色行：不换行、色块与输入框同一行 */
+.be-color { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-width: 0; }
+.be-color > * { min-width: 0; }

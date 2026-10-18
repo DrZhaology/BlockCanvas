@@ -250,9 +250,12 @@ export function AddPropertyMenu(props: Props) {
       <button
         key={s.key}
         className={"add-prop-item" + (!app.applicable ? " is-disabled" : "")}
-        onClick={() => { if (app.applicable) addAndClose(s.key); }}
-        disabled={!app.applicable}
-        title={!app.applicable ? `暂不可用: ${app.disabledReason}` : s.help ? `${s.label}\n${s.help.content}` : s.label}
+        // v0.4.4 修：以前"当前不适用"的属性是**禁用**的（点了没反应），
+        // 导致 left/right/top/bottom 在 position:static 时根本加不进来（用户反馈）。
+        // 现在改成**可以添加**，只是加完行上标「不生效」并提示原因 —— 用户可以先加属性、
+        // 再把 position 设好，属性立刻生效，不用来回找菜单。
+        onClick={() => addAndClose(s.key)}
+        title={!app.applicable ? `现在不生效：${app.disabledReason}（仍可添加，等条件满足后自动生效）` : s.help ? `${s.label}\n${s.help.content}` : s.label}
       >
         <div className="add-prop-item-left">
           {s.scope ? (

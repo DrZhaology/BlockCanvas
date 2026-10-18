@@ -19,6 +19,9 @@ export function ProjectTabBar() {
   const activeTabId = useTabStore((s) => s.activeTabId);
   const switchTab = useTabStore((s) => s.switchTab);
   const closeTab = useTabStore((s) => s.closeTab);
+  /** v0.4.4：关标签直接关。View Transition 在无 GPU / 软件渲染环境里会让 GPU 进程崩，
+   *  关标签的过渡交给首页内容自带的淡入（打开工程仍保留视图过渡）。 */
+  const closeTabAnimated = (id: string) => closeTab(id);
   const newTab = useTabStore((s) => s.newTab);
 
   // 双击/点击铅笔重命名状态
@@ -77,7 +80,7 @@ export function ProjectTabBar() {
     //（保持原来的静默关闭行为，不因此弹窗）。
     const hasUndoHistory = isActiveTab && useScene.getState().history.past.length > 0;
     if (isEmptyProject(liveScene) && !hasUndoHistory) {
-      closeTab(tab.id);
+      closeTabAnimated(tab.id);
       return;
     }
 
@@ -94,7 +97,7 @@ export function ProjectTabBar() {
         const hist = useScene.getState().history;
         window.bc.saveProject({ name: tab.name, scene: curScene, history: { past: hist.past, future: hist.future } }, false, tab.filePath).then(() => {
           useTabStore.getState().setTabSaved(tab.id, tab.filePath!, tab.name);
-          closeTab(tab.id);
+          closeTabAnimated(tab.id);
         });
         return;
       }
@@ -109,11 +112,11 @@ export function ProjectTabBar() {
         danger: true
       });
       if (!abandon) return;
-      closeTab(tab.id);
+      closeTabAnimated(tab.id);
       return;
     }
 
-    closeTab(tab.id);
+    closeTabAnimated(tab.id);
   };
 
   return (
