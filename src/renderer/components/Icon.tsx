@@ -40,7 +40,7 @@ export type IconName =
   | 'home' | 'history' | 'option' | 'command' | 'tab' | 'enter' | 'highlighter'
   | 'text' | 'rect' | 'fill' | 'rows' | 'columns' | 'collapse' | 'printer' | 'burst'
   | 'swap' | 'book' | 'indent' | 'outdent' | 'zoomIn' | 'gradient' | 'cloud' | 'glasses'
-  | 'list' | 'quote' | 'dot' | 'code' | 'heading' | 'bold' | 'italic';
+  | 'list' | 'quote' | 'dot' | 'code' | 'heading' | 'bold' | 'italic' | 'camera' | 'cross';
 
 const P: Record<IconName, ReactNode> = {
   palette: (
@@ -671,6 +671,17 @@ const P: Record<IconName, ReactNode> = {
       <circle cx="12" cy="13.6" r="7.4" />
       <path d="M12 9.8v3.9l2.6 1.5" />
       <path d="M9.5 2.8h5M12 2.8v2.6" />
+    </>
+  ),
+  camera: (
+    <>
+      <path d="M4.2 8.4h2.6l1.4-2.1h7.6l1.4 2.1h2.6A1.4 1.4 0 0 1 21.2 9.8v8.4a1.4 1.4 0 0 1-1.4 1.4H4.2a1.4 1.4 0 0 1-1.4-1.4V9.8a1.4 1.4 0 0 1 1.4-1.4Z" />
+      <circle cx="12" cy="13.7" r="3.4" />
+    </>
+  ),
+  cross: (
+    <>
+      <path d="M9.4 3.4h5.2v6h6v5.2h-6v6H9.4v-6h-6V9.4h6Z" />
     </>
   ),
   hourglass: (

@@ -69,6 +69,12 @@ export function ProjectTabBar() {
     // 关闭整个软件时的会话恢复特性不受影响：没被 × 关掉的标签（含未保存草稿）仍走
     // data/session.json 原地恢复，下次打开还是一样的界面。
     // —— v0.4.3：完全空的项目直接关 ——
+    // 只读快照标签：本来就没有"保存"这回事，直接关（v0.4.5）
+    if (tab.kind === 'snapshot') {
+      closeTabAnimated(tab.id);
+      return;
+    }
+
     // 新建标签默认 isDirty=true（否则连"要不要保存"都不会问），但"不小心点出来、
     // 什么都没放"的空壳再拦一道就很烦。根容器没有子元素 + 页面 CSS / 设计变量仍是
     // 出厂状态 = 完全空且没有撤销历史，直接关闭；只要动过任何东西，仍走下面的二次确认。
@@ -129,19 +135,25 @@ export function ProjectTabBar() {
           return (
             <div
               key={tab.id}
-              className={"tab-item" + (isActive ? " active" : "") + (tab.isDirty ? " is-dirty" : "")}
+              className={"tab-item" + (isActive ? " active" : "") + (tab.isDirty ? " is-dirty" : "") + (tab.kind === 'snapshot' ? " is-snapshot" : "")}
               onClick={() => switchTab(tab.id)}
-              onDoubleClick={(e) => startRename(e, tab)}
-              title={tab.filePath ? `${tab.name}\n路径: ${tab.filePath}\n(点击铅笔按钮或双击重命名)` : `${tab.name} (未保存，点击铅笔按钮或双击重命名)`}
+              onDoubleClick={(e) => { if (tab.kind !== 'snapshot') startRename(e, tab); }}
+              title={tab.kind === 'snapshot'
+                ? `${tab.name}\n只读快照预览（不可保存，关闭时不会提示保存）`
+                : (tab.filePath ? `${tab.name}\n路径: ${tab.filePath}\n(点击铅笔按钮或双击重命名)` : `${tab.name} (未保存，点击铅笔按钮或双击重命名)`)}
             >
-              {/* 铅笔图标放到前面 */}
-              <button
-                className="tab-rename-btn-front"
-                onClick={(e) => startRename(e, tab)}
-                title="重命名此项目"
-              >
-                <Icon name="pencil" size={12} />
-              </button>
+              {/* 铅笔图标放到前面（快照标签换成相机，且不可重命名） */}
+              {tab.kind === 'snapshot' ? (
+                <span className="tab-snap-ico" title="只读快照"><Icon name="camera" size={12} /></span>
+              ) : (
+                <button
+                  className="tab-rename-btn-front"
+                  onClick={(e) => startRename(e, tab)}
+                  title="重命名此项目"
+                >
+                  <Icon name="pencil" size={12} />
+                </button>
+              )}
 
               {isEditing ? (
                 <input

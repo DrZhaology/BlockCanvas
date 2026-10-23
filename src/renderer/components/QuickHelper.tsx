@@ -93,6 +93,7 @@ export function QuickHelper(props: Props) {
 
   // 折叠状态全部记住：下次打开还是用户熟悉的样子
   const [layoutOpen, setLayoutOpen] = usePersistedBool('qh-layout-open', true);
+  const [posOpen, setPosOpen] = usePersistedBool('qh-position-open', false);
   const [gradOpen, setGradOpen] = usePersistedBool('qh-textgrad-open', true);
   const gradDraftRef = useRef('');
 
@@ -348,6 +349,104 @@ export function QuickHelper(props: Props) {
           </div>
         </div>
       )}
+
+      {/* ——— ①.5 定位助手（v0.4.5）——— */}
+      <div className="qh-block">
+        <div className="qh-block-head">
+          <button className="qh-block-toggle" onClick={() => setPosOpen((v) => !v)}>
+            <span className={'page-advanced-caret' + (posOpen ? ' open' : '')}><Icon name="chevronRight" size={11} /></span>
+            定位助手
+          </button>
+          <span className="qh-block-sub">贴边 / 居中 / 悬浮</span>
+          <HelpButton
+            title="定位助手"
+            content={
+              '【它是干什么的】\n' +
+              '把「position + left/top/right/bottom + margin:auto」这套要配合起来才生效的定位属性，做成几个按钮。\n\n' +
+              '【三种常用姿势】\n' +
+              '· 相对定位 relative：元素还在原来的位置，只做偏移（不影响其他元素）。\n' +
+              '· 绝对定位 absolute：脱离文档流，相对最近的定位父容器摆放。\n' +
+              '· 固定定位 fixed：相对浏览器窗口固定，滚动页面也不动（悬浮按钮 / 回到顶部）。\n\n' +
+              '【居中为什么要用 margin:auto】\n' +
+              '绝对定位元素写 left:0; right:0; margin-left:auto; margin-right:auto 才会真正水平居中；\n' +
+              '只写 left:50% 会以元素左上角对齐中线，看起来偏右。垂直居中同理，且元素需要有明确高度。'
+            }
+          />
+        </div>
+        {posOpen && (
+          <div className="pos-helper">
+            <div className="flex-helper-row">
+              <label>定位方式 (position)</label>
+              <select
+                value={eff.position ?? 'static'}
+                onChange={(e) => updateStyle(elementId, { position: e.target.value as any })}
+              >
+                <option value="static">默认流式 (static)</option>
+                <option value="relative">相对定位 (relative)</option>
+                <option value="absolute">绝对定位 (absolute)</option>
+                <option value="fixed">固定定位 (fixed · 悬浮在窗口)</option>
+                <option value="sticky">粘性定位 (sticky)</option>
+              </select>
+            </div>
+
+            {(eff.position === 'absolute' || eff.position === 'fixed' || eff.position === 'relative' || eff.position === 'sticky') && (
+              <div className="pos-edges">
+                {([['top', '上'], ['right', '右'], ['bottom', '下'], ['left', '左']] as const).map(([k, label]) => (
+                  <div className="pos-edge" key={k}>
+                    <span>{label}</span>
+                    <NumberUnitInput elementId={elementId} schemaKey={k} unit="px" />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="pos-actions">
+              <button
+                className="pos-btn"
+                onClick={() => {
+                  beginStyleEdit();
+                  const positioned = ['absolute', 'fixed'].includes(eff.position ?? '');
+                  updateStyle(elementId, positioned
+                    ? { left: '0px', right: '0px', marginLeft: 'auto', marginRight: 'auto' }
+                    : { marginLeft: 'auto', marginRight: 'auto' });
+                  endStyleEdit();
+                }}
+                title={['absolute', 'fixed'].includes(eff.position ?? '')
+                  ? '左右都设 0 + 外边距自动 → 水平居中（需要元素有明确宽度）'
+                  : '左右外边距自动 → 块级元素水平居中（需要元素有明确宽度）'}
+              ><Icon name="columns" size={13} /> 水平居中</button>
+              <button
+                className="pos-btn"
+                onClick={() => {
+                  beginStyleEdit();
+                  const positioned = ['absolute', 'fixed'].includes(eff.position ?? '');
+                  updateStyle(elementId, positioned
+                    ? { top: '0px', bottom: '0px', marginTop: 'auto', marginBottom: 'auto' }
+                    : { marginTop: 'auto', marginBottom: 'auto' });
+                  endStyleEdit();
+                }}
+                title="上下都设 0 + 外边距自动 → 垂直居中（需要元素有明确高度；流式元素需要父级是 Flex 才生效）"
+              ><Icon name="rows" size={13} /> 垂直居中</button>
+              <button
+                className="pos-btn is-ghost"
+                onClick={() => {
+                  beginStyleEdit();
+                  updateStyle(elementId, {
+                    position: 'static', left: 'auto', right: 'auto', top: 'auto', bottom: 'auto',
+                    marginLeft: 'auto', marginRight: 'auto', marginTop: 'auto', marginBottom: 'auto'
+                  });
+                  endStyleEdit();
+                }}
+                title="清掉定位与偏移，回到普通文档流"
+              ><Icon name="undo" size={13} /> 清除定位</button>
+            </div>
+
+            <div className="pos-hint">
+              居中生效需要元素有<strong>明确宽/高</strong>（或由内容撑开）。fixed 定位相对窗口，滚动页面也不动。
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ——— ② 文字渐变（仅文本元素可用） ——— */}
       {isText && (

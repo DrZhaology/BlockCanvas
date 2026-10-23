@@ -1036,29 +1036,34 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
         </div>
       </div>
 
-      {/* 未命名的强提醒：没有类名 / ID / 关系选择器时，伪类样式导出后必然失效。
-          这里做闪烁提示，尽量在用户"白干一场"之前拦下来。 */}
+      {/* 未命名的提醒：没有类名 / ID / 关系选择器时，伪类样式导出后必然失效。
+          v0.4.5：从一整块黄色大卡片压成**一行**（图标 + 一句话 + 起名按钮）。
+          它每个新元素都会出现，占掉 180px 面板高度实在太吵；
+          详细原因放进 title，需要时悬停即可看到。 */}
       {hasInlineStyle && (
-        <div className="cls-warn-flash" role="alert">
-          <span className="cls-warn-ico"><Icon name="warning" size={18} /></span>
-          <div className="cls-warn-body">
-            <div className="cls-warn-title">样式还没有名字</div>
-            <div className="cls-warn-desc">
-              这 {stylePropCount} 项样式会以<b>行内样式</b>导出；:hover / :active / :focus 这类伪类样式
-              必须有「类名 / ID / 关系选择器」才能在导出后生效。
-            </div>
-            <div className="cls-warn-actions">
-              <button
-                className="btn-primary btn-mini"
-                onClick={() => setSecOpen((p) => ({ ...p, identity: true }))}
-              >起个名字</button>
-              <button
-                className="btn-secondary btn-mini"
-                onClick={() => window.dispatchEvent(new CustomEvent('bc:open-class'))}
-                title="到「类名 · ID 总览」里批量给未命名元素起名"
-              >打开类名总览</button>
-            </div>
-          </div>
+        <div
+          className="cls-warn-flash"
+          role="alert"
+          title={
+            `这 ${stylePropCount} 项样式会以行内样式导出。\n` +
+            '行内样式无法承载 :hover / :active / :focus 这类伪类，\n' +
+            '所以给元素起一个类名（或设 ID / 关系选择器）后，伪类样式才能在导出的网页里生效。'
+          }
+        >
+          <span className="cls-warn-ico"><Icon name="warning" size={13} /></span>
+          <span className="cls-warn-line">
+            样式还没有名字，伪类样式导出后会失效
+          </span>
+          <button
+            className="cls-warn-btn"
+            onClick={() => setSecOpen((p) => ({ ...p, identity: true }))}
+            title="给当前元素起一个类名"
+          >起个名字</button>
+          <button
+            className="cls-warn-btn is-ghost"
+            onClick={() => window.dispatchEvent(new CustomEvent('bc:open-class'))}
+            title="到「类名 · ID 总览」里批量给未命名元素起名"
+          >类名总览</button>
         </div>
       )}
 
@@ -2004,10 +2009,11 @@ function PropertyRow(props: {
     >
       <div className="prop-row-header">
         <span>
-          {schemaItem.scope && (
-            <span className="prop-scope" title={schemaItem.scope === '父' ? '此属性作用在父容器上，影响子元素排布' : '此属性作用在子元素上'}>
-              {schemaItem.scope}
-            </span>
+          {/* v0.4.5：以前每个属性名前都挂一个"子"字小方块，看起来像乱码。
+              现在只在**真的作用于父容器**（flex/grid 这类）时显示一枚"父级"小标签，
+              其余属性靠左侧分类色条区分，不再堆字。 */}
+          {schemaItem.scope === '父' && (
+            <span className="prop-scope" title="此属性作用在父容器上，影响子元素排布">父级</span>
           )}
           {schemaItem.label}{help}
           {isOverridden && (

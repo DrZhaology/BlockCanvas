@@ -299,7 +299,32 @@ export function ProjectsCenter(props: {
     }
   };
 
-  // 6. 恢复某份专属快照
+  // 6. 只读预览某份专属快照（v0.4.5）：开一个 kind='snapshot' 的标签，画布不可编辑
+  const handlePreviewSnapshot = async (b: ProjectFileInfo) => {
+    const res = await window.bc.openProjectFile(b.filePath);
+    if (!res.ok || !res.project?.scene) {
+      await appConfirm({ title: '快照读取失败', body: res.error || '无法读取这份快照文件', okText: '知道了' });
+      return;
+    }
+    const proj = selectedProjectForBackups;
+    newTab(
+      `${proj?.name || '项目'} · 快照 ${new Date(b.updatedAt).toLocaleTimeString()}`,
+      res.project.scene,
+      null,
+      undefined,
+      'snapshot',
+      {
+        projectName: proj?.name || res.project.name || '项目',
+        projectPath: proj?.filePath,
+        snapshotPath: b.filePath,
+        takenAt: b.updatedAt
+      }
+    );
+    showToast('已打开只读快照预览');
+    onBack();
+  };
+
+  // 7. 恢复某份专属快照（作为草稿新标签）
   const handleRestoreSnapshot = async (b: ProjectFileInfo) => {
     const okOpen = await appConfirm({
       title: '载入快照',
@@ -474,9 +499,17 @@ export function ProjectsCenter(props: {
                   <div className="pc-backup-action">
                     <button
                       className="btn-primary btn-mini"
-                      onClick={() => handleRestoreSnapshot(b)}
+                      onClick={() => void handlePreviewSnapshot(b)}
+                      title="以只读快照标签打开：可查看、可覆盖回项目或另存为新项目，但不会改动任何文件"
                     >
-                      载入此版本
+                      <Icon name="camera" size={11} /> 只读预览
+                    </button>
+                    <button
+                      className="btn-secondary btn-mini"
+                      onClick={() => handleRestoreSnapshot(b)}
+                      title="把这份快照当作草稿载入一个新标签（不会立刻写回项目）"
+                    >
+                      作为草稿打开
                     </button>
                   </div>
                 </div>

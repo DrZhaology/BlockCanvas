@@ -15,7 +15,7 @@ import { AboutModal } from '@comp/About';
 import { HelpCenter, type DocKey } from '@comp/HelpCenter';
 import { ShortcutsModal } from '@comp/ShortcutsModal';
 import { useScene, findNode } from '@store/sceneStore';
-import { useTabStore } from '@store/tabStore';
+import { useTabStore, isSnapshotTab } from '@store/tabStore';
 import { useUpdateBusy } from '@store/updateStore';
 import { useTasks, subscribeTasks } from '@store/taskStore';
 import { refreshPlugins } from '@lib/pluginHost';
@@ -27,6 +27,7 @@ import { applySelHighlightClass } from '@lib/selHighlight';
 import { showToast, type ToastType } from '@lib/toast';
 import { requestPropFocus } from '@lib/propFocus';
 import { EmptyHome } from '@comp/EmptyHome';
+import { SnapshotBar, SnapshotNotice, SnapshotInfoPanel } from '@comp/SnapshotBar';
 
 // BlockCanvas · 主界面
 // - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
@@ -68,6 +69,9 @@ export default function App() {
   // 否则切到"表格编辑器/设置"等视图时这个 hook 不执行，hooks 数量前后不一致，
   // React 直接抛 #300 把整个视图渲染崩掉（踩过一次，表格编辑器打不开就是它）。
   const tabCount = useTabStore((s) => s.tabs.length);
+  // 当前激活标签 + 是否"只读快照预览"（v0.4.5）
+  const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
+  const readonly = isSnapshotTab(activeTab);
   // 自动保存节流锚点：手动 Ctrl+S / 自动保存成功都会刷新（见下方自动保存循环）
   const autoSaveLastRef = useRef(0);
   // 全局快捷键在一个"依赖里没有 view"的 useEffect 里注册 → 闭包里的 view 永远是首次渲染的值。
@@ -512,12 +516,16 @@ export default function App() {
           ) : (
             <>
               <ProjectTabBar />
-              <Toolbar
-            canvasWidth={canvasWidth}
-            onCanvasWidthChange={setCanvasWidth}
-            zoom={zoom}
-            onZoomChange={setZoom}
-          />
+              {readonly && activeTab ? (
+                <SnapshotBar tab={activeTab} />
+              ) : (
+                <Toolbar
+                  canvasWidth={canvasWidth}
+                  onCanvasWidthChange={setCanvasWidth}
+                  zoom={zoom}
+                  onZoomChange={setZoom}
+                />
+              )}
           {(() => {
             const effectiveBottomHeight = pocketExpanded
               ? Math.max(520, Math.round(window.innerHeight * 0.65))
@@ -528,7 +536,7 @@ export default function App() {
 
             return (
               <div
-                className={"workspace" + (pocketExpanded ? " pocket-expanded" : "")}
+                className={"workspace" + (pocketExpanded ? " pocket-expanded" : "") + (readonly ? " is-readonly" : "")}
                 data-layout={layout}
                 style={{
                   '--bc-bottom-height': effectiveBottomHeight + 'px',
@@ -537,7 +545,7 @@ export default function App() {
                 } as React.CSSProperties}
               >
                 <div className="elem-pane-wrap">
-                  <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>
+                  {readonly ? <SnapshotNotice /> : <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>}
                   {layout === 'left' && (
                     <div
                       className={"panel-resizer panel-resizer-left" + (pocketExpanded ? " is-disabled" : "")}
@@ -582,21 +590,27 @@ export default function App() {
                     <div className="panel-resizer-handle" />
                   </div>
                   <div className="right-pane">
-                    <div className="tab-bar">
-                      <button
-                        className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
-                        onClick={() => setRightTab('layers')}
-                      >图层</button>
-                      <button
-                        className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
-                        onClick={() => setRightTab('inspector')}
-                      >属性</button>
-                    </div>
-                    <div className="tab-body" key={rightTab}>
-                      <ErrorBoundary label="右侧面板">
-                        {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
-                      </ErrorBoundary>
-                    </div>
+                    {readonly && activeTab ? (
+                      <SnapshotInfoPanel tab={activeTab} />
+                    ) : (
+                      <>
+                        <div className="tab-bar">
+                          <button
+                            className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
+                            onClick={() => setRightTab('layers')}
+                          >图层</button>
+                          <button
+                            className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
+                            onClick={() => setRightTab('inspector')}
+                          >属性</button>
+                        </div>
+                        <div className="tab-body" key={rightTab}>
+                          <ErrorBoundary label="右侧面板">
+                            {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
+                          </ErrorBoundary>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -799,6 +813,8 @@ function useKeyboardShortcuts(
     const onKey = (e: KeyboardEvent) => {
       // 更新进行中：全局快捷键全部失效（连撤销都不允许，避免半途改数据）
       if (useUpdateBusy.getState().busy) return;
+      // 只读快照预览：画布快捷键（保存/导出/删除/微调…）一律不生效
+      if (isSnapshotTab(useTabStore.getState().tabs.find((t) => t.id === useTabStore.getState().activeTabId))) return;
       const t = e.target as HTMLElement;
       const inField = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
       // 多行文本框 / 可编辑区：正在打字时用户要的是"撤销我刚敲的字" → 让原生撤销优先。

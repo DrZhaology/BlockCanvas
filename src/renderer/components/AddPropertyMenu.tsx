@@ -258,8 +258,8 @@ export function AddPropertyMenu(props: Props) {
         title={!app.applicable ? `现在不生效：${app.disabledReason}（仍可添加，等条件满足后自动生效）` : s.help ? `${s.label}\n${s.help.content}` : s.label}
       >
         <div className="add-prop-item-left">
-          {s.scope ? (
-            <span className="prop-scope" title={s.scope === '父' ? '作用在父容器上，管子元素排布' : '作用在自身/子元素上'}>{s.scope}</span>
+          {s.scope === '父' ? (
+            <span className="prop-scope" title="作用在父容器上，管子元素排布">父级</span>
           ) : (
             <span className="prop-scope-space" />
           )}

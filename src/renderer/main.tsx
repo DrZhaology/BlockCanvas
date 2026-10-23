@@ -28,6 +28,7 @@ import './styles/23-v044d-ui.css'; // v0.4.4d：UI 统一（动效/选择器）+
 import './styles/24-v044h-ui.css'; // v0.4.4h：Alt 墙提示 + 拖到墙外改父子关系 + 中键属性搜索两态 + 删除项目三步防护
 import './styles/25-v044-storage-ui.css'; // v0.4.4：设置→存储占用明细（分类互斥可加和 + 分类清理）
 import './styles/26-empty-home.css'; // v0.4.4：空页面（关掉全部标签后的首页）+ 全局轻提示 toast
+import './styles/27-v045-ui.css'; // v0.4.5：只读快照预览 / 色标卡片 / 外轮廓 / 面板密度
 import './animations.css'; // 统一动画体系：token + 全部 keyframes（分片里只写引用）
 
 createRoot(document.getElementById('root')!).render(

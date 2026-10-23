@@ -50,6 +50,35 @@ if (!app.isPackaged) {
 // electron-vite 在 dev 模式下注入 ELECTRON_RENDERER_URL；
 const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
 
+// ============ 应用图标（窗口 / 任务栏 / 原生弹窗 / 子窗口统一用三色 Logo） ============
+// v0.4.5 修复：以前只有主窗口传了 icon，原生文件对话框、开发者工具这类"单独弹出的窗口"
+// 会回落到 Electron 默认原子图标（用户看到的任务栏里两个图标不一致）。
+// 现在：① 应用级 AppUserModelID 提前到 ready 之前设置；② 任何新建窗口（含 DevTools）在
+// browser-window-created 里统一补图标；③ 所有 dialog 都挂到主窗口上（模态 + 继承窗口图标）。
+function appIconPath(): string | null {
+  const p = app.isPackaged
+    ? join(process.resourcesPath, 'icon.png')
+    : join(app.getAppPath(), 'build', 'icon.png');
+  return existsSync(p) ? p : null;
+}
+
+/** 原生弹窗的父窗口：优先当前聚焦窗口，退而求其次取第一个窗口（保证弹窗带主窗口图标、且模态） */
+function dialogParent(): BrowserWindow | undefined {
+  return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? undefined;
+}
+
+/** 统一入口：所有原生「保存」对话框都挂到主窗口上（模态 + 继承 BlockCanvas 图标） */
+function showSaveDialog(opts: Electron.SaveDialogOptions) {
+  const w = dialogParent();
+  return w ? dialog.showSaveDialog(w, opts) : dialog.showSaveDialog(opts);
+}
+
+/** 统一入口：所有原生「打开」对话框都挂到主窗口上 */
+function showOpenDialog(opts: Electron.OpenDialogOptions) {
+  const w = dialogParent();
+  return w ? dialog.showOpenDialog(w, opts) : dialog.showOpenDialog(opts);
+}
+
 // ============ 本地图片协议 ============
 protocol.registerSchemesAsPrivileged([
   { scheme: 'bc-img', privileges: { standard: true, secure: true } }
@@ -165,20 +194,17 @@ async function createWindow() {
     callback((permission as string) === 'local-fonts');
   });
 
-  // 窗口/任务栏图标：统一用三色 Logo。
-  // · 开发态：build/icon.png（仓库里就是三色 Logo）
-  // · 打包态：electron-builder 通过 extraResources 把它复制到 resources/icon.png ——
-  //   因为 build/** 不进 asar，以前打包后这里找不到文件，任务栏就回落到 exe 的旧图标。
-  const iconPath = app.isPackaged
-    ? join(process.resourcesPath, 'icon.png')
-    : join(app.getAppPath(), 'build', 'icon.png');
+  // 窗口/任务栏图标：统一用三色 Logo（路径见 appIconPath，开发态 build/icon.png，
+  // 打包态 resources/icon.png —— build/** 不进 asar，以前打包后这里找不到文件，
+  // 任务栏就回落到 exe 的旧图标）。
+  const iconPath = appIconPath();
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 960,
     minHeight: 640,
     title: 'BlockCanvas 积木画布',
-    ...(existsSync(iconPath) ? { icon: iconPath } : {}),
+    ...(iconPath ? { icon: iconPath } : {}),
     backgroundColor: '#f3f3f3',
     webPreferences: {
       preload: join(__dirname, '../preload/preload.js'),
@@ -428,7 +454,7 @@ ipcMain.handle('project:save', async (_evt, projectData: { name?: string; scene:
     if (!targetPath) {
       if (saveAs) {
         // 关键修复：默认路径传入完整绝对路径，文件选择器自动跳转定位至 BlockCanvas\data\projects\
-        const res = await dialog.showSaveDialog({
+        const res = await showSaveDialog({
           title: '保存项目工程文件 (.bcproj)',
           defaultPath: join(defaultFullDir, `${cleanName}.bcproj`),
           filters: [{ name: 'BlockCanvas 工程文件', extensions: ['bcproj', 'json'] }]
@@ -479,7 +505,7 @@ ipcMain.handle('project:open-file', async (_evt, customPath?: string) => {
   try {
     let targetPath = customPath;
     if (!targetPath) {
-      const res = await dialog.showOpenDialog({
+      const res = await showOpenDialog({
         title: '打开项目工程文件',
         defaultPath: join(dataRoot(), 'projects'),
         properties: ['openFile'],
@@ -587,7 +613,7 @@ ipcMain.handle('export:html', async (_evt, html: string, defaultName = 'index.ht
     }
   }
   const defaultDir = app.getPath('downloads') || join(dataRoot(), 'projects');
-  const res = await dialog.showSaveDialog({
+  const res = await showSaveDialog({
     title: '导出 HTML 网页文件',
     defaultPath: join(defaultDir, defaultName),
     filters: [{ name: 'HTML 网页文件', extensions: ['html', 'htm'] }]
@@ -606,7 +632,7 @@ ipcMain.handle('export:html', async (_evt, html: string, defaultName = 'index.ht
 // 导出 HTML 的同时自动保存同名 .bcproj 项目文件（HTML 逆向成本高，双写防丢）
 ipcMain.handle('export:html-with-project', async (_evt, html: string, scene: any, defaultName = 'index.html', projectName = '我的网页') => {
   try {
-    const res = await dialog.showSaveDialog({
+    const res = await showSaveDialog({
       title: '导出 HTML 与项目文件',
       defaultPath: defaultName,
       filters: [{ name: 'HTML 网页文件', extensions: ['html'] }]
@@ -793,7 +819,7 @@ ipcMain.handle('ext:delete', async (_evt, kind: 'plugins' | 'resources', id: str
 
 ipcMain.handle('ext:import-folder', async (_evt, kind: 'plugins' | 'resources') => {
   try {
-    const res = await dialog.showOpenDialog({ title: '选择要导入的资源包文件夹', properties: ['openDirectory'] });
+    const res = await showOpenDialog({ title: '选择要导入的资源包文件夹', properties: ['openDirectory'] });
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
     const src = res.filePaths[0];
     const mf = JSON.parse(readFileSync(join(src, 'manifest.json'), 'utf-8'));
@@ -825,7 +851,7 @@ function ensureImportedPackage() {
 
 ipcMain.handle('ext:import-json', async () => {
   try {
-    const res = await dialog.showOpenDialog({
+    const res = await showOpenDialog({
       title: '选择要导入的模板 JSON',
       properties: ['openFile'],
       filters: [{ name: 'JSON', extensions: ['json'] }]
@@ -850,7 +876,7 @@ ipcMain.handle('ext:import-json', async () => {
 
 ipcMain.handle('ext:import-zip', async (_evt, kind: 'plugins' | 'resources') => {
   try {
-    const res = await dialog.showOpenDialog({
+    const res = await showOpenDialog({
       title: '选择要导入的 zip 资源包',
       properties: ['openFile'],
       filters: [{ name: 'Zip 资源包', extensions: ['zip'] }]
@@ -888,12 +914,12 @@ ipcMain.handle('ext:export-resource', async (_evt, id: string, format: 'folder' 
     const files = collectFiles(srcDir, '').map((f) => ({ name: f.rel, data: readFileSync(f.abspath) }));
     const fileName = sanitizeId(mf.name || id);
     if (format === 'zip') {
-      const res = await dialog.showSaveDialog({ defaultPath: `${fileName}.zip`, filters: [{ name: 'Zip 资源包', extensions: ['zip'] }] });
+      const res = await showSaveDialog({ defaultPath: `${fileName}.zip`, filters: [{ name: 'Zip 资源包', extensions: ['zip'] }] });
       if (res.canceled || !res.filePath) return { ok: false, canceled: true };
       writeFileSync(res.filePath, zipCreate(files));
       return { ok: true, path: res.filePath };
     }
-    const res = await dialog.showOpenDialog({ title: '选择导出目标目录', properties: ['openDirectory', 'createDirectory'] });
+    const res = await showOpenDialog({ title: '选择导出目标目录', properties: ['openDirectory', 'createDirectory'] });
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
     const target = join(res.filePaths[0], id);
     if (existsSync(target)) return { ok: false, error: '目标目录已存在同名文件夹' };
@@ -906,7 +932,7 @@ ipcMain.handle('ext:export-resource', async (_evt, id: string, format: 'folder' 
 
 ipcMain.handle('tpl:export-single', async (_evt, tree: unknown, defaultName?: string) => {
   try {
-    const res = await dialog.showSaveDialog({ defaultPath: defaultName || 'template.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+    const res = await showSaveDialog({ defaultPath: defaultName || 'template.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
     if (res.canceled || !res.filePath) return { ok: false, canceled: true };
     writeFileSync(res.filePath, JSON.stringify(tree, null, 2), 'utf-8');
     return { ok: true, path: res.filePath };
@@ -931,12 +957,12 @@ ipcMain.handle('tpl:export-package', async (_evt, tree: unknown, meta: { id?: st
       { name: `templates/${id}.json`, data: Buffer.from(JSON.stringify(tree, null, 2), 'utf-8') }
     ];
     if (format === 'zip') {
-      const res = await dialog.showSaveDialog({ defaultPath: `${name}.zip`, filters: [{ name: 'Zip 资源包', extensions: ['zip'] }] });
+      const res = await showSaveDialog({ defaultPath: `${name}.zip`, filters: [{ name: 'Zip 资源包', extensions: ['zip'] }] });
       if (res.canceled || !res.filePath) return { ok: false, canceled: true };
       writeFileSync(res.filePath, zipCreate(files));
       return { ok: true, path: res.filePath };
     }
-    const res = await dialog.showOpenDialog({ title: '选择导出目标目录', properties: ['openDirectory', 'createDirectory'] });
+    const res = await showOpenDialog({ title: '选择导出目标目录', properties: ['openDirectory', 'createDirectory'] });
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
     const target = join(res.filePaths[0], id);
     if (existsSync(target)) return { ok: false, error: '目标目录已存在同名文件夹' };
@@ -1012,7 +1038,7 @@ function pruneOldPreviews(dir: string, keep: number): number {
 }
 
 ipcMain.handle('img:pick-src', async (_evt, mode: 'abs' | 'rel' = 'rel') => {
-  const res = await dialog.showOpenDialog({
+  const res = await showOpenDialog({
     title: '选择本地图片',
     properties: ['openFile'],
     filters: [
@@ -1033,7 +1059,7 @@ ipcMain.handle('img:pick-src', async (_evt, mode: 'abs' | 'rel' = 'rel') => {
 // 首页背景：选择图片 / 视频文件（只返回路径，不复制；渲染层用 bc-img:// 预览）
 ipcMain.handle('media:pick-src', async (_evt, kind: 'image' | 'video' = 'image') => {
   const isVideo = kind === 'video';
-  const res = await dialog.showOpenDialog({
+  const res = await showOpenDialog({
     title: isVideo ? '选择本地视频' : '选择本地图片',
     properties: ['openFile'],
     filters: isVideo
@@ -1065,6 +1091,20 @@ function mediaMimeOf(p: string): string {
 }
 
 app.whenReady().then(() => {
+  // 应用级身份：必须在任何窗口/弹窗出现之前设置，任务栏才会把主窗口、原生对话框、
+  // 开发者工具都归到同一个 BlockCanvas 图标下（而不是其中一个变成 Electron 原子）。
+  if (process.platform === 'win32') app.setAppUserModelId('com.blockcanvas.app');
+
+  // 兜底：任何后建的窗口（DevTools、预览子窗、将来的多窗口）没显式给 icon 时补上三色 Logo。
+  // 用 'once' 不行——每建一个窗口都要生效，所以是常驻监听；已设过 icon 的窗口不覆盖。
+  app.on('browser-window-created', (_e, w) => {
+    const icon = appIconPath();
+    if (!icon) return;
+    try {
+      if (!w.isDestroyed()) w.setIcon(icon);
+    } catch { /* 某些窗口类型不支持 setIcon，忽略 */ }
+  });
+
   protocol.handle('bc-img', async (request) => {
     try {
       const url = new URL(request.url);

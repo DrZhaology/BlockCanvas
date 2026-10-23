@@ -1,0 +1,477 @@
+﻿/* ============================================================================
+   BlockCanvas 路 v0.4.5 鐣岄潰涓庝氦浜掑叏闈㈡墦纾?   ----------------------------------------------------------------------------
+   杩欎竴鐗囧彧鍋?鐪嬪緱瑙?鐨勪簨锛屼笉鏀逛换浣曟暟鎹€昏緫锛?     1. 鍙蹇収棰勮锛堥《閮ㄦ潯 / 宸︿晶璇存槑 / 鍙充晶淇℃伅 / 鏍囩閰嶈壊 / 鐢诲竷閿佸畾锛?     2. 娓愬彉鑹叉爣鍗＄墖锛氫慨鎺?align-items:center 閫犳垚鐨勫乏鍙冲ぇ鐗囩┖鐧?     3. 澶栬疆寤撻瑙堬細杞粨绾夸笉鍐嶇敾鍒板崱鐗囧闈?     4. 灞炴€ц"鐖剁骇"鏍囩銆佺鐢ㄦ寜閽姣斿害銆佹爣绛炬爮鎶€宸ф潯鏀剁獎
+     5. 鍏冪礌闈㈡澘姣忓垪婊氬姩鏉＄粏鍖栥€佸浘灞傛爲涓嶅啀妯悜婊氬姩
+     6. 鏂偣鏉?鑷€傚簲"鎸夐挳鍙鎬?   ========================================================================== */
+
+/* ---------- 1. 鍙蹇収棰勮 ---------- */
+.snapshot-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 14px;
+  background: linear-gradient(180deg, #faf7ff 0%, #f4f0ff 100%);
+  border-bottom: 1px solid #e4dcf7;
+  flex-shrink: 0;
+}
+.snap-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: #ede9fe;
+  border: 1px solid #ddd6fe;
+  color: #6d28d9;
+  font-size: 11.5px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.snap-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.snap-time {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.snap-spacer { flex: 1; }
+.snap-hint { font-size: 11px; color: #8b7bb8; }
+.snap-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.snap-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--hover-accent); }
+.snap-btn.is-danger { color: #b45309; border-color: #fcd34d; background: #fffbeb; }
+.snap-btn.is-danger:hover:not(:disabled) { color: #92400e; border-color: #f59e0b; background: #fef3c7; }
+.snap-btn.is-ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
+.snap-btn.is-ghost:hover { background: rgba(109, 40, 217, 0.08); color: #6d28d9; border-color: transparent; }
+.snap-btn:disabled { opacity: 0.55; cursor: default; }
+
+/* 鍙鏍囩锛氭贰绱簳 + 鐩告満鍥炬爣 */
+.tab-item.is-snapshot { background: #f6f2ff; }
+.tab-item.is-snapshot.active { background: #efe8ff; }
+.tab-item.is-snapshot .tab-title { color: #5b21b6; }
+.tab-snap-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: #7c3aed;
+  flex-shrink: 0;
+}
+
+/* 宸︿晶璇存槑 / 鍙充晶淇℃伅 */
+.snapshot-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 22px;
+  text-align: center;
+  background: #faf8ff;
+  border: 1px solid #ece6fb;
+  border-radius: 10px;
+  margin: 12px;
+  flex: 1;
+}
+.snap-notice-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #ede9fe;
+  color: #7c3aed;
+}
+.snap-notice-title { font-size: 13px; font-weight: 700; color: #4c1d95; }
+.snap-notice-desc { font-size: 12px; line-height: 1.7; color: var(--text-muted); }
+.snap-notice-tip {
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: #6d28d9;
+  background: #f3edff;
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: left;
+}
+.snapshot-info {
+  padding: 16px;
+  overflow-y: auto;
+}
+.snap-info-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #5b21b6;
+  margin-bottom: 12px;
+}
+.snap-info-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--border);
+  font-size: 12px;
+}
+.snap-info-row > span { color: var(--text-muted); flex-shrink: 0; }
+.snap-info-row > b { font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.snap-info-path {
+  margin-top: 12px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-family: Consolas, monospace;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.snap-info-tip {
+  margin-top: 12px;
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: var(--text-muted);
+  background: #faf8ff;
+  border: 1px solid #ece6fb;
+  border-radius: 8px;
+  padding: 9px 10px;
+}
+
+/* 鍙鐢诲竷锛氳兘鐪嬩笉鑳芥敼锛堟粴鍔ㄤ粛鍙敤锛?*/
+.workspace.is-readonly .canvas { pointer-events: none; }
+.workspace.is-readonly .canvas-resize-handle { display: none; }
+.workspace.is-readonly .canvas-hint { display: none; }
+
+/* ---------- 2. 娓愬彉鑹叉爣鍗＄墖锛氫笉鍐嶅眳涓缉鎴愪竴鍥?---------- */
+.grad-stop { align-items: stretch; }
+.grad-stop-top,
+.grad-stop-bottom { width: 100%; }
+.grad-stop-bottom { padding-left: 20px; }
+.grad-stop .color-text-input { height: 26px; }
+.grad-stop-del {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+}
+.grad-stop-del:hover:not(:disabled) { background: #fee2e2; color: var(--danger); border-color: #fca5a5; }
+
+/* ---------- 3. 澶栬疆寤撻瑙堬細绾挎案杩滃緟鍦ㄥ崱鐗囬噷 ---------- */
+.outline-preview {
+  height: auto;
+  padding: 16px 14px;
+  display: block;
+  background: var(--panel-soft);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.outline-preview-box {
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--bg-panel);
+  font-size: 11px;
+  color: var(--text-muted);
+  box-sizing: border-box;
+}
+.outline-row.is-wrap { align-items: flex-start; }
+.outline-row.is-wrap .outline-label { padding-top: 6px; }
+.outline-styles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  width: 100%;
+}
+.outline-style-btn { justify-content: center; padding: 0 4px; }
+
+/* ---------- 4. 灞炴€ц"鐖剁骇"鏍囩 / 绂佺敤鎸夐挳 / 鎶€宸ф潯 ---------- */
+.prop-scope {
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  padding: 0 4px;
+  margin-right: 5px;
+  border-radius: 3px;
+  background: #eef2f8;
+  color: #64748b;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  vertical-align: 1px;
+}
+.prop-scope-space { display: none; }
+
+/* 绂佺敤鎬侊細浠ュ墠 0.42 閫忔槑鍑犱箮鐪嬩笉瑙侊紝鐜板湪淇濈暀鍙鐨勭伆 */
+.toolbar .tb-btn-ghost:disabled,
+.toolbar .tb-btn-soft:disabled,
+.toolbar .tb-btn-primary:disabled { opacity: 0.55; }
+.toolbar .tb-btn-ghost:disabled { color: #9aa7b6; }
+
+/* 鏍囩鏍忓彸渚х殑鎶€宸ф潯锛氫笉鍐嶅儚杈撳叆妗嗭紝鏀剁獎 + 鍙湪 hover 鏄剧ず鍏抽棴鎸夐挳 */
+.tabbar-tips {
+  max-width: 380px;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 0 4px;
+}
+.tabbar-tips .tt-icon { color: #b8c2cf; }
+.tabbar-tips .tt-text {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+  display: block;
+}
+.tabbar-tips .tt-btn { opacity: 0; transition: opacity 0.15s ease; }
+.tabbar-tips:hover .tt-btn { opacity: 1; }
+
+/* ---------- 5. 鍏冪礌闈㈡澘姣忓垪婊氬姩鏉?/ 鍥惧眰鏍?---------- */
+/* 娉ㄦ剰锛氳繖閲屼笉鑳藉啓 scrollbar-width 鈥斺€?涓€鏃﹁缃紝Chromium 浼氬拷鐣ヤ笅闈㈢殑
+   ::-webkit-scrollbar 鑷畾涔夋牱寮忥紝鍙嶈€屾樉绀烘垚鍘熺敓绮楁粴鍔ㄦ潯锛? 鍒楀悓鏃跺嚭鐜伴潪甯稿惖锛夈€?*/
+.workspace[data-layout='bottom'] .element-group .element-grid::-webkit-scrollbar { width: 4px; }
+.workspace[data-layout='bottom'] .element-group .element-grid::-webkit-scrollbar-track { background: transparent; }
+.workspace[data-layout='bottom'] .element-group .element-grid::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+}
+.workspace[data-layout='bottom'] .element-group:hover .element-grid::-webkit-scrollbar-thumb {
+  background: rgba(120, 128, 140, 0.35);
+}
+
+.layer-tree { overflow-x: hidden; }
+.layer-tree .layer-row { gap: 1px; }
+.layer-tree .layer-text-preview { min-width: 0; }
+.layer-tree .layer-actions { opacity: 0.3; }
+.layer-tree .layer-row:hover .layer-actions,
+.layer-tree .layer-row.selected .layer-actions { opacity: 1; }
+
+/* ---------- 6. 鏂偣鏉★細鑷€傚簲鎸夐挳鏇村儚鎸夐挳 ---------- */
+.inspector-bp-bar .bp-auto-btn {
+  width: 34px;
+  height: 32px;
+  border-color: var(--border);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+}
+.inspector-bp-bar .bp-auto-btn:hover { border-color: var(--accent); color: var(--accent); }
+.inspector-bp-bar .bp-auto-btn.is-auto { color: var(--accent); border-color: #bfdbfe; background: #eff6ff; }
+
+/* ---------- 7. 娣诲姞灞炴€ц彍鍗曪細闄愰珮銆侀檺瀹斤紝鍒硦婊℃暣灞?---------- */
+.add-prop-menu {
+  max-height: 380px;
+  border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.18);
+}
+.add-prop-menu .add-prop-scroll { padding-bottom: 8px; }
+.add-prop-search input::placeholder { color: #9aa7b6; opacity: 1; }
+.add-prop-trigger {
+  height: 32px;
+  font-size: 12.5px;
+  border-style: solid;
+  border-color: #c7d7ee;
+  background: #f6f9ff;
+}
+.add-prop-trigger:hover:not(:disabled) { background: #eef4ff; }
+
+/* ---------- 8. 鍙橀噺闈㈡澘绌烘€侊細灏戜竴鐐归噸澶嶆寜閽?---------- */
+.token-empty { padding: 26px 18px 18px; gap: 8px; }
+.token-empty-icon { opacity: 0.55; }
+.token-empty .btn-secondary { margin-top: 4px; }
+
+/* ---------- 9. 璁剧疆 / 甯姪涓績锛氭鏂囬檺鍒堕槄璇诲搴?---------- */
+/* 设置页正文限宽，避免超宽屏上表单被拉成一条长线 */
+.fluent-content { max-width: 1080px; }
+/* 帮助中心正文（.help-doc 本身已有 900px 上限，这里只保证行宽不被撑破） */
+.help-scroll { padding-left: 32px; padding-right: 32px; }
+
+/* ---------- 10. 瀹氫綅鍔╂墜锛圦uickHelper锛?---------- */
+.pos-helper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 2px 2px;
+}
+.pos-edges {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+.pos-edge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.pos-edge > span {
+  flex-shrink: 0;
+  width: 16px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.pos-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pos-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.pos-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--hover-accent); }
+.pos-btn.is-ghost { color: var(--text-muted); }
+.pos-btn.is-ghost:hover { color: var(--danger); border-color: #fca5a5; background: #fef2f2; }
+.pos-hint {
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text-muted);
+  background: var(--panel-soft);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.pos-hint strong { color: var(--text); font-weight: 600; }
+
+/* ---------- 11. 鏈懡鍚嶆彁閱掑帇鎴愪竴琛?---------- */
+.cls-warn-flash {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  margin: 6px 0;
+  border: 1px solid #fde68a;
+  border-radius: 7px;
+  background: #fffbeb;
+}
+.cls-warn-flash .cls-warn-ico {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: #d97706;
+}
+.cls-warn-line {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #92400e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cls-warn-btn {
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid #f59e0b;
+  border-radius: 5px;
+  background: #fff;
+  color: #92400e;
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.cls-warn-btn:hover { background: #fef3c7; }
+.cls-warn-btn.is-ghost { border-color: transparent; background: transparent; color: #b45309; }
+.cls-warn-btn.is-ghost:hover { background: #fef3c7; }
+
+/* ---------- 12. 棣栭〉锛氬唴瀹瑰湪绐楀彛閲屽眳涓紝涓嶅啀"鍏ㄦ尋鍦ㄤ笂鍗婂睆" ---------- */
+.empty-home {
+  align-items: center;
+  padding: 24px;
+  overflow-y: auto;
+}
+.empty-home .eh-center {
+  max-height: 100%;
+}
+/* 鐭獥鍙ｄ粛鐒朵粠涓婂線涓嬫帓锛岄伩鍏嶅唴瀹硅鍘嬪嚭灞忓箷 */
+@media (max-height: 760px) {
+  .empty-home { align-items: flex-start; padding-top: 6vh; }
+}
+
+/* 娓愬彉鑹叉爣鍗＄墖锛氱粰瀹冧竴寮犵湡姝ｇ殑"鍗＄墖"搴曪紝鍜屽懆鍥村瓧娈垫媺寮€灞傛 */
+.grad-stop {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.grad-stop + .grad-stop { margin-top: 6px; }
+
+/* ---------- 13. 鍏冪礌闈㈡澘锛氭暣鍧楀彧淇濈暀涓€鏉℃粴鍔ㄦ潯 ----------
+   浠ュ墠 7 涓垎缁勫悇鑷?overflow-y:auto锛屽簳閮ㄥ悓鏃跺啋鍑?7 鏉℃粴鍔ㄦ潯锛?   姣忓垪杩樺彧鑳介湶鍑?5~6 涓Н鏈ㄣ€傜幇鍦ㄦ敼鎴愶細澶栧眰 element-body 缁熶竴婊氬姩锛?   鍒嗙粍绛夐珮浜庢渶楂樼殑涓€鍒楋紝缁勫唴缃戞牸涓嶅啀婊氬姩銆?*/
+.workspace[data-layout='bottom'] .element-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  align-items: stretch;
+}
+.workspace[data-layout='bottom'] .element-group { height: auto; }
+.workspace[data-layout='bottom'] .element-group .element-grid {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+/* ---------- 14. 鍥惧眰鏍戯細鏂囧瓧棰勮涓嶅啀鍘嬪埌鎿嶄綔鎸夐挳涓?---------- */
+.layer-tree .layer-row { min-width: 0; }
+.layer-tree .layer-text-preview {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.layer-tree .layer-actions { margin-left: auto; }
+
+/* ---------- 15. 棰滆壊鑹插潡锛氱櫧鑹?閫忔槑涔熻鐪嬪緱瑙佽竟鐣?---------- */
+.color-swatch-btn { box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.1); }

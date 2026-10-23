@@ -7,12 +7,36 @@ import { useScene } from './sceneStore';
 // - 自动记录未保存修改状态 (isDirty / • 标记)
 // - 自动与 data/session.json 双向同步（关闭程序下次打开秒级原地恢复）
 
+/** 标签种类：普通工程 / 只读快照预览（v0.4.5） */
+export type TabKind = 'project' | 'snapshot';
+
+/** 快照预览标签携带的来源信息 */
+export interface SnapshotRef {
+  /** 快照属于哪个项目（给人看的名字） */
+  projectName: string;
+  /** 原工程项目文件（绝对路径，可能为空：从"全部项目"列表点开时一定有） */
+  projectPath?: string;
+  /** 快照文件本身（绝对路径） */
+  snapshotPath: string;
+  /** 快照时间（ISO） */
+  takenAt: string;
+}
+
 export interface ProjectTab {
   id: string;
   name: string;
   filePath?: string | null;
   isDirty?: boolean;
   scene: SceneGraph;
+  /** 缺省 = 'project'（兼容旧会话） */
+  kind?: TabKind;
+  /** kind === 'snapshot' 时必填 */
+  snapshot?: SnapshotRef;
+}
+
+/** 这个标签是不是"只读快照预览" */
+export function isSnapshotTab(tab: ProjectTab | null | undefined): boolean {
+  return !!tab && tab.kind === 'snapshot';
 }
 
 export function createEmptyScene(): SceneGraph {
@@ -74,9 +98,14 @@ function debouncePersistSession(get: () => TabState) {
   syncTimer = window.setTimeout(() => {
     const st = get();
     // 准备要存盘的纯数据快照
+    // v0.4.5：只读快照标签**不写进会话**——下次启动不该莫名其妙恢复一个"快照预览"，
+    // 用户要看快照随时能从「全部项目 → 历史快照」再点开。
+    const persistTabs = st.tabs.filter((t) => t.kind !== 'snapshot');
     const payload = {
-      activeTabId: st.activeTabId,
-      tabs: st.tabs.map((t) => ({
+      activeTabId: persistTabs.some((t) => t.id === st.activeTabId)
+        ? st.activeTabId
+        : (persistTabs[persistTabs.length - 1]?.id ?? null),
+      tabs: persistTabs.map((t) => ({
         id: t.id,
         name: t.name,
         filePath: t.filePath || null,
@@ -93,7 +122,7 @@ interface TabState {
   activeTabId: string | null;
 
   loadSceneSilently: (scene: SceneGraph) => void;
-  newTab: (name?: string, scene?: SceneGraph, filePath?: string | null, history?: { past?: SceneGraph[]; future?: SceneGraph[] }) => string;
+  newTab: (name?: string, scene?: SceneGraph, filePath?: string | null, history?: { past?: SceneGraph[]; future?: SceneGraph[] }, kind?: TabKind, snapshot?: SnapshotRef) => string;
   closeTab: (tabId: string) => boolean;
   switchTab: (tabId: string) => void;
   updateActiveTabScene: (scene: SceneGraph, markDirty?: boolean) => void;
@@ -102,6 +131,8 @@ interface TabState {
   setTabSaved: (tabId: string, filePath: string, name?: string) => void;
   /** 工程文件在磁盘上被重命名后，同步更新打开了它的标签的 filePath */
   renameTabFilePath: (oldPath: string, newPath: string) => void;
+  /** 快照覆盖回项目后：把已经打开的那个工程标签同步成新场景（并清掉未保存点） */
+  applyRestoredScene: (filePath: string, scene: SceneGraph) => void;
   initFromSession: (session: { activeTabId: string | null; tabs: any[] }) => void;
 }
 
@@ -120,7 +151,7 @@ export const useTabStore = create<TabState>((set, get) => ({
     requestAnimationFrame(() => { isSwitchingTab = false; });
   },
 
-  newTab: (name, customScene, filePath = null, history) => {
+  newTab: (name, customScene, filePath = null, history, kind = 'project', snapshot) => {
     const st = get();
     const curIndex = st.tabs.length + 1;
     const tabName = name || `未命名项目 ${curIndex}`;
@@ -135,8 +166,11 @@ export const useTabStore = create<TabState>((set, get) => ({
       id: newId,
       name: tabName,
       filePath,
-      isDirty: !filePath,
-      scene
+      // 快照预览是只读的，永远不脏；普通工程未保存过就是脏的
+      isDirty: kind === 'snapshot' ? false : !filePath,
+      scene,
+      kind,
+      ...(snapshot ? { snapshot } : {})
     };
 
     set({
@@ -269,6 +303,25 @@ export const useTabStore = create<TabState>((set, get) => ({
         t.filePath && norm(t.filePath) === norm(oldPath) ? { ...t, filePath: newPath } : t
       )
     }));
+    debouncePersistSession(get);
+  },
+
+  // 快照覆盖回项目：如果原工程此刻正开着，直接把它的场景换掉（撤销栈清空、未保存点清掉），
+  // 否则用户会看到"磁盘已经回退，画布还是旧内容"。
+  applyRestoredScene: (filePath: string, scene: SceneGraph) => {
+    const norm = (p: string) => String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
+    const st = get();
+    const target = st.tabs.find((t) => t.filePath && norm(t.filePath) === norm(filePath));
+    if (!target) return;
+    set({
+      tabs: st.tabs.map((t) => (t.id === target.id ? { ...t, scene, isDirty: false } : t))
+    });
+    if (st.activeTabId === target.id) {
+      isSwitchingTab = true;
+      useScene.getState().setScene(scene);
+      useScene.setState({ history: { past: [], future: [] } });
+      requestAnimationFrame(() => { isSwitchingTab = false; });
+    }
     debouncePersistSession(get);
   },
 
