@@ -167,6 +167,21 @@ contextBridge.exposeInMainWorld('bc', {
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);
   },
+  /**
+   * v0.4.5：系统层要求打开某个 .bcproj（双击文件 / 第二个实例 / macOS open-file）。
+   * 主进程会把绝对路径发过来，渲染进程负责真正打开它。
+   */
+  onOpenProjectPath: (cb: (path: string) => void) => {
+    const listener = (_e: IpcRendererEvent, p: string) => cb(String(p || ''));
+    ipcRenderer.on('bc:open-project-path', listener);
+    return () => ipcRenderer.removeListener('bc:open-project-path', listener);
+  },
+  /** v0.4.5：启动加载页的真实进度（主进程在解包素材等步骤里逐条播报） */
+  onLoadProgress: (cb: (p: { id: string; label: string; percent: number }) => void) => {
+    const listener = (_e: IpcRendererEvent, p: { id: string; label: string; percent: number }) => cb(p);
+    ipcRenderer.on('bc:load-progress', listener);
+    return () => ipcRenderer.removeListener('bc:load-progress', listener);
+  },
   setNativeTheme: (source: 'dark' | 'light' | 'system') =>
     ipcRenderer.send('theme:set-source', source),
   pickImageSrc: (mode?: 'abs' | 'rel') =>

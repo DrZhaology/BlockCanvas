@@ -143,6 +143,55 @@ function loadBg(): BgSpec {
   return DEFAULT_BG;
 }
 
+// ============================================================================
+// v0.4.5：**记住主界面的颜色模式**（用户反馈）
+// ----------------------------------------------------------------------------
+// 用户原话：「比如可以记录主界面的颜色模式，比如背景是淡色的，记录一下，那么显示的字体就是黑色的。
+//            因为现在直接进入会有一个过渡期，如果背景深色的，会等一会儿再把文字变成白色。」
+//
+// 原因：文字反色以前**只能等异步采样**（图片要 onload、视频要等 1.8 秒那一帧），
+// 所以进首页时先按"浅色底 → 黑字"画一帧，采样完才翻成白字 —— 那一下很跳。
+//
+// 现在两道保险：
+//  1. **能同步算的就同步算**：纯色 / 渐变直接解析颜色算亮度，第一帧就是对的（根本不进过渡期）；
+//  2. **算不了的记住上次结果**：图片 / 视频按"背景签名"（类型+路径+压暗+模糊）记住上次判定，
+//     下次进首页直接套用；签名没变就完全不需要再翻色。
+// ============================================================================
+const BG_DARK_KEY = 'bc-home-dark';        // 上次判定结果（true = 深色底 → 白字）
+const BG_DARK_SIG_KEY = 'bc-home-dark-sig'; // 该结果对应的背景签名
+
+/** 背景签名：同一种背景（含压暗/模糊参数）算同一档，换背景就重新判定 */
+function bgSignature(spec: BgSpec): string {
+  if (spec.kind === 'preset') return 'preset:' + spec.value;
+  if (spec.kind === 'gradient') return 'gradient:' + (spec.css || DEFAULT_GRADIENT);
+  return `${spec.kind}:${spec.src}:${spec.dim ?? 0}:${spec.blur ?? 0}`;
+}
+
+/** 同步判定"要不要用白字"；算不出来的（图片/视频）用记下来的结果兜底 */
+function initialOnDark(spec: BgSpec): boolean {
+  if (spec.kind === 'preset') return (cssLuminance(spec.value) ?? 1) < 0.5;
+  if (spec.kind === 'gradient') return (cssLuminance(spec.css || DEFAULT_GRADIENT) ?? 1) < 0.5;
+  const sig = bgSignature(spec);
+  const lastSig = readPersisted<string>(BG_DARK_SIG_KEY, '');
+  if (lastSig === sig) return readPersisted<boolean>(BG_DARK_KEY, false);
+  // 这个背景没记过 → 沿用"上一次的整体模式"，至少不会先黑后白地闪一下
+  return readPersisted<boolean>(BG_DARK_KEY, false);
+}
+
+/** 记下这次判定（同时记全局默认），下次进首页第一帧就是对的 */
+function rememberOnDark(spec: BgSpec, dark: boolean): void {
+  try {
+    localStorage.setItem(BG_DARK_KEY, JSON.stringify(dark));
+    localStorage.setItem(BG_DARK_SIG_KEY, JSON.stringify(bgSignature(spec)));
+  } catch { /* 隐私模式下写不了，忽略 */ }
+}
+
+// 探针钩子（开发无关，只是让 E2E 能直接断言"首帧判定"这个纯函数，
+// 否则一张 data URL 图片加载太快，观测不到"记忆值"那一帧）：
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__bcHomeDark = { initialOnDark, bgSignature, rememberOnDark };
+}
+
 function loadSaved(): SavedBg[] {
   const raw = readPersisted<unknown>(SAVED_KEY, []);
   if (!Array.isArray(raw)) return [];
@@ -209,8 +258,9 @@ export function EmptyHome(props: {
   const [panelOpen, setPanelOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>('preset');
   const [leaving, setLeaving] = useState(false);
-  // 深色背景 → 文字/玻璃控件自动转白
-  const [onDark, setOnDark] = useState(false);
+  // 深色背景 → 文字/玻璃控件自动转白。
+  // v0.4.5：**首帧就是对的**——纯色/渐变同步算，图片/视频用记住的上次结果（见 initialOnDark）。
+  const [onDark, setOnDark] = useState(() => initialOnDark(bg));
   const panelRef = useRef<HTMLDivElement>(null);
 
   // 图片 / 视频的草稿参数（输入即生效，所以直接跟 bg 同步）
@@ -263,7 +313,7 @@ export function EmptyHome(props: {
     if (!panelOpen) return;
     const inPicker = (t: EventTarget | null) =>
       !!(t as HTMLElement | null)?.closest?.(
-        '.cp-modal, .cp-modal-mask, .cp-varmenu, .cp-varmenu-mask, .cp-sv, .cp-hue, .cp-alpha, .bc-color-portal'
+        '.cp-modal, .cp-modal-mask, .cp-varmenu, .cp-varmenu-mask, .bc-varmenu, .cp-sv, .cp-hue, .cp-alpha, .bc-color-portal'
       );
     const onDown = (e: MouseEvent) => {
       if (inPicker(e.target)) return;
@@ -329,12 +379,17 @@ export function EmptyHome(props: {
   }, [bg.kind]);
 
   // —— 文字颜色自动反色 ——
-  // 预设 / 渐变：直接解析颜色算亮度
+  // 预设 / 渐变：直接解析颜色算亮度（**同步**，第一帧就对，不会先黑后白）
   useEffect(() => {
     if (bg.kind !== 'preset' && bg.kind !== 'gradient') return;
     const lum = cssLuminance(bgCss(bg));
-    if (lum !== null) setOnDark(lum < 0.5);
+    if (lum !== null) { const dark = lum < 0.5; setOnDark(dark); rememberOnDark(bg, dark); }
   }, [bg]);
+  // 换背景时先用"记住的结果"预置一次，避免异步采样回来之前闪一下反色
+  useEffect(() => {
+    setOnDark(initialOnDark(bg));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bgSignature(bg)]);
   // 图片：加载后采样一次
   useEffect(() => {
     if (bg.kind !== 'image' || !bg.src.trim()) return;
@@ -344,9 +399,9 @@ export function EmptyHome(props: {
     img.onload = () => {
       if (!alive) return;
       const lum = frameLuminance(img);
-      if (lum !== null) setOnDark(lum < 0.5);
+      if (lum !== null) { const dark = lum < 0.5; setOnDark(dark); rememberOnDark(bg, dark); }
     };
-    img.onerror = () => { if (alive) setOnDark(true); };
+    img.onerror = () => { if (alive) { setOnDark(true); rememberOnDark(bg, true); } };
     img.src = mediaSrc(bg.src);
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -358,7 +413,7 @@ export function EmptyHome(props: {
       const v = videoRef.current;
       if (!v || v.readyState < 2) return;
       const lum = frameLuminance(v);
-      if (lum !== null) setOnDark(lum < 0.5);
+      if (lum !== null) { const dark = lum < 0.5; setOnDark(dark); rememberOnDark(bg, dark); }
     };
     const t = window.setInterval(tick, 1800);
     window.setTimeout(tick, 600);
@@ -399,7 +454,9 @@ export function EmptyHome(props: {
         st.switchTab(existing.id);
         showToast(`「${existing.name}」已经打开着，已为你切换过去`);
       } else {
-        withViewTransition(() => st.newTab(p.name, res.project.scene, p.filePath));
+        // v0.4.5：**必须把 res.history 一起传进去** —— 首页「最近项目」这条路以前漏了，
+        // 于是从这里打开的工程撤销栈是空的（用户反馈"重新打开项目 Ctrl+Z 完全无法执行"）。
+        withViewTransition(() => st.newTab(p.name, res.project.scene, p.filePath, res.history));
       }
       setFocused(false);
     } catch (e) {

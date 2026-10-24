@@ -112,9 +112,39 @@ export function QuickHelper(props: Props) {
   const marginDirty = marginVals.some((v) => !!v && v !== '0' && v !== '0px' && v !== 'auto');
   const marginIrregular = new Set(marginVals.map((v) => v || '0px')).size > 1;
 
+  /**
+   * 居中。
+   *
+   * v0.4.5 第 8 批（用户反馈）：
+   * 「整个 fixed 的定位和 relative 非常糟糕，说了 fixed 要自动适配，**不要 4 边的都调整**，
+   *   因为我浏览器视口和画布完全不一样！」
+   *
+   * 以前 fixed 也走 `left:0; right:0; margin:auto` —— 那是**四个边一起被改**，
+   * 而且在浏览器里居中的是"真实视口"，画布上看到的完全是另一回事（画布宽度 ≠ 视口宽度）。
+   * 现在 fixed 改用**单边 + 百分比**：
+   *   left: calc(50% - 元素宽一半)  →  只改 left 一边，且自动适配任何视口宽度。
+   * 这样画布里看着居中，导出后在浏览器里同样居中（百分比跟着视口走）。
+   */
   const applyCenter = (axis: 'x' | 'y', clearFirst: boolean) => {
     beginStyleEdit();
-    const positioned = ['absolute', 'fixed'].includes(eff.position ?? '');
+    const pos = eff.position ?? '';
+    const positioned = pos === 'absolute' || pos === 'fixed';
+    const isFixed = pos === 'fixed';
+
+    if (isFixed) {
+      // 量元素自身的布局尺寸（offsetWidth/Height 是 CSS 像素，不受画布 scale(zoom) 影响）
+      const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(elementId)}"]`) as HTMLElement | null;
+      const w = el?.offsetWidth ?? 0;
+      const h = el?.offsetHeight ?? 0;
+      const patch = axis === 'x'
+        ? { left: `calc(50% - ${Math.round(w / 2)}px)`, right: undefined, marginLeft: '0', marginRight: '0' }
+        : { top: `calc(50% - ${Math.round(h / 2)}px)`, bottom: undefined, marginTop: '0', marginBottom: '0' };
+      updateStyle(elementId, patch as never);
+      endStyleEdit();
+      setMarginConfirm(null);
+      return;
+    }
+
     const clear = clearFirst
       ? (axis === 'x'
         ? { marginLeft: '0px', marginRight: '0px' }
@@ -133,6 +163,11 @@ export function QuickHelper(props: Props) {
   };
 
   const requestCenter = (axis: 'x' | 'y') => {
+    // fixed 走"单边百分比"方案，不改 margin、不需要确认
+    if ((eff.position ?? '') === 'fixed') {
+      applyCenter(axis, true);
+      return;
+    }
     if (marginDirty || marginIrregular) {
       setMarginConfirm(axis);
       return;
@@ -445,14 +480,18 @@ export function QuickHelper(props: Props) {
               <button
                 className="pos-btn"
                 onClick={() => requestCenter('x')}
-                title={['absolute', 'fixed'].includes(eff.position ?? '')
-                  ? '左右都设 0 + 外边距自动 → 水平居中（需要元素有明确宽度）'
-                  : '左右外边距自动 → 块级元素水平居中（需要元素有明确宽度）'}
+                title={(eff.position ?? '') === 'fixed'
+                  ? '写 left: calc(50% - 宽÷2) —— 只改左边一条，自动适配任何视口宽度（不动四边）'
+                  : ['absolute'].includes(eff.position ?? '')
+                    ? '左右都设 0 + 外边距自动 → 水平居中（需要元素有明确宽度）'
+                    : '左右外边距自动 → 块级元素水平居中（需要元素有明确宽度）'}
               ><Icon name="columns" size={13} /> 水平居中</button>
               <button
                 className="pos-btn"
                 onClick={() => requestCenter('y')}
-                title="上下都设 0 + 外边距自动 → 垂直居中（需要元素有明确高度；流式元素需要父级是 Flex 才生效）"
+                title={(eff.position ?? '') === 'fixed'
+                  ? '写 top: calc(50% - 高÷2) —— 只改上边一条，自动适配任何视口高度（不动四边）'
+                  : '上下都设 0 + 外边距自动 → 垂直居中（需要元素有明确高度；流式元素需要父级是 Flex 才生效）'}
               ><Icon name="rows" size={13} /> 垂直居中</button>
               <button
                 className="pos-btn is-ghost"
@@ -491,7 +530,10 @@ export function QuickHelper(props: Props) {
             )}
 
             <div className="pos-hint">
-              居中生效需要元素有<strong>明确宽/高</strong>（或由内容撑开）。fixed 定位相对窗口，滚动页面也不动。
+              居中生效需要元素有<strong>明确宽/高</strong>（或由内容撑开）。
+              <strong>fixed</strong> 定位在导出后相对<strong>浏览器视口</strong>，所以这里的居中是
+              百分比（<code>calc(50% - 一半)</code>）—— 只动一条边，换任何屏幕宽度都居中；
+              画布上的位置只是预览，实际以浏览器视口为准。
             </div>
           </div>
         )}

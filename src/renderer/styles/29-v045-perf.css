@@ -1,0 +1,98 @@
+/* ============================================================================
+   BlockCanvas · 29-v045-perf.css
+   ----------------------------------------------------------------------------
+   v0.4.5 第九批：**动画性能**。CSS 侧只做"开关"，判断交给 JS
+   （见 src/renderer/lib/animGovernor.ts，它往 <html> 上写两个属性）：
+
+     data-bc-anim="full"    正常（默认，什么都不做）
+     data-bc-anim="lite"    精简档：装饰性过渡/动画时长压到 0.01ms（状态视觉不变，只是瞬间到位）
+     data-bc-anim="off"     关闭档：连"表示正在忙"的旋转也停
+     data-bc-anim-paused=1  窗口不可见/失焦：装饰动画暂停不跑（省 GPU / 电量）
+
+   为什么这是"另一条路"而不是继续抠 CSS：动画是否卡顿取决于**当时机器在干什么**
+   （一个 4K 场景 + 一堆大图解码时，任何过渡都会掉帧）。与其二选一（要么全有要么全无），
+   不如让程序在掉帧时自动收、在顺滑时自动放 —— 用户完全无感。
+
+   ⚠ 精简档**不清除**任何状态类（.is-active / .is-open / 伪类颜色…），
+     只压缩时长，所以"视觉正确性"不受影响；旋转指示单独保留，否则用户会以为程序卡死。
+   ========================================================================== */
+
+/* ============================================================================
+   1. 手动/自动"精简档" & "关闭档"
+   ========================================================================== */
+html[data-bc-anim='lite'] *,
+html[data-bc-anim='lite'] *::before,
+html[data-bc-anim='lite'] *::after {
+  transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
+}
+/* 精简档仍保留"正在忙"的旋转：它是状态指示，不是装饰 */
+html[data-bc-anim='lite'] .tb-spin,
+html[data-bc-anim='lite'] .tb-spin::before,
+html[data-bc-anim='lite'] .tb-spin::after {
+  animation-duration: inherit !important;
+}
+
+/* 关闭档：装饰动画一律不跑（旋转除外，留一个"在做事"的反馈） */
+html[data-bc-anim='off'] *,
+html[data-bc-anim='off'] *::before,
+html[data-bc-anim='off'] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+html[data-bc-anim='off'] .tb-spin { animation: bcSpin 0.9s linear infinite !important; }
+
+/* ============================================================================
+   2. 窗口不可见 / 失焦 → 装饰动画暂停（不是"删掉"，切回来立刻继续）
+   ---------------------------------------------------------------------------
+   只暂停**纯装饰**的那几个（旋转、脉冲、呼吸、进场），其它一律不动 ——
+   暂停所有动画会把"正在下载""正在应用更新"这类进度反馈也冻住，那是错的。
+   ========================================================================== */
+html[data-bc-anim-paused='1'] .tb-spin,
+html[data-bc-anim-paused='1'] .bc-drop-preview,
+html[data-bc-anim-paused='1'] .bc-loading-logo,
+html[data-bc-anim-paused='1'] .bc-tips-roll,
+html[data-bc-anim-paused='1'] .eh-panel,
+html[data-bc-anim-paused='1'] .app-toast {
+  animation-play-state: paused !important;
+}
+
+/* ============================================================================
+   3. 顺带修掉几处"动画属性选得不划算"的地方
+   ---------------------------------------------------------------------------
+   · 画布宽度切换的过渡里原来还带着 box-shadow 与 border-radius：
+     这两个都是**重绘**属性，而 .canvas 底下是一整棵场景树 —— 每次过渡都要重绘整张画布。
+     宽度/最小高度本来就要重排，重绘就省了。
+   · 卡片悬浮的阴影过渡同理：只保留 transform（合成层，不进主线程布局/重绘）。
+   ========================================================================== */
+.canvas {
+  transition:
+    width 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    min-height 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* 悬浮只动 transform（合成），不动 box-shadow（重绘） */
+.asset-item,
+.pc-card,
+.token-row,
+.eh-saved-item {
+  transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.16s ease;
+}
+/* 拖拽中的覆盖层：提前告诉合成器"这个层会动"，避免每帧临时提升 */
+.marquee-box,
+.bc-alt-box,
+.bc-boxm,
+.bc-alt-badge {
+  will-change: transform, left, top;
+}
+
+/* ============================================================================
+   4. 加载页的深色底（跟随"记住的主界面颜色模式"，避免启动时白→黑闪一下）
+   ========================================================================== */
+.bc-loading.is-dark { background: #0f1420; }
+.bc-loading.is-dark .bc-loading-name { color: #e8edf6; }
+.bc-loading.is-dark .bc-loading-stage,
+.bc-loading.is-dark .bc-loading-pct { color: #6f7d92; }
+.bc-loading.is-dark .bc-loading-meta { color: #a8b4c6; }
+.bc-loading.is-dark .bc-loading-bar { background: #1b2231; }

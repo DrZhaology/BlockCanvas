@@ -28,6 +28,8 @@ import { showToast, type ToastType } from '@lib/toast';
 import { requestPropFocus } from '@lib/propFocus';
 import { EmptyHome } from '@comp/EmptyHome';
 import { SnapshotBar, SnapshotNotice, SnapshotInfoPanel } from '@comp/SnapshotBar';
+import { LoadingScreen } from '@comp/LoadingScreen';
+import { useLoadScreen } from '@store/loadStore';
 
 // BlockCanvas · 主界面
 // - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
@@ -180,17 +182,47 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false);
   useEffect(() => {
     (async () => {
+      // v0.4.5：加载页 —— 启动这一步的进度是**真的**（读会话 → 恢复标签 → 准备画布），
+      // 不是定时器凑出来的。会话读回来之前一直盖着，所以不会"首页一闪 → 画布"。
+      useLoadScreen.getState().begin('正在恢复上次的会话…');
+      useLoadScreen.getState().report('正在恢复上次的会话…', 24);
       try {
         const session = await window.bc.getSession();
         if (session && session.tabs && session.tabs.length > 0) {
+          useLoadScreen.getState().report(`正在恢复 ${session.tabs.length} 个标签…`, 62);
           useTabStore.getState().initFromSession(session);
+        } else {
+          useLoadScreen.getState().report('准备空页面…', 62);
         }
       } catch (e) {
         console.warn('恢复会话失败:', e);
       } finally {
-        setSessionReady(true);
+        useLoadScreen.getState().report('正在准备界面…', 92);
+        // 等主界面真正渲染出来（下一帧）再放开闸门并淡出加载页
+        requestAnimationFrame(() => {
+          setSessionReady(true);
+          requestAnimationFrame(() => useLoadScreen.getState().finish());
+        });
       }
     })();
+  }, []);
+
+  // 1b. 主进程在"打开工程"过程中播报的真实进度（解包素材 N/M 等）
+  useEffect(() => {
+    const off = window.bc.onLoadProgress((p) => {
+      if (!p || typeof p.percent !== 'number') return;
+      const st = useLoadScreen.getState();
+      if (!st.visible) st.begin(p.label);
+      st.report(p.label, p.percent);
+      // ⚠ 关键：进度到 100% 必须**自己收尾**。
+      // 有些打开路径（首页「最近打开」卡片、只读快照）是组件自己调 openProjectFile 的，
+      // 不会经过 App 的 openProjectAt → 如果只靠那边调 finish()，
+      // 加载页会永远挂在最上层（z-index 最高档）把整个界面挡死（探针抓到过一次）。
+      if (p.percent >= 100) {
+        window.setTimeout(() => useLoadScreen.getState().finish(), 140);
+      }
+    });
+    return () => off?.();
   }, []);
 
   // 2. 定时自动备份：按用户配置的毫秒数执行，按项目名称分别隔离保存
@@ -364,27 +396,52 @@ export default function App() {
       if (res.ok && res.path) { useTabStore.getState().setTabSaved(curTab.id, res.path, res.name); autoSaveLastRef.current = Date.now(); }
     };
 
-    const onOpenProject = async () => {
-      if (blocked()) return;
-      const res = await window.bc.openProjectFile();
-      if (res.ok && res.project?.scene) {
-        // v0.4.4：同一个文件重复打开 → 不再开新标签，切到已打开的那个并轻提示
-        const st = useTabStore.getState();
-        const norm = (p: string) => String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
-        const existing = st.tabs.find((t) => t.filePath && norm(t.filePath) === norm(res.path || ''));
-        if (existing) {
-          st.switchTab(existing.id);
-          showToast(`「${existing.name}」已经打开着，已为你切换到那个标签页`, 'info');
-          switchView('editor');
-        } else {
-          // v0.4.4：从首页打开工程也走视图过渡（旧帧=首页，新帧=编辑器），背景丝滑交叉淡入
-          withViewTransition(() => {
-            st.newTab(res.project.name || '已打开工程', res.project.scene, res.path, res.history);
-            setView('editor');
-          });
+    /**
+     * 打开工程。
+     *
+     * v0.4.5：`path` 由系统层给出（双击 .bcproj / 第二个实例 / macOS open-file），
+     * 这时**一定**要挂加载页 —— 用户双击文件后看到的是一个空白壳子会以为没反应。
+     * 从菜单 / 首页打开时不开加载页（那边本来就有自己的动效，且用户看得见文件选择框）。
+     */
+    const openProjectAt = async (path?: string) => {
+      if (blocked()) { if (path) useLoadScreen.getState().finish(); return; }
+      const withSplash = Boolean(path);
+      if (withSplash) {
+        useLoadScreen.getState().begin('正在打开工程…');
+        useLoadScreen.getState().report('正在打开工程…', 4);
+      }
+      try {
+        const res = await window.bc.openProjectFile(path);
+        if (res.ok && res.project?.scene) {
+          // v0.4.4：同一个文件重复打开 → 不再开新标签，切到已打开的那个并轻提示
+          const st = useTabStore.getState();
+          const norm = (p: string) => String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
+          const existing = st.tabs.find((t) => t.filePath && norm(t.filePath) === norm(res.path || ''));
+          if (existing) {
+            st.switchTab(existing.id);
+            showToast(`「${existing.name}」已经打开着，已为你切换到那个标签页`, 'info');
+            switchView('editor');
+          } else {
+            // v0.4.4：从首页打开工程也走视图过渡（旧帧=首页，新帧=编辑器），背景丝滑交叉淡入
+            withViewTransition(() => {
+              st.newTab(res.project.name || '已打开工程', res.project.scene, res.path, res.history);
+              setView('editor');
+            });
+          }
+        } else if (withSplash && !res.canceled) {
+          showToast('打开失败：' + (res.error || '文件可能已损坏'), 'err');
+        }
+      } finally {
+        if (withSplash) {
+          // 等主界面画完这一帧再淡出（和启动流程同样的处理）
+          requestAnimationFrame(() => useLoadScreen.getState().finish());
         }
       }
     };
+
+    const onOpenProject = () => { void openProjectAt(); };
+    // 系统层要求打开某个 .bcproj（双击文件关联 / 第二个实例）
+    const offOpenPath = window.bc.onOpenProjectPath((p) => { if (p) void openProjectAt(p); });
 
     const onExportHtml = () => {
       window.dispatchEvent(new CustomEvent('bc:export-html'));
@@ -427,8 +484,10 @@ export default function App() {
     // 中键属性搜索：先把请求写进缓冲（lib/propFocus），再切页签。
     // 这样无论右侧当前在「图层」还是「页面 / 类名 / 变量」，Inspector 挂载后都能补上定位。
     const onFocusProp = (e: Event) => {
-      const d = (e as CustomEvent).detail as { key?: string; add?: boolean } | undefined;
-      if (d?.key) requestPropFocus({ key: d.key, add: d.add !== false });
+      const d = (e as CustomEvent).detail as { key?: string; add?: boolean; value?: string } | undefined;
+      // ⚠ v0.4.5：`value` 一定要透传 —— 中键搜索的「属性值预测」就是靠它把值一起写进去的。
+      // 这里当初漏掉 value，导致点了预测值只会定位、不会写值（探针抓出来的）。
+      if (d?.key) requestPropFocus({ key: d.key, add: d.add !== false, ...(d.value !== undefined ? { value: d.value } : {}) });
       setRightTab('inspector');
       switchView('editor');
     };
@@ -484,12 +543,19 @@ export default function App() {
       window.removeEventListener('menu:export-html', onExportHtml);
       window.removeEventListener('menu:preview', onPreview);
       offs.forEach((off) => off && off());
+      offOpenPath?.();
     };
   }, [setLayout, switchView, openUpdateCenter]);
 
-  // 会话还没读回来：先只铺一层背景，避免"首页一闪 → 画布"的跳变
+  // 会话还没读回来：先只铺一层背景，避免"首页一闪 → 画布"的跳变。
+  // v0.4.5：现在这里同时挂上带 Logo + 真实进度的加载页（它自己会淡出，不阻塞渲染）。
   if (!sessionReady) {
-    return <div className="app bc-booting" />;
+    return (
+      <>
+        <div className="app bc-booting" />
+        <LoadingScreen />
+      </>
+    );
   }
 
   return (
@@ -555,7 +621,7 @@ export default function App() {
                   '--bc-left-width': effectiveLeftWidth + 'px'
                 } as React.CSSProperties}
               >
-                <div className="elem-pane-wrap">
+                <div className="elem-pane-wrap" data-bc-avoid="elem-pane">
                   {readonly ? <SnapshotNotice /> : <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>}
                   {layout === 'left' && (
                     <div
@@ -593,7 +659,7 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                <div className="right-pane-wrap">
+                <div className="right-pane-wrap" data-bc-avoid="right-pane">
                   <div
                     className="panel-resizer panel-resizer-vertical"
                     onMouseDown={(e) => startResize(e, 'right', setRightWidth, RIGHT_WIDTH_MIN, rightWidth)}
@@ -635,6 +701,8 @@ export default function App() {
       <ShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       <UpdateBusyOverlay />
       <AppToasts />
+      {/* v0.4.5：打开工程 / 恢复会话期间的加载页（在主界面之后挂载 → 盖在最上层） */}
+      <LoadingScreen />
     </div>
   );
 }

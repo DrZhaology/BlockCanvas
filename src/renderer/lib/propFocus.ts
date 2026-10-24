@@ -9,8 +9,13 @@
 
 export interface PropFocusRequest {
   key: string;
-  /** 是否顺便把属性加进可见列表（Ctrl+Enter 时 true） */
+  /** 是否顺便把属性加进可见列表（Ctrl+Enter / 中键搜索的值预测时 true） */
   add: boolean;
+  /**
+   * 可选的"顺便写入的值"（v0.4.5：中键搜索的属性值预测）。
+   * 裸数字会按 schema.unit 自动补单位（见 propertySchema.presetValue）。
+   */
+  value?: string;
 }
 
 let pending: PropFocusRequest | null = null;

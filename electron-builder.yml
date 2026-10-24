@@ -43,10 +43,28 @@ extraResources:
   - from: builtin-extensions
     to: builtin-extensions
 
+# .bcproj 项目文件关联：双击项目文件即用 BlockCanvas 打开。
+# （v0.4.5 起 .bcproj 是 ZIP 容器；这里给 Windows 注册表 / macOS 文档类型 / Linux MIME 用。
+#   icon 用专用的折角纸面 + 三色方块图标，和 App 主图标区分开。）
+fileAssociations:
+  - ext: bcproj
+    name: BlockCanvas 项目文件
+    description: BlockCanvas 积木画布项目工程文件
+    icon: build/bcproj.ico
+    role: Editor
+    mimeType: application/x-blockcanvas-project
+
 win:
-  # 用 build/icon.png（256×256）自动生成 exe 图标
+  # 用 build/icon.png（1024×1024，三色 Logo 4× 超采样矢量风重绘）生成 exe 图标
   icon: build/icon.png
   target:
     - target: dir
       arch:
         - x64
+
+# macOS / Linux：同样指向 1024×1024 高清 PNG（打包时由 electron-builder 按平台转换）
+mac:
+  icon: build/icon.png
+
+linux:
+  icon: build/icon.png

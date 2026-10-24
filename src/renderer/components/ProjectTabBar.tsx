@@ -126,7 +126,7 @@ export function ProjectTabBar() {
   };
 
   return (
-    <div className={"project-tab-bar" + (overflow ? " tabs-overflow" : "")}>
+    <div className={"project-tab-bar" + (overflow ? " tabs-overflow" : "")} data-bc-avoid="tabbar">
       <div className={"tab-strip bc-hscroll" + (overflow ? " has-overflow" : "")} ref={stripRef}>
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;

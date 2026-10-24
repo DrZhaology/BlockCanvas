@@ -1,0 +1,409 @@
+/* ============================================================================
+   BlockCanvas · 28-v045-zindex.css
+   ----------------------------------------------------------------------------
+   v0.4.5 第八批：**全程序 z-index 标尺的落地** + 统一浮层视觉 + 属性搜索高亮修复。
+
+   标尺本身的说明见 styles/00-theme-tokens.css 的「z-index 标尺」一节
+   （以及 JS 侧的 src/renderer/lib/zLayers.ts）—— 三处必须一致。
+
+   这个文件只做两件事：
+     1. 把"外壳层 / 画布覆盖层 / 浮层"按标尺归位（以前是 30/60/88/90/400/800/9999 乱飞）；
+     2. 定义统一的浮层外观（变量菜单 VarMenu、属性搜索）。
+
+   ⚠ 不要在这里写新的裸数字，一律 var(--z-xxx)。
+   ========================================================================== */
+
+/* ============================================================================
+   1. 外壳层归位
+   ---------------------------------------------------------------------------
+   工具栏 / 页签栏 / 侧边面板以前没有 z-index（都是 auto），于是
+   "Portal 到 body 的浮层"与"照 DOM 顺序叠"完全不可预测 —— 中键属性搜索框就是
+   这样被下方元素面板拦腰截断的（面板本身也没定位，只是恰好排在后面对不上）。
+   现在：工具栏显式 --z-toolbar，面板显式 --z-sheet，浮层显式 --z-popover。
+   ========================================================================== */
+.toolbar,
+.project-tab-bar,
+.snapshot-bar {
+  position: relative;
+  z-index: var(--z-toolbar);
+}
+.elem-pane-wrap,
+.right-pane-wrap {
+  position: relative;
+  z-index: var(--z-sheet);
+}
+/* 面板拖手要压在面板之上、工具栏之下（拖手本身是面板的一部分，别被面板吃掉） */
+.workspace .panel-resizer { z-index: calc(var(--z-sheet) + 1); }
+
+/* ── 画布覆盖层带 400~449 ── */
+.marquee-box { z-index: var(--z-canvas-overlay); }
+.canvas-inline-sel { z-index: var(--z-canvas-overlay); }
+.bc-alt-box { z-index: var(--z-canvas-overlay); }
+.bc-drop-preview { z-index: var(--z-canvas-walls); }
+.bc-boxm { z-index: var(--z-canvas-boxmodel); }
+.bc-wall-hint,
+.bc-align-guide,
+.bc-wall-flash { z-index: var(--z-canvas-walls); }
+.bc-alt-badge { z-index: var(--z-canvas-badge); }
+.bc-alt-ghost { z-index: var(--z-drag-ghost); }
+/* Alt 拖拽时给 body 加的类：光标与"拖拽中"的全局态（不是层级，顺便放这里） */
+body.bc-alt-dragging { cursor: grabbing; }
+
+/* ── 脱离容器的浮层统一到 --z-popover ── */
+.tb-anchor-pos { z-index: var(--z-popover); }
+.bc-text-menu { z-index: var(--z-popover); }
+
+/* ============================================================================
+   2. 变量选择浮层（components/VarMenu.tsx）
+   ---------------------------------------------------------------------------
+   三个引用入口（调色盘 / 数值 / 四边）共用这一个浮层：
+   Portal 到 body + 位置由 lib/overlayPlacement 计算 → 不出窗口、不压操作区。
+   ========================================================================== */
+.bc-varmenu {
+  position: fixed;
+  z-index: var(--z-popover);
+  width: 268px;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--line, var(--border));
+  border-radius: 10px;
+  box-shadow: var(--shadow-2, 0 8px 28px rgba(15, 23, 42, 0.18));
+  overflow: hidden;
+  animation: bcPopIn 0.14s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.bc-varmenu.is-closing { animation: bcPopOut 0.13s ease-in forwards; }
+.bc-varmenu.above { animation-name: bcPopInUp; }
+
+.bc-varmenu-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px 7px;
+  border-bottom: 1px solid var(--line, var(--border));
+  background: var(--surface-1, var(--muted-bg));
+}
+.bc-varmenu-title { font-size: 11px; font-weight: 600; color: var(--text-1, var(--text)); line-height: 1.4; }
+.bc-varmenu-kinds { display: flex; gap: 4px; flex-wrap: wrap; }
+.bc-varmenu-kind {
+  font-size: 9.5px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 999px;
+  border: 1px solid var(--line, var(--border));
+  color: var(--text-3, var(--text-muted));
+}
+.bc-varmenu-kind.k-color { color: #b45309; border-color: #fcd34d; background: #fffbeb; }
+.bc-varmenu-kind.k-size { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
+.bc-varmenu-kind.k-shadow { color: #6d28d9; border-color: #ddd6fe; background: #f5f3ff; }
+html[data-bc-dark] .bc-varmenu-kind.k-color { color: #fcd34d; border-color: #78350f; background: #2a1f0a; }
+html[data-bc-dark] .bc-varmenu-kind.k-size { color: #93c5fd; border-color: #1e3a8a; background: #0f1c33; }
+html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c1d95; background: #1d1533; }
+
+.bc-varmenu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  overflow-y: auto;
+  max-height: 260px;
+}
+.bc-varmenu-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 7px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+.bc-varmenu-item:hover { background: var(--hover); }
+.bc-varmenu-item.is-active { background: var(--hover-accent, #eff6ff); box-shadow: inset 2px 0 0 0 var(--accent); }
+.bc-varmenu-swatch {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+}
+.bc-varmenu-glyph {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid var(--line, var(--border));
+  color: var(--text-3, var(--text-muted));
+}
+.bc-varmenu-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  font-family: Consolas, Menlo, monospace;
+  color: var(--text-1, var(--text));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bc-varmenu-val {
+  flex: 0 1 auto;
+  max-width: 96px;
+  font-size: 10px;
+  color: var(--text-3, var(--text-muted));
+  font-family: Consolas, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bc-varmenu-empty {
+  padding: 9px 10px;
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--text-3, var(--text-muted));
+}
+.bc-varmenu-foot {
+  padding: 6px 10px 7px;
+  border-top: 1px solid var(--line, var(--border));
+  background: var(--surface-1, var(--muted-bg));
+  font-size: 10px;
+  color: var(--text-3, var(--text-muted));
+  text-align: center;
+}
+
+@keyframes bcPopInUp {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ============================================================================
+   3. 中键属性搜索浮层：抬高到浮层档 + **只保留一种蓝色**
+   ---------------------------------------------------------------------------
+   用户反馈原话：「只有一种蓝色的显示，蓝色的选项就对应选中的选项，现在第一个是蓝色的，
+   最后一个是蓝色的，中键选中的又是前面一部分蓝色，很奇怪完全弄不明白。」
+   原因：以前同时有 4 个类会刷蓝底 —— `.is-best`（权重第一）/ `.is-added`（已添加）/
+   `.is-added:hover` / `.is-active`（键盘选中）。
+   现在：**蓝色底只有一个来源 —— `.is-active`（键盘/鼠标当前指向的那一项）**；
+   "已添加 / 未添加"降级成右侧小徽章的文字与颜色，不再抢底色。
+   ========================================================================== */
+.bc-prop-search {
+  z-index: var(--z-popover);
+  position: fixed;
+  max-width: calc(100vw - 16px);
+}
+/* 全部"除了当前激活项以外"的蓝色底一律清掉 */
+.bc-prop-search-item,
+.bc-prop-search-item.is-best,
+.bc-prop-search-item.is-added,
+.bc-prop-search-item.is-added.is-best,
+.bc-prop-search-item.is-added:hover,
+.bc-prop-search-item.is-missing,
+.bc-prop-search-item.is-active.is-missing {
+  background: transparent;
+  box-shadow: none;
+}
+.bc-prop-search-item:hover { background: var(--hover); }
+/* 唯一的蓝色：当前激活项 */
+.bc-prop-search-item.is-active,
+.bc-prop-search-item.is-active:hover {
+  background: var(--hover-accent, #eff6ff);
+  box-shadow: inset 2px 0 0 0 var(--accent, #1e88e5);
+}
+/* 已添加 / 未添加：只影响文字与徽章，不影响底色 */
+.bc-prop-search-item.is-added .bc-prop-search-label,
+.bc-prop-search-item.is-added .bc-prop-search-key { color: var(--accent); }
+.bc-prop-search-item.is-missing .bc-prop-search-label { color: var(--text, inherit); }
+.bc-prop-search-badge { border: 1px solid var(--line, var(--border)); border-radius: 999px; padding: 1px 5px; }
+.bc-prop-search-item.is-added .bc-prop-search-badge { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.bc-prop-search-item.is-missing .bc-prop-search-badge { color: var(--text-3, var(--text-muted)); }
+
+/* 属性值预测行（中键搜索新增：敲 `display fl` 直接预测到 display: flex） */
+.bc-prop-vals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px 2px;
+  border-top: 1px dashed var(--line, var(--border));
+  margin-top: 5px;
+}
+.bc-prop-vals-label {
+  flex: 0 0 100%;
+  font-size: 10px;
+  color: var(--text-3, var(--text-muted));
+  margin-bottom: 1px;
+}
+.bc-prop-val {
+  padding: 3px 7px;
+  border: 1px solid var(--line, var(--border));
+  border-radius: 999px;
+  background: var(--bg-panel);
+  font-size: 11px;
+  font-family: Consolas, Menlo, monospace;
+  color: var(--text-2, var(--text));
+  cursor: pointer;
+}
+.bc-prop-val:hover { border-color: var(--accent); color: var(--accent); background: var(--hover-accent, #eff6ff); }
+.bc-prop-val.is-active,
+.bc-prop-val.is-active:hover {
+  background: var(--hover-accent, #eff6ff);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ============================================================================
+   4. 「添加属性」菜单：修"内框和外面卡片边框快重合"
+   ---------------------------------------------------------------------------
+   用户反馈：「你看图片 1，这个 UI 边框都快和外面的重合的，不好看」。
+   原因是下拉面板紧贴属性卡片内缘、又各自画了 1px 边框 → 两条线相距 1~2px。
+   这里把菜单与卡片内缘拉开 8px，并把菜单边框换成更弱的 --line。
+   ========================================================================== */
+.add-prop-menu {
+  margin-top: 6px;
+  border-color: var(--line, var(--border));
+  box-shadow: var(--shadow-2, 0 8px 28px rgba(15, 23, 42, 0.16));
+}
+.add-prop-wrap { margin-bottom: 6px; }
+.add-prop-backdrop { z-index: var(--z-panel-inline); }
+.add-prop-menu { z-index: calc(var(--z-panel-inline) + 1); }
+
+/* ============================================================================
+   5. 媒体播放锁（v0.4.5）：右侧「媒体」卡片上的"锁死播放"按钮
+   ---------------------------------------------------------------------------
+   防止"想用 Alt 微调位置，结果点到了视频把它播起来"。
+   锁上之后画布上的媒体永远不播（暂停 + 静音 + 不响应播放），状态随元素保存。
+   ========================================================================== */
+.media-lock-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line, var(--border));
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-2, var(--text));
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.media-lock-btn:hover { border-color: var(--accent); color: var(--accent); }
+.media-lock-btn.is-on {
+  border-color: var(--danger, #dc2626);
+  color: var(--danger, #dc2626);
+  background: var(--danger-tint, #fef2f2);
+  font-weight: 600;
+}
+.media-lock-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-3, var(--text-muted));
+}
+.media-lock-row { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px; }
+.media-toggle-forced-tag {
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--text-3, var(--text-muted));
+}
+/* 锁定中的媒体：画布上描一圈红色虚线（提示"这里点不动 / 不会播"）。
+   ⚠ 不能用伪元素画角标 —— video/audio 是替换元素，::after 在它们身上不渲染。 */
+.canvas [data-bc-play-lock='1'] {
+  outline: 2px dashed rgba(220, 38, 38, 0.5);
+  outline-offset: 2px;
+  cursor: default;
+}
+.canvas [data-bc-play-lock='1']:hover { outline-color: rgba(220, 38, 38, 0.8); }
+
+/* 自动播放 → 静音开关必须锁死在"开"，这里给个明确的禁用观感 */
+.media-toggle.is-forced { opacity: 0.72; cursor: not-allowed; }
+.media-toggle.is-forced input { cursor: not-allowed; }
+
+/* ============================================================================
+   6. 启动 / 打开工程 的加载页（components/LoadingScreen.tsx）
+   ---------------------------------------------------------------------------
+   必须在**所有东西之上**（--z-critical），并且在主界面画出第一帧之前一直盖着 ——
+   这就是"不会先闪一下首页再进编辑器"的保证。
+   ========================================================================== */
+.bc-loading {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-critical);
+  display: grid;
+  place-items: center;
+  background: var(--surface-0, #fff);
+  animation: bcLoadIn 0.22s ease-out both;
+}
+.bc-loading.is-leaving {
+  animation: bcLoadOut 0.3s ease-in both;
+  /* 淡出过程中**不能再吃鼠标**：它盖在最上层，若还拦截点击，
+     用户会觉得"界面卡住、点不动"（探针里表现为 click 超时）。 */
+  pointer-events: none;
+}
+.bc-loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 320px;
+  max-width: calc(100vw - 48px);
+}
+.bc-loading-logo {
+  width: 72px;
+  height: 72px;
+  display: block;
+  /* 轻微的呼吸感，让"在做事"这件事可感知（系统开了减少动效时会被 media query 关掉） */
+  animation: bcLoadBreath 1.9s ease-in-out infinite;
+}
+.bc-loading-name {
+  margin-top: 8px;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-1, #0f172a);
+}
+.bc-loading-stage { font-size: 11.5px; color: var(--text-3, #94a3b8); }
+.bc-loading-bar {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  margin-top: 20px;
+  border-radius: 999px;
+  background: var(--surface-sunken, #f1f5f9);
+  overflow: hidden;
+}
+.bc-loading-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2965F1, #E34F26 55%, #F7DF1E);
+  /* 进度条"追"目标值：每一步都平滑地走过去，不是一格一格跳 */
+  transition: width 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.bc-loading-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  width: 100%;
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-2, #475569);
+}
+.bc-loading-pct { font-family: Consolas, Menlo, monospace; color: var(--text-3, #94a3b8); }
+
+@keyframes bcLoadIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bcLoadOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes bcLoadBreath {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.045); opacity: 0.92; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bc-loading, .bc-loading.is-leaving, .bc-loading-logo { animation: none; }
+  .bc-loading-bar-fill { transition: none; }
+}

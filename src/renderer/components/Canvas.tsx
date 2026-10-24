@@ -81,6 +81,69 @@ function pickDropTarget(
   return null;
 }
 
+/**
+ * 元素的**包含块内容盒**（client 坐标）。
+ *
+ * 为什么需要它：`position: absolute / fixed` 的 left/top 百分比与像素值都是相对
+ * **包含块的内容盒**（padding box 再往里减掉 padding），而不是父元素的边框外边。
+ * 以前拖动时直接拿 `parentElement.getBoundingClientRect()` 当基准，遇到带 padding/border
+ * 的父容器就会偏一个 padding+border 的距离。
+ *
+ * v0.4.5 更正：**`fixed` 的包含块不是 DOM 父元素**，而是"视口" ——
+ * 在编辑器里 `.canvas` 因为带了 transform 而成为 fixed 后代的包含块（扮演浏览器视口），
+ * 所以 fixed 必须传 `.canvas`。以前按 DOM 父元素算，fixed 元素一拖就整体错位
+ * （用户反馈"fixed 的定位非常糟糕"）。
+ */
+function contentBoxOf(el: HTMLElement): { left: number; top: number; right: number; bottom: number } {
+  const r = el.getBoundingClientRect();
+  const cs = getComputedStyle(el);
+  const n = (v: string) => parseFloat(v) || 0;
+  const left = r.left + el.clientLeft + n(cs.paddingLeft);
+  const top = r.top + el.clientTop + n(cs.paddingTop);
+  return {
+    left,
+    top,
+    right: r.right - el.clientLeft - n(cs.paddingRight),
+    bottom: r.bottom - el.clientTop - n(cs.paddingBottom)
+  };
+}
+
+/** 一个样式值算不算"已经锚定了这一边"（空 / auto 都不算） */
+function hasSideValue(v: string | undefined): boolean {
+  const s = String(v ?? '').trim();
+  return s !== '' && s !== 'auto';
+}
+
+/**
+ * 决定这一趟拖动**锚定在哪一边**（只在拖动开始时算一次）。
+ *
+ * 规则（v0.4.5）：
+ *  1. `relative` / `sticky` 一律用 left / top —— 它们的偏移是"相对自身文档流原位"的位移，
+ *     写 right/bottom 也能表达，但和"离父容器哪边近"没有关系，按距离反推会直接跳位。
+ *  2. `absolute` / `fixed`：**优先沿用样式里已有的那一边**（我明明锚在右边，一拖就变左边很烦）；
+ *     两边都没有（或都有）时，取距离更近的一边，中间留 8px 死区（避免横跨中线时反复争抢）。
+ */
+function pickAxisSide(
+  posKind: 'static' | 'relative' | 'absolute' | 'fixed' | 'sticky',
+  style: Record<string, string | undefined>,
+  rect: DOMRect,
+  cb: { left: number; top: number; right: number; bottom: number } | null
+): { x: 'left' | 'right'; y: 'top' | 'bottom' } {
+  if (posKind === 'relative' || posKind === 'sticky' || !cb) return { x: 'left', y: 'top' };
+  const DEAD = 8;
+  let x: 'left' | 'right' = 'left';
+  let y: 'top' | 'bottom' = 'top';
+  const hasL = hasSideValue(style.left);
+  const hasR = hasSideValue(style.right);
+  const hasT = hasSideValue(style.top);
+  const hasB = hasSideValue(style.bottom);
+  if (hasR && !hasL) x = 'right';
+  else if (!hasL && !hasR && (cb.right - rect.right) < (rect.left - cb.left) - DEAD) x = 'right';
+  if (hasB && !hasT) y = 'bottom';
+  else if (!hasT && !hasB && (cb.bottom - rect.bottom) < (rect.top - cb.top) - DEAD) y = 'bottom';
+  return { x, y };
+}
+
 export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserResize }: {
   canvasWidth?: string;
   zoom?: number;
@@ -158,7 +221,10 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
 
   const toggleSelect = useScene((s) => s.toggleSelect);
   const selectMany = useScene((s) => s.selectMany);
-  // 滚轮缩放要用到"当前缩放"，但 wheel 回调里读 prop 会拿到旧值 → 用 ref 跟住
+  // 滚轮缩放要用到"当前缩放"，但 wheel 回调里读 prop 会拿到旧值 → 用 ref 跟住。
+  // v0.4.5：Alt 拖动 / 缩放**同样**必须把鼠标的 client 位移换算成 CSS 像素（÷ zoom）——
+  // 否则 zoom≠1 时元素移动距离与鼠标不一致，用户看到的就是"闪烁、瞬移"
+  // （以前全程按 client px 直接写进 left/top，这是那一类问题的根因）。
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
   // Alt+滚轮的"缩放锚点"（transform-origin）：默认左上，Alt 滚轮时设到光标处
@@ -297,6 +363,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     startW: number; startH: number;
     /** 移动基准：定位元素用计算后的 left/top；常规流用 margin */
     positioned: boolean; isFixed: boolean;
+    posKind: 'static' | 'relative' | 'absolute' | 'fixed' | 'sticky';
     startLeft: number; startTop: number;
     startMarginL: number; startMarginT: number;
     /** 允许移动/缩放的 client 坐标范围（"墙"）+ 每面墙要画的整条边 + 吸附参考线 */
@@ -313,6 +380,15 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     parentId: string | null;
     startFont: number;
     engaged: boolean;
+    /** v0.4.5：最后一次 pointermove 的 client 坐标（松手贴边判定要用"手拖到哪儿了"） */
+    lastX: number;
+    lastY: number;
+    /**
+     * v0.4.5：定位元素这一趟拖动**锚定在哪一边**（每次拖动开始时决定一次，中途不再改）。
+     * 以前每帧都按"离哪边近"重算，元素横跨中线时 left/right 会来回争抢 → 视觉抖动。
+     * relative / sticky 固定用 left / top（它们的偏移是相对自身文档流位置，用 right/bottom 反而绕）。
+     */
+    axisSide: { x: 'left' | 'right'; y: 'top' | 'bottom' };
   }>(null);
 
   /**
@@ -590,26 +666,32 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const positioned = pos === 'absolute' || pos === 'fixed' || pos === 'relative';
     const bounds = boundsFor(el, rect);
     const parentNode = findParent(root, h.id);
+    const posKind = (['relative', 'absolute', 'fixed', 'sticky'] as const).includes(pos as never)
+      ? (pos as 'relative' | 'absolute' | 'fixed' | 'sticky')
+      : 'static';
+    const isFixed = pos === 'fixed';
     // 定位基准：优先计算后的 left/top（缺省时按"当前实际位置 - 定位父级内容盒"补一个，
     // 这样 right/bottom 锚定或 left/top:auto 的元素第一次拖动不会跳变）
-    const baseEl = pos === 'fixed'
+    // v0.4.5：**fixed 的包含块是 `.canvas`（模拟浏览器视口）**，不是它的 DOM 父元素 ——
+    // 浏览器里 fixed 相对视口定位，按父元素算偏移会整体错位（用户反馈"fixed 的定位很糟糕"）。
+    const cbEl = isFixed
       ? (el.closest('.canvas') as HTMLElement | null)
       : (el.offsetParent as HTMLElement | null);
-    const baseRect = baseEl?.getBoundingClientRect();
-    const baseLeft = baseRect ? baseRect.left + (baseEl!.clientLeft || 0) : 0;
-    const baseTop = baseRect ? baseRect.top + (baseEl!.clientTop || 0) : 0;
+    const cb = cbEl ? contentBoxOf(cbEl) : null;
     const parsedLeft = parseFloat(cs.left);
     const parsedTop = parseFloat(cs.top);
-    const startLeft = Number.isFinite(parsedLeft) ? parsedLeft : rect.left - baseLeft;
-    const startTop = Number.isFinite(parsedTop) ? parsedTop : rect.top - baseTop;
+    const startLeft = Number.isFinite(parsedLeft) ? parsedLeft : (cb ? rect.left - cb.left : 0);
+    const startTop = Number.isFinite(parsedTop) ? parsedTop : (cb ? rect.top - cb.top : 0);
     const startMarginL = Number.isFinite(parseFloat(cs.marginLeft)) ? parseFloat(cs.marginLeft) : 0;
     const startMarginT = Number.isFinite(parseFloat(cs.marginTop)) ? parseFloat(cs.marginTop) : 0;
+    // 这一趟拖动锚定在哪一边（决定后中途不再变，避免 left/right 来回争抢造成的抖动）
+    const axisSide = pickAxisSide(posKind, (findNode(root, h.id)?.style ?? {}) as Record<string, string | undefined>, rect, cb);
     altDragRef.current = {
       id: h.id, mode: h.mode, edge: h.edge,
       startX: e.clientX, startY: e.clientY,
       rect,
       startW: rect.width, startH: rect.height,
-      positioned, isFixed: pos === 'fixed',
+      positioned, isFixed, posKind,
       startLeft, startTop, startMarginL, startMarginT,
       bounds,
       walls: [bounds.barL, bounds.barR, bounds.barT, bounds.barB].filter(Boolean) as Bar[],
@@ -617,7 +699,10 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       dropId: null,
       parentId: parentNode?.id ?? null,
       startFont: parseFloat(cs.fontSize) || 16,
-      engaged: false
+      engaged: false,
+      lastX: e.clientX,
+      lastY: e.clientY,
+      axisSide
     };
     window.addEventListener('pointermove', onAltDragMove);
     window.addEventListener('pointerup', onAltDragUp);
@@ -640,19 +725,101 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     });
   };
 
+  /**
+   * v0.4.5：把定位元素的 margin 折算进偏移、并把 margin 归零。
+   *
+   * 用户反馈：「我是说在更改 position 的时候，有些状态例如 fixed 要能拖动的时候 margin
+   * 也能自动修改，现在 margin 被锁死了用起来很难受！」
+   *
+   * 原因：`absolute` / `fixed` 的视觉位置 = 偏移(left/top/right/bottom) + margin。
+   * 元素一旦带上 `margin: auto`（「水平居中」就是写这个）或一个非零 margin，
+   * 拖动只改偏移，margin 把差量全吃掉 —— 表现出来就是"拖了没反应"。
+   *
+   * 做法（一条撤销、视觉位置不变）：把当前 rect 到包含块的距离量出来，直接写成偏移，
+   * 同时把四边 margin 归零。这样之后每一像素拖动都 1:1 落在元素上。
+   * relative / sticky 不走这里：它们的偏移是相对自身文档流原位，margin 不构成阻碍。
+   */
+  const normalizePositionedMargin = (d: NonNullable<typeof altDragRef.current>) => {
+    if (d.posKind !== 'absolute' && d.posKind !== 'fixed') return;
+    const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
+    if (!el) return;
+    const cs = getComputedStyle(el);
+    const z = zoomRef.current || 1;
+    const ml = parseFloat(cs.marginLeft) || 0;
+    const mr = parseFloat(cs.marginRight) || 0;
+    const mt = parseFloat(cs.marginTop) || 0;
+    const mb = parseFloat(cs.marginBottom) || 0;
+    const style = (findNode(useScene.getState().scene.root, d.id)?.style ?? {}) as Record<string, string | undefined>;
+    const hasAuto = (['marginLeft', 'marginRight', 'marginTop', 'marginBottom'] as const)
+      .some((k) => String(style[k] ?? '').trim() === 'auto');
+    if (!hasAuto && ml === 0 && mr === 0 && mt === 0 && mb === 0) return; // 本来就是干净的
+    const cbEl = d.isFixed
+      ? (el.closest('.canvas') as HTMLElement | null)
+      : (el.offsetParent as HTMLElement | null);
+    if (!cbEl) return;
+    const cb = contentBoxOf(cbEl);
+    const r = el.getBoundingClientRect();
+    const offL = (r.left - cb.left) / z;
+    const offT = (r.top - cb.top) / z;
+    const offR = (cb.right - r.right) / z;
+    const offB = (cb.bottom - r.bottom) / z;
+    const patch: Record<string, string | undefined> = {
+      marginLeft: '0', marginRight: '0', marginTop: '0', marginBottom: '0'
+    };
+    if (d.axisSide.x === 'right') { patch.right = Math.round(offR) + 'px'; patch.left = undefined; }
+    else { patch.left = Math.round(offL) + 'px'; patch.right = undefined; }
+    if (d.axisSide.y === 'bottom') { patch.bottom = Math.round(offB) + 'px'; patch.top = undefined; }
+    else { patch.top = Math.round(offT) + 'px'; patch.bottom = undefined; }
+    useScene.getState().updateStyle(d.id, patch as never);
+    // 记录归一化后的基准，后续 resize / 方向判断都用它
+    d.startLeft = d.axisSide.x === 'right' ? offR : offL;
+    d.startTop = d.axisSide.y === 'bottom' ? offB : offT;
+    d.startMarginL = 0;
+    d.startMarginT = 0;
+  };
+
+  /**
+   * v0.4.5：Alt 拖动时让画布"无限长"。
+   *
+   * 用户反馈：「让按住 Alt 后拖动元素的时候画布变成无限长度，不是还要我往下拖动，画布才变长。」
+   * 以前只有在元素**已经撞到画布下沿**时才把画布加长 180px 一档 —— 所以体感是
+   * "我得先往下拖、拖到边，画布才长一点"，非常卡顿。
+   *
+   * 现在改成**按鼠标位置主动预留**：指针下方永远留半个视口的空白（且至少 400px），
+   * 于是"往下拖"这件事在画布上永远不会碰到边界。松手时 padding 归零，画布恢复原长。
+   */
+  const growCanvasForDrag = (clientY: number) => {
+    const canvasEl = canvasRef.current;
+    if (!canvasEl) return;
+    const cr = canvasEl.getBoundingClientRect();
+    const need = Math.max(400, Math.ceil(clientY + window.innerHeight * 0.5 - cr.bottom));
+    if (need > altPadRef.current + 40) {
+      altPadRef.current = need;
+      setAltPad(need);
+    }
+  };
+
   const onAltDragMove = (ev: PointerEvent) => {
     const d = altDragRef.current;
     if (!d) return;
+    d.lastX = ev.clientX;
+    d.lastY = ev.clientY;
     const dx = ev.clientX - d.startX;
     const dy = ev.clientY - d.startY;
     if (!d.engaged && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
     const st = useScene.getState();
     if (!d.engaged) {
       d.engaged = true;
-      // v0.4.5：把锚点重置到"真正开始拖动的这一帧"。
-      // 用户可能先按住左键、过一会儿才按 Alt，这时 startX/startY 是按下 Alt 那一刻之前算的，
-      // dx/dy 一下子变成几十像素 → 元素先跳到旧锚点、下一帧再弹回鼠标（"闪到别处又回来"）。
-      // 这里把起点对齐到当前指针与当前 rect，dx/dy 从 0 开始，视觉上就不会跳。
+      // v0.4.5 第 8 批修正：**不要**把锚点重置到"开始拖动的这一帧"。
+      //
+      // 老代码在进入拖动的第一帧把 startX/startY 对齐到当前指针，理由是
+      // "用户可能先按住左键、过一会儿才按 Alt，dx/dy 会一下子变成几十像素"。
+      // 但实际路径上根本不存在那种情况：拖动只能由**按下时就带着 Alt** 的 pointerdown 创建，
+      // 所以进入拖动的第一帧 dx/dy 最多就是那个 4px 的启动阈值 ——
+      // 重置锚点只会把这 4px（以及 Playwright 那种大步进下的几十像素）白白丢掉，
+      // 表现出来就是"元素跟不上鼠标、总要慢一截"。这正是用户说的"移动起来会闪烁、瞬移"。
+      //
+      // 现在只刷新 rect/尺寸（防止这期间有别的渲染把位置改了），锚点保持 pointerdown 时的值。
       const liveEl = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
       if (liveEl) {
         const r = liveEl.getBoundingClientRect();
@@ -660,14 +827,17 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
         d.startW = r.width;
         d.startH = r.height;
       }
-      d.startX = ev.clientX;
-      d.startY = ev.clientY;
       document.body.classList.add('bc-alt-dragging');
       if (d.mode === 'font') document.body.classList.add('bc-alt-fonting');
       // 拖动时常显"可达边界"提示线（橙色）——让内边距/外边距的界限一眼可见
       if (d.mode !== 'font') setWallHints(d.walls);
       st.selectElement(d.id);
       st.beginStyleEdit(); // 单条撤销：整个拖动 = 一步 Ctrl+Z
+      // v0.4.5：定位元素的 margin 归一化（用户反馈"margin 被锁死了，拖不动"）。
+      // 必须放在 beginStyleEdit 之后 —— 归一化要和拖动同属一条撤销记录。
+      if (d.mode === 'move') normalizePositionedMargin(d);
+      // v0.4.5：一开始拖就把画布向下"长出"一段 → 不用等元素撞到下沿才一格一格变长
+      growCanvasForDrag(ev.clientY);
     }
     const node = findNode(st.scene.root, d.id);
     if (!node) return;
@@ -710,8 +880,11 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
         shiftY = d.bounds.minY - d.rect.top;
         flashWall(bar('t'));
       }
-      const patch: Record<string, string> = { width: Math.round(nw) + 'px' };
-      if (hasT || hasB) patch.height = Math.round(nh) + 'px';
+      // v0.4.5：nw/nh 是 client 像素（getBoundingClientRect），写进 CSS 前必须 ÷ zoom。
+      // 以前直接写 width: nw + 'px'，zoom≠1 时"拖 100 像素长了 148 像素"（用户反馈的缩放错位）。
+      const z = zoomRef.current || 1;
+      const patch: Record<string, string> = { width: Math.round(nw / z) + 'px' };
+      if (hasT || hasB) patch.height = Math.round(nh / z) + 'px';
 
       // v0.4.5（用户反馈 C补5）：图片 / 视频 / 音频**只能按比例缩放**，不能拉伸变形。
       // 做法：算出宽度方向的比例，再把高度按原比例推回去（反之亦然）。
@@ -719,21 +892,21 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       if (isMediaEl && d.startW > 0 && d.startH > 0 && (hasL || hasR)) {
         const scale = nw / d.startW;
         nh = Math.max(8, d.startH * scale);
-        patch.height = Math.round(nh) + 'px';
+        patch.height = Math.round(nh / z) + 'px';
       }
       if (isMediaEl && d.startW > 0 && d.startH > 0 && !(hasL || hasR) && (hasT || hasB)) {
         const scale = nh / d.startH;
         nw = Math.max(8, d.startW * scale);
-        patch.width = Math.round(nw) + 'px';
+        patch.width = Math.round(nw / z) + 'px';
       }
 
-      if (hasL) patch[d.positioned ? 'left' : 'marginLeft'] = Math.round((d.positioned ? d.startLeft : d.startMarginL) + shiftX) + 'px';
-      if (hasT) patch[d.positioned ? 'top' : 'marginTop'] = Math.round((d.positioned ? d.startTop : d.startMarginT) + shiftY) + 'px';
+      if (hasL) patch[d.positioned ? 'left' : 'marginLeft'] = Math.round((d.positioned ? d.startLeft : d.startMarginL) + shiftX / z) + 'px';
+      if (hasT) patch[d.positioned ? 'top' : 'marginTop'] = Math.round((d.positioned ? d.startTop : d.startMarginT) + shiftY / z) + 'px';
       st.updateStyle(d.id, patch);
       scheduleAltLiveBox();
       setAltBadge({ x: d.rect.right, y: d.rect.top, text: `${Math.round(nw)} × ${Math.round(nh)}` });
     } else if (d.mode === 'font') {
-      const size = Math.max(6, Math.min(400, Math.round(d.startFont + dx / 6)));
+      const size = Math.max(6, Math.min(400, Math.round(d.startFont + (dx / (zoomRef.current || 1)) / 6)));
       st.updateStyle(d.id, { fontSize: size + 'px' });
       scheduleAltLiveBox();
       setAltBadge({ x: ev.clientX + 14, y: ev.clientY + 14, text: `字号 ${size}px` });
@@ -841,42 +1014,57 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       const parentNow = elNow?.parentElement;
 
       // —— 常规流元素：靠 margin 移动（并保留"拖到中线自动 margin:auto 居中"）——
+      // v0.4.5：同样要 ÷ zoom（margin 是 CSS 像素，指针位移是 client 像素）
+      const zNow = zoomRef.current || 1;
       if (!d.positioned) {
-        patch.marginLeft = Math.round(d.startMarginL + ax) + 'px';
-        patch.marginTop = Math.round(d.startMarginT + ay) + 'px';
+        patch.marginLeft = Math.round(d.startMarginL + ax / zNow) + 'px';
+        patch.marginTop = Math.round(d.startMarginT + ay / zNow) + 'px';
       }
 
-      // —— v0.4.5（用户反馈 C补14b）：定位元素改用"离哪边近就写哪边" ——
-      // 以前**永远只写 left/top**：元素明明锚在右边，拖完变成 left 和 right 同时存在
-      //（over-constrained，浏览器只认 left），right 从此再也不动，用户觉得"右边完全不会变"。
-      // 现在：分别对水平/垂直取更近的一边；**另一条边清掉**，避免两边打架。
-      // 另外加一条"死区"：位置接近中线时（两边差 < 8px）固定用 left/top ——
-      // 否则元素横跨中线时会 left/right 反复争抢，视觉上就是抖动。
-      if (d.positioned && parentNow && elNow) {
-        const pr = parentNow.getBoundingClientRect();
-        const pcs = getComputedStyle(parentNow);
-        const cL = pr.left + parentNow.clientLeft + (parseFloat(pcs.paddingLeft) || 0);
-        const cR = pr.right - parentNow.clientLeft - (parseFloat(pcs.paddingRight) || 0);
-        const cT = pr.top + parentNow.clientTop + (parseFloat(pcs.paddingTop) || 0);
-        const cB = pr.bottom - parentNow.clientTop - (parseFloat(pcs.paddingBottom) || 0);
-        const dL = targetLeft - cL;
-        const dR = cR - (targetLeft + d.rect.width);
-        const dT = targetTop - cT;
-        const dB = cB - (targetTop + d.rect.height);
-        const DEAD = 8;
-        if (Number.isFinite(dR) && dR < dL && Math.abs(dL - dR) > DEAD) {
-          patch.right = Math.round(dR) + 'px';
-          patch.left = undefined;
-        } else {
-          patch.left = Math.round(dL) + 'px';
+      // —— v0.4.5：定位元素的偏移写入（第 8 批重做）——
+      // 三件事必须同时成立，否则就是用户看到的"闪烁 / 瞬移"：
+      //  1. **client px → CSS px**：`.canvas` 上有 scale(zoom)，鼠标走了 dx 个屏幕像素，
+      //     元素只该移动 dx/zoom 个 CSS 像素。以前直接写 client 像素，zoom≠1 时严重错位。
+      //  2. **包含块的取法要对**：absolute 用 offsetParent；**fixed 用 `.canvas`**（它扮演浏览器视口）。
+      //     以前 fixed 拿 DOM 父元素当基准，一拖就整体偏一个父容器 padding/border 的量。
+      //  3. **一趟拖动只锚一边**：锚哪边在拖动开始时定死（d.axisSide），
+      //     relative / sticky 一律用 left/top（它们的偏移相对自身文档流原位，
+      //     按"离父容器哪边近"反推会当场跳位 —— 这正是 relative 拖动瞬移的根因）。
+      if (d.positioned && elNow) {
+        if (d.posKind === 'relative' || d.posKind === 'sticky') {
+          // 相对定位：偏移 = 起始偏移 + 指针位移（CSS 像素），与包含块无关
+          const nx = d.startLeft + ax / zNow;
+          const ny = d.startTop + ay / zNow;
+          // 归零就不留 left: 0px 这种噪声
+          patch.left = Math.abs(nx) < 0.5 ? undefined : Math.round(nx) + 'px';
+          patch.top = Math.abs(ny) < 0.5 ? undefined : Math.round(ny) + 'px';
           patch.right = undefined;
-        }
-        if (Number.isFinite(dB) && dB < dT && Math.abs(dT - dB) > DEAD) {
-          patch.bottom = Math.round(dB) + 'px';
-          patch.top = undefined;
-        } else {
-          patch.top = Math.round(dT) + 'px';
           patch.bottom = undefined;
+        } else {
+          const cbEl = d.isFixed
+            ? (canvasRef.current as HTMLElement | null)
+            : (elNow.offsetParent as HTMLElement | null);
+          const cb = cbEl ? contentBoxOf(cbEl) : null;
+          if (cb) {
+            const dL = (targetLeft - cb.left) / zNow;
+            const dR = (cb.right - (targetLeft + d.rect.width)) / zNow;
+            const dT = (targetTop - cb.top) / zNow;
+            const dB = (cb.bottom - (targetTop + d.rect.height)) / zNow;
+            if (d.axisSide.x === 'right') {
+              patch.right = Math.round(dR) + 'px';
+              patch.left = undefined;
+            } else {
+              patch.left = Math.round(dL) + 'px';
+              patch.right = undefined;
+            }
+            if (d.axisSide.y === 'bottom') {
+              patch.bottom = Math.round(dB) + 'px';
+              patch.top = undefined;
+            } else {
+              patch.top = Math.round(dT) + 'px';
+              patch.bottom = undefined;
+            }
+          }
         }
       }
 
@@ -900,14 +1088,18 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
         }
       }
 
-      // —— Alt 拖动时自动加长画布：往下拖不再被"画布高度"卡住（松手自动缩回）——
+      // —— Alt 拖动时画布持续向下生长（v0.4.5：按鼠标位置主动预留，不再等元素撞墙）——
+      // fixed 也要长：它的墙就是画布（= 视口），画布越长它能去的地方越远。
       const canvasEl = canvasRef.current;
-      if (canvasEl && !d.isFixed) {
-        const cr = canvasEl.getBoundingClientRect();
-        const need = Math.max(0, Math.ceil(targetTop + d.rect.height - cr.bottom + 180));
-        if (need > altPadRef.current + 60) {
-          altPadRef.current = need;
-          setAltPad(need);
+      if (canvasEl) {
+        growCanvasForDrag(ev.clientY);
+        // fixed 的下墙跟着画布走 —— 画布刚长出来的部分也要能拖进去，否则墙还停在旧下沿
+        if (d.isFixed && Number.isFinite(d.bounds.maxY)) {
+          const cr = canvasEl.getBoundingClientRect();
+          const cs2 = getComputedStyle(canvasEl);
+          const padB = parseFloat(cs2.paddingBottom) || 0;
+          d.bounds.maxY = cr.bottom - (parseFloat(cs2.borderBottomWidth) || 0) - padB - d.rect.height;
+          d.bounds.barB = { x: cr.left, y: cr.bottom - padB, w: cr.width, h: 4 };
         }
       }
 
@@ -958,69 +1150,85 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       // · relative：水平拖到父容器中线 → 改用 margin-left/right: auto（而不是一个死偏移）
       if (d.mode === 'move') {
         const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
-        const cv = canvasRef.current?.getBoundingClientRect();
+        const cvRaw = canvasRef.current?.getBoundingClientRect();
+        // v0.4.5：Alt 拖动期间画布被临时加长了（无限画布），松手那一刻 padding 还没归零。
+        // "贴到画布底边"要对着**去掉临时加长后的真实底边**判断 —— 否则永远贴不上。
+        // ⚠ 不能读 altPadRef：它在 onAltDragUp 开头就被清零了，这里要读**当前 DOM 上真实的**
+        //    padding-bottom（React 还没提交这次清零）。
+        const padNow = canvasRef.current
+          ? (parseFloat(getComputedStyle(canvasRef.current).paddingBottom) || 0)
+          : 0;
+        const cv = cvRaw ? {
+          top: cvRaw.top,
+          bottom: cvRaw.bottom - padNow,
+          left: cvRaw.left,
+          right: cvRaw.right
+        } : undefined;
         if (el) {
           const r = el.getBoundingClientRect();
           const cs = getComputedStyle(el);
           const patch: Record<string, string | undefined> = {};
-          const EDGE = 3;
+          // v0.4.5：Alt 拖动期间画布会临时加长（"无限画布"），元素很难真的"撞到"原来的下沿。
+          // 所以贴边判定除了看元素自己的边，还看**手拖到哪儿了** ——
+          // 鼠标落在（真实）画布边缘 12px 内，就认为用户是想贴那一边。
+          const nearBottom = (cv ? cv.bottom : Infinity) - Math.min(r.bottom, d.lastY) <= 12;
+          const nearTop = Math.min(r.top, d.lastY) - (cv ? cv.top : -Infinity) <= 12;
+          const nearRight = (cv ? cv.right : Infinity) - Math.min(r.right, d.lastX) <= 12;
+          const nearLeft = Math.min(r.left, d.lastX) - (cv ? cv.left : -Infinity) <= 12;
           if (d.isFixed && cv) {
-            if (r.bottom >= cv.bottom - EDGE) { patch.bottom = '0px'; patch.top = undefined; }
-            else if (r.top <= cv.top + EDGE) { patch.top = '0px'; }
-            if (r.right >= cv.right - EDGE) { patch.right = '0px'; patch.left = undefined; }
-            else if (r.left <= cv.left + EDGE) { patch.left = '0px'; }
+            if (nearBottom) { patch.bottom = '0px'; patch.top = undefined; }
+            else if (nearTop) { patch.top = '0px'; patch.bottom = undefined; }
+            if (nearRight) { patch.right = '0px'; patch.left = undefined; }
+            else if (nearLeft) { patch.left = '0px'; patch.right = undefined; }
           }
 
           // —— relative / 常规流：贴边与居中都用"更稳定的 CSS"表达 ——
           // · 水平中线 → margin-left/right: auto（比写死一个 left/margin 偏移更耐改）
-          // · relative 贴右 / 贴底 → 改用 right / bottom 锚定（四边都可用）
           // · 偏移归零 → 清掉 left/top，别在样式里留一堆 left:0
+          //
+          // ⚠ v0.4.5 修正：relative **不再**在松手时改写成 right / bottom。
+          // relative 的 right/bottom 是"相对自身文档流原位的反向位移"，跟"距父容器右边多远"
+          // 根本不是一回事 —— 元素明明拖到容器右侧（left 是个大正值），松手却写成
+          // `right: 0`（= 回到原位），视觉上就是"一松手弹回去"。这正是用户反馈的
+          // "relative 的定位非常糟糕、会瞬移"。relative / sticky 全程只用 left/top。
           const parentEl = el.parentElement;
+          const relOrSticky = cs.position === 'relative' || cs.position === 'sticky';
           if (!d.isFixed && parentEl && r.width > 0) {
             const pr = parentEl.getBoundingClientRect();
             const pcs = getComputedStyle(parentEl);
             const padL = parseFloat(pcs.paddingLeft) || 0;
             const padR = parseFloat(pcs.paddingRight) || 0;
-            const padT = parseFloat(pcs.paddingTop) || 0;
-            const padB = parseFloat(pcs.paddingBottom) || 0;
             const contentL = pr.left + parentEl.clientLeft + padL;
             const contentR = pr.right - parentEl.clientLeft - padR;
-            const contentT = pr.top + parentEl.clientTop + padT;
-            const contentB = pr.bottom - parentEl.clientTop - padB;
             const innerW = contentR - contentL;
 
-            // 水平居中（元素比父容器窄时才用 auto，否则 auto 两边都是 0、等于没居中）
-            if (innerW > 0 && r.width < innerW - 2
-              && Math.abs((r.left + r.width / 2) - (contentL + innerW / 2)) <= 3) {
-              patch.marginLeft = 'auto';
-              patch.marginRight = 'auto';
-              if (cs.position === 'relative') patch.left = undefined;
-            }
-
-            if (cs.position === 'relative') {
-              // 贴右 / 贴底：换成 right / bottom 锚定
-              if (r.right >= contentR - EDGE) {
-                patch.right = '0px';
+            if (relOrSticky) {
+              // relative / sticky：只保留"归零清理"与"拖到中线 → margin auto 居中"。
+              // **不写 right/bottom**（见上）。
+              const centered = innerW > 0 && r.width < innerW - 2
+                && Math.abs((r.left + r.width / 2) - (contentL + innerW / 2)) <= 3;
+              if (centered) {
+                patch.marginLeft = 'auto';
+                patch.marginRight = 'auto';
                 patch.left = undefined;
-              } else if (r.left <= contentL + EDGE) {
-                patch.left = '0px';
-                patch.right = undefined;
-              } else if (Math.abs(parseFloat(cs.left) || 0) < 0.5) {
-                patch.left = undefined;
+              } else {
+                if (Math.abs(parseFloat(cs.left) || 0) < 0.5) patch.left = undefined;
+                if (Math.abs(parseFloat(cs.top) || 0) < 0.5) patch.top = undefined;
               }
-              if (r.bottom >= contentB - EDGE) {
-                patch.bottom = '0px';
-                patch.top = undefined;
-              } else if (r.top <= contentT + EDGE) {
-                patch.top = '0px';
-                patch.bottom = undefined;
-              } else if (Math.abs(parseFloat(cs.top) || 0) < 0.5) {
-                patch.top = undefined;
+              patch.right = undefined;
+              patch.bottom = undefined;
+            } else {
+              // 水平居中（元素比父容器窄时才用 auto，否则 auto 两边都是 0、等于没居中）
+              if (innerW > 0 && r.width < innerW - 2
+                && Math.abs((r.left + r.width / 2) - (contentL + innerW / 2)) <= 3) {
+                patch.marginLeft = 'auto';
+                patch.marginRight = 'auto';
               }
-            } else if (cs.position === 'static') {
-              // 常规流：margin 归零就删掉，避免样式里堆 margin-left: 0px
-              if (Math.abs(parseFloat(cs.marginLeft) || 0) < 0.5) patch.marginLeft = undefined;
-              if (Math.abs(parseFloat(cs.marginTop) || 0) < 0.5) patch.marginTop = undefined;
+              if (cs.position === 'static') {
+                // 常规流：margin 归零就删掉，避免样式里堆 margin-left: 0px
+                if (Math.abs(parseFloat(cs.marginLeft) || 0) < 0.5) patch.marginLeft = undefined;
+                if (Math.abs(parseFloat(cs.marginTop) || 0) < 0.5) patch.marginTop = undefined;
+              }
             }
           }
           if (Object.keys(patch).length > 0) {
@@ -1817,28 +2025,46 @@ const CanvasNode = React.memo(function CanvasNode(props: {
           //    选中后才显示控件，可以就地播放预览。想永远不要控件就用「背景模式」。
           const bgMode = node.attrs?.controls === '0';   // 背景模式：永不显示控制条
           const wantsAutoplay = node.attrs?.autoplay === '1';
+          // v0.4.5：**播放锁**（右侧媒体卡片上的「锁死播放」）。
+          // 锁上之后画布上这个媒体永远不播：不挂控件、强制 paused、任何 play 都被按回去，
+          // 于是"按住 Alt 拖动排版"时绝不会误触播放（用户反馈的原话）。
+          // 注意：这个标记只存在编辑器里，exporter 不写它，导出后的网页行为完全不变。
+          const playLock = node.attrs?.playLock === '1';
           return {
             src: node.attrs?.src ? toRenderableSrc(node.attrs.src) : undefined,
             // v0.4.5 修正（用户反馈：不选中就"什么都不显示"了）：
             // 控制条**始终显示** —— 否则未选中的音频是零高度、视频是空白框，
             // 既看不见也点不着，比"控件吃点击"更糟。
-            controls: !bgMode,
+            controls: !bgMode && !playLock,
             loop: node.attrs?.loop === '1',
             // 自动播放必须静音，否则浏览器会直接拦掉（HTML 规范）
-            muted: node.attrs?.muted === '1' || wantsAutoplay,
-            autoPlay: wantsAutoplay,
+            muted: node.attrs?.muted === '1' || wantsAutoplay || playLock,
+            autoPlay: wantsAutoplay && !playLock,
             playsInline: node.type === 'video',
-            // 性能：没选中的媒体只读元数据，不预解码 ——
-            // 页面上有十几个视频时，全部预载会直接把 GPU/内存吃满。
-            preload: isSelected ? 'metadata' : 'none',
-            // 未选中时：这一次点击只用来**选中元素**，不交给原生控件
-            //（音频整块都是控件区，以前怎么点都选不中）。
-            onPointerDownCapture: (e: React.PointerEvent) => {
-              if (isSelected) return;
-              e.preventDefault();
-              e.stopPropagation();
-              onSelect(node.id);
-            }
+            // 锁死时：不预载、不回放，连元数据都不读（真正做到"永远不响"）
+            preload: playLock ? 'none' : (isSelected ? 'metadata' : 'none'),
+            // 锁死标记：给 CSS 挂"禁止播放"的虚线描边 + 拦掉所有播放事件
+            // ⚠ 不要复用 data-bc-locked —— 那个是"元素锁定"（不可作为拖放目标），语义不同
+            'data-bc-play-lock': playLock ? '1' : undefined,
+            ...(playLock ? {
+              onPlay: (e: React.SyntheticEvent<HTMLMediaElement>) => { e.currentTarget.pause(); },
+              onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => { e.currentTarget.pause(); },
+              // 锁死状态下的点击一律用于"选中元素"，任何情况下都不播放
+              onPointerDownCapture: (e: React.PointerEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onSelect(node.id);
+              }
+            } : {
+              // 未选中时：这一次点击只用来**选中元素**，不交给原生控件
+              //（音频整块都是控件区，以前怎么点都选不中）。
+              onPointerDownCapture: (e: React.PointerEvent) => {
+                if (isSelected) return;
+                e.preventDefault();
+                e.stopPropagation();
+                onSelect(node.id);
+              }
+            })
           };
         })()
       : {})

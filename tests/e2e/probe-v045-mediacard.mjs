@@ -63,8 +63,8 @@ async function main() {
 
   check('选中 video 时出现媒体属性卡', card.exists, card.title);
   check('卡片里有媒体地址输入框与「本地文件…」按钮', card.hasSrcInput && card.pickBtn, '');
-  check('卡片里有「循环播放」「默认静音」两个开关',
-    card.toggles.length === 2 && card.toggles.some((t) => t.includes('循环')) && card.toggles.some((t) => t.includes('静音')),
+  check('卡片里有「循环播放」「默认静音」「自动播放」「背景模式」四个开关 + 播放锁',
+    card.toggles.length >= 4 && card.toggles.some((t) => t.includes('循环')) && card.toggles.some((t) => t.includes('静音')),
     card.toggles.join(' / '));
 
   // 在输入框里写地址 → 元素 attrs.src 应该跟着变

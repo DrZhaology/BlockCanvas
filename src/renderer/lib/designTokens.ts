@@ -126,6 +126,61 @@ export function uniqueTokenName(base: string, tokens: TokenEntry[]): string {
   return `${start}-${i}`;
 }
 
+// ============================================================================
+// 变量类型 ↔ 属性类型的对应关系（v0.4.5）
+// ----------------------------------------------------------------------------
+// 用户反馈：「变量里面的属性怎么可以乱用了，应该颜色只能对应颜色的使用，宽度就宽度，现在乱了。」
+//
+// 原因：变量面板只区分了 color / size / shadow 三种类型，但引用变量的三个入口
+// （调色盘、数值输入、四值输入）里，只有调色盘做了过滤 ——
+// 数值框的 var 菜单把**所有**变量都列了出来，于是可以把 `--primary`（颜色）
+// 引用到一个 `width` 上，导出的 CSS 直接失效。
+//
+// 现在统一由这里裁决：**输入控件类型 → 允许的变量类型**，不符合的变量不出现在菜单里。
+// ============================================================================
+
+export type TokenKind = TokenEntry['kind'];
+
+export const TOKEN_KIND_LABELS: Record<TokenKind, string> = {
+  color: '颜色',
+  size: '尺寸',
+  shadow: '阴影'
+};
+
+/** 各类输入控件允许引用的变量类型；返回空数组 = 这一项不该出现 var 按钮 */
+export function kindsForInput(input: string): TokenKind[] {
+  switch (input) {
+    case 'color':
+      return ['color'];
+    case 'number':
+    case 'trbl':
+    case 'box4':
+    case 'opacity':
+    case 'lineHeight':
+      return ['size'];
+    case 'shadow':
+    case 'textShadow':
+      return ['shadow'];
+    default:
+      return [];
+  }
+}
+
+/** 按允许的类型过滤变量（保持原有顺序） */
+export function filterTokensByKind(tokens: TokenEntry[] | undefined | null, allow: TokenKind[]): TokenEntry[] {
+  const all = tokens ?? [];
+  if (allow.length === 0) return [];
+  const set = new Set<TokenKind>(allow);
+  return all.filter((t) => set.has(t.kind));
+}
+
+/** 给 UI 用的一句话说明："这里只能引用颜色类变量" */
+export function kindsHint(allow: TokenKind[]): string {
+  if (allow.length === 0) return '这一项不支持引用设计变量';
+  const names = allow.map((k) => TOKEN_KIND_LABELS[k]).join(' / ');
+  return `这里只能引用「${names}」类变量`;
+}
+
 /** 按分组归类，UI 分块渲染 */
 export function groupTokens(tokens: TokenEntry[]): Array<{ group: TokenGroup; items: TokenEntry[] }> {
   const out: Array<{ group: TokenGroup; items: TokenEntry[] }> = [];

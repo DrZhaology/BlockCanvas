@@ -218,32 +218,6 @@ export function AddPropertyMenu(props: Props) {
     : [];
   const candidates = q ? nameHits.map((x) => x.s) : baseCandidates;
 
-  /** 搜索"属性值"：从 schema 的选项 + 元素当前值里找 —— 点蓝色条目可直接"插入 属性名+属性值" */
-  const valueHits = (() => {
-    if (!q) return [] as { key: string; label: string; value: string; score: number }[];
-    const out: { key: string; label: string; value: string; score: number }[] = [];
-    const seen = new Set<string>();
-    for (const s of allSchema) {
-      const cands = new Set<string>();
-      if (s.options) for (const o of s.options) cands.add(o);
-      const cur = props.elementStyle?.[s.key];
-      if (cur) for (const part of String(cur).split(/[\s,]+/)) if (part) cands.add(part);
-      for (const c of cands) {
-        const n = c.toLowerCase();
-        let sc = 0;
-        if (n === q) sc = 900;
-        else if (n.startsWith(q)) sc = 700;
-        else if (n.includes(q)) sc = 520;
-        if (sc <= 0) continue;
-        const dedup = s.key + '=' + c;
-        if (seen.has(dedup)) continue;
-        seen.add(dedup);
-        out.push({ key: s.key, label: s.label, value: c, score: sc });
-      }
-    }
-    return out.sort((a, b) => b.score - a.score).slice(0, 8);
-  })();
-
   // 按类别分组（仅"未搜索"时用）
   const grouped: Record<PropertyCategory, PropertySchema[]> = {
     '盒模型': [], '颜色': [], '字体与排版': [], '边框与阴影': [], '列表': [], '多媒体': [], '定位': [], 'Flex & Grid 布局': [], '其他': []
@@ -336,26 +310,12 @@ export function AddPropertyMenu(props: Props) {
             <div className="add-prop-scroll">
               {q ? (
                 <>
-                  {nameHits.length === 0 && valueHits.length === 0 && (
-                    <div className="add-prop-empty">没有匹配「{search.trim()}」的属性或属性值</div>
-                  )}
-                  {valueHits.length > 0 && (
-                    <div className="add-prop-group">
-                      <div className="add-prop-group-title">属性值（点蓝色条目直接插入「属性名 + 属性值」）</div>
-                      {valueHits.map((v) => (
-                        <button
-                          key={v.key + '=' + v.value}
-                          className="add-prop-value-item"
-                          onClick={() => addAndClose(v.key, v.value)}
-                          title={`插入 ${v.label} = ${v.value}`}
-                        >
-                          <span className="add-prop-value-label">{v.label}</span>
-                          <span className="add-prop-value-sep">=</span>
-                          <span className="add-prop-value-val">{v.value}</span>
-                          <span className="add-prop-value-plus">＋ 插入</span>
-                        </button>
-                      ))}
-                    </div>
+                  {/* v0.4.5（用户要求）：**删掉"搜索属性值"这一路**。
+                      原话：「正常的右侧面板的添加属性部分不要这样的机制，用起来麻烦……
+                      也就是这个入口删除搜索属性值的机制，只保留搜索属性名。」
+                      属性值预测统一搬到画布上的「中键属性搜索」里（见 CanvasPropSearch）。 */}
+                  {nameHits.length === 0 && (
+                    <div className="add-prop-empty">没有匹配「{search.trim()}」的属性名</div>
                   )}
                   {nameHits.length > 0 && (
                     <div className="add-prop-group">

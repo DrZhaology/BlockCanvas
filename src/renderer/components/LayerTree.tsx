@@ -87,6 +87,9 @@ export function LayerTree() {
       {/* 画布根节点行（可作为拖出到最外层的放置目标） */}
       <div
         className={"layer-row root-row" + (dropTarget?.id === root.id ? ' drop-inside' : '')}
+        // v0.4.5：根行以前没有左内边距 → 图标紧贴面板左边框（全界面审计的
+        // 「内容行贴左边」规则抓到了它）。和子行一样从 8px 起，视觉上才是一棵树。
+        style={{ paddingLeft: 8 }}
         onClick={() => select(root.id)}
         onDragOver={(e) => {
           if (!dragEnabled) return;

@@ -23,19 +23,28 @@ const ok = (name, cond, extra) => {
   else { fail++; console.log('  ✗ ' + name + '  [' + (extra ?? '') + ']'); }
 };
 
+// ⚠ v0.4.5：**断点感知读值**。
+// 属性写入是跟着当前断点走的：画布窄一点（右侧面板加宽后默认只有 ~753px）就落到 tablet 断点，
+// 值写进 `responsive.tablet` 而不是 `style`。以前这里只读 `style`，
+// 于是整片断言都读到"没写进去"（其实是写到了断点层）。这里把当前断点层合并进来，
+// 读到的就是**画布上实际生效**的样式。
 const READ = `(() => {
+  const st = window.__sceneStore.getState();
+  const bp = st.activeBreakpoint;
+  const merge = (n) => ({ ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) });
   let t = null;
   const find = (n) => { if (!t && n.type === 'table') t = n; for (const c of n.children) find(c); };
-  find(window.__sceneStore.getState().scene.root);
+  find(st.scene.root);
   if (!t) return null;
   const secs = t.children.filter((c) => c.type === 'thead' || c.type === 'tbody' || c.type === 'tfoot');
   const rows = [];
   for (const s of secs) for (const r of s.children) rows.push(r);
   const cell = rows[1] ? rows[1].children[0] : (rows[0] ? rows[0].children[0] : null);
   return {
-    table: { id: t.id, cls: (t.attrs && t.attrs.className) || '', style: { ...(t.style || {}) }, childStyles: (t.childStyles || []).map((c) => ({ ...c })) },
+    bp,
+    table: { id: t.id, cls: (t.attrs && t.attrs.className) || '', style: merge(t), childStyles: (t.childStyles || []).map((c) => ({ ...c })) },
     rows: rows.length,
-    firstCell: cell ? { id: cell.id, type: cell.type, text: cell.text ?? '', style: { ...(cell.style || {}) }, attrs: { ...(cell.attrs || {}) } } : null
+    firstCell: cell ? { id: cell.id, type: cell.type, text: cell.text ?? '', style: merge(cell), attrs: { ...(cell.attrs || {}) } } : null
   };
 })()`;
 

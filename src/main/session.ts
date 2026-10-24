@@ -49,6 +49,16 @@ export interface SessionTab {
   filePath?: string | null;
   isDirty?: boolean;
   scene: any;
+  /**
+   * v0.4.5：撤销栈（Ctrl+Z / Ctrl+Y 的 past / future）。
+   *
+   * 为什么放在这里：用户反馈「说了保存最近的 100 个 Ctrl+Z / Ctrl+Y，但重新打开项目
+   * 完全无法执行」。查下来 history 确实写进了工程容器（sections.history），
+   * 但**会话恢复这条路**（关掉程序再打开）从来没有存过它 —— 会话只存 scene。
+   * 现在顺手写进每个标签的草稿容器（同一个 .bcproj 格式的多 section 能力），
+   * 读会话时一起装回来。
+   */
+  history?: { past: any[]; future: any[] };
 }
 export interface AppSession {
   activeTabId: string | null;
@@ -57,6 +67,14 @@ export interface AppSession {
 }
 
 const SESSION_SCHEMA = 2;
+
+/** 会话草稿里最多保留多少条撤销记录（工程文件里是 100；会话要小一点） */
+const SESSION_HISTORY_LIMIT = 20;
+
+/** 撤销栈"指纹"：参与草稿去重哈希，否则只改历史不会触发重写 */
+function histFingerprint(h?: { past?: unknown[]; future?: unknown[] }): string {
+  return `${h?.past?.length ?? 0}/${h?.future?.length ?? 0}`;
+}
 
 function nowIsoSafe(): string {
   try { return new Date().toISOString(); } catch { return ''; }
@@ -137,15 +155,26 @@ export function readSession(): AppSession | null {
   // —— 新格式：索引 + 按需读草稿/工程文件 ——
   const tabs: SessionTab[] = raw.tabs.map((t: any) => {
     let scene: any = null;
+    let history: SessionTab['history'];
     if (t.hasDraft) {
       const r = readProject(draftPath(t.id));
-      if (r.ok && r.payload) scene = r.payload.scene;
+      if (r.ok && r.payload) {
+        scene = r.payload.scene;
+        history = (r.payload as any)?.extraSections?.history;
+      }
     }
     if (scene == null && t.filePath && existsSync(t.filePath)) {
       const r = readProject(t.filePath);
-      if (r.ok && r.payload) scene = r.payload.scene;
+      if (r.ok && r.payload) {
+        scene = r.payload.scene;
+        // 工程文件里也带着 history（sections.history）—— 已保存且不脏的标签从这儿恢复
+        history = (r.payload as any)?.extraSections?.history;
+      }
     }
-    return { id: t.id, name: t.name, filePath: t.filePath ?? null, isDirty: !!t.isDirty, scene };
+    const h = history && Array.isArray(history.past)
+      ? { past: history.past, future: Array.isArray(history.future) ? history.future : [] }
+      : undefined;
+    return { id: t.id, name: t.name, filePath: t.filePath ?? null, isDirty: !!t.isDirty, scene, ...(h ? { history: h } : {}) };
   });
 
   return { activeTabId: raw.activeTabId ?? null, tabs, updatedAt: raw.updatedAt || new Date().toISOString() };
@@ -167,12 +196,25 @@ export function writeSession(session: { activeTabId: string | null; tabs: Sessio
 
     if (wants) {
       keep.add(t.id);
-      const h = sceneHash(t.scene);
+      const haveHist = Array.isArray(t.history?.past) && t.history!.past!.length > 0;
+      // 哈希里带上撤销栈的指纹：否则"只改动历史"不会触发草稿重写（历史就悄悄丢了）
+      const h = sceneHash(t.scene) + '|' + histFingerprint(t.history);
       if (lastDraftHash.get(t.id) !== h || !existsSync(draftPath(t.id))) {
+        const sections = haveHist
+          ? {
+              history: {
+                savedAt: nowIsoSafe(),
+                limit: SESSION_HISTORY_LIMIT,
+                past: (t.history!.past || []).slice(-SESSION_HISTORY_LIMIT),
+                future: (t.history!.future || []).slice(0, SESSION_HISTORY_LIMIT)
+              }
+            }
+          : undefined;
         const w = writeProject(draftPath(t.id), {
           name: t.name || '未命名网页',
           scene: t.scene,
-          meta: { kind: 'session-draft', tabId: t.id, projectName: t.name || '' }
+          meta: { kind: 'session-draft', tabId: t.id, projectName: t.name || '' },
+          ...(sections ? { sections } : {})
         });
         hasDraft = !!w.ok;
         if (w.ok) lastDraftHash.set(t.id, h);

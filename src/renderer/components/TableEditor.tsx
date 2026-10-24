@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useScene, findNode } from '@store/sceneStore';
+import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import type { ElementStyle, SceneElement } from '@lib/types';
 import {
   readTable, normalizeTable, buildGrid, canMergeRange, applyTableOp, findTableAncestor,
@@ -178,7 +178,9 @@ function matchesChain(sel: string, chain: SceneElement[]): boolean {
 /** 合并出这一格的最终样式（camelCase，可直接喂给 cellLiveStyle / React） */
 function resolveCellStyle(
   chain: SceneElement[],
-  childStyles: { sel: string; css: string }[] | undefined
+  childStyles: { sel: string; css: string }[] | undefined,
+  /** v0.4.5：这一格"当前断点下实际生效"的样式（不传则退回基础层） */
+  ownOverride?: Record<string, string | undefined>
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const cs of childStyles ?? []) {
@@ -186,7 +188,7 @@ function resolveCellStyle(
     if (!sel || !isValidChildSelector(sel) || !matchesChain(sel, chain)) continue;
     Object.assign(out, cssTextToObject(cs.css));
   }
-  const own = chain[chain.length - 1]?.style as Record<string, string> | undefined;
+  const own = (ownOverride ?? (chain[chain.length - 1]?.style as Record<string, string | undefined>)) as Record<string, string | undefined>;
   if (own) {
     // ⚠ 简写会吃掉长写：`.data-table td { padding: 9px 12px }` 给了 padding 简写，
     //   而这一格自己只改 paddingTop —— 若两条并存，readPad/render 会按简写走，
@@ -254,7 +256,27 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
   const editingRef = useRef(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const table = useMemo(() => findNode(scene.root, tableId), [scene, tableId]);
+  /**
+   * v0.4.5：**表格编辑器必须按当前断点读样式**。
+   *
+   * 写入走 `updateStyle` —— 它跟着断点走：画布窄一点（右侧面板加宽后默认只有 ~753px）
+   * 就落到 tablet 断点，值写进 `responsive.tablet` 而不是 `style`。
+   * 而这里以前直接读 `table.style`（基础层）→ 表现为：
+   *   · 数值框填完立刻跳回旧值；
+   *   · 勾选框点了不保持（探针里直接报 "Clicking the checkbox did not change its state"）；
+   *   · 画布上明明生效了，编辑器里却像"设置没作用"。
+   * 现在统一合并成"当前断点下实际生效"的样式再读。
+   */
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
+  const tableRaw = useMemo(() => findNode(scene.root, tableId), [scene, tableId]);
+  const effStyleOf = useMemo(() => {
+    return (node: SceneElement | null | undefined): ElementStyle =>
+      (node ? (getEffectiveStyle(node, activeBreakpoint) as ElementStyle) : {});
+  }, [activeBreakpoint]);
+  const table = useMemo(() => {
+    if (!tableRaw) return null;
+    return { ...tableRaw, style: effStyleOf(tableRaw) } as SceneElement;
+  }, [tableRaw, effStyleOf]);
   // 编辑器只读展示：先规整再读，保证与结构操作看到的是同一套区块
   const parts = useMemo(() => (table && table.type === 'table' ? readTable(normalizeTable(table)) : null), [table]);
 
@@ -293,7 +315,12 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
 
   /** 这一格在编辑器里应该长什么样 = 表格子元素规则（命中的那些）+ 这一格自己的样式 */
   const styleOfCell = (cell: SceneElement) =>
-    resolveCellStyle(cellChains.get(cell.id) ?? [cell], table?.childStyles);
+    resolveCellStyle(
+      cellChains.get(cell.id) ?? [cell],
+      table?.childStyles,
+      // v0.4.5：这一格自己的样式也要按当前断点合并，否则"改了单元格底色，编辑器里没变"
+      effStyleOf(cell) as unknown as Record<string, string | undefined>
+    );
 
   // ——— 选区派生 ———
   const rect = useMemo(() => {
@@ -687,7 +714,8 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
 
   if (!table || table.type !== 'table' || !parts) return null;
 
-  const cellStyle: ElementStyle = anchor?.style ?? {};
+  // v0.4.5：单元格样式同样要按当前断点合并（写入跟着断点走）
+  const cellStyle: ElementStyle = effStyleOf(anchor);
   /** 这一格的内边距四值（右侧预览的间距 = 它，拖动改的也是它）；没写过就按编辑器默认显示 */
   const pad = hasPad(cellStyle) ? readPad(cellStyle) : { ...PAD_FALLBACK };
   /** 表格标题在预览里放上还是放下（跟 captionSide 一致） */
@@ -963,7 +991,7 @@ export function TableEditor({ tableId, onBack }: { tableId: string; onBack: () =
                       ) : (
                         <span
                           className="tbl-cell-text"
-                          style={{ whiteSpace: cell.style?.whiteSpace === 'nowrap' ? 'nowrap' : 'normal' }}
+                          style={{ whiteSpace: effStyleOf(cell).whiteSpace === 'nowrap' ? 'nowrap' : 'normal' }}
                         >{(cell.text ?? '').trim() || ' '}</span>
                       )}
                       {cs > 1 && <span className="tbl-cell-badge"><Icon name="tab" size={9} />{cs}</span>}

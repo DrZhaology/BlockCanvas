@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { useScene, findNode } from '@store/sceneStore';
+import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { CSS_UNITS, UNIT_LABELS } from '@lib/propertySchema';
 import { useWheelAdjust } from '@lib/wheelAdjust';
-import { cssVarName, tokenRef } from '@lib/designTokens';
+import { tokenRef } from '@lib/designTokens';
+import { VarMenu } from './VarMenu';
 
 // BlockCanvas · 四值输入（上 / 右 / 下 / 左 分开填写）
 // 设计动机：过去是一个"简写输入框"（要用户自己记住 `8px 4px 8px 4px` 的 CSS 简写顺序），
@@ -42,7 +43,15 @@ export function TrblInput(props: Props) {
   const [sync, setSync] = useState(false);
 
   const node = findNode(scene.root, elementId);
-  const style = (node?.style ?? {}) as Record<string, string | undefined>;
+  const activeBreakpoint = useScene((s) => s.activeBreakpoint);
+  /**
+   * v0.4.5：显示值必须用**当前断点合并后的样式**。
+   *
+   * 写入是跟着断点走的（非 desktop 断点写进 `responsive[bp]`），
+   * 以前这里读的是 `node.style`（基础层）→ 在平板/手机断点下，明明设了 margin，
+   * 四个输入框却全是空的；再滚一下滚轮，数值就从 0 重新开始，看起来像"值被清空"。
+   */
+  const style = (node ? getEffectiveStyle(node, activeBreakpoint) : {}) as Record<string, string | undefined>;
 
   useEffect(() => { setU(unit ?? 'px'); }, [unit, elementId]);
 
@@ -73,8 +82,10 @@ export function TrblInput(props: Props) {
     if (Object.keys(patch).length > 0) updateStyle(elementId, patch);
   };
 
-  // v0.4.5：四边一次性引用设计变量（间距类）。变量引用不再拼单位。
+  // v0.4.5：四边一次性引用设计变量（**只给尺寸类**）。变量引用不再拼单位。
+  // v0.4.5 修正：改用统一的 VarMenu（Portal + 避让定位），不再用会跑出窗口的绝对定位菜单。
   const [varOpen, setVarOpen] = useState(false);
+  const varBtnRef = useRef<HTMLButtonElement | null>(null);
   const sizeTokens = (scene.tokens ?? []).filter((t) => t.kind !== 'color');
   const applyVarToAll = (name: string) => {
     const v = tokenRef(name);
@@ -94,37 +105,22 @@ export function TrblInput(props: Props) {
         <div className="trbl4-head-right">
           <div className="trbl4-var-wrap">
             <button
+              ref={varBtnRef}
               className={'trbl4-var-btn' + (varOpen ? ' active' : '')}
               onClick={() => setVarOpen((v) => !v)}
               title={sizeTokens.length > 0
-                ? '四边都设成某个设计变量（间距类），例如 space-md = 16px'
-                : '还没有间距类变量 —— 到右侧「变量」页签新建一个（如 space-md = 16px）'}
+                ? '四边都设成某个「尺寸」类设计变量，例如 space-md = 16px'
+                : '还没有尺寸类变量 —— 到右侧「变量」页签新建一个（如 space-md = 16px）'}
               tabIndex={-1}
             >var</button>
-            {varOpen && (
-              <>
-                <div className="trbl4-var-backdrop" onClick={() => setVarOpen(false)} />
-                <div className="trbl4-var-menu">
-                  {sizeTokens.length === 0 && (
-                    <div className="trbl4-var-empty">
-                      还没有间距类变量。<br />
-                      到右侧面板「变量」页签 →「模板 → 中间距」建一个，这里就能四边一键引用。
-                    </div>
-                  )}
-                  {sizeTokens.map((t) => (
-                    <button
-                      key={t.name}
-                      className="trbl4-var-item"
-                      onClick={() => applyVarToAll(t.name)}
-                      title={`四边都设为 ${tokenRef(t.name)}`}
-                    >
-                      <span className="trbl4-var-name">{cssVarName(t.name)}</span>
-                      <span className="trbl4-var-val">{t.value}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
+            <VarMenu
+              open={varOpen}
+              anchorRef={varBtnRef}
+              kinds={['size']}
+              title="四边都引用同一个「尺寸」类变量"
+              onClose={() => setVarOpen(false)}
+              onPick={applyVarToAll}
+            />
           </div>
           <label className="trbl4-sync" title="勾选后：改任意一边，其余三边自动跟随（做四周等距留白更快）">
             <input type="checkbox" checked={sync} onChange={(e) => setSync(e.target.checked)} />

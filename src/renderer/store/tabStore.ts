@@ -32,6 +32,37 @@ export interface ProjectTab {
   kind?: TabKind;
   /** kind === 'snapshot' 时必填 */
   snapshot?: SnapshotRef;
+  /**
+   * v0.4.5：**这个标签自己的撤销栈**。
+   *
+   * 为什么要放在标签上：撤销栈以前只有一份，挂在 sceneStore 的全局 state 上，
+   * 而 `switchTab` 走的是 `setScene()` —— 那个动作会把 history 清空。
+   * 于是「切到另一个标签再切回来，Ctrl+Z 就没了」。打开工程 / 恢复会话时也一样。
+   *
+   * 现在：切走前把当前 history 存回旧标签，切进来时把目标标签的 history 装回 sceneStore，
+   * 会话恢复（session.json）也把它一起带上 —— 关掉程序再打开，Ctrl+Z 依然有效。
+   */
+  history?: SceneHistory;
+}
+
+/** 撤销栈（与 sceneStore 的 History 结构一致，抽出来避免循环依赖） */
+export interface SceneHistory {
+  past: SceneGraph[];
+  future: SceneGraph[];
+}
+
+/** 会话里每个标签最多带多少条撤销记录（session.json 体积上限；工程文件里是 100 条） */
+export const SESSION_HISTORY_LIMIT = 20;
+
+/** 取当前 sceneStore 的撤销栈（浅拷贝，避免外部改到内部数组） */
+function snapshotHistory(): SceneHistory {
+  const h = useScene.getState().history;
+  return { past: h.past.slice(), future: h.future.slice() };
+}
+
+/** 把撤销栈装回 sceneStore */
+function restoreHistory(h?: SceneHistory | null): void {
+  useScene.setState({ history: { past: (h?.past ?? []).slice(), future: (h?.future ?? []).slice() } });
 }
 
 /** 这个标签是不是"只读快照预览" */
@@ -110,7 +141,16 @@ function debouncePersistSession(get: () => TabState) {
         name: t.name,
         filePath: t.filePath || null,
         isDirty: !!t.isDirty,
-        scene: t.id === st.activeTabId ? useScene.getState().scene : t.scene
+        scene: t.id === st.activeTabId ? useScene.getState().scene : t.scene,
+        // v0.4.5：撤销栈随会话保存 —— 关掉程序再打开，Ctrl+Z 依然能回退（用户反馈"一直没修好"）。
+        // 只保留最近 SESSION_HISTORY_LIMIT 条，避免 session.json 被撑大。
+        history: (() => {
+          const h = t.id === st.activeTabId ? snapshotHistory() : (t.history ?? { past: [], future: [] });
+          return {
+            past: h.past.slice(-SESSION_HISTORY_LIMIT),
+            future: h.future.slice(0, SESSION_HISTORY_LIMIT)
+          };
+        })()
       }))
     };
     window.bc.setSession(payload);
@@ -158,9 +198,10 @@ export const useTabStore = create<TabState>((set, get) => ({
     const scene = customScene || createEmptyScene();
     const newId = genTabId();
 
-    // 先把当前激活标签的 scene 存回 tabs 数组
+    // 先把当前激活标签的 scene 存回 tabs 数组（撤销栈也一起存，切回来还在）
     const curScene = useScene.getState().scene;
-    const updatedTabs = st.tabs.map((t) => (t.id === st.activeTabId ? { ...t, scene: curScene } : t));
+    const curHist = snapshotHistory();
+    const updatedTabs = st.tabs.map((t) => (t.id === st.activeTabId ? { ...t, scene: curScene, history: curHist } : t));
 
     const newT: ProjectTab = {
       id: newId,
@@ -170,6 +211,10 @@ export const useTabStore = create<TabState>((set, get) => ({
       isDirty: kind === 'snapshot' ? false : !filePath,
       scene,
       kind,
+      // v0.4.5：撤销栈挂在标签上（切标签 / 关程序再打开都不会丢）
+      history: history && Array.isArray(history.past)
+        ? { past: history.past.slice(), future: (history.future || []).slice() }
+        : { past: [], future: [] },
       ...(snapshot ? { snapshot } : {})
     };
 
@@ -182,11 +227,7 @@ export const useTabStore = create<TabState>((set, get) => ({
     get().loadSceneSilently(scene);
     // 撤销历史随工程保存（v0.4.4）：工程文件里带了 history 节就恢复 ——
     // 下次打开还能 Ctrl+Z 回退到上次关闭前的状态（条数由设置里的阈值控制）
-    if (history && Array.isArray(history.past) && history.past.length > 0) {
-      useScene.setState({
-        history: { past: history.past.slice(), future: (history.future || []).slice() }
-      });
-    }
+    restoreHistory(newT.history);
     debouncePersistSession(get);
     return newId;
   },
@@ -229,9 +270,10 @@ export const useTabStore = create<TabState>((set, get) => ({
     const target = st.tabs.find((t) => t.id === targetTabId);
     if (!target) return;
 
-    // 存下当前 tab 的最新 scene
+    // 存下当前 tab 的最新 scene 与撤销栈
     const curScene = useScene.getState().scene;
-    const updatedTabs = st.tabs.map((t) => (t.id === st.activeTabId ? { ...t, scene: curScene } : t));
+    const curHist = snapshotHistory();
+    const updatedTabs = st.tabs.map((t) => (t.id === st.activeTabId ? { ...t, scene: curScene, history: curHist } : t));
 
     isSwitchingTab = true;
     set({
@@ -240,6 +282,9 @@ export const useTabStore = create<TabState>((set, get) => ({
     });
 
     useScene.getState().setScene(target.scene);
+    // v0.4.5：把目标标签自己的撤销栈装回来 ——
+    // 以前 setScene() 会把 history 清空，所以"切走再切回来 Ctrl+Z 就失效了"。
+    restoreHistory(target.history);
     // 等下一帧让 subscribe 走完后再解除标记
     requestAnimationFrame(() => { isSwitchingTab = false; });
     debouncePersistSession(get);
@@ -338,7 +383,11 @@ export const useTabStore = create<TabState>((set, get) => ({
       name: t.name || `未命名网页 ${idx + 1}`,
       filePath: t.filePath || null,
       isDirty: !!t.isDirty,
-      scene: t.scene || createEmptyScene()
+      scene: t.scene || createEmptyScene(),
+      // v0.4.5：撤销栈随会话恢复（老会话没有这个字段 → 空栈，行为与以前一致）
+      history: t.history && Array.isArray(t.history.past)
+        ? { past: t.history.past, future: Array.isArray(t.history.future) ? t.history.future : [] }
+        : { past: [], future: [] }
     }));
 
     const activeId = (session.activeTabId && loadedTabs.some((x) => x.id === session.activeTabId))
@@ -353,6 +402,10 @@ export const useTabStore = create<TabState>((set, get) => ({
     });
 
     get().loadSceneSilently(activeTab.scene);
+    // 关键：loadSceneSilently → setScene() 会把 history 清空，所以必须**在它之后**装回来。
+    // 这正是用户说的「说了保存最近的 100 个 Ctrl+Z / Ctrl+Y，但重新打开完全无法执行」——
+    // 历史其实写进了 history.json（工程容器）与会话，只是一直没有人在"载入场景之后"把它装回去。
+    restoreHistory(activeTab.history);
   }
 }));
 

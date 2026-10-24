@@ -4,7 +4,7 @@ import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { TEXT_TAGS, SELF_CLOSING_TAGS, CONTAINER_TAGS } from '@lib/types';
 import type { ElementType, SceneElement, SceneGraph } from '@lib/types';
 import { SCHEMA, ATTRS_SCHEMA, DEFAULT_VISIBLE_PROPS,
-  getSchemaItem, isApplicable, hasStyleValue, applyUnit, UNIT_HELP_TEXT
+  getSchemaItem, isApplicable, hasStyleValue, applyUnit, presetValue, UNIT_HELP_TEXT
 } from '@lib/propertySchema';
 import { getPluginProperties } from '@lib/pluginHost';
 import { AddPropertyMenu } from './AddPropertyMenu';
@@ -902,7 +902,21 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   const visibleSchema: typeof SCHEMA = [];
   const visiblePropList = selected.visibleProps ?? [];
   const allSchema = [...SCHEMA, ...getPluginProperties()];
-  const isTextGradientEl = selected.style.WebkitTextFillColor === 'transparent';
+  /**
+   * v0.4.5：判断"这条属性已添加了吗"必须看**当前断点合并后的样式**。
+   *
+   * 以前只看 `selected.style`（基础层）。可是写入是跟着当前断点走的 ——
+   * 画布窄一点（右侧面板加宽后默认只有 ~753px）就会落到 tablet 断点，
+   * 值写进 `responsive.tablet`，基础层依然是空的 → **刚设好的属性行当场消失**。
+   * 合并之后"面板里看到的行"与"画布上生效的样式"始终一致。
+   */
+  const styleForPresence: Record<string, string | undefined> = {
+    ...(selected.style as unknown as Record<string, string | undefined>),
+    ...((activeBreakpoint !== 'desktop'
+      ? (selected.responsive?.[activeBreakpoint] as unknown as Record<string, string | undefined>)
+      : undefined) ?? {})
+  };
+  const isTextGradientEl = styleForPresence.WebkitTextFillColor === 'transparent';
   // 「过渡动画 (transition)」由「交互状态 (伪类)」区域的滑块统一管理，
   // 不再在下方「CSS 样式属性」里重复出现一条（用户若从 + 添加属性 显式加过，仍然显示）
   const PSEUDO_MANAGED_KEYS = new Set(['transition']);
@@ -910,8 +924,8 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
     // v0.4.4：显式添加过的属性即使"当前条件不满足"也要渲染出来（行上标「不生效」），
     // 否则 left/right/top/bottom 在 position:static 时加进来会直接消失（用户反馈）。
     if (!isApplicable(s, selected.type) && !visiblePropList.includes(s.key)) continue;
-    const extraBg = s.key === 'backgroundColor' && isGradient(selected.style.backgroundImage) && !isTextGradientEl;
-    const byValue = hasStyleValue(selected.style, s as any) || extraBg;
+    const extraBg = s.key === 'backgroundColor' && isGradient(styleForPresence.backgroundImage) && !isTextGradientEl;
+    const byValue = hasStyleValue(styleForPresence, s as any) || extraBg;
     const helperHidden =
       !showHelperInCss && HELPER_MANAGED_KEYS.has(s.key) && !visiblePropList.includes(s.key);
     const pseudoHidden =
@@ -960,6 +974,12 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
       const shouldAdd = req.add !== false;
       setSecOpen((p) => ({ ...p, css: true }));
       if (shouldAdd) addVisibleProp(elementId, key);
+      // v0.4.5：中键搜索的「属性值预测」—— 顺手把值也写进去（裸数字按 schema.unit 补单位）
+      if (req.value !== undefined) {
+        const item = getSchemaItem(key);
+        const v = item ? presetValue(item, req.value) : req.value;
+        updateStyle(elementId, { [key]: v } as never);
+      }
       setFlashKey(key);
       // 滚动到该行：**不用 scrollIntoView('center')** —— 行在列表末尾时容器已经滚不动，
       // 只能贴底，容易被面板底部挡住（用户反馈"末尾元素定位不到"）。

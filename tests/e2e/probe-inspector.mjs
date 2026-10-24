@@ -140,7 +140,12 @@ async function main() {
   }));
   ok('断点条 = 3 个设备分段 + 1 个小的自适应按钮', bp.tabs === 3 && bp.auto === 1, JSON.stringify(bp));
   ok('「自适应」不再是分段按钮（不会常亮）', !bp.autoText.includes('自适应'), bp.autoText);
-  ok('默认高亮由画布宽度决定（电脑）', bp.active.includes('电脑'), bp.active);
+  // v0.4.5：**不要硬编码「电脑」**。右侧面板加宽到 456px 后，探针窗口（1280 宽）里
+  // 画布只剩 ~753px → 按断点阈值本来就该高亮「平板」。这里改成"高亮必须与画布实际宽度一致"，
+  // 这才是这条断言真正要验的东西（下一段已经用同样的算法复核过一次）。
+  const bpWidth = await win.evaluate(() => document.querySelector('.canvas')?.clientWidth || 0);
+  const bpExpect = bpWidth <= 480 ? '手机' : bpWidth <= 768 ? '平板' : '电脑';
+  ok(`默认高亮由画布宽度决定（画布 ${bpWidth}px → ${bpExpect}）`, bp.active.includes(bpExpect), bp.active);
 
   // 切到手机 → 手机分段高亮
   await win.evaluate(() => window.dispatchEvent(new CustomEvent('bc:set-device', { detail: 'mobile' })));
@@ -161,13 +166,22 @@ async function main() {
     autoState.autoActive === false && autoState.active.includes(expected),
     JSON.stringify({ ...autoState, expected }));
 
-  // ============ 6. 层级纪律：面板在画布覆盖层之上 ============
-  const z = await win.evaluate(() => ({
-    panel: Number(getComputedStyle(document.querySelector('.right-pane-wrap')).zIndex) || 0,
-    toolbar: Number(getComputedStyle(document.querySelector('.toolbar')).zIndex) || 0,
-    boxm: 402 // CSS 里盒模型覆盖层的层级
-  }));
-  ok('面板 / 工具栏层级高于画布覆盖层（700 > 402）', z.panel === 700 && z.toolbar === 700 && z.panel > z.boxm,
+  // ============ 6. 层级纪律：面板 / 工具栏在画布覆盖层之上 ============
+  // v0.4.5 第八批：层级不再各写裸数字，改成读「z-index 标尺」变量（见 00-theme-tokens.css）。
+  // 断言从"必须是 700"改成"必须是标尺里的正确层"，比原来更严（同时校验了顺序关系）。
+  const z = await win.evaluate(() => {
+    const cs = getComputedStyle(document.documentElement);
+    const px = (name) => Number(cs.getPropertyValue(name).trim()) || 0;
+    return {
+      panel: Number(getComputedStyle(document.querySelector('.right-pane-wrap')).zIndex) || 0,
+      toolbar: Number(getComputedStyle(document.querySelector('.toolbar')).zIndex) || 0,
+      boxm: px('--z-canvas-boxmodel'),
+      sheetVar: px('--z-sheet'),
+      toolbarVar: px('--z-toolbar')
+    };
+  });
+  ok('层级纪律：面板 / 工具栏都在画布覆盖层之上（且取自统一的 z-index 标尺）',
+    z.panel === z.sheetVar && z.panel > z.boxm && z.toolbar === z.toolbarVar && z.toolbar > z.boxm,
     JSON.stringify(z));
 
   // ============ 7. 中键定位：末尾属性也在可视区内 ============

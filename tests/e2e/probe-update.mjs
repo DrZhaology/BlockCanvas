@@ -229,8 +229,14 @@ async function main() {
     if (w) w.webContents.send('task:changed', []);
   });
   await sleep(300);
-  ok('任务清空后按钮回到空闲态（不再显示环形进度）',
-    (await win.locator('.toolbar .tb-task-ring').count()) === 0 && (await win.locator('.toolbar .tb-task-btn').count()) === 1);
+  // v0.4.5 起：**没有任务时「任务」按钮整体隐藏**（工具栏不留一个永远空着的入口），
+  // 所以这里断言"环形进度消失 + 按钮消失"，而不是"按钮还在但回到空闲态"。
+  const idle = await win.evaluate(() => ({
+    ring: document.querySelectorAll('.toolbar .tb-task-ring').length,
+    btn: document.querySelectorAll('.toolbar .tb-task-btn').length
+  }));
+  ok('任务清空后按钮整体隐藏（不再留一个空入口 / 环形进度）',
+    idle.ring === 0 && idle.btn === 0, JSON.stringify(idle));
 
   ok('无 console 错误', errs.length === 0, errs.slice(0, 3).join(' | '));
   console.log(`\n===== 更新中心探针：${pass} 通过 / ${fail} 失败 =====`);

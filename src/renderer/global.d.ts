@@ -214,6 +214,10 @@ declare global {
       ) => Promise<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>;
 
       onMenu: (channel: string, cb: () => void) => () => void;
+      /** v0.4.5：系统层要求打开某个 .bcproj（双击文件 / 第二个实例 / macOS open-file） */
+      onOpenProjectPath: (cb: (path: string) => void) => () => void;
+      /** v0.4.5：启动加载页的真实进度（主进程逐条播报） */
+      onLoadProgress: (cb: (p: { id: string; label: string; percent: number }) => void) => () => void;
       setNativeTheme: (source: 'dark' | 'light' | 'system') => void;
       pickImageSrc: (mode?: 'abs' | 'rel') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
       /** 首页背景用：选择图片 / 视频文件（返回绝对路径，渲染层用 bc-img:// 显示） */

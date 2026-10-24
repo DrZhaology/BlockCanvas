@@ -813,16 +813,22 @@ async function main() {
   await mkTable();
 
   const dumpTables = () => win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    const bp = st.activeBreakpoint;
+    // v0.4.5：属性写入跟着当前断点走（画布 753px → tablet，值在 responsive.tablet），
+    // 这里把断点层合并进来，读到的才是"实际生效"的样式（否则会误报"没写进去"）。
+    const merged = (n) => ({ ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) });
     const tables = [];
     const find = (n) => { if (n.type === 'table') tables.push(n); for (const c of n.children) find(c); };
-    find(window.__sceneStore.getState().scene.root);
+    find(st.scene.root);
     const out = [];
     for (const t of tables) {
       const nodes = [];
       const walk = (n, d) => {
+        const s = merged(n);
         nodes.push({ d, type: n.type, id: n.id,
           rsel: (n.attrs && n.attrs.relSelector) || '',
-          style: Object.keys(n.style || {}).map((k) => k + '=' + n.style[k]).join(',') });
+          style: Object.keys(s).map((k) => k + '=' + s[k]).join(',') });
         for (const c of n.children) walk(c, d + 1);
       };
       walk(t, 0);

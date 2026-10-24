@@ -456,7 +456,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   }, []);
 
   return (
-    <div className="toolbar">
+    <div className="toolbar" data-bc-avoid="toolbar">
       {/* —— 主区：可滚动流水线（竖向滚轮直接左右滚） —— */}
       <div className="tb-main bc-hscroll" title="工具按钮：放不下时可左右滚动（滚轮直接左右滚，不必按 Shift）；在「设置 → 工具栏管理」里可自由调整 / 分组">
         {renderArea(mainItems)}

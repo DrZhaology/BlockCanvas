@@ -109,7 +109,7 @@ export function SnapshotBar({ tab }: { tab: ProjectTab }) {
   };
 
   return (
-    <div className="snapshot-bar">
+    <div className="snapshot-bar" data-bc-avoid="snapshotbar">
       <span className="snap-badge"><Icon name="camera" size={13} /> 只读快照</span>
       <span className="snap-title">{snap.projectName}</span>
       <span className="snap-time">{fmtTime(snap.takenAt)}</span>

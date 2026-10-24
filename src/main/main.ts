@@ -87,6 +87,79 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'bc-img', privileges: { standard: true, secure: true } }
 ]);
 
+// ============ 「双击 .bcproj 直接用 BlockCanvas 打开」 ============
+//
+// 用户反馈：「直接打开 .bcproj 后缀的项目现在完全不会」。查下来是两段都缺：
+//   ① 打包配置里已经登记了文件关联（electron-builder fileAssociations），
+//      但主进程**从来没有读过命令行参数** —— 双击时 Windows 会把文件路径塞进 argv[1]，
+//      程序照常启动、照常恢复会话，那个路径被直接丢掉了；
+//   ② 没有单实例锁：文件已经被打开着时再双击一个工程，会**再起一个进程**
+//      （两个进程同时写 data/ 目录，风险很大）。
+//
+// 现在：单实例锁 + 三种入口（首次启动的 argv / 第二个实例的 argv / macOS 的 open-file）
+// 统一走 openProjectFromOs()，最终给渲染进程发 `bc:open-project-path`。
+let pendingOsOpenPath: string | null = null;
+
+/** 从命令行里挑出 .bcproj 路径（跳过 - 开头的开关；不认其它扩展名，避免误开无关文件） */
+function extractProjectPathFromArgv(argv: string[]): string | null {
+  for (const a of argv.slice(1)) {
+    if (!a || a.startsWith('-')) continue;
+    const p = a.replace(/^"|"$/g, '');
+    if (!/\.bcproj$/i.test(p)) continue;
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** 把"要打开哪个工程"这件事交给渲染进程；窗口还没建好就先记下来，等它加载完再发 */
+function openProjectFromOs(p: string | null) {
+  if (!p) return;
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win || win.webContents.isLoading()) {
+    pendingOsOpenPath = p;
+    return;
+  }
+  if (win.isMinimized()) win.restore();
+  win.focus();
+  win.webContents.send('bc:open-project-path', p);
+}
+
+/** 窗口加载完成时把"启动时攒下的待打开工程"发出去 */
+function flushPendingOsOpen() {
+  if (!pendingOsOpenPath) return;
+  const p = pendingOsOpenPath;
+  pendingOsOpenPath = null;
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win && !win.isDestroyed()) win.webContents.send('bc:open-project-path', p);
+}
+
+// 单实例：拿不到锁说明已经有一个在跑 → 把参数交给那个实例，自己退出
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', (_e, argv) => {
+    openProjectFromOs(extractProjectPathFromArgv(argv));
+  });
+  // macOS：Finder 里双击文档走的是 open-file 事件（不是 argv）
+  app.on('open-file', (e, p) => {
+    e.preventDefault();
+    openProjectFromOs(p);
+  });
+}
+
+// ============ 启动加载页的**真实**进度通道 ============
+// 用户要求：「做一个加载的页面，可以包含 BlockCanvas 的 Logo，显示真实的加载进度，
+//           与主界面要过渡丝滑。」
+// 这里只负责"报数"：每一步真的有进展才发一条，绝不用定时器凑进度。
+function emitLoad(id: string, label: string, percent: number) {
+  try {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('bc:load-progress', { id, label, percent: Math.max(0, Math.min(100, Math.round(percent))) });
+    }
+  } catch { /* 窗口没了就算了 */ }
+}
+
 // ============ 自定义中文菜单 ============
 function buildMenu(win: BrowserWindow): Menu {
   const template: MenuItemConstructorOptions[] = [
@@ -239,6 +312,10 @@ async function createWindow() {
   ipcMain.on('theme:set-source', (_evt, source: unknown) => {
     nativeTheme.themeSource = source === 'dark' || source === 'light' ? source : 'system';
   });
+
+  // v0.4.5：加载完成后把"启动时攒下的待打开工程"（双击 .bcproj 启动的那条路径）发给渲染进程。
+  // 放在 did-finish-load 而不是 loadURL 之后立刻发：渲染进程的监听器要等 React 挂载才有。
+  win.webContents.on('did-finish-load', () => { flushPendingOsOpen(); });
 
   if (devServerUrl) {
     await win.loadURL(devServerUrl);
@@ -570,6 +647,7 @@ ipcMain.handle('project:save', async (_evt, projectData: { name?: string; scene:
 });
 
 ipcMain.handle('project:open-file', async (_evt, customPath?: string) => {
+  const loadId = 'open-' + Date.now().toString(36);
   try {
     let targetPath = customPath;
     if (!targetPath) {
@@ -583,17 +661,30 @@ ipcMain.handle('project:open-file', async (_evt, customPath?: string) => {
       targetPath = res.filePaths[0];
     }
     if (!existsSync(targetPath)) return { ok: false, error: '文件不存在' };
+    // —— 真实进度播报（启动加载页用；每一步都是真的做完了才报）——
+    emitLoad(loadId, '正在读取工程文件…', 8);
     // v1（纯 JSON）与 v2（ZIP 容器）都能读
     const r = readProject(targetPath);
     if (!r.ok || !r.payload) return { ok: false, error: r.error || '文件不是有效的 BlockCanvas 工程文件' };
+    emitLoad(loadId, '正在解析场景…', 34);
     // v0.4.5：把容器里的 assets/ 解到缓存目录，`bc-img://asset/...` 才有东西可服务
     let extracted = 0;
-    try { extracted = extractProjectAssets(targetPath, r.payload); } catch { /* 解包失败不阻断打开 */ }
+    try {
+      const assetCount = (r.payload as unknown as { assets?: unknown[] }).assets?.length ?? 0;
+      extracted = extractProjectAssets(targetPath, r.payload, (done, total) => {
+        // 素材解包占 34% → 92% 这一段
+        const span = total > 0 ? done / total : 1;
+        emitLoad(loadId, `正在准备素材 ${done}/${total || assetCount}…`, 34 + span * 58);
+      });
+    } catch { /* 解包失败不阻断打开 */ }
+    emitLoad(loadId, '正在登记到项目列表…', 95);
     // v0.4.5：从 data/projects 以外打开的工程登记进项目列表（否则用户在列表里找不到它）
     try { registerExternalProject(targetPath, r.payload.name); } catch { /* 登记失败不影响打开 */ }
+    emitLoad(loadId, '即将进入编辑界面…', 100);
     return {
       ok: true, project: r.payload, path: targetPath, container: r.container,
       extractedAssets: extracted,
+      loadId,
       // 随工程保存的撤销历史（老工程没有这一节 → undefined）
       history: (r.payload as any)?.extraSections?.history
     };
@@ -1309,6 +1400,16 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  // 首次启动时若命令行里带了 .bcproj（双击文件启动），窗口还没加载完 → 先记下，
+  // did-finish-load 时再发给渲染进程。
+  {
+    const fromArgv = extractProjectPathFromArgv(process.argv);
+    if (fromArgv) {
+      pendingOsOpenPath = fromArgv;
+      ulog(`启动参数里带工程文件：${fromArgv}`);
+    }
+  }
 
   // 启动自愈：清我们自己在系统 Temp 里留下的文件（默认开）/ Chromium 缓存 / 孤立快照。
   // 必须在这里（app ready 之后）：storage 里要用到 session，且 userData 已重定向到 data/user-data。

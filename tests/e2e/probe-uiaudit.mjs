@@ -239,7 +239,22 @@ async function main() {
   });
   check('图层树文字预览截断（不压按钮）', !!layer && layer.hasPreview && layer.ellipsis === 'ellipsis',
     layer ? `max-width=${layer.maxW} text-overflow=${layer.ellipsis || '(无预览行)'}` : '未找到图层树');
-  check('图层树不出现横向滚动条', !!layer && layer.treeOverflowX === 'hidden', layer && `overflow-x=${layer.treeOverflowX}`);
+  // ⚠ 这条断言在 v0.4.5 第 8 批被**反转**了。
+  // 用户原话：「上述的图层界面回归原来的，不要缺失内容，保留原来的左右可以滑动。」
+  // 层叠很深时 overflow-x:hidden 会把右边的内容整块吃掉（看起来像"图层丢了"），
+  // 所以现在要求：**图层树允许横向滚动**，并且行宽用 max-content 撑开（不截断文字）。
+  const layerScroll = await win.evaluate(() => {
+    const tree = document.querySelector('.layer-tree');
+    const row = document.querySelector('.layer-tree .layer-row');
+    if (!tree) return null;
+    return {
+      treeOverflowX: getComputedStyle(tree).overflowX,
+      rowMinWidth: row ? getComputedStyle(row).minWidth : ''
+    };
+  });
+  check('图层树保留横向滚动（层叠深时内容不被吃掉）',
+    !!layerScroll && ['auto', 'scroll'].includes(layerScroll.treeOverflowX),
+    layerScroll ? `overflow-x=${layerScroll.treeOverflowX} 行 min-width=${layerScroll.rowMinWidth}` : '未找到图层树');
 
   // ---------- 10.5 第二批：属性卡片与定位助手 ----------
   // 上一节切到了「图层」页签，属性面板此时没挂载 —— 先切回来

@@ -120,24 +120,39 @@ export function collectSceneAssets(scene: unknown): CollectResult {
 /**
  * 打开工程时把容器里的 assets/ 解到缓存目录，让 `bc-img://asset/...` 能被协议读到。
  * 已存在的跳过（内容哈希 = 幂等）。
+ *
+ * v0.4.5：加了 `onProgress(done, total)` 回调 —— 启动加载页要显示**真实进度**，
+ * 而"解包素材"正是一个大工程最耗时、也是唯一能分步计数的一段。
  */
-export function extractProjectAssets(projectPath: string, manifest?: ProjectManifest | null): number {
+export function extractProjectAssets(
+  projectPath: string,
+  manifest?: ProjectManifest | null,
+  onProgress?: (done: number, total: number) => void
+): number {
   const list = manifest?.assets ?? [];
-  if (list.length === 0) return 0;
+  if (list.length === 0) { onProgress?.(0, 0); return 0; }
   const dir = assetCacheDir();
   let n = 0;
-  for (const a of list) {
+  for (let i = 0; i < list.length; i += 1) {
+    const a = list[i];
     const name = String(a.path || '').replace(/^assets\//, '');
-    if (!name) continue;
-    const target = join(dir, name);
-    if (existsSync(target)) continue;
-    const buf = readAsset(projectPath, a.path);
-    if (!buf) continue;
-    try {
-      writeFileSync(target, buf);
-      n += 1;
-    } catch { /* 单个失败不影响其它 */ }
+    if (name) {
+      const target = join(dir, name);
+      if (!existsSync(target)) {
+        const buf = readAsset(projectPath, a.path);
+        if (buf) {
+          try {
+            writeFileSync(target, buf);
+            n += 1;
+          } catch { /* 单个失败不影响其它 */ }
+        }
+      }
+    }
+    // 每 4 个报一次，够顺滑又不会把 IPC 打爆
+    const done = i + 1;
+    if (onProgress && (done % 4 === 0 || done === list.length)) onProgress(done, list.length);
   }
+  onProgress?.(list.length, list.length);
   return n;
 }
 

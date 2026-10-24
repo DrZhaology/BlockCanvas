@@ -96,18 +96,21 @@ async function main() {
     return { exists: true };
   });
   await sleep(400);
+  // v0.4.5 第 8 批：var 菜单统一成了 VarMenu（Portal 到 body，类名 .bc-varmenu-item），
+  // 并且**按类型过滤** —— 这里同时验证「菜单能列出尺寸类变量」与「不会列出颜色类变量」。
   const menu = await win.evaluate(() => {
-    const items = [...document.querySelectorAll('.trbl4-var-item')].map((b) => (b.textContent || '').trim());
-    return { count: items.length, items: items.slice(0, 4) };
+    const items = [...document.querySelectorAll('.bc-varmenu-item')].map((b) => (b.textContent || '').trim());
+    return { count: items.length, items: items.slice(0, 4), hasPortal: !!document.querySelector('.bc-varmenu') };
   });
   check('padding/margin 卡片有 var 入口', trblVar.exists, trblVar.exists ? '找到 .trbl4-var-btn' : '未找到');
-  check('var 菜单列出间距类变量（不再拼单位）',
+  check('var 菜单用的是统一浮层（Portal + 避让定位）', menu.hasPortal, menu.hasPortal ? '.bc-varmenu 已渲染' : '未渲染');
+  check('var 菜单列出尺寸类变量（不再拼单位）',
     menu.count > 0 && menu.items.some((t) => t.includes('--Brand_2')),
     menu.count > 0 ? menu.items.join(' | ') : '菜单为空');
 
   // 点一下菜单项：四边应写成 var(--Brand_2)，不能变成 var(--Brand_2)px
   await win.evaluate(() => {
-    const b = [...document.querySelectorAll('.trbl4-var-item')].find((x) => (x.textContent || '').includes('--Brand_2'));
+    const b = [...document.querySelectorAll('.bc-varmenu-item')].find((x) => (x.textContent || '').includes('--Brand_2'));
     if (b) b.click();
   });
   await sleep(500);
