@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useScene, findNode } from '@store/sceneStore';
 import { CSS_UNITS, UNIT_LABELS } from '@lib/propertySchema';
 import { useWheelAdjust } from '@lib/wheelAdjust';
+import { cssVarName, tokenRef } from '@lib/designTokens';
 
 // BlockCanvas · 四值输入（上 / 右 / 下 / 左 分开填写）
 // 设计动机：过去是一个"简写输入框"（要用户自己记住 `8px 4px 8px 4px` 的 CSS 简写顺序），
@@ -49,10 +50,14 @@ export function TrblInput(props: Props) {
 
   const write = (key: string, raw: string, transient: boolean) => {
     const patch: Record<string, string> = {};
+    // v0.4.5：允许直接写变量引用 var(--x)。这种值不能再拼单位，
+    // 否则会变成 var(--x)px 这种非法值（以前 padding/margin 用不了变量就是卡在这）。
+    const isVar = /^\s*var\(/.test(raw);
+    const val = isVar ? raw.trim() : normalize(raw, u);
     if (sync) {
-      for (const s of sides) patch[s.key] = normalize(raw, u);
+      for (const s of sides) patch[s.key] = val;
     } else {
-      patch[key] = normalize(raw, u);
+      patch[key] = val;
     }
     if (transient) updateStyleTransient(elementId, patch);
     else updateStyle(elementId, patch);
@@ -63,9 +68,20 @@ export function TrblInput(props: Props) {
     const patch: Record<string, string> = {};
     for (const s of sides) {
       const v = style[s.key];
-      if (v) patch[s.key] = normalize(stripUnit(v, u), nu);
+      if (v && !/^\s*var\(/.test(v)) patch[s.key] = normalize(stripUnit(v, u), nu);
     }
     if (Object.keys(patch).length > 0) updateStyle(elementId, patch);
+  };
+
+  // v0.4.5：四边一次性引用设计变量（间距类）。变量引用不再拼单位。
+  const [varOpen, setVarOpen] = useState(false);
+  const sizeTokens = (scene.tokens ?? []).filter((t) => t.kind !== 'color');
+  const applyVarToAll = (name: string) => {
+    const v = tokenRef(name);
+    const patch: Record<string, string> = {};
+    for (const s of sides) patch[s.key] = v;
+    updateStyle(elementId, patch);
+    setVarOpen(false);
   };
 
   return (
@@ -76,6 +92,40 @@ export function TrblInput(props: Props) {
           {fallback ? <span className="trbl4-head-hint">（例：{fallback}）</span> : null}
         </span>
         <div className="trbl4-head-right">
+          <div className="trbl4-var-wrap">
+            <button
+              className={'trbl4-var-btn' + (varOpen ? ' active' : '')}
+              onClick={() => setVarOpen((v) => !v)}
+              title={sizeTokens.length > 0
+                ? '四边都设成某个设计变量（间距类），例如 space-md = 16px'
+                : '还没有间距类变量 —— 到右侧「变量」页签新建一个（如 space-md = 16px）'}
+              tabIndex={-1}
+            >var</button>
+            {varOpen && (
+              <>
+                <div className="trbl4-var-backdrop" onClick={() => setVarOpen(false)} />
+                <div className="trbl4-var-menu">
+                  {sizeTokens.length === 0 && (
+                    <div className="trbl4-var-empty">
+                      还没有间距类变量。<br />
+                      到右侧面板「变量」页签 →「模板 → 中间距」建一个，这里就能四边一键引用。
+                    </div>
+                  )}
+                  {sizeTokens.map((t) => (
+                    <button
+                      key={t.name}
+                      className="trbl4-var-item"
+                      onClick={() => applyVarToAll(t.name)}
+                      title={`四边都设为 ${tokenRef(t.name)}`}
+                    >
+                      <span className="trbl4-var-name">{cssVarName(t.name)}</span>
+                      <span className="trbl4-var-val">{t.value}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <label className="trbl4-sync" title="勾选后：改任意一边，其余三边自动跟随（做四周等距留白更快）">
             <input type="checkbox" checked={sync} onChange={(e) => setSync(e.target.checked)} />
             四边同步
@@ -131,6 +181,8 @@ function Trbl4Cell(props: {
   }, [value]);
 
   const { num } = splitVal(value, unit);
+  // 变量引用（var(--x)）要原样显示，不能当成"数值"再拼单位
+  const isVarValue = /^\s*var\(/.test(value);
 
   // 滚轮调值：聚焦后滚动滚轮即增减（Shift ×10），停手 0.26s 自动提交
   const wheel = useWheelAdjust({
@@ -156,11 +208,11 @@ function Trbl4Cell(props: {
           ref={wheel.ref}
           type="text"
           className="trbl4-input"
-          value={editingRef.current ? draft : (num || '')}
+          value={editingRef.current ? draft : (isVarValue ? value : (num || ''))}
           placeholder="0"
           spellCheck={false}
           title={`点一下进入输入状态：滚动滚轮调数值（上滚增大 / 下滚减小），按住 Shift 一次调 10${sync ? '（四边同步开启中）' : ''}`}
-          onFocus={() => { editingRef.current = true; setDraft(num || ''); props.onBegin(); }}
+          onFocus={() => { editingRef.current = true; setDraft(isVarValue ? value : (num || '')); props.onBegin(); }}
           onChange={(e) => {
             const raw = e.target.value;
             setDraft(raw);

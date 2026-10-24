@@ -44,52 +44,82 @@ export const DEFAULT_TOKENS: TokenEntry[] = [
   { name: 'shadow-card', value: '0 4px 16px rgba(0, 0, 0, 0.08)', group: '阴影', kind: 'shadow' }
 ];
 
-/** 完整 CSS 变量名（--bc-primary） */
+/** 完整 CSS 变量名。v0.4.5 起**不再强制加 bc- 前缀**，用户起什么名就是什么名 */
 export function cssVarName(name: string): string {
-  return `--bc-${name}`;
+  const n = String(name ?? '').trim().replace(/^--/, '');
+  return `--${n}`;
 }
 
-/** 可供写进样式的引用（var(--bc-primary)） */
+/** 旧版变量名（--bc-xxx）。只为兼容已存工程，新代码不要再用 */
+export function legacyVarName(name: string): string {
+  const n = String(name ?? '').trim().replace(/^--/, '');
+  return `--bc-${n}`;
+}
+
+/** 可供写进样式的引用（var(--primary)） */
 export function tokenRef(name: string): string {
   return `var(${cssVarName(name)})`;
 }
 
-/** 是否是一个变量引用（如 var(--bc-primary)） */
+/** 变量引用匹配：新名 var(--x) 与旧名 var(--bc-x) 都算 */
+const VAR_REF_RE = /^\s*var\(\s*--(?:bc-)?([^)\s]+)\s*\)\s*$/;
+
+/** 是否是一个变量引用（如 var(--primary) / var(--bc-primary)） */
 export function isTokenRef(value: string | undefined | null): boolean {
-  return !!value && /^\s*var\(\s*--bc-[^)]+\)\s*$/.test(value);
+  return !!value && VAR_REF_RE.test(value);
 }
 
-/** 从 var(--bc-primary) 里取出变量名 primary；不是变量引用则返回 null */
+/** 从 var(--primary) / var(--bc-primary) 里取出变量名 primary；不是变量引用则返回 null */
 export function tokenNameFromRef(value: string | undefined | null): string | null {
   if (!value) return null;
-  const m = /^\s*var\(\s*--bc-([^)\s]+)\s*\)\s*$/.exec(value);
+  const m = VAR_REF_RE.exec(value);
   return m ? m[1] : null;
 }
 
-/** 生成 :root 定义块 */
+/**
+ * 生成 :root 定义块。
+ *
+ * v0.4.5 无感迁移的关键：每个变量**同时输出新名与旧名**。
+ * 老工程里写的是 var(--bc-primary)，新代码写 var(--primary)，
+ * 两者在导出后都能解析 —— 不需要改写任何已存工程，也不会出现"打开就变样"。
+ */
 export function tokensToCss(tokens: TokenEntry[]): string {
   if (!tokens || tokens.length === 0) return '';
-  const lines = tokens.map((t) => `  ${cssVarName(t.name)}: ${t.value};`).join('\n');
+  const lines = tokens
+    .map((t) => `  ${cssVarName(t.name)}: ${t.value};\n  ${legacyVarName(t.name)}: ${t.value};`)
+    .join('\n');
   return `:root {\n${lines}\n}`;
 }
 
 /** 生成可直接注入编辑器的 CSS 文本（用于让画布实时预览） */
 export function tokensToRootCss(tokens: TokenEntry[]): string {
   if (!tokens || tokens.length === 0) return '';
-  const lines = tokens.map((t) => `${cssVarName(t.name)}: ${t.value};`).join(' ');
+  const lines = tokens
+    .map((t) => `${cssVarName(t.name)}: ${t.value}; ${legacyVarName(t.name)}: ${t.value};`)
+    .join(' ');
   return `:root { ${lines} }`;
 }
 
-/** 变量名合法性：小写字母开头，只允许小写字母 / 数字 / 连字符（CSS 自定义属性允许更宽，但保持一致更好读） */
+/**
+ * 变量名合法性：**自由度放宽**。
+ * 允许大小写字母、数字、连字符、下划线；首字符不能是连字符（避免 -- 开头）。
+ * 不再强制小写，也不再要求必须以字母开头。
+ */
 export function isValidTokenName(name: string): boolean {
-  return /^[a-z][a-z0-9-]*$/.test(name);
+  const n = String(name ?? '').trim();
+  if (!n || n.length > 48) return false;
+  return /^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(n);
 }
 
-/** 在给定集合里生成不重复的变量名 */
+/** 在给定集合里生成不重复的变量名（保留用户输入的大小写） */
 export function uniqueTokenName(base: string, tokens: TokenEntry[]): string {
   const used = new Set(tokens.map((t) => t.name));
-  const safe = base.trim().replace(/[^a-zA-Z0-9-]/g, '-').replace(/^-+/, '').toLowerCase() || 'token';
-  const start = isValidTokenName(safe) ? safe : 'token-' + safe.replace(/[^a-z0-9-]/g, '');
+  const cleaned = String(base ?? '')
+    .trim()
+    .replace(/^--/, '')
+    .replace(/[^A-Za-z0-9_-]/g, '-')
+    .replace(/^-+/, '');
+  const start = isValidTokenName(cleaned) ? cleaned : 'token';
   if (!used.has(start)) return start;
   let i = 2;
   while (used.has(`${start}-${i}`)) i += 1;

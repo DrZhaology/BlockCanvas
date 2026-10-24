@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { CSS_UNITS, UNIT_LABELS } from '@lib/propertySchema';
 import { useWheelAdjust } from '@lib/wheelAdjust';
+import { cssVarName, isTokenRef, tokenRef } from '@lib/designTokens';
 
 // BlockCanvas · 数值输入（数字框 + 单位下拉）
 //
@@ -101,11 +102,11 @@ export function NumberUnitInput(props: Props) {
 
   const isAuto = u === 'auto';
   const dragDisabled = isAuto || u === 'custom';
-  const isVarRef = /^\s*var\(\s*--bc-[^)]+\)\s*$/.test(value);
+  const isVarRef = isTokenRef(value);
 
-  /** 选用设计变量：值直接写成 var(--bc-xxx)（一条撤销） */
+  /** 选用设计变量：值直接写成 var(--xxx)（一条撤销）。旧工程里的 var(--bc-xxx) 依然认 */
   const applyVar = (name: string) => {
-    const v = `var(--bc-${name})`;
+    const v = tokenRef(name);
     setNum(v);
     setU('custom');
     commit(v);
@@ -184,7 +185,7 @@ export function NumberUnitInput(props: Props) {
           className={'num-unit-var-btn' + (isVarRef || varOpen ? ' active' : '')}
           onClick={() => setVarOpen((v) => !v)}
           title={tokens && tokens.length > 0
-            ? '使用设计变量：写入 var(--bc-xxx)，改变量值全站一起变'
+            ? '使用设计变量：写入 var(--xxx)，改变量值全站一起变'
             : '还没有定义变量 —— 到右侧「变量」页签点「＋ 新建变量」'}
           tabIndex={-1}
         >var</button>
@@ -202,10 +203,10 @@ export function NumberUnitInput(props: Props) {
                   key={t.name}
                   className="num-unit-var-item"
                   onClick={() => applyVar(t.name)}
-                  title={`var(--bc-${t.name}) = ${t.value}`}
+                  title={`${cssVarName(t.name)} = ${t.value}`}
                 >
                   {t.kind === 'color' && <span className="num-unit-var-swatch" style={{ background: t.value }} />}
-                  <span className="num-unit-var-name">--bc-{t.name}</span>
+                  <span className="num-unit-var-name">{cssVarName(t.name)}</span>
                   <span className="num-unit-var-val">{t.value}</span>
                 </button>
               ))}

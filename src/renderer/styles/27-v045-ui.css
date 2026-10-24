@@ -825,3 +825,75 @@
   .prop-row.is-just-added,
   .prop-row.is-leaving { animation: none; }
 }
+
+/* ============================================================================
+   19. 四值输入（padding / margin）支持设计变量（v0.4.5）
+   ========================================================================== */
+.trbl4-var-wrap { position: relative; display: inline-flex; }
+.trbl4-var-btn {
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+.trbl4-var-btn:hover { border-color: var(--accent); color: var(--accent); }
+.trbl4-var-btn.active { border-color: var(--accent); color: var(--accent); background: var(--hover-accent); }
+.trbl4-var-backdrop { position: fixed; inset: 0; z-index: 60; }
+.trbl4-var-menu {
+  position: absolute;
+  top: 24px;
+  right: 0;
+  z-index: 61;
+  width: 244px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+}
+.trbl4-var-empty {
+  padding: 9px 10px;
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+.trbl4-var-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.trbl4-var-item:hover { background: var(--hover-accent); }
+.trbl4-var-name {
+  flex: 1;
+  min-width: 0;
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trbl4-var-val {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
