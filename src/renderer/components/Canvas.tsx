@@ -512,7 +512,10 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const cs = getComputedStyle(el);
     // 行内元素（display:inline，如 span/strong/a）不参与"贴边改大小" —— 它没有块级盒，
     // 强行 resize 既不符合直觉、也容易误触；行内文字走"左右拖改字号"。
-    const isInline = cs.display === 'inline';
+    // v0.4.5（用户反馈 C补5）：图片/视频/音频的**默认 display 也是 inline**，
+    // 但它们明明是替换元素、能正常改尺寸 —— 以前被这条一起排除，导致"多媒体完全不能缩放"。
+    const isReplacedMedia = node.type === 'img' || MEDIA_TAGS.has(node.type);
+    const isInline = cs.display === 'inline' && !isReplacedMedia;
     const edge = isInline ? null : edgeAt(r, e.clientX, e.clientY);
     const isText = TEXT_TAGS.has(node.type);
     const mode: AltMode = edge ? 'resize' : isText ? 'font' : 'move';
@@ -698,6 +701,21 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       }
       const patch: Record<string, string> = { width: Math.round(nw) + 'px' };
       if (hasT || hasB) patch.height = Math.round(nh) + 'px';
+
+      // v0.4.5（用户反馈 C补5）：图片 / 视频 / 音频**只能按比例缩放**，不能拉伸变形。
+      // 做法：算出宽度方向的比例，再把高度按原比例推回去（反之亦然）。
+      const isMediaEl = node.type === 'img' || node.type === 'video' || node.type === 'audio';
+      if (isMediaEl && d.startW > 0 && d.startH > 0 && (hasL || hasR)) {
+        const scale = nw / d.startW;
+        nh = Math.max(8, d.startH * scale);
+        patch.height = Math.round(nh) + 'px';
+      }
+      if (isMediaEl && d.startW > 0 && d.startH > 0 && !(hasL || hasR) && (hasT || hasB)) {
+        const scale = nh / d.startH;
+        nw = Math.max(8, d.startW * scale);
+        patch.width = Math.round(nw) + 'px';
+      }
+
       if (hasL) patch[d.positioned ? 'left' : 'marginLeft'] = Math.round((d.positioned ? d.startLeft : d.startMarginL) + shiftX) + 'px';
       if (hasT) patch[d.positioned ? 'top' : 'marginTop'] = Math.round((d.positioned ? d.startTop : d.startMarginT) + shiftY) + 'px';
       st.updateStyle(d.id, patch);
@@ -1754,17 +1772,27 @@ const CanvasNode = React.memo(function CanvasNode(props: {
     ...(node.type === 'th' && node.attrs?.scope ? { scope: node.attrs.scope } : {}),
     // v0.4.5：媒体元素 —— 画布上要能真的播放/预览，属性与导出一致
     ...(MEDIA_TAGS.has(node.type)
-      ? {
-          src: node.attrs?.src ? toRenderableSrc(node.attrs.src) : undefined,
-          controls: true,
-          loop: node.attrs?.loop === '1',
-          muted: node.attrs?.muted === '1',
-          autoPlay: false,
-          playsInline: node.type === 'video',
-          // v0.4.5 性能：没选中的媒体只读元数据，不预解码 ——
-          // 页面上有十几个视频时，全部预载会直接把 GPU/内存吃满。
-          preload: isSelected ? 'metadata' : 'none'
-        }
+      ? (() => {
+          // v0.4.5（用户反馈 C补2 / C补3 / C补8）：
+          //  · 原生控件会吃掉鼠标事件 —— 音频整块都是控件区，所以"怎么点都选不中"；
+          //    视频也要精准点到左下角播放键才响。编辑时这很碍事。
+          //  · 方案：**未选中时不渲染控制条**（点击落到元素上 → 正常选中元素）；
+          //    选中后才显示控件，可以就地播放预览。想永远不要控件就用「背景模式」。
+          const bgMode = node.attrs?.controls === '0';   // 背景模式：永不显示控制条
+          const wantsAutoplay = node.attrs?.autoplay === '1';
+          return {
+            src: node.attrs?.src ? toRenderableSrc(node.attrs.src) : undefined,
+            controls: bgMode ? false : isSelected,
+            loop: node.attrs?.loop === '1',
+            // 自动播放必须静音，否则浏览器会直接拦掉（HTML 规范）
+            muted: node.attrs?.muted === '1' || wantsAutoplay,
+            autoPlay: wantsAutoplay,
+            playsInline: node.type === 'video',
+            // 性能：没选中的媒体只读元数据，不预解码 ——
+            // 页面上有十几个视频时，全部预载会直接把 GPU/内存吃满。
+            preload: isSelected ? 'metadata' : 'none'
+          };
+        })()
       : {})
   } as const;
 

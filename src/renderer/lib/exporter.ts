@@ -36,13 +36,22 @@ function buildAttrsString(node: SceneElement, ctx: StyleClassSet): { attrsStr: s
     if (src) out.push(`src="${escapeAttr(src)}"`);
   }
   if (node.type === 'a' && get('href')) out.push(`href="${escapeAttr(get('href'))}"`);
-  // v0.4.5：媒体元素 —— 导出必须带真实 src 与 controls，否则网页里就是个空盒子
+  // v0.4.5：媒体元素 —— 导出必须带真实 src；控件/自动播放按属性决定
   if (node.type === 'video' || node.type === 'audio') {
     const src = get('src');
     if (src) out.push(`src="${escapeAttr(src)}"`);
-    out.push('controls');
+    const bgMode = get('controls') === '0';
+    const wantsAutoplay = get('autoplay') === '1';
+    const wantsMuted = get('muted') === '1';
+    if (!bgMode) out.push('controls');
+    if (wantsAutoplay) {
+      // 自动播放必须带 muted，否则浏览器会静默拦掉；导出时一并写上
+      out.push('autoplay');
+      out.push('muted');
+    } else if (wantsMuted) {
+      out.push('muted');
+    }
     if (get('loop') === '1') out.push('loop');
-    if (get('muted') === '1') out.push('muted');
     if (node.type === 'video') out.push('playsinline');
   }
   if ((node.type === 'input' || node.type === 'textarea') && get('placeholder')) {
