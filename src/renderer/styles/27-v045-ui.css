@@ -1042,3 +1042,72 @@
   cursor: pointer;
 }
 .pc-forget-btn:hover { background: #fef2f2; border-color: #f87171; }
+
+/* ============================================================================
+   22. 媒体属性卡（video / audio，v0.4.5）
+   ========================================================================== */
+.media-props .inspector-sec-head.static { cursor: default; }
+.media-props-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.media-props-hint {
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.media-props-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 2px 2px;
+}
+.media-props-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.media-props-label {
+  flex: 0 0 52px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.media-props-src {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+}
+.media-props-src:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.media-props-pick { flex: 0 0 auto; white-space: nowrap; }
+.media-props-toggles {
+  display: flex;
+  gap: 14px;
+  padding-left: 58px;
+}
+.media-props-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+.media-props-tip {
+  font-size: 10.5px;
+  line-height: 1.65;
+  color: var(--text-muted);
+  background: var(--panel-soft);
+  border-radius: 6px;
+  padding: 7px 9px;
+}

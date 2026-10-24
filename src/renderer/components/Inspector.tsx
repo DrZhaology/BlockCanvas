@@ -14,6 +14,7 @@ import { Box4Input } from './Box4Input';
 import { useShowBr } from '@lib/showBr';
 import { peekPendingPropFocus, subscribePropFocus, takePendingPropFocus, type PropFocusRequest } from '@lib/propFocus';
 import { TrblInput } from './TrblInput';
+import { MediaPropsCard } from './MediaPropsCard';
 import { ColorPicker, ColorField } from './ColorPicker';
 import { NumberUnitInput } from './NumberUnitInput';
 import { FontFamilyInput } from './FontFamilyInput';
@@ -1246,6 +1247,11 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
           </div>
         </Collapse>
       </div>
+
+      {/* 1.5 媒体属性卡（v0.4.5）：video / audio 专用，只有这几个属性，不该让人手填 src */}
+      {(elementType === 'video' || elementType === 'audio') && (
+        <MediaPropsCard elementId={elementId} elementType={elementType} />
+      )}
 
       {/* 2. 快捷助手折叠区（Flex & Grid + 文字渐变 + 未来更多） */}
       <div className="inspector-sec">

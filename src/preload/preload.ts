@@ -169,6 +169,6 @@ contextBridge.exposeInMainWorld('bc', {
   pickImageSrc: (mode?: 'abs' | 'rel') =>
     ipcRenderer.invoke('img:pick-src', mode),
   /** 首页背景：选择图片 / 视频文件（返回绝对路径） */
-  pickMediaSrc: (kind: 'image' | 'video') =>
+  pickMediaSrc: (kind: 'image' | 'video' | 'audio') =>
     ipcRenderer.invoke('media:pick-src', kind)
 });

@@ -1147,14 +1147,17 @@ ipcMain.handle('img:pick-src', async (_evt, mode: 'abs' | 'rel' = 'rel') => {
 });
 
 // 首页背景：选择图片 / 视频文件（只返回路径，不复制；渲染层用 bc-img:// 预览）
-ipcMain.handle('media:pick-src', async (_evt, kind: 'image' | 'video' = 'image') => {
+ipcMain.handle('media:pick-src', async (_evt, kind: 'image' | 'video' | 'audio' = 'image') => {
   const isVideo = kind === 'video';
+  const isAudio = kind === 'audio';
   const res = await showOpenDialog({
-    title: isVideo ? '选择本地视频' : '选择本地图片',
+    title: isVideo ? '选择本地视频' : isAudio ? '选择本地音频' : '选择本地图片',
     properties: ['openFile'],
     filters: isVideo
       ? [{ name: '视频文件', extensions: ['mp4', 'webm', 'ogv', 'ogg', 'mov', 'm4v'] }]
-      : [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] }]
+      : isAudio
+        ? [{ name: '音频文件', extensions: ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg', 'opus'] }]
+        : [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] }]
   });
   if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
   return { ok: true, path: res.filePaths[0], absPath: res.filePaths[0] };
