@@ -1,10 +1,20 @@
-﻿/* ============================================================================
-   BlockCanvas 路 v0.4.5 鐣岄潰涓庝氦浜掑叏闈㈡墦纾?   ----------------------------------------------------------------------------
-   杩欎竴鐗囧彧鍋?鐪嬪緱瑙?鐨勪簨锛屼笉鏀逛换浣曟暟鎹€昏緫锛?     1. 鍙蹇収棰勮锛堥《閮ㄦ潯 / 宸︿晶璇存槑 / 鍙充晶淇℃伅 / 鏍囩閰嶈壊 / 鐢诲竷閿佸畾锛?     2. 娓愬彉鑹叉爣鍗＄墖锛氫慨鎺?align-items:center 閫犳垚鐨勫乏鍙冲ぇ鐗囩┖鐧?     3. 澶栬疆寤撻瑙堬細杞粨绾夸笉鍐嶇敾鍒板崱鐗囧闈?     4. 灞炴€ц"鐖剁骇"鏍囩銆佺鐢ㄦ寜閽姣斿害銆佹爣绛炬爮鎶€宸ф潯鏀剁獎
-     5. 鍏冪礌闈㈡澘姣忓垪婊氬姩鏉＄粏鍖栥€佸浘灞傛爲涓嶅啀妯悜婊氬姩
-     6. 鏂偣鏉?鑷€傚簲"鎸夐挳鍙鎬?   ========================================================================== */
+/* ============================================================================
+   BlockCanvas · v0.4.5 界面与交互全面打磨
+   ----------------------------------------------------------------------------
+   这一片只做"看得见"的事，不改任何数据逻辑：
+     1. 只读快照预览（顶部条 / 左侧说明 / 右侧信息 / 标签配色 / 画布锁定）
+     2. 渐变色标卡片：修掉 align-items:center 造成的左右大片空白
+     3. 外轮廓预览：轮廓线不再画到卡片外面
+     4. 属性行"父级"标签、禁用按钮对比度、标签栏技巧条收窄
+     5. 元素面板整块一条滚动条、图层树不再横向滚动
+     6. 断点条"自适应"按钮可读性
+     7. 添加属性菜单限高（必须与 JS 测算值 380 对齐）
+     8. 未命名提醒压成一行
+     9. 首页内容垂直居中
+    10. 定位助手（快捷助手内新增）
+   ========================================================================== */
 
-/* ---------- 1. 鍙蹇収棰勮 ---------- */
+/* ---------- 1. 只读快照预览 ---------- */
 .snapshot-bar {
   display: flex;
   align-items: center;
@@ -67,7 +77,7 @@
 .snap-btn.is-ghost:hover { background: rgba(109, 40, 217, 0.08); color: #6d28d9; border-color: transparent; }
 .snap-btn:disabled { opacity: 0.55; cursor: default; }
 
-/* 鍙鏍囩锛氭贰绱簳 + 鐩告満鍥炬爣 */
+/* 只读标签：淡紫底 + 相机图标 */
 .tab-item.is-snapshot { background: #f6f2ff; }
 .tab-item.is-snapshot.active { background: #efe8ff; }
 .tab-item.is-snapshot .tab-title { color: #5b21b6; }
@@ -81,7 +91,7 @@
   flex-shrink: 0;
 }
 
-/* 宸︿晶璇存槑 / 鍙充晶淇℃伅 */
+/* 左侧说明 / 右侧信息 */
 .snapshot-notice {
   display: flex;
   flex-direction: column;
@@ -163,13 +173,24 @@
   padding: 9px 10px;
 }
 
-/* 鍙鐢诲竷锛氳兘鐪嬩笉鑳芥敼锛堟粴鍔ㄤ粛鍙敤锛?*/
+/* 只读画布：能看不能改（滚动仍可用） */
 .workspace.is-readonly .canvas { pointer-events: none; }
 .workspace.is-readonly .canvas-resize-handle { display: none; }
 .workspace.is-readonly .canvas-hint { display: none; }
 
-/* ---------- 2. 娓愬彉鑹叉爣鍗＄墖锛氫笉鍐嶅眳涓缉鎴愪竴鍥?---------- */
-.grad-stop { align-items: stretch; }
+/* ---------- 2. 渐变色标卡片 ----------
+   11-editors.css 给 .grad-stop 设了 align-items:center，14 号文件把它改成两行
+   （flex-direction:column）却没改对齐 → 两行都按内容宽度收缩，右边一大片空白。
+   这里必须 stretch，两行才会铺满卡片。 */
+.grad-stop {
+  align-items: stretch;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.grad-stop + .grad-stop { margin-top: 6px; }
 .grad-stop-top,
 .grad-stop-bottom { width: 100%; }
 .grad-stop-bottom { padding-left: 20px; }
@@ -186,7 +207,9 @@
 }
 .grad-stop-del:hover:not(:disabled) { background: #fee2e2; color: var(--danger); border-color: #fca5a5; }
 
-/* ---------- 3. 澶栬疆寤撻瑙堬細绾挎案杩滃緟鍦ㄥ崱鐗囬噷 ---------- */
+/* ---------- 3. 外轮廓预览：线永远待在卡片里 ----------
+   outline 天生画在盒子外面，直接画在预览框上会糊出卡片。
+   改成"外层留内边距 + 内层小盒子画轮廓 + 外层裁切"。 */
 .outline-preview {
   height: auto;
   padding: 16px 14px;
@@ -216,7 +239,7 @@
 }
 .outline-style-btn { justify-content: center; padding: 0 4px; }
 
-/* ---------- 4. 灞炴€ц"鐖剁骇"鏍囩 / 绂佺敤鎸夐挳 / 鎶€宸ф潯 ---------- */
+/* ---------- 4. 属性行"父级"标签 / 禁用按钮 / 技巧条 ---------- */
 .prop-scope {
   display: inline-flex;
   align-items: center;
@@ -233,13 +256,13 @@
 }
 .prop-scope-space { display: none; }
 
-/* 绂佺敤鎬侊細浠ュ墠 0.42 閫忔槑鍑犱箮鐪嬩笉瑙侊紝鐜板湪淇濈暀鍙鐨勭伆 */
+/* 禁用态：以前 0.42 透明几乎看不见，现在保留可读的灰 */
 .toolbar .tb-btn-ghost:disabled,
 .toolbar .tb-btn-soft:disabled,
 .toolbar .tb-btn-primary:disabled { opacity: 0.55; }
 .toolbar .tb-btn-ghost:disabled { color: #9aa7b6; }
 
-/* 鏍囩鏍忓彸渚х殑鎶€宸ф潯锛氫笉鍐嶅儚杈撳叆妗嗭紝鏀剁獎 + 鍙湪 hover 鏄剧ず鍏抽棴鎸夐挳 */
+/* 标签栏右侧的技巧条：不再像输入框，收窄 + 只在 hover 显示关闭按钮 */
 .tabbar-tips {
   max-width: 380px;
   min-width: 0;
@@ -261,27 +284,48 @@
 .tabbar-tips .tt-btn { opacity: 0; transition: opacity 0.15s ease; }
 .tabbar-tips:hover .tt-btn { opacity: 1; }
 
-/* ---------- 5. 鍏冪礌闈㈡澘姣忓垪婊氬姩鏉?/ 鍥惧眰鏍?---------- */
-/* 娉ㄦ剰锛氳繖閲屼笉鑳藉啓 scrollbar-width 鈥斺€?涓€鏃﹁缃紝Chromium 浼氬拷鐣ヤ笅闈㈢殑
-   ::-webkit-scrollbar 鑷畾涔夋牱寮忥紝鍙嶈€屾樉绀烘垚鍘熺敓绮楁粴鍔ㄦ潯锛? 鍒楀悓鏃跺嚭鐜伴潪甯稿惖锛夈€?*/
-.workspace[data-layout='bottom'] .element-group .element-grid::-webkit-scrollbar { width: 4px; }
-.workspace[data-layout='bottom'] .element-group .element-grid::-webkit-scrollbar-track { background: transparent; }
-.workspace[data-layout='bottom'] .element-group .element-grid::-webkit-scrollbar-thumb {
-  background: transparent;
+/* ---------- 5. 元素面板：整块只保留一条滚动条 ----------
+   以前 7 个分组各自 overflow-y:auto，底部同时冒出 7 条滚动条，
+   每列还只能露出 5~6 个积木。现在外层 element-body 统一滚动，
+   分组等高于最高的一列，组内网格不再滚动。 */
+.workspace[data-layout='bottom'] .element-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  align-items: stretch;
+}
+.workspace[data-layout='bottom'] .element-group { height: auto; }
+.workspace[data-layout='bottom'] .element-group .element-grid {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+/* 注意：这里不能写 scrollbar-width —— 一旦设置，Chromium 会忽略下面的
+   ::-webkit-scrollbar 自定义样式，反而显示成原生粗滚动条。 */
+.workspace[data-layout='bottom'] .element-body::-webkit-scrollbar { width: 6px; }
+.workspace[data-layout='bottom'] .element-body::-webkit-scrollbar-track { background: transparent; }
+.workspace[data-layout='bottom'] .element-body::-webkit-scrollbar-thumb {
+  background: rgba(120, 128, 140, 0.28);
   border-radius: 999px;
 }
-.workspace[data-layout='bottom'] .element-group:hover .element-grid::-webkit-scrollbar-thumb {
-  background: rgba(120, 128, 140, 0.35);
+.workspace[data-layout='bottom'] .element-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 128, 140, 0.45);
 }
 
+/* ---------- 6. 图层树：文字预览不再压到操作按钮上 ---------- */
 .layer-tree { overflow-x: hidden; }
-.layer-tree .layer-row { gap: 1px; }
-.layer-tree .layer-text-preview { min-width: 0; }
-.layer-tree .layer-actions { opacity: 0.3; }
+.layer-tree .layer-row { gap: 1px; min-width: 0; }
+.layer-tree .layer-text-preview {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.layer-tree .layer-actions { margin-left: auto; opacity: 0.3; }
 .layer-tree .layer-row:hover .layer-actions,
 .layer-tree .layer-row.selected .layer-actions { opacity: 1; }
 
-/* ---------- 6. 鏂偣鏉★細鑷€傚簲鎸夐挳鏇村儚鎸夐挳 ---------- */
+/* ---------- 7. 断点条：自适应按钮更像按钮 ---------- */
 .inspector-bp-bar .bp-auto-btn {
   width: 34px;
   height: 32px;
@@ -292,7 +336,9 @@
 .inspector-bp-bar .bp-auto-btn:hover { border-color: var(--accent); color: var(--accent); }
 .inspector-bp-bar .bp-auto-btn.is-auto { color: var(--accent); border-color: #bfdbfe; background: #eff6ff; }
 
-/* ---------- 7. 娣诲姞灞炴€ц彍鍗曪細闄愰珮銆侀檺瀹斤紝鍒硦婊℃暣灞?---------- */
+/* ---------- 8. 添加属性菜单 ----------
+   高度必须 ≤ JS 里测算的 380：JS 按 need = min(scrollHeight + 10, 380)
+   判断"下面放不放得下"，CSS 写得更高就会顶出窗口底部。 */
 .add-prop-menu {
   max-height: 380px;
   border-radius: 10px;
@@ -309,18 +355,63 @@
 }
 .add-prop-trigger:hover:not(:disabled) { background: #eef4ff; }
 
-/* ---------- 8. 鍙橀噺闈㈡澘绌烘€侊細灏戜竴鐐归噸澶嶆寜閽?---------- */
-.token-empty { padding: 26px 18px 18px; gap: 8px; }
-.token-empty-icon { opacity: 0.55; }
-.token-empty .btn-secondary { margin-top: 4px; }
+/* ---------- 9. 未命名提醒压成一行 ----------
+   每个新建元素都会出现，180px 的大黄卡太吵；压成 41px 一行，原因放悬停提示。 */
+.cls-warn-flash {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  margin: 6px 0;
+  border: 1px solid #fde68a;
+  border-radius: 7px;
+  background: #fffbeb;
+}
+.cls-warn-flash .cls-warn-ico {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: #d97706;
+}
+.cls-warn-line {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #92400e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cls-warn-btn {
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid #f59e0b;
+  border-radius: 5px;
+  background: #fff;
+  color: #92400e;
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.cls-warn-btn:hover { background: #fef3c7; }
+.cls-warn-btn.is-ghost { border-color: transparent; background: transparent; color: #b45309; }
+.cls-warn-btn.is-ghost:hover { background: #fef3c7; }
 
-/* ---------- 9. 璁剧疆 / 甯姪涓績锛氭鏂囬檺鍒堕槄璇诲搴?---------- */
-/* 设置页正文限宽，避免超宽屏上表单被拉成一条长线 */
-.fluent-content { max-width: 1080px; }
-/* 帮助中心正文（.help-doc 本身已有 900px 上限，这里只保证行宽不被撑破） */
-.help-scroll { padding-left: 32px; padding-right: 32px; }
+/* ---------- 10. 首页：内容在窗口里居中，不再"全挤在上半屏" ---------- */
+.empty-home {
+  align-items: center;
+  padding: 24px;
+  overflow-y: auto;
+}
+.empty-home .eh-center { max-height: 100%; }
+/* 矮窗口仍然从上往下排，避免内容被压出屏幕 */
+@media (max-height: 760px) {
+  .empty-home { align-items: flex-start; padding-top: 6vh; }
+}
 
-/* ---------- 10. 瀹氫綅鍔╂墜锛圦uickHelper锛?---------- */
+/* ---------- 11. 定位助手（快捷助手内新增） ---------- */
 .pos-helper {
   display: flex;
   flex-direction: column;
@@ -381,97 +472,16 @@
 }
 .pos-hint strong { color: var(--text); font-weight: 600; }
 
-/* ---------- 11. 鏈懡鍚嶆彁閱掑帇鎴愪竴琛?---------- */
-.cls-warn-flash {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 8px;
-  margin: 6px 0;
-  border: 1px solid #fde68a;
-  border-radius: 7px;
-  background: #fffbeb;
-}
-.cls-warn-flash .cls-warn-ico {
-  display: inline-flex;
-  flex-shrink: 0;
-  color: #d97706;
-}
-.cls-warn-line {
-  flex: 1;
-  min-width: 0;
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: #92400e;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cls-warn-btn {
-  flex-shrink: 0;
-  height: 22px;
-  padding: 0 8px;
-  border: 1px solid #f59e0b;
-  border-radius: 5px;
-  background: #fff;
-  color: #92400e;
-  font-family: inherit;
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-.cls-warn-btn:hover { background: #fef3c7; }
-.cls-warn-btn.is-ghost { border-color: transparent; background: transparent; color: #b45309; }
-.cls-warn-btn.is-ghost:hover { background: #fef3c7; }
-
-/* ---------- 12. 棣栭〉锛氬唴瀹瑰湪绐楀彛閲屽眳涓紝涓嶅啀"鍏ㄦ尋鍦ㄤ笂鍗婂睆" ---------- */
-.empty-home {
-  align-items: center;
-  padding: 24px;
-  overflow-y: auto;
-}
-.empty-home .eh-center {
-  max-height: 100%;
-}
-/* 鐭獥鍙ｄ粛鐒朵粠涓婂線涓嬫帓锛岄伩鍏嶅唴瀹硅鍘嬪嚭灞忓箷 */
-@media (max-height: 760px) {
-  .empty-home { align-items: flex-start; padding-top: 6vh; }
-}
-
-/* 娓愬彉鑹叉爣鍗＄墖锛氱粰瀹冧竴寮犵湡姝ｇ殑"鍗＄墖"搴曪紝鍜屽懆鍥村瓧娈垫媺寮€灞傛 */
-.grad-stop {
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-}
-.grad-stop + .grad-stop { margin-top: 6px; }
-
-/* ---------- 13. 鍏冪礌闈㈡澘锛氭暣鍧楀彧淇濈暀涓€鏉℃粴鍔ㄦ潯 ----------
-   浠ュ墠 7 涓垎缁勫悇鑷?overflow-y:auto锛屽簳閮ㄥ悓鏃跺啋鍑?7 鏉℃粴鍔ㄦ潯锛?   姣忓垪杩樺彧鑳介湶鍑?5~6 涓Н鏈ㄣ€傜幇鍦ㄦ敼鎴愶細澶栧眰 element-body 缁熶竴婊氬姩锛?   鍒嗙粍绛夐珮浜庢渶楂樼殑涓€鍒楋紝缁勫唴缃戞牸涓嶅啀婊氬姩銆?*/
-.workspace[data-layout='bottom'] .element-body {
-  overflow-y: auto;
-  overflow-x: hidden;
-  align-items: stretch;
-}
-.workspace[data-layout='bottom'] .element-group { height: auto; }
-.workspace[data-layout='bottom'] .element-group .element-grid {
-  flex: 0 0 auto;
-  overflow: visible;
-}
-
-/* ---------- 14. 鍥惧眰鏍戯細鏂囧瓧棰勮涓嶅啀鍘嬪埌鎿嶄綔鎸夐挳涓?---------- */
-.layer-tree .layer-row { min-width: 0; }
-.layer-tree .layer-text-preview {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 42%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.layer-tree .layer-actions { margin-left: auto; }
-
-/* ---------- 15. 棰滆壊鑹插潡锛氱櫧鑹?閫忔槑涔熻鐪嬪緱瑙佽竟鐣?---------- */
+/* ---------- 12. 颜色色块：白色/透明也要看得见边界 ---------- */
 .color-swatch-btn { box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.1); }
+
+/* ---------- 13. 变量面板空态：少一点重复按钮 ---------- */
+.token-empty { padding: 26px 18px 18px; gap: 8px; }
+.token-empty-icon { opacity: 0.55; }
+.token-empty .btn-secondary { margin-top: 4px; }
+
+/* ---------- 14. 设置页 / 帮助中心：正文限宽 ---------- */
+/* 设置页正文限宽，避免超宽屏上表单被拉成一条长线 */
+.fluent-content { max-width: 1080px; }
+/* 帮助中心正文（.help-doc 本身已有 900px 上限，这里只补左右呼吸位） */
+.help-scroll { padding-left: 32px; padding-right: 32px; }

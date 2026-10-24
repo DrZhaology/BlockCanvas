@@ -1,8 +1,8 @@
-﻿{
+{
   "name": "blockcanvas",
   "version": "0.4.5",
-  "bcStage": "闃舵 5 路 鐣岄潰涓庝氦浜掑叏闈㈡墦纾紙娴嬭瘯鐗堬級",
-  "description": "BlockCanvas 绉湪鐢诲竷 - 鍙鍖栭潤鎬佺綉椤垫瀯寤哄伐鍏?,
+  "bcStage": "阶段 5 · 界面与交互全面打磨（测试版）",
+  "description": "BlockCanvas 积木画布 - 可视化静态网页构建工具",
   "main": "out/main/main.js",
   "author": "Dr.Zhaology",
   "license": "MIT",
