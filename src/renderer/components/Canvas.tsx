@@ -1819,7 +1819,10 @@ const CanvasNode = React.memo(function CanvasNode(props: {
           const wantsAutoplay = node.attrs?.autoplay === '1';
           return {
             src: node.attrs?.src ? toRenderableSrc(node.attrs.src) : undefined,
-            controls: bgMode ? false : isSelected,
+            // v0.4.5 修正（用户反馈：不选中就"什么都不显示"了）：
+            // 控制条**始终显示** —— 否则未选中的音频是零高度、视频是空白框，
+            // 既看不见也点不着，比"控件吃点击"更糟。
+            controls: !bgMode,
             loop: node.attrs?.loop === '1',
             // 自动播放必须静音，否则浏览器会直接拦掉（HTML 规范）
             muted: node.attrs?.muted === '1' || wantsAutoplay,
@@ -1827,7 +1830,15 @@ const CanvasNode = React.memo(function CanvasNode(props: {
             playsInline: node.type === 'video',
             // 性能：没选中的媒体只读元数据，不预解码 ——
             // 页面上有十几个视频时，全部预载会直接把 GPU/内存吃满。
-            preload: isSelected ? 'metadata' : 'none'
+            preload: isSelected ? 'metadata' : 'none',
+            // 未选中时：这一次点击只用来**选中元素**，不交给原生控件
+            //（音频整块都是控件区，以前怎么点都选不中）。
+            onPointerDownCapture: (e: React.PointerEvent) => {
+              if (isSelected) return;
+              e.preventDefault();
+              e.stopPropagation();
+              onSelect(node.id);
+            }
           };
         })()
       : {})

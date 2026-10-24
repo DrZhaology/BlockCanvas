@@ -30,6 +30,9 @@ export function CanvasPropSearch({ x, y, onClose }: { x: number; y: number; onCl
   const inputRef = useRef<HTMLInputElement>(null);
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
+  // v0.4.5（用户反馈）：↑↓ 切换候选项以前完全没用 —— 这里补上"当前高亮项"。
+  const [activeIdx, setActiveIdx] = useState(0);
+  useEffect(() => { setActiveIdx(0); }, [q]);
 
   // 退场动画：先播动画再真正卸载（关掉时不再"啪一下没了"）
   const [open, setOpen] = useState(true);
@@ -121,10 +124,20 @@ export function CanvasPropSearch({ x, y, onClose }: { x: number; y: number; onCl
           onChange={(e) => { setQ(e.target.value); setMsg(null); }}
           onKeyDown={(e) => {
             e.stopPropagation();
-            if (e.key === 'Enter') {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
               e.preventDefault();
-              // Ctrl+Enter = 快捷添加并定位（哪怕没添加过）
-              commit(hits[0]?.item, e.ctrlKey || e.metaKey);
+              if (hits.length === 0) return;
+              setActiveIdx((i) => {
+                const cur = Math.min(Math.max(i, 0), hits.length - 1);
+                return e.key === 'ArrowDown' ? (cur + 1) % hits.length : (cur - 1 + hits.length) % hits.length;
+              });
+              setMsg(null);
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              // v0.4.5：不再要求 Ctrl —— 没添加过就**直接添加并定位**，
+              // 用户反馈"鼠标点击/回车不能定位或添加，非得按 Ctrl"。
+              const target = hits[Math.min(Math.max(activeIdx, 0), Math.max(0, hits.length - 1))]?.item;
+              if (target) commit(target, !isAdded(target));
             } else if (e.key === 'Escape') { e.preventDefault(); close(); }
           }}
         />
@@ -134,12 +147,15 @@ export function CanvasPropSearch({ x, y, onClose }: { x: number; y: number; onCl
           {hits.length === 0 && <div className="bc-prop-search-empty">没有匹配的属性</div>}
           {hits.map((h, i) => {
             const added = isAdded(h.item);
-            return (
+            const active = i === Math.min(activeIdx, hits.length - 1);
+              return (
               <button
                 key={h.item.key}
-                className={'bc-prop-search-item' + (i === 0 ? ' is-best' : '') + (added ? ' is-added' : ' is-missing')}
-                onClick={() => commit(h.item, false)}
-                title={added ? `定位到「${h.item.label}」` : `「${h.item.label}」未添加（Ctrl+Enter 添加并定位）`}
+                className={'bc-prop-search-item' + (active ? ' is-active' : '') + (i === 0 ? ' is-best' : '') + (added ? ' is-added' : ' is-missing')}
+                // v0.4.5：单击 = 定位；没添加过的一并添加（不再需要 Ctrl+左键）
+                onClick={() => commit(h.item, !added)}
+                onMouseEnter={() => setActiveIdx(i)}
+                title={added ? `定位到「${h.item.label}」` : `添加「${h.item.label}」并定位`}
               >
                 <span className="bc-prop-search-label">{h.item.label}</span>
                 <span className="bc-prop-search-key">{h.item.key}</span>
@@ -155,7 +171,7 @@ export function CanvasPropSearch({ x, y, onClose }: { x: number; y: number; onCl
           最匹配的「{best!.label}」尚未添加 · 按住 <kbd>Ctrl</kbd> 再按 <kbd>Enter</kbd> 可快捷添加并定位
         </div>
       )}
-      <div className="bc-prop-search-hint">中键搜索 · Enter 定位 · Ctrl+Enter 添加 · Esc / 点别处关闭</div>
+      <div className="bc-prop-search-hint">中键搜索 · ↑↓ 选择 · Enter 定位/添加 · Esc / 点别处关闭</div>
     </div>,
     document.body
   );

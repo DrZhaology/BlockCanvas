@@ -64,6 +64,25 @@ const AUDIT_FN = `(selectors) => {
             out.push({ kind: '文字竖排', el: desc(el), detail: txt + ' 被拆成 ' + lines + ' 行（内容高 ' + Math.round(contentH) + 'px / 行高 ' + Math.round(lh) + '）', rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] });
           }
         }
+        // ⑤ 卡片"内容行"贴着左边框（用户反复反馈的问题）
+        //    只查内容容器（-body / -row / -toggles / -controls），
+        //    不查页签栏、图层行这类"本来就不该有内边距"的结构件，避免误报。
+        const pl = parseFloat(cs.paddingLeft) || 0;
+        const prr = parseFloat(cs.paddingRight) || 0;
+        const clsName = String(el.className || '');
+        const isBodyish = /(-body$|-row$|-toggles$|-controls$|-controls-grid$)/.test(clsName)
+          || /(^|[\s])(props-body|prop-row-body|media-props-body|media-props-toggles)([\s]|$)/.test(clsName);
+        //    还要求它**本身有可见底色/边框**（是卡片内容区），
+        //    否则 .help-body / .tab-body 这类透明布局容器会被误报。
+        const hasBg = cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent';
+        const hasBorder = parseFloat(cs.borderTopWidth) > 0 || parseFloat(cs.borderLeftWidth) > 0;
+        if (isBodyish && (hasBg || hasBorder) && el.clientWidth > 120 && el.childElementCount > 0) {
+          if (pl < 6) {
+            out.push({ kind: '内容行贴左边', el: desc(el), detail: '左内边距只有 ' + pl + 'px', rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] });
+          } else if (Math.abs(pl - prr) > 4) {
+            out.push({ kind: '内容行左右不等距', el: desc(el), detail: '左 ' + pl + 'px / 右 ' + prr + 'px', rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] });
+          }
+        }
         // ④ 跑到窗口外（左右超出视口）
         if (r.left < -4 || r.right > window.innerWidth + 4) {
           out.push({ kind: '超出窗口', el: desc(el), detail: (r.left < -4 ? '左侧 ' + Math.round(r.left) : '右侧 ' + Math.round(r.right - window.innerWidth)) + 'px', rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] });

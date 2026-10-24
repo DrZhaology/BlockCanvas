@@ -44,6 +44,12 @@ function shrink(el: HTMLImageElement) {
   if (!src || src.startsWith('blob:')) return;
   if (!el.naturalWidth || !el.naturalHeight) return;
 
+  // 逃生开关：任何情况下用户都能一键关掉这个优化
+  // （localStorage['bc-img-downscale'] = 'off'）
+  try {
+    if (localStorage.getItem('bc-img-downscale') === 'off') return;
+  } catch { /* 读不到就按默认开 */ }
+
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const shownW = el.clientWidth || el.width || 0;
   const shownH = el.clientHeight || el.height || 0;
@@ -51,8 +57,10 @@ function shrink(el: HTMLImageElement) {
 
   const needW = bucket(shownW * dpr);
   const needH = bucket(shownH * dpr);
-  // 原图不比显示尺寸大多少就没必要降采样（避免白折腾还掉画质）
-  if (el.naturalWidth <= needW * 1.5 && el.naturalHeight <= needH * 1.5) return;
+  // v0.4.5 收紧（用户反馈"高清图被模糊成一坨"）：
+  // 只有**收益非常明显**时才降采样 —— 原图至少是需要的 3 倍才动手。
+  // 以前是 1.5 倍，等于稍微大一点就被压，画质掉得肉眼可见。
+  if (el.naturalWidth <= needW * 3 && el.naturalHeight <= needH * 3) return;
 
   const key = `${src}|${needW}x${needH}`;
   const cached = blobCache.get(key);
@@ -76,17 +84,28 @@ function shrink(el: HTMLImageElement) {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, w, h);
-        // webp 保留透明通道且体积小；浏览器不支持时自动回退 png
+        // webp 保留透明通道；质量拉到 0.95（接近无损），避免"高清图被压糊"
         cv.toBlob((blob) => {
-          if (blob) {
-            const url = URL.createObjectURL(blob);
+          if (!blob) { img.src = ''; next(); return; }
+          const url = URL.createObjectURL(blob);
+          // v0.4.5 关键防护（用户反馈"图片又不能显示了"）：
+          // **先验证这张小图真的能加载**，成功之后才替换。
+          // 以前直接 el.src = url，一旦编码/解码有问题，画布上那张图就空白了。
+          const probe = new Image();
+          probe.onload = () => {
             blobCache.set(key, url);
             if (el.isConnected) el.src = url;
-          }
-          // img 出作用域后原始解码位图会被回收 —— 这是内存能降下来的关键
-          img.src = '';
-          next();
-        }, 'image/webp', 0.86);
+            img.src = '';
+            next();
+          };
+          probe.onerror = () => {
+            // 降采样结果不可用 → 保留原图（宁可多占内存，也不能让图消失）
+            URL.revokeObjectURL(url);
+            img.src = '';
+            next();
+          };
+          probe.src = url;
+        }, 'image/webp', 0.95);
       } catch {
         next();
       }

@@ -61,10 +61,17 @@ async function main() {
       videoPreload: v ? v.getAttribute('preload') : null
     };
   });
-  check('C补8 未选中时音频不再渲染原生控件（点击就能选中它）',
-    unselected.audioControls === false, `audio controls=${unselected.audioControls}`);
-  check('C补2 未选中时视频也不显示控件（点它=选中元素，不误触播放）',
-    unselected.videoControls === false, `video controls=${unselected.videoControls}`);
+  check('C补8 未选中时音频仍然可见（控件常显，点它就选中元素）',
+    unselected.audioControls === true, `audio controls=${unselected.audioControls}`);
+  check('C补2 未选中时视频也保持可见（不再变成空白框）',
+    unselected.videoControls === true, `video controls=${unselected.videoControls}`);
+  const visible = await win.evaluate(() => {
+    const a = document.querySelector('.canvas audio');
+    const v = document.querySelector('.canvas video');
+    return { aH: a ? Math.round(a.getBoundingClientRect().height) : 0, vH: v ? Math.round(v.getBoundingClientRect().height) : 0 };
+  });
+  check('C补2 未选中时媒体不是零高度/不可见（用户反馈"直接不显示了"）',
+    visible.aH > 0 && visible.vH > 0, `音频高 ${visible.aH}px · 视频高 ${visible.vH}px`);
 
   // 选中后应该出现控件，可以就地试播
   await win.evaluate(() => {

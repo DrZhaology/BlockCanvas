@@ -311,21 +311,25 @@
 }
 
 /* ---------- 6. 图层树：文字预览不再压到操作按钮上 ---------- */
-.layer-tree { overflow-x: hidden; }
-.layer-tree .layer-row { gap: 1px; min-width: 0; }
+/* v0.4.5 用户反馈（图层界面回归原来）：
+   之前我给 .layer-tree 加了 overflow-x:hidden —— 等于**砍掉了图层树原来的横向滚动**，
+   层叠很深、名字很长时内容就"缺失"了。恢复可横向滑动，文字预览也不再强行截断到 58%。
+   （文字预览仍保留省略号，但整行超宽时可以通过横向滚动看到完整内容。） */
+.layer-tree { overflow-x: auto; overflow-y: auto; }
+.layer-tree .layer-row { min-width: max-content; }
 .layer-tree .layer-text-preview {
   flex: 0 1 auto;
   min-width: 0;
-  /* v0.4.5（C补13）：42% 截得太狠，层叠多的时候完全看不出是哪个元素。
-     放宽到 58%，操作按钮仍然固定在最右侧不会重叠。 */
-  max-width: 58%;
+  max-width: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.layer-tree .layer-actions { margin-left: auto; opacity: 0.3; }
-.layer-tree .layer-row:hover .layer-actions,
-.layer-tree .layer-row.selected .layer-actions { opacity: 1; }
+.layer-tree .layer-actions { margin-left: auto; }
+/* 横向滚动条做细一点，别抢视觉 */
+.layer-tree::-webkit-scrollbar { height: 8px; width: 8px; }
+.layer-tree::-webkit-scrollbar-thumb { background: rgba(120, 128, 140, 0.35); border-radius: 999px; }
+.layer-tree::-webkit-scrollbar-track { background: transparent; }
 
 /* ---------- 7. 断点条：自适应按钮更像按钮 ---------- */
 .inspector-bp-bar .bp-auto-btn {
@@ -1065,8 +1069,12 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 8px 2px 2px;
+  /* v0.4.5 用户反复反馈"内容贴左边框"：这里原来只有 2px 左内边距。
+     卡片内边距统一 10px，且左右对称。 */
+  padding: 8px 10px 6px;
 }
+/* 卡片左内边距不得小于 8px（用户反馈的"贴着左边框"问题，统一兜住） */
+.inspector-sec-body { padding-left: 10px; padding-right: 10px; }
 .media-props-row {
   display: flex;
   align-items: center;
@@ -1337,6 +1345,13 @@
   60%  { transform: translateX(calc(100% + 40px)); opacity: 1; }
   to   { transform: translateX(calc(100% + 40px)); max-height: 0; margin-top: 0; margin-bottom: 0; opacity: 1; }
 }
+
+/* 中键属性搜索：↑↓ 高亮当前项（v0.4.5 补；以前上下键完全没反应） */
+.bc-prop-search-item.is-active {
+  background: var(--hover-accent, #eff6ff);
+  box-shadow: inset 2px 0 0 0 var(--accent, #1e88e5);
+}
+.bc-prop-search-item.is-active.is-missing { background: #fffdf5; }
 
 /* ============================================================================
    25. 全界面溢出审计的修复（v0.4.5）
