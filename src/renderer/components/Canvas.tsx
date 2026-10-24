@@ -4,6 +4,7 @@ import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS, TEXT_TAGS, MEDIA_TAG
 import type { SceneElement } from '@lib/types';
 import { selectorForNode, collectStyleClasses, buildStyleBlock, createStyleClassSet, quickCssToCss, cssTextToObject, simplifyStyle } from '@lib/styleClass';
 import { classColor } from '@lib/classColor';
+import { downscaleBigImages } from '@lib/imgDownscale';
 import { useShowBr } from '@lib/showBr';
 import { CanvasTextMenu, isTextStylable, type TextMenuPayload } from './CanvasTextMenu';
 import { CanvasPropSearch } from './CanvasPropSearch';
@@ -174,6 +175,15 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     wrapRect: DOMRect;
   } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  // v0.4.5（性能）：画布图片按显示尺寸降采样。
+  // 4K 图按原始分辨率解码一张≈33MB，插 50 张就是 1.6GB —— 这是内存飙升的主因。
+  // 这里在场景/尺寸变化后扫一遍，把"原图远大于显示尺寸"的图换成小副本（导出仍用原图）。
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      try { downscaleBigImages(canvasRef.current); } catch { /* 优化失败不影响渲染 */ }
+    }, 260);
+    return () => window.clearTimeout(id);
+  }, [root, canvasWidth, zoom, activeBreakpoint]);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   // 拖框结束后会跟着一个 click（冒泡到 .canvas）——用它吞掉，避免框选完又清空选区
   const suppressClickRef = useRef(false);
@@ -827,20 +837,53 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       const ax = targetLeft - d.rect.left;
       const ay = targetTop - d.rect.top;
       const patch: Record<string, string | undefined> = {};
-      if (d.positioned) {
-        patch.left = Math.round(d.startLeft + ax) + 'px';
-        patch.top = Math.round(d.startTop + ay) + 'px';
-      } else {
+      const elNow = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
+      const parentNow = elNow?.parentElement;
+
+      // —— 常规流元素：靠 margin 移动（并保留"拖到中线自动 margin:auto 居中"）——
+      if (!d.positioned) {
         patch.marginLeft = Math.round(d.startMarginL + ax) + 'px';
         patch.marginTop = Math.round(d.startMarginT + ay) + 'px';
       }
 
-      // —— v0.4.4：中线自动 margin:auto 改成**实时**生效（以前松手才变）——
-      // 拖到父容器水平中线：立刻切 margin-left/right:auto；离开中线：立刻删掉没用的 auto 一边。
-      // 只对"比父容器窄"的元素做，否则 auto 两边都是 0，等于没居中。
-      const elNow = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
-      const parentNow = elNow?.parentElement;
-      if (parentNow && elNow) {
+      // —— v0.4.5（用户反馈 C补14b）：定位元素改用"离哪边近就写哪边" ——
+      // 以前**永远只写 left/top**：元素明明锚在右边，拖完变成 left 和 right 同时存在
+      //（over-constrained，浏览器只认 left），right 从此再也不动，用户觉得"右边完全不会变"。
+      // 现在：分别对水平/垂直取更近的一边；**另一条边清掉**，避免两边打架。
+      // 另外加一条"死区"：位置接近中线时（两边差 < 8px）固定用 left/top ——
+      // 否则元素横跨中线时会 left/right 反复争抢，视觉上就是抖动。
+      if (d.positioned && parentNow && elNow) {
+        const pr = parentNow.getBoundingClientRect();
+        const pcs = getComputedStyle(parentNow);
+        const cL = pr.left + parentNow.clientLeft + (parseFloat(pcs.paddingLeft) || 0);
+        const cR = pr.right - parentNow.clientLeft - (parseFloat(pcs.paddingRight) || 0);
+        const cT = pr.top + parentNow.clientTop + (parseFloat(pcs.paddingTop) || 0);
+        const cB = pr.bottom - parentNow.clientTop - (parseFloat(pcs.paddingBottom) || 0);
+        const dL = targetLeft - cL;
+        const dR = cR - (targetLeft + d.rect.width);
+        const dT = targetTop - cT;
+        const dB = cB - (targetTop + d.rect.height);
+        const DEAD = 8;
+        if (Number.isFinite(dR) && dR < dL && Math.abs(dL - dR) > DEAD) {
+          patch.right = Math.round(dR) + 'px';
+          patch.left = undefined;
+        } else {
+          patch.left = Math.round(dL) + 'px';
+          patch.right = undefined;
+        }
+        if (Number.isFinite(dB) && dB < dT && Math.abs(dT - dB) > DEAD) {
+          patch.bottom = Math.round(dB) + 'px';
+          patch.top = undefined;
+        } else {
+          patch.top = Math.round(dT) + 'px';
+          patch.bottom = undefined;
+        }
+      }
+
+      // —— 常规流元素拖到父容器中线：实时切 margin:auto 居中 ——
+      // 注意：**只对常规流做**。定位元素以前也走这里，结果"一居中就把 left 清成 undefined"，
+      // 元素会瞬间弹到容器左边再被 margin 拉回来 —— 正是用户看到的"left 突然清零 + 闪烁"。
+      if (parentNow && elNow && !d.positioned) {
         const pr = parentNow.getBoundingClientRect();
         const pcs = getComputedStyle(parentNow);
         const cL = pr.left + parentNow.clientLeft + (parseFloat(pcs.paddingLeft) || 0);
@@ -851,13 +894,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
         if (centered) {
           patch.marginLeft = 'auto';
           patch.marginRight = 'auto';
-          if (d.positioned) patch.left = undefined; // 居中后不再需要 left 偏移
-        } else if (d.positioned) {
-          // 离开中线：把 auto 清掉，回到 left 定位
-          patch.marginLeft = undefined;
-          patch.marginRight = undefined;
         } else {
-          // 常规流：右边留 auto 会让元素被挤到奇怪的位置
+          // 常规流：右边留 auto 会把元素挤到奇怪的位置
           patch.marginRight = undefined;
         }
       }

@@ -1094,8 +1094,9 @@
 .media-props-pick { flex: 0 0 auto; white-space: nowrap; }
 .media-props-toggles {
   display: flex;
-  gap: 14px;
-  padding-left: 58px;
+  flex-wrap: wrap;          /* v0.4.5 修溢出：面板窄的时候 4 个开关要换行，而不是把文字挤成竖排 */
+  gap: 6px 14px;
+  padding-left: 0;
 }
 .media-props-toggle {
   display: inline-flex;
@@ -1104,7 +1105,10 @@
   font-size: 11.5px;
   color: var(--text);
   cursor: pointer;
+  white-space: nowrap;      /* 关键：不许把「循环播放」拆成 循/环/播/放 */
+  flex: 0 0 auto;
 }
+.media-props-toggle input { flex: 0 0 auto; margin: 0; }
 .media-props-tip {
   font-size: 10.5px;
   line-height: 1.65;
@@ -1124,6 +1128,12 @@
   padding: 8px 10px 12px;
   min-height: 0;
   overflow-y: auto;
+  /* v0.4.5 修布局：素材页是面板的直接子元素，底部/左侧布局下必须自己撑满，
+     否则会被挤成一列窄条（用户截图里"完全看不了"）。 */
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 .asset-gallery-head {
   display: flex;
@@ -1175,10 +1185,17 @@
 }
 .asset-gallery-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
   gap: 8px;
   align-content: start;
+  width: 100%;
 }
+/* 底部布局：面板是横条，素材网格应该横向铺满（而不是缩成一列） */
+.workspace[data-layout='bottom'] .asset-gallery-grid {
+  grid-template-columns: repeat(auto-fill, minmax(96px, 112px));
+  justify-content: start;
+}
+.workspace[data-layout='bottom'] .asset-item { max-width: 112px; }
 .asset-item {
   display: flex;
   flex-direction: column;
