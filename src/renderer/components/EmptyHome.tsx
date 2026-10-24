@@ -47,6 +47,33 @@ const DEFAULT_BG: BgSpec = { kind: 'preset', value: BG_PRESETS[0].value };
 const DEFAULT_GRADIENT = 'linear-gradient(160deg, #dbeafe 0%, #ffffff 100%)';
 
 /**
+ * 「解不了的视频」黑名单（v0.4.5）
+ *
+ * 背景：Chromium 遇到解不了的编码会打 `ffmpeg_common.cc Unsupported pixel format: -1`，
+ * 那条日志来自**原生解码器**，JS 完全屏蔽不了。之前只做到「失败就回退背景」，
+ * 但每次启动仍会先尝试解码一次 → 每次进首页还是刷同一条错误。
+ *
+ * 现在把失败过的文件路径记下来：以后连 `<video>` 都不挂载，从根上不再触发解码。
+ * 只记最近 20 条，用户换新文件不受影响。
+ */
+const BAD_VIDEO_KEY = 'bc-empty-home-bad-videos';
+function readBadVideos(): string[] {
+  try {
+    const arr = JSON.parse(localStorage.getItem(BAD_VIDEO_KEY) || '[]');
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+function markBadVideo(src: string): void {
+  try {
+    const list = readBadVideos();
+    if (!src || list.includes(src)) return;
+    localStorage.setItem(BAD_VIDEO_KEY, JSON.stringify([...list, src].slice(-20)));
+  } catch { /* 记不住也无所谓，只是下次还会试一次 */ }
+}
+
+/**
  * 视频能不能解（v0.4.5）。
  * Chromium 遇到解不了的编码会打 `Unsupported pixel format: -1`（ffmpeg_common.cc），
  * 那条日志来自原生解码器，JS 没法屏蔽；能做的是**事先探一次**，
@@ -189,6 +216,8 @@ export function EmptyHome(props: {
   // 图片 / 视频的草稿参数（输入即生效，所以直接跟 bg 同步）
   const [imgSrc, setImgSrc] = useState(() => (bg.kind === 'image' ? bg.src : ''));
   const [vidSrc, setVidSrc] = useState(() => (bg.kind === 'video' ? bg.src : ''));
+  // 已知解不了的视频（A9）：不挂载 <video>，避免原生解码器反复报错
+  const [badVideos, setBadVideos] = useState<string[]>(() => readBadVideos());
   const [dim, setDim] = useState(() => (bg.kind === 'image' || bg.kind === 'video' ? bg.dim : 12));
   const [blur, setBlur] = useState(() => (bg.kind === 'image' || bg.kind === 'video' ? bg.blur : 0));
   const [gradCss, setGradCss] = useState(() => (bg.kind === 'gradient' ? bg.css : DEFAULT_GRADIENT));
@@ -490,7 +519,9 @@ export function EmptyHome(props: {
           }}
         />
       )}
-      {bg.kind === 'video' && (
+      {/* v0.4.5（A9）：已知解不了的视频**根本不挂载** <video>，
+          否则每次进首页都会让原生解码器再报一次 Unsupported pixel format。 */}
+      {bg.kind === 'video' && !badVideos.includes(bg.src) && (
         <video
           ref={videoRef}
           className="eh-media eh-video"
@@ -505,8 +536,11 @@ export function EmptyHome(props: {
           // v0.4.5：解码失败（例如 ffmpeg Unsupported pixel format）就回退到默认背景，
           // 并把这条坏配置从本地存储覆盖掉 —— 否则每次进首页都会重试、刷同一条错误。
           onError={() => {
+            // 记进黑名单：以后连挂载都不挂，从根上不再触发原生解码错误
+            markBadVideo(bg.src);
+            setBadVideos((prev) => (prev.includes(bg.src) ? prev : [...prev, bg.src]));
             applyBg(DEFAULT_BG);
-            showToast('这段视频的编码浏览器解不了，已暂时切回默认背景', 'err');
+            showToast('这段视频的编码浏览器解不了，已切回默认背景（以后不会再尝试它）', 'err');
           }}
           style={{
             filter: mediaBlur > 0 ? `blur(${mediaBlur}px)` : undefined,
