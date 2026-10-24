@@ -4,6 +4,8 @@ import { useTasks } from '@store/taskStore';
 import { InlineTaskStrip } from './TaskButton';
 import { Icon } from './Icon';
 import { RESUMABLE_STATUS, type BgTask } from '@lib/taskTypes';
+import { useTabStore } from '@store/tabStore';
+import { appConfirm } from '@lib/appConfirm';
 import logoUrl from '@renderer/assets/logo.svg';
 
 // BlockCanvas · 更新中心（v0.4.4 第三版）
@@ -257,6 +259,25 @@ export function UpdateCenter({ onBack }: { onBack: () => void }) {
   const install = async (entry: VersionEntry) => {
     if (!entry.asset) return;
     setApplyError('');
+    // v0.4.5：更新会替换程序并重启，先看一眼有没有没保存的改动。
+    // 会话本身会持久化草稿，但"重启后才发现某个标签没保存"仍然很吓人，所以明确问一次。
+    try {
+      const dirty = useTabStore.getState().tabs.filter((t) => t.isDirty && t.kind !== 'snapshot');
+      if (dirty.length > 0) {
+        const names = dirty.slice(0, 3).map((t) => `「${t.name}」`).join('、');
+        const more = dirty.length > 3 ? ` 等 ${dirty.length} 个` : '';
+        const go = await appConfirm({
+          title: '还有没保存的改动',
+          body:
+            `现在有 ${dirty.length} 个标签还没保存：${names}${more}。\n\n` +
+            '更新会替换程序并重启。未保存的草稿在下次打开时通常能恢复，但先保存一次更稳妥。\n\n' +
+            '点「继续更新」立即开始；点「先去保存」回到编辑器。',
+          okText: '继续更新',
+          cancelText: '先去保存'
+        });
+        if (!go) return;
+      }
+    } catch { /* 检查失败不阻断更新（用户已经点了更新） */ }
     const r = (await window.bc.applyUpdate(
       entry.asset.url, entry.asset.name, entry.version, entry.tag
     )) as unknown as { ok: boolean; error?: string };
