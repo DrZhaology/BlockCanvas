@@ -7,7 +7,8 @@ import * as pathUtils from './paths';
 import { zipCreate, zipList } from './zip';
 import {
   dataRoot, initDataDirectories, readAppConfig, writeAppConfig, listProjects,
-  listProjectBackups, saveProjectSnapshotFile, deleteProjectBackupFolder
+  listProjectBackups, saveProjectSnapshotFile, deleteProjectBackupFolder,
+  registerExternalProject, forgetExternalProject
 } from './userData';
 import { readSession, writeSession } from './session';
 import {
@@ -415,6 +416,9 @@ ipcMain.handle('cfg:set', (_evt, patch: Record<string, any>) => writeAppConfig(p
 // ============ 项目工程管理 (.bcproj) ============
 ipcMain.handle('project:list', () => listProjects());
 
+// v0.4.5：把某个外部工程从列表里移除（不动磁盘文件）
+ipcMain.handle('project:forget-external', (_evt, filePath: string) => forgetExternalProject(filePath));
+
 /**
  * 工程名 → 安全文件名：**保留中文等 Unicode 字符**，只剔除 Windows 文件名的非法字符。
  * （修复：以前用 sanitizeId 只留 a-z0-9，中文名整个被清空 → 首次保存弹出的默认文件名
@@ -543,6 +547,8 @@ ipcMain.handle('project:open-file', async (_evt, customPath?: string) => {
     // v0.4.5：把容器里的 assets/ 解到缓存目录，`bc-img://asset/...` 才有东西可服务
     let extracted = 0;
     try { extracted = extractProjectAssets(targetPath, r.payload); } catch { /* 解包失败不阻断打开 */ }
+    // v0.4.5：从 data/projects 以外打开的工程登记进项目列表（否则用户在列表里找不到它）
+    try { registerExternalProject(targetPath, r.payload.name); } catch { /* 登记失败不影响打开 */ }
     return {
       ok: true, project: r.payload, path: targetPath, container: r.container,
       extractedAssets: extracted,

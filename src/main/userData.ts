@@ -183,6 +183,67 @@ export interface ProjectFileInfo {
   elementCount?: number;
   previewText?: string;
   backupCount?: number; // 该项目专属的快照数量
+  /** v0.4.5：来自 data/projects 以外（用户从别处导入的工程） */
+  external?: boolean;
+  /** v0.4.5：登记过但磁盘上已经不在了（被移动/删除），列表里置灰提示 */
+  missing?: boolean;
+}
+
+/** 外部工程登记表（data/external-projects.json） */
+export interface ExternalProjectEntry {
+  path: string;
+  name?: string;
+  addedAt: string;
+}
+
+function externalRegistryPath(): string {
+  return join(dataRoot(), 'external-projects.json');
+}
+
+const normPath = (p: string) => String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
+
+export function readExternalRegistry(): ExternalProjectEntry[] {
+  try {
+    const p = externalRegistryPath();
+    if (!existsSync(p)) return [];
+    const arr = JSON.parse(readFileSync(p, 'utf8'));
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((e: ExternalProjectEntry) => e && typeof e.path === 'string' && e.path.trim());
+  } catch {
+    return [];
+  }
+}
+
+function writeExternalRegistry(list: ExternalProjectEntry[]): void {
+  try {
+    mkdirSync(dataRoot(), { recursive: true });
+    writeFileSync(externalRegistryPath(), JSON.stringify(list, null, 2), 'utf8');
+  } catch { /* 登记失败不影响打开工程 */ }
+}
+
+/** 把一个位于 data/projects 之外的工程登记进列表（重复登记自动去重） */
+export function registerExternalProject(filePath: string, name?: string): void {
+  const p = String(filePath || '').trim();
+  if (!p) return;
+  const defaultDir = join(dataRoot(), 'projects');
+  if (normPath(p).startsWith(normPath(defaultDir) + '/')) return; // 默认目录里的不用登记
+  const list = readExternalRegistry();
+  const hit = list.find((e) => normPath(e.path) === normPath(p));
+  if (hit) {
+    if (name) hit.name = name;
+  } else {
+    list.push({ path: p, name, addedAt: new Date().toISOString() });
+  }
+  writeExternalRegistry(list);
+}
+
+/** 从列表里移除一个外部工程（不动磁盘文件） */
+export function forgetExternalProject(filePath: string): boolean {
+  const list = readExternalRegistry();
+  const next = list.filter((e) => normPath(e.path) !== normPath(filePath));
+  if (next.length === list.length) return false;
+  writeExternalRegistry(next);
+  return true;
 }
 
 export function sanitizeProjectFolder(name: string): string {
@@ -219,6 +280,50 @@ export function listProjects(): ProjectFileInfo[] {
       });
     } catch {}
   }
+
+  // v0.4.5：把"外部工程"（用户从别处导入的）也并进列表。
+  // 文件被移动/删掉的保留一条 missing 记录，让用户知道"它去哪了"，
+  // 而不是无声消失、以为工程丢了。
+  for (const e of readExternalRegistry()) {
+    const full = e.path;
+    const base = full.replace(/^.*[\\/]/, '');
+    if (!existsSync(full)) {
+      list.push({
+        fileName: base,
+        filePath: full,
+        name: e.name || base.replace(/\.bcproj$/i, ''),
+        size: 0,
+        updatedAt: e.addedAt || new Date(0).toISOString(),
+        elementCount: 0,
+        previewText: '文件已不在原位置（可能被移动或删除）',
+        backupCount: 0,
+        external: true,
+        missing: true
+      });
+      continue;
+    }
+    try {
+      const stat = statSync(full);
+      const m = readManifestOnly(full);
+      const projName = (m.ok && m.manifest?.name) || e.name || base.replace(/\.bcproj$/i, '');
+      const backupDir = join(dataRoot(), 'backups', sanitizeProjectFolder(projName));
+      const backupCount = existsSync(backupDir)
+        ? readdirSync(backupDir).filter((x) => x.endsWith('.bcproj')).length
+        : 0;
+      list.push({
+        fileName: base,
+        filePath: full,
+        name: projName,
+        size: stat.size,
+        updatedAt: stat.mtime.toISOString(),
+        elementCount: (m.ok && m.manifest?.meta?.elementCount) || 0,
+        previewText: (m.ok && m.manifest?.meta?.description) || '',
+        backupCount,
+        external: true
+      });
+    } catch { /* 单个外部工程读不出来就跳过 */ }
+  }
+
   return list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
