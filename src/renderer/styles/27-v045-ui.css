@@ -1337,6 +1337,22 @@
   60%  { transform: translateX(calc(100% + 40px)); opacity: 1; }
   to   { transform: translateX(calc(100% + 40px)); max-height: 0; margin-top: 0; margin-bottom: 0; opacity: 1; }
 }
+
+/* ============================================================================
+   25. 全界面溢出审计的修复（v0.4.5）
+   用 probe-ui-overflow.mjs 逐面扫描发现的三处轻微溢出。
+   ========================================================================== */
+/* 帮助中心左侧目录：长标题会溢出 5px，加省略号 */
+.help-toc-item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* 更新中心板块折叠箭头：不要被压扁（审计实测内容比 10px 盒子宽 4px） */
+.update-sec-caret { flex: 0 0 auto; width: auto; min-width: 12px; display: inline-flex; align-items: center; justify-content: center; }
+/* 帮助文档表格：中文短词不要被拆成三四行 */
+.help-doc td, .help-doc th { word-break: keep-all; }
 .prop-row.is-leaving { animation: propRowOut2 0.34s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
 .asset-item:hover { border-color: var(--accent); transform: translateY(-1px); }
 .asset-thumb {

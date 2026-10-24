@@ -107,7 +107,7 @@ async function main() {
     last ? `top=${last.t} bottom=${last.b ?? '(无)'}` : '');
 
   // 拖到水平中线附近 → 必须固定用 left（死区），且**不能出现 left 被清零**的瞬间
-  const s2 = await win.evaluate((tid) => {
+  const midLeft = await win.evaluate((tid) => {
     const st = window.__sceneStore.getState();
     const el = document.querySelector(`.canvas [data-bc-id="${tid}"]`);
     const parent = el ? el.parentElement : null;
