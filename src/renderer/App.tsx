@@ -46,7 +46,7 @@ const LEFT_WIDTH_DEFAULT = 230;
 const LEFT_WIDTH_MIN = 160;
 const BOTTOM_HEIGHT_DEFAULT = 250;
 const BOTTOM_HEIGHT_MIN = 175;
-const RIGHT_WIDTH_DEFAULT = 416;
+const RIGHT_WIDTH_DEFAULT = 456;
 const RIGHT_WIDTH_MIN = 340;
 
 export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 'help';
@@ -111,6 +111,17 @@ export default function App() {
       if (localStorage.getItem('bc-right-width-widened') === '1') return;
       localStorage.setItem('bc-right-width-widened', '1');
       if (rightWidth < 400) setRightWidth(RIGHT_WIDTH_DEFAULT);
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // v0.4.5（用户反馈 C补13）：图层树里长名字被截得太狠，"层叠多的时候看不到后面的元素"。
+  // 再做一次一次性加宽：416 → 456。仍然可以手动拖窄（拖过就不会被覆盖）。
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('bc-right-width-widened-2') === '1') return;
+      localStorage.setItem('bc-right-width-widened-2', '1');
+      if (rightWidth < RIGHT_WIDTH_DEFAULT) setRightWidth(RIGHT_WIDTH_DEFAULT);
     } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

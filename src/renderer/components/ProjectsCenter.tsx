@@ -209,7 +209,10 @@ export function ProjectsCenter(props: {
         st.switchTab(existing.id);
         showToast(`「${existing.name}」已经打开着，已为你切换过去`);
       } else {
-        newTab(p.name, res.project.scene, p.filePath);
+        // v0.4.5（用户反馈 C补10）：工程文件里存了撤销历史（sections.history），
+        // 但这条路径**没有把它传进去** → 打开后按 Ctrl+Z 一次都撤不动
+        //（"文件里有 100 条记录却按了没反应"就是这个原因）。菜单里那条打开路径原本是传了的。
+        newTab(p.name, res.project.scene, p.filePath, res.history);
         showToast(`已在新标签页打开「${p.name}」`);
       }
       onBack();
@@ -258,7 +261,7 @@ export function ProjectsCenter(props: {
         st.switchTab(existing.id);
         showToast(`「${existing.name}」已经打开着，已为你切换过去`);
       } else {
-        newTab(pName, res.project.scene, res.path);
+        newTab(pName, res.project.scene, res.path, res.history);
         showToast(`已导入并打开「${pName}」`);
       }
       onBack();

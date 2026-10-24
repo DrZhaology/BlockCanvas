@@ -316,7 +316,9 @@
 .layer-tree .layer-text-preview {
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 42%;
+  /* v0.4.5（C补13）：42% 截得太狠，层叠多的时候完全看不出是哪个元素。
+     放宽到 58%，操作按钮仍然固定在最右侧不会重叠。 */
+  max-width: 58%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
