@@ -112,7 +112,7 @@ async function main() {
   // 造一点内容：给根容器加一个 div
   await win.evaluate(() => {
     const st = window.__sceneStore.getState();
-    st.addElement(st.scene.root.id, 'div');
+    st.addElement('div');
   });
   await sleep(400);
 
@@ -218,7 +218,7 @@ async function main() {
   // 先放一个带文字的段落，保证图层树里一定有 .layer-text-preview
   await win.evaluate(() => {
     const st = window.__sceneStore.getState();
-    const id = st.addElement(st.scene.root.id, 'p');
+    const id = st.addElement('p');
     const after = window.__sceneStore.getState();
     const target = id || after.scene.root.children[after.scene.root.children.length - 1]?.id;
     if (target) after.setText(target, '这是一段很长的说明文字，用来验证图层树里的文字预览会不会压到右侧的操作按钮上');
@@ -248,7 +248,7 @@ async function main() {
   // 直接新建一个 div 并选中它（不依赖之前那个元素还在不在）
   await win.evaluate(() => {
     const st = window.__sceneStore.getState();
-    const newId = st.addElement(st.scene.root.id, 'div');
+    const newId = st.addElement('div');
     const s2 = window.__sceneStore.getState();
     const id = newId || (s2.scene.root.children || [])[(s2.scene.root.children || []).length - 1]?.id;
     if (!id) return;

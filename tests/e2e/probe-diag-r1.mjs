@@ -81,7 +81,7 @@ async function main() {
   await win.waitForSelector('.project-tab-bar', { timeout: 15000 });
   await win.evaluate(() => {
     const st = window.__sceneStore.getState();
-    st.addElement(st.scene.root.id, 'div');
+    st.addElement('div');
   });
   await sleep(500);
   const dirty = await win.evaluate(() => {

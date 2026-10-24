@@ -44,7 +44,7 @@ async function main() {
       { name: 'Brand_2', value: '16px', group: '间距', kind: 'size' },
       { name: 'primary', value: '#ff0000', group: '颜色', kind: 'color' }
     ]);
-    const id = st.addElement(st.scene.root.id, 'div');
+    const id = st.addElement('div');
     const s2 = window.__sceneStore.getState();
     const target = id || (s2.scene.root.children || [])[(s2.scene.root.children || []).length - 1]?.id;
     if (!target) return { ok: false };

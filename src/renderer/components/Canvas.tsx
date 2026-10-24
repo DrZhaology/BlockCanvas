@@ -42,6 +42,12 @@ type AltBoxModelData = {
   posLabel: string;
   /** relative 才有意义：当前 left / top 偏移量 */
   offsetX: number; offsetY: number;
+  /** v0.4.5：场景样式里写成 auto 的边（computed 会把 auto 算成具体像素，只能回场景读） */
+  autoSides: string[];
+  /** v0.4.5：定位偏移的原始写法（可能是 'auto'），fixed/absolute 时画布上要能看到 */
+  insets: { top: string; right: string; bottom: string; left: string };
+  /** v0.4.5：定位方式（决定画布上显示哪些辅助） */
+  posKind: 'static' | 'relative' | 'absolute' | 'fixed' | 'sticky';
 };
 
 /**
@@ -200,10 +206,19 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const cs = getComputedStyle(el);
     const n = (v: string) => { const x = parseFloat(v); return Number.isFinite(x) ? x : 0; };
     const pos = cs.position;
+    const posKind = (['relative', 'absolute', 'fixed', 'sticky'] as const).includes(pos as never)
+      ? (pos as AltBoxModelData['posKind'])
+      : 'static';
     const posLabel = pos === 'relative' ? '相对定位'
       : pos === 'absolute' ? '绝对定位'
         : pos === 'fixed' ? '固定定位'
           : pos === 'sticky' ? '粘性定位' : '常规流';
+    // computed 会把 margin:auto 解析成具体像素，所以"是不是 auto"只能回场景样式里读
+    const bcId = el.getAttribute('data-bc-id') || '';
+    const node = bcId ? findNode(useScene.getState().scene.root, bcId) : null;
+    const st = (node?.style ?? {}) as Record<string, string | undefined>;
+    const autoSides = ['marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'top', 'right', 'bottom', 'left']
+      .filter((k) => String(st[k] ?? '').trim() === 'auto');
     return {
       x: r.left, y: r.top, w: r.width, h: r.height,
       mt: n(cs.marginTop), mr: n(cs.marginRight), mb: n(cs.marginBottom), ml: n(cs.marginLeft),
@@ -211,7 +226,10 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       pt: n(cs.paddingTop), pr: n(cs.paddingRight), pb: n(cs.paddingBottom), pl: n(cs.paddingLeft),
       posLabel,
       offsetX: pos === 'relative' ? n(cs.left) : 0,
-      offsetY: pos === 'relative' ? n(cs.top) : 0
+      offsetY: pos === 'relative' ? n(cs.top) : 0,
+      autoSides,
+      insets: { top: cs.top, right: cs.right, bottom: cs.bottom, left: cs.left },
+      posKind
     };
   };
   // 撞到"墙"时闪一下的那条边（橙色），告诉用户"这是限制不是 BUG"
@@ -483,12 +501,13 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const el = (e.target as HTMLElement)?.closest?.('.canvas [data-bc-id]') as HTMLElement | null;
     if (!el || el.getAttribute('data-bc-locked') === '1') {
       if (altHover) setAltHover(null);
+      setBoxModel(null);
       tagAltCursor(null, '');
       return;
     }
     const id = el.getAttribute('data-bc-id')!;
     const node = findNode(root, id);
-    if (!node) { if (altHover) setAltHover(null); tagAltCursor(null, ''); return; }
+    if (!node) { if (altHover) setAltHover(null); setBoxModel(null); tagAltCursor(null, ''); return; }
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);
     // 行内元素（display:inline，如 span/strong/a）不参与"贴边改大小" —— 它没有块级盒，
@@ -504,6 +523,9 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           : (edge === 'tl' || edge === 'br') ? 'nwse' : 'nesw';
     tagAltCursor(el, cursorKind);
     const next = { id, edge, mode, rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
+    // v0.4.5：Alt **悬停**就把盒模型浮层显示出来（以前只在拖动中出现）。
+    // 放在"位置未变就提前 return"之前 —— 否则鼠标停在同一元素上时浮层永远不会挂载。
+    if (!altDragRef.current) setBoxModel(readBoxModel(el));
     const prev = altHoverRef.current;
     if (prev && prev.id === id && prev.edge === edge && prev.mode === mode
       && Math.abs(prev.rect.x - next.rect.x) < 0.5 && Math.abs(prev.rect.y - next.rect.y) < 0.5
@@ -1411,19 +1433,49 @@ function AltBoxModel({ bm }: { bm: AltBoxModelData }) {
   };
   const num = (v: number) => Math.round(v);
   const show = (v: number) => v >= 12; // 太窄就不画数字，避免糊成一团
+  // v0.4.5：margin 写的是 auto 时显示 "auto"（computed 只会给出算好的像素）
+  const isAuto = (k: string) => bm.autoSides.includes(k);
+  const mLbl = (k: string, v: number) => (isAuto(k) ? 'auto' : String(num(v)));
+  // v0.4.5：定位偏移标签（fixed / absolute / sticky 才画）
+  const insetLbl = (k: 'top' | 'right' | 'bottom' | 'left') => {
+    const raw = String(bm.insets[k] ?? 'auto').trim();
+    if (isAuto(k) || raw === 'auto' || raw === '') return `${k} auto`;
+    const v = parseFloat(raw);
+    return Number.isFinite(v) ? `${k} ${Math.round(v)}px` : `${k} auto`;
+  };
+  const showInsets = bm.posKind === 'fixed' || bm.posKind === 'absolute' || bm.posKind === 'sticky';
 
   return (
     <div className="bc-boxm">
+      {/* relative：先画出"元素原本在文档流里占的位置"（虚线幽灵），再画当前盒 */}
+      {bm.posKind === 'relative' && (bm.offsetX !== 0 || bm.offsetY !== 0) && (
+        <div
+          className="bc-boxm-ghost"
+          style={{ left: x - bm.offsetX, top: y - bm.offsetY, width: w, height: h }}
+        >
+          <em>原文档流位置</em>
+        </div>
+      )}
       <div className="bc-boxm-layer is-margin" style={margin} />
       <div className="bc-boxm-layer is-border" style={border} />
       <div className="bc-boxm-layer is-padding" style={padding} />
       <div className="bc-boxm-layer is-content" style={content} />
 
-      {/* margin 四边数值 */}
-      {show(mt) && <span className="bc-boxm-num" style={{ left: x + w / 2, top: y - mt / 2 }}>{num(mt)}</span>}
-      {show(mb) && <span className="bc-boxm-num" style={{ left: x + w / 2, top: y + h + mb / 2 }}>{num(mb)}</span>}
-      {show(ml) && <span className="bc-boxm-num" style={{ left: x - ml / 2, top: y + h / 2 }}>{num(ml)}</span>}
-      {show(mr) && <span className="bc-boxm-num" style={{ left: x + w + mr / 2, top: y + h / 2 }}>{num(mr)}</span>}
+      {/* margin 四边数值（auto 时显示 auto） */}
+      {(show(mt) || isAuto('marginTop')) && <span className="bc-boxm-num" style={{ left: x + w / 2, top: y - mt / 2 }}>{mLbl('marginTop', mt)}</span>}
+      {(show(mb) || isAuto('marginBottom')) && <span className="bc-boxm-num" style={{ left: x + w / 2, top: y + h + mb / 2 }}>{mLbl('marginBottom', mb)}</span>}
+      {(show(ml) || isAuto('marginLeft')) && <span className="bc-boxm-num" style={{ left: x - ml / 2, top: y + h / 2 }}>{mLbl('marginLeft', ml)}</span>}
+      {(show(mr) || isAuto('marginRight')) && <span className="bc-boxm-num" style={{ left: x + w + mr / 2, top: y + h / 2 }}>{mLbl('marginRight', mr)}</span>}
+
+      {/* 定位偏移：fixed / absolute / sticky 时把 top/right/bottom/left 都标出来 */}
+      {showInsets && (
+        <>
+          <span className="bc-boxm-inset is-top" style={{ left: x + w / 2, top: y - 17 }}>{insetLbl('top')}</span>
+          <span className="bc-boxm-inset is-bottom" style={{ left: x + w / 2, top: y + h + 17 }}>{insetLbl('bottom')}</span>
+          <span className="bc-boxm-inset is-left" style={{ left: x - 22, top: y + h / 2 }}>{insetLbl('left')}</span>
+          <span className="bc-boxm-inset is-right" style={{ left: x + w + 22, top: y + h / 2 }}>{insetLbl('right')}</span>
+        </>
+      )}
 
       {/* padding 四边数值 */}
       {show(pt) && <span className="bc-boxm-num is-pad" style={{ left: x + w / 2, top: padding.top + pt / 2 }}>{num(pt)}</span>}
@@ -1436,6 +1488,26 @@ function AltBoxModel({ bm }: { bm: AltBoxModelData }) {
         <b>{bm.posLabel}</b>
         <i>{Math.round(w)} × {Math.round(h)}</i>
       </span>
+
+      {/* v0.4.5：按定位类型给出对应说明（B2 的类型适配） */}
+      {bm.posKind === 'sticky' && (
+        <span className="bc-boxm-note" style={{ left: x + w / 2, top: y + h + 34 }}>
+          粘性吸附：滚动到 {[
+            !isAuto('top') && bm.insets.top !== 'auto' ? `top ${insetLbl('top').replace('top ', '')}` : '',
+            !isAuto('left') && bm.insets.left !== 'auto' ? `left ${insetLbl('left').replace('left ', '')}` : ''
+          ].filter(Boolean).join(' / ') || '未设偏移（不会吸附）'}
+        </span>
+      )}
+      {bm.posKind === 'absolute' && (
+        <span className="bc-boxm-note" style={{ left: x + w / 2, top: y + h + 34 }}>
+          绝对定位：以最近的「定位祖先」为基准，不受兄弟元素影响
+        </span>
+      )}
+      {bm.posKind === 'fixed' && (
+        <span className="bc-boxm-note" style={{ left: x + w / 2, top: y + h + 34 }}>
+          固定定位：以浏览器窗口为基准，页面滚动时不动
+        </span>
+      )}
 
       {/* relative：从文档流原位到当前位置的距离箭头 */}
       {bm.offsetX !== 0 && (

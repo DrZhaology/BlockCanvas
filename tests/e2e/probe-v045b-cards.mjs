@@ -39,7 +39,7 @@ async function main() {
   // 造一个带颜色/背景/定位的 div 并选中
   const made = await win.evaluate(() => {
     const st = window.__sceneStore.getState();
-    const id = st.addElement(st.scene.root.id, 'div');
+    const id = st.addElement('div');
     const s2 = window.__sceneStore.getState();
     const target = id || (s2.scene.root.children || [])[(s2.scene.root.children || []).length - 1]?.id;
     if (!target) return { ok: false, children: (s2.scene.root.children || []).length };

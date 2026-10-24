@@ -897,3 +897,59 @@
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* ============================================================================
+   20. 定位可视化（v0.4.5）：relative 的原位幽灵 + fixed/absolute 的四边偏移标签
+   ========================================================================== */
+.bc-boxm-ghost {
+  position: fixed;
+  z-index: 86;
+  box-sizing: border-box;
+  border: 1.5px dashed rgba(100, 116, 139, 0.8);
+  border-radius: 3px;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(148, 163, 184, 0.14) 0 6px,
+    transparent 6px 12px
+  );
+  pointer-events: none;
+}
+.bc-boxm-ghost > em {
+  position: absolute;
+  left: 0;
+  top: -15px;
+  font-style: normal;
+  font-size: 9.5px;
+  color: #64748b;
+  white-space: nowrap;
+}
+.bc-boxm-inset {
+  position: fixed;
+  z-index: 89;
+  transform: translate(-50%, -50%);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(220, 38, 38, 0.92);
+  color: #fff;
+  font-size: 9.5px;
+  font-family: Consolas, monospace;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.bc-boxm-note {
+  position: fixed;
+  z-index: 88;
+  transform: translate(-50%, -50%);
+  max-width: 460px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.86);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}

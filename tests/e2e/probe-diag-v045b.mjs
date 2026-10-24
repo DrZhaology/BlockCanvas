@@ -73,7 +73,7 @@ async function main() {
 
   await win.evaluate(() => {
     const st = window.__sceneStore.getState();
-    const id = st.addElement(st.scene.root.id, 'div');
+    const id = st.addElement('div');
     const after = window.__sceneStore.getState();
     const target = id || after.scene.root.children[after.scene.root.children.length - 1]?.id;
     after.selectElement(target);
