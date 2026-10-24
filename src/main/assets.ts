@@ -14,7 +14,7 @@
 // 协议按 hash 取文件，不需要知道它原来叫什么、在哪。
 // ============================================================================
 import { createHash } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
 import { basename, extname, join } from 'path';
 import { dataRoot } from './userData';
 import { readAsset, type ProjectManifest } from './projectFile';
@@ -147,4 +147,71 @@ export function resolveCachedAsset(name: string): string | null {
   if (!clean || clean.includes('..')) return null;
   const p = join(assetCacheDir(), clean);
   return existsSync(p) ? p : null;
+}
+
+// ============================================================================
+// 素材库（v0.4.5）：把缓存目录里的素材列出来给界面用
+// ============================================================================
+export interface CachedAsset {
+  /** 缓存里的文件名（内容哈希 + 扩展名） */
+  name: string;
+  /** 直接能放进 src / background-image 的地址 */
+  url: string;
+  bytes: number;
+  mtime: string;
+  kind: 'image' | 'video' | 'audio' | 'other';
+}
+
+function kindOfName(name: string): CachedAsset['kind'] {
+  const ext = (name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]) ?? '';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'].includes(ext)) return 'image';
+  if (['mp4', 'webm', 'ogv', 'ogg', 'mov', 'm4v'].includes(ext)) return 'video';
+  if (['mp3', 'wav', 'flac', 'm4a', 'aac', 'opus'].includes(ext)) return 'audio';
+  return 'other';
+}
+
+/** 列出素材缓存里的文件（新的在前） */
+export function listAssetCache(): CachedAsset[] {
+  try {
+    const dir = assetCacheDir();
+    const out: CachedAsset[] = [];
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      if (!f.isFile()) continue;
+      try {
+        const st = statSync(join(dir, f.name));
+        out.push({
+          name: f.name,
+          url: `${ASSET_PREFIX}${f.name}`,
+          bytes: st.size,
+          mtime: st.mtime.toISOString(),
+          kind: kindOfName(f.name)
+        });
+      } catch { /* 单个文件读不到就跳过 */ }
+    }
+    return out.sort((a, b) => b.mtime.localeCompare(a.mtime));
+  } catch {
+    return [];
+  }
+}
+
+/** 把一个本地文件收进素材缓存（内容哈希命名，天然去重），返回它在库里的条目 */
+export function importAssetToCache(srcPath: string): CachedAsset | null {
+  try {
+    if (!srcPath || !existsSync(srcPath)) return null;
+    const data = readFileSync(srcPath);
+    const hash = createHash('sha1').update(data).digest('hex').slice(0, 16);
+    const ext = (extname(srcPath).replace('.', '') || 'bin').toLowerCase();
+    const name = `${hash}.${ext}`;
+    writeCache(name, data);
+    const st = statSync(join(assetCacheDir(), name));
+    return {
+      name,
+      url: `${ASSET_PREFIX}${name}`,
+      bytes: st.size,
+      mtime: st.mtime.toISOString(),
+      kind: kindOfName(name)
+    };
+  } catch {
+    return null;
+  }
 }

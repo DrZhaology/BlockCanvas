@@ -20,7 +20,7 @@ import {
 } from './projectFile';
 import * as projectFileApi from './projectFile';
 // v0.4.5：工程素材（保存时收集本地图片/视频进容器，打开时解包到缓存）
-import { collectSceneAssets, extractProjectAssets, resolveCachedAsset } from './assets';
+import { collectSceneAssets, extractProjectAssets, resolveCachedAsset, listAssetCache, importAssetToCache } from './assets';
 import {
   getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo,
   resolveInstallDir, updateLogPath, ulog
@@ -440,6 +440,23 @@ ipcMain.handle('project:list', () => listProjects());
 
 // v0.4.5：把某个外部工程从列表里移除（不动磁盘文件）
 ipcMain.handle('project:forget-external', (_evt, filePath: string) => forgetExternalProject(filePath));
+
+// v0.4.5：素材库（图库面板）—— 列出缓存里的素材 / 导入新素材
+ipcMain.handle('assets:list', () => listAssetCache());
+ipcMain.handle('assets:import', async () => {
+  const res = await showOpenDialog({
+    title: '导入素材',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] },
+      { name: '视频', extensions: ['mp4', 'webm', 'ogv', 'ogg', 'mov', 'm4v'] },
+      { name: '音频', extensions: ['mp3', 'wav', 'flac', 'm4a', 'aac', 'opus'] }
+    ]
+  });
+  if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
+  const items = res.filePaths.map((p) => importAssetToCache(p)).filter(Boolean);
+  return { ok: true, items };
+});
 
 // v0.4.5：抢救损坏的工程（只读，不改原文件）
 ipcMain.handle('project:salvage', (_evt, filePath: string) => projectFileApi.salvageProject(filePath));

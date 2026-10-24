@@ -3,6 +3,7 @@ import { useScene, findNode } from '@store/sceneStore';
 import type { ElementType } from '@lib/types';
 import { exportHTML } from '@lib/exporter';
 import { HelpButton } from './HelpButton';
+import { AssetGallery } from './AssetGallery';
 import { Collapse } from './Collapse';
 import { getPluginElements } from '@lib/pluginHost';
 import { TABLE_STYLE_PRESETS, applyTableStylePreset } from '@lib/tablePresets';
@@ -133,7 +134,7 @@ export function ElementPanel() {
   const insertTemplate = useScene((s) => s.insertTemplate);
   const autoInherit = useScene((s) => s.autoInherit);
   const setAutoInherit = useScene((s) => s.setAutoInherit);
-  const [tab, setTab] = useState<'element' | 'templates'>(() => {
+  const [tab, setTab] = useState<'element' | 'templates' | 'assets'>(() => {
     try { return (localStorage.getItem('bc-elem-tab') as any) || 'element'; } catch { return 'element'; }
   });
   const [scan, setScan] = useState<ScanResult | null>(null);
@@ -145,7 +146,7 @@ export function ElementPanel() {
     if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = 0; }
   };
 
-  const changeTab = (nextTab: 'element' | 'templates') => {
+  const changeTab = (nextTab: 'element' | 'templates' | 'assets') => {
     setTab(nextTab);
     try { localStorage.setItem('bc-elem-tab', nextTab); } catch {}
   };
@@ -257,6 +258,12 @@ export function ElementPanel() {
           onClick={() => changeTab('templates')}
           title="预设组件模板库"
         >模板</button>
+        {/* v0.4.5：素材库 —— 工程里用过的图片/视频/音频，点一下就插到画布 */}
+        <button
+          className={"inspector-tab" + (tab === 'assets' ? ' active' : '')}
+          onClick={() => changeTab('assets')}
+          title="素材库：工程里用过的图片、视频、音频"
+        >素材</button>
       </div>
 
       {tab === 'element' && (
@@ -379,6 +386,9 @@ export function ElementPanel() {
           />
         </div>
       )}
+
+      {/* v0.4.5：素材库 */}
+      {tab === 'assets' && <AssetGallery />}
     </div>
   );
 }

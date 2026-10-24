@@ -91,6 +91,20 @@ declare global {
       updateLogPath: () => Promise<string>;
       /** v0.4.5：读更新日志尾部若干行 */
       updateLogTail: (maxLines?: number) => Promise<string>;
+      /** v0.4.5：素材库列表 */
+      listAssets: () => Promise<Array<{
+        name: string;
+        url: string;
+        bytes: number;
+        mtime: string;
+        kind: 'image' | 'video' | 'audio' | 'other';
+      }>>;
+      /** v0.4.5：导入素材到库（弹文件选择框） */
+      importAssets: () => Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        items?: Array<{ name: string; url: string; bytes: number; mtime: string; kind: 'image' | 'video' | 'audio' | 'other' }>;
+      }>;
       saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown; history?: { past?: unknown[]; future?: unknown[] } }, saveAs?: boolean, customPath?: string) => Promise<{ ok: boolean; path?: string; name?: string; error?: string; canceled?: boolean }>;
       openProjectFile: (customPath?: string) => Promise<{ ok: boolean; project?: any; path?: string; error?: string; canceled?: boolean; container?: string; history?: { past?: any[]; future?: any[] } }>;
       deleteProject: (fileName: string, projectName?: string) => Promise<{ ok: boolean; error?: string }>;

@@ -1111,3 +1111,101 @@
   border-radius: 6px;
   padding: 7px 9px;
 }
+
+/* ============================================================================
+   23. 素材库（图库面板，v0.4.5）
+   ========================================================================== */
+.asset-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 12px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.asset-gallery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.asset-gallery-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.asset-gallery-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+.asset-gallery-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 26px 14px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+.asset-gallery-empty-ico {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--panel-soft);
+  opacity: 0.7;
+}
+.asset-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+.asset-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, transform 0.12s ease;
+}
+.asset-item:hover { border-color: var(--accent); transform: translateY(-1px); }
+.asset-thumb {
+  display: grid;
+  place-items: center;
+  height: 62px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--panel-soft);
+}
+.asset-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.asset-thumb-ico { color: var(--text-muted); }
+.asset-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+.asset-kind { color: var(--text); font-weight: 600; }
