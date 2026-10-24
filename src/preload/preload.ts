@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld('bc', {
   /** v0.4.5：抢救损坏的工程文件（只读） */
   salvageProject: (filePath: string) =>
     ipcRenderer.invoke('project:salvage', filePath),
+  /** v0.4.5：更新日志（路径 + 尾部内容），用于排障 */
+  updateLogPath: () => ipcRenderer.invoke('update:log-path'),
+  updateLogTail: (maxLines = 200) => ipcRenderer.invoke('update:log-tail', maxLines),
   saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown; history?: unknown }, saveAs = false, customPath?: string) =>
     ipcRenderer.invoke('project:save', projectData, saveAs, customPath),
   openProjectFile: (customPath?: string) =>

@@ -23,7 +23,7 @@ import * as projectFileApi from './projectFile';
 import { collectSceneAssets, extractProjectAssets, resolveCachedAsset } from './assets';
 import {
   getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo,
-  resolveInstallDir
+  resolveInstallDir, updateLogPath, ulog
 } from './updater';
 import {
   listTasks, startTask, pauseTask, resumeTask, cancelTask, dismissTask, revealTask,
@@ -269,6 +269,28 @@ ipcMain.handle('data:enforce-budgets', () => enforceStorageBudgets());
 
 // ============ 自动更新 IPC ============
 ipcMain.handle('update:get-version', () => getLocalVersion());
+
+// v0.4.5：更新日志路径（界面可以给一个"打开日志"入口）
+ipcMain.handle('update:log-path', () => {
+  try {
+    ulog(`查询日志路径（当前版本 ${getLocalVersion()}）`);
+    return updateLogPath();
+  } catch {
+    return '';
+  }
+});
+
+// v0.4.5：读最近若干行更新日志（只读尾部）
+ipcMain.handle('update:log-tail', (_evt, maxLines = 200) => {
+  try {
+    const p = updateLogPath();
+    if (!existsSync(p)) return '';
+    const lines = readFileSync(p, 'utf8').split(/\r?\n/);
+    return lines.slice(Math.max(0, lines.length - Math.max(1, Number(maxLines) || 200))).join('\n');
+  } catch {
+    return '';
+  }
+});
 // 「关于」页的阶段文案（来源 version.json → tools/sync-version.mjs → package.json.bcStage）
 ipcMain.handle('app:get-stage', () => getAppStage());
 
@@ -1159,6 +1181,8 @@ function mediaMimeOf(p: string): string {
 }
 
 app.whenReady().then(() => {
+  // 启动就记一条：出问题时至少能确认"是不是这个版本、这个时间开的"
+  ulog(`应用启动 v${getLocalVersion()}（${getAppStage()}）`);
   // 应用级身份：必须在任何窗口/弹窗出现之前设置，任务栏才会把主窗口、原生对话框、
   // 开发者工具都归到同一个 BlockCanvas 图标下（而不是其中一个变成 Electron 原子）。
   if (process.platform === 'win32') app.setAppUserModelId('com.blockcanvas.app');

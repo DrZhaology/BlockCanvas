@@ -87,6 +87,10 @@ declare global {
         notes: string[];
         error?: string;
       }>;
+      /** v0.4.5：更新日志路径（排障用） */
+      updateLogPath: () => Promise<string>;
+      /** v0.4.5：读更新日志尾部若干行 */
+      updateLogTail: (maxLines?: number) => Promise<string>;
       saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown; history?: { past?: unknown[]; future?: unknown[] } }, saveAs?: boolean, customPath?: string) => Promise<{ ok: boolean; path?: string; name?: string; error?: string; canceled?: boolean }>;
       openProjectFile: (customPath?: string) => Promise<{ ok: boolean; project?: any; path?: string; error?: string; canceled?: boolean; container?: string; history?: { past?: any[]; future?: any[] } }>;
       deleteProject: (fileName: string, projectName?: string) => Promise<{ ok: boolean; error?: string }>;

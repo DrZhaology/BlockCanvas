@@ -4,6 +4,35 @@ import {
   existsSync, mkdirSync, readdirSync, rmSync, writeFileSync, chmodSync, readFileSync
 } from 'node:fs';
 import { installUnitDir } from './paths';
+import { dataRoot } from './userData';
+
+// ============================================================================
+// 更新日志（v0.4.5）
+// ----------------------------------------------------------------------------
+// 更新出问题时用户只能说"更新失败了"，我们连哪一步、哪个镜像、什么错误都看不到。
+// 这里把关键事件按天写进 data/logs/update-YYYYMMDD.log：
+//   · 应用启动（版本号）
+//   · 拉取发行版信息（哪个镜像成功/失败）
+//   · 开始下载 / 下载完成 / 校验失败 / 安装开始与结束
+// 原则：**日志失败绝不影响更新本身**（全部 try-catch 吞掉）。
+// ============================================================================
+let _logPath = '';
+export function updateLogPath(): string {
+  if (_logPath) return _logPath;
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  const dir = join(dataRoot(), 'logs');
+  try { if (!existsSync(dir)) mkdirSync(dir, { recursive: true }); } catch { /* 忽略 */ }
+  _logPath = join(dir, `update-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}.log`);
+  return _logPath;
+}
+
+/** 写一条更新日志（永不抛错） */
+export function ulog(msg: string): void {
+  try {
+    writeFileSync(updateLogPath(), `[${new Date().toISOString()}] ${msg}\n`, { flag: 'a' });
+  } catch { /* 日志写不进去也不该影响更新 */ }
+}
 
 // ============================================================================
 // BlockCanvas · 自动更新中枢（v0.4.3 重写）
@@ -151,14 +180,22 @@ async function fetchJsonWithTimeout(url: string, ms: number): Promise<any> {
  */
 export async function fetchReleases(perPage = 100): Promise<ReleaseFetchResult | null> {
   const raw = `https://api.github.com/repos/${REPO}/releases?per_page=${perPage}`;
+  ulog(`拉取发行版列表（per_page=${perPage}）`);
   for (const id of READ_ORDER) {
     const m = mirrorById(id);
     try {
       const data = await fetchJsonWithTimeout(wrap(m.prefix, raw), 12000);
-      if (!Array.isArray(data) || data.length === 0) continue;
+      if (!Array.isArray(data) || data.length === 0) {
+        ulog(`  ${m.name}：返回空列表，换下一个源`);
+        continue;
+      }
+      ulog(`  ${m.name}：成功，${data.length} 条发行版`);
       return { list: data.map(mapRawRelease), source: m.name };
-    } catch { /* 换下一个源 */ }
+    } catch (e) {
+      ulog(`  ${m.name}：失败（${(e as Error).message}），换下一个源`);
+    }
   }
+  ulog('所有镜像都失败了：拿不到发行版信息');
   return null;
 }
 
