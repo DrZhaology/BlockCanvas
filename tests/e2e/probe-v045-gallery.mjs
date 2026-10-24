@@ -26,7 +26,7 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-probe-gallery');
   rmSync(DATA_DIR, { recursive: true, force: true });
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC = resolve(ROOT, 'extensions');
+  const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
 
   // 预先放一个素材进缓存目录（模拟"这个工程用过这张图"）

@@ -64,7 +64,7 @@ async function main() {
   // 清不掉就沿用旧目录，别让清理动作把整轮测试打断。
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC = resolve(ROOT, 'extensions');
+  const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
   // 导出验证：命中 BC_AUTO_EXPORT_PATH 时主进程跳过保存对话框直接落盘
   const EXPORT_PATH = resolve(ROOT, 'tests/e2e/tmp-table-export.html');

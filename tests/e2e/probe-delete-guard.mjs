@@ -36,7 +36,7 @@ async function main() {
     meta: { elementCount: 1 }
   }), 'utf-8');
   writeFileSync(join(DATA_DIR, 'backups', PROJ_NAME, 'snap-1.bcproj'), JSON.stringify({ name: PROJ_NAME }), 'utf-8');
-  for (const rel of [resolve(ROOT, 'extensions'), resolve(ROOT, 'data', 'extensions')]) {
+  for (const rel of [resolve(ROOT, 'builtin-extensions'), resolve(ROOT, 'data', 'extensions')]) {
     if (existsSync(rel)) cpSync(rel, resolve(DATA_DIR, 'extensions'), { recursive: true });
   }
   const env = { ...process.env, BC_DATA_DIR: DATA_DIR };

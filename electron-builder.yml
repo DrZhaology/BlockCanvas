@@ -38,6 +38,10 @@ asar: true
 extraResources:
   - from: build/icon.png
     to: icon.png
+  # v0.4.5：内置插件/资源包随包分发到这里，首次启动由主进程种进 data/extensions/。
+  # 运行时**只有** data/extensions/ 一个扩展目录（仓库根的 extensions/ 已改名为 builtin-extensions/）。
+  - from: builtin-extensions
+    to: builtin-extensions
 
 win:
   # 用 build/icon.png（256×256）自动生成 exe 图标

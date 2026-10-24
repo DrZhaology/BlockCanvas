@@ -18,7 +18,7 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-probe-data');
   rmSync(DATA_DIR, { recursive: true, force: true });
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC_EXT = resolve(ROOT, 'extensions');
+  const SRC_EXT = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC_EXT)) cpSync(SRC_EXT, resolve(DATA_DIR, 'extensions'), { recursive: true });
 
   const app = await electron.launch({

@@ -126,7 +126,7 @@ async function main() {
   rmSync(DATA_DIR, { recursive: true, force: true });
   mkdirSync(DATA_DIR, { recursive: true });
   // 内置扩展（插件 / 模板资源包）从源码 extensions/ 拷入隔离目录，保证模板类用例有数据可测
-  const SRC_EXT = resolve(ROOT, 'extensions');
+  const SRC_EXT = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC_EXT)) cpSync(SRC_EXT, resolve(DATA_DIR, 'extensions'), { recursive: true });
 
   // --disable-gpu 等参数：CI / 无独显环境下 Electron GPU 进程会反复崩溃导致启动失败

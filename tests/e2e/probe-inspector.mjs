@@ -23,7 +23,7 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-inspector-probe');
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC = resolve(ROOT, 'extensions');
+  const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
   const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;

@@ -26,7 +26,7 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-probe-perf');
   rmSync(DATA_DIR, { recursive: true, force: true });
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC = resolve(ROOT, 'extensions');
+  const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
 
   // 造 60 个素材，模拟"用户放了很多图"的场景

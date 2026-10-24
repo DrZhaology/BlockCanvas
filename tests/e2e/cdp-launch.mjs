@@ -23,7 +23,7 @@ export async function launchApp(opts = {}) {
   const DATA_DIR = opts.dataDir ?? resolve(tmpdir(), 'bc-cdp-' + process.pid);
   rmSync(DATA_DIR, { recursive: true, force: true });
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC = resolve(ROOT, 'extensions');
+  const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
 
   const port = opts.port ?? 9333;

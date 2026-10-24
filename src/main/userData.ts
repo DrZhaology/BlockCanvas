@@ -1,5 +1,5 @@
 import { app } from 'electron';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import {
   existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync, rmSync, copyFileSync
 } from 'node:fs';
@@ -473,13 +473,19 @@ function countNodes(node: any): number {
 }
 
 /**
- * 从「种子扩展目录」同步内置扩展到运行时 data/extensions/
- * 同名 id 覆盖，用户第三方扩展保留不动
+ * 从「内置扩展源目录」同步内置扩展到运行时 data/extensions/
+ * 同名 id 覆盖，用户第三方扩展保留不动。
+ *
+ * v0.4.5 目录统一：源码里的扩展**只放** `builtin-extensions/`（仓库根目录不再有 extensions/），
+ * 运行时**只读** data/extensions/。这里负责把内置的那份种进去，用户装的那份不受影响。
+ *   · 打包后：随包分发的 resources/builtin-extensions
+ *   · 开发态：仓库根的 builtin-extensions
  */
 function seedExtensionsFromZip(extDir: string) {
   try {
-    // 种子路径：exe 同级的 data/extensions/
-    const seedExtDir = join(dirname(process.execPath), 'data', 'extensions');
+    const seedExtDir = app.isPackaged
+      ? join(process.resourcesPath, 'builtin-extensions')
+      : join(app.getAppPath(), 'builtin-extensions');
     if (!existsSync(seedExtDir)) return;
 
     for (const kindDir of ['plugins', 'resources']) {

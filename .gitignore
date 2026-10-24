@@ -12,9 +12,10 @@ dist/
 
 # ---- 运行时数据（纯便携，含工程/快照/配置/缓存，绝对不进仓库）----
 data/
-
-# ---- 但保留源码级的扩展文件夹 ----
-!extensions/
+# v0.4.5：扩展目录统一 —— 运行时只有 data/extensions/（已被上面忽略）。
+# 仓库根目录的 extensions/ 曾经和它重名、容易混淆，已改名为 builtin-extensions/
+# （那是**源码**：内置插件与随包资源，打包时进 resources/builtin-extensions）。
+extensions/
 
 # ---- 日志 / 临时文件 ----
 *.log

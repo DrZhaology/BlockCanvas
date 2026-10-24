@@ -27,7 +27,7 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-probe-assets');
   rmSync(DATA_DIR, { recursive: true, force: true });
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC = resolve(ROOT, 'extensions');
+  const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
 
   // 造一张真实存在的本地图片（模拟"用户电脑上的图片"）
