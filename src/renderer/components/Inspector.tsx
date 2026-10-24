@@ -1051,19 +1051,20 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
           }
         >
           <span className="cls-warn-ico"><Icon name="warning" size={13} /></span>
-          <span className="cls-warn-line">
-            样式还没有名字，伪类样式导出后会失效
-          </span>
+          <div className="cls-warn-body">
+            <div className="cls-warn-title">样式还没有名字</div>
+            <div className="cls-warn-desc">伪类样式导出后会失效</div>
+          </div>
           <button
             className="cls-warn-btn"
             onClick={() => setSecOpen((p) => ({ ...p, identity: true }))}
             title="给当前元素起一个类名"
-          >起个名字</button>
+          >起名</button>
           <button
             className="cls-warn-btn is-ghost"
             onClick={() => window.dispatchEvent(new CustomEvent('bc:open-class'))}
             title="到「类名 · ID 总览」里批量给未命名元素起名"
-          >类名总览</button>
+          >总览</button>
         </div>
       )}
 

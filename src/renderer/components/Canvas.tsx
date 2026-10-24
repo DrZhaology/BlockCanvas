@@ -540,6 +540,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       return;
     }
     if (!e.altKey || e.button !== 0) return;
+    // 已经有一次 Alt 拖拽在跑：不要用新的锚点覆盖它（会造成"闪一下又回弹"）
+    if (altDragRef.current) return;
     const h = altHoverRef.current;
     if (!h) return;
     e.preventDefault();
@@ -611,6 +613,19 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const st = useScene.getState();
     if (!d.engaged) {
       d.engaged = true;
+      // v0.4.5：把锚点重置到"真正开始拖动的这一帧"。
+      // 用户可能先按住左键、过一会儿才按 Alt，这时 startX/startY 是按下 Alt 那一刻之前算的，
+      // dx/dy 一下子变成几十像素 → 元素先跳到旧锚点、下一帧再弹回鼠标（"闪到别处又回来"）。
+      // 这里把起点对齐到当前指针与当前 rect，dx/dy 从 0 开始，视觉上就不会跳。
+      const liveEl = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
+      if (liveEl) {
+        const r = liveEl.getBoundingClientRect();
+        d.rect = { ...d.rect, left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } as typeof d.rect;
+        d.startW = r.width;
+        d.startH = r.height;
+      }
+      d.startX = ev.clientX;
+      d.startY = ev.clientY;
       document.body.classList.add('bc-alt-dragging');
       if (d.mode === 'font') document.body.classList.add('bc-alt-fonting');
       // 拖动时常显"可达边界"提示线（橙色）——让内边距/外边距的界限一眼可见

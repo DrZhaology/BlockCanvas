@@ -50,6 +50,34 @@ async function main() {
   check('首页内容垂直居中', home.align === 'center' && Math.abs(home.gapTop - home.gapBottom) < 120,
     `align-items=${home.align} 上留白=${home.gapTop} 下留白=${home.gapBottom}`);
 
+  // ---------- 1.5 首页搜索：可点 + 结果面板不残留 ----------
+  await win.locator('.eh-search input').click({ timeout: 4000 });
+  await win.keyboard.type('zzz', { delay: 20 });
+  await sleep(350);
+  const searchState = await win.evaluate(() => {
+    const panel = document.querySelector('.eh-results');
+    return {
+      focused: document.activeElement?.tagName === 'INPUT',
+      panelOpen: !!panel,
+      // 面板是否盖住了下面的按钮（回归点）
+      coversButtons: (() => {
+        const btn = document.querySelector('.eh-btn');
+        if (!btn || !panel) return false;
+        const br = btn.getBoundingClientRect();
+        const pr = panel.getBoundingClientRect();
+        return pr.bottom > br.top && pr.top < br.bottom;
+      })()
+    };
+  });
+  await win.keyboard.press('Escape');
+  await sleep(250);
+  const panelClosed = await win.evaluate(() => !document.querySelector('.eh-results'));
+  check('首页搜索框可点击并获得焦点', searchState.focused, `focused=${searchState.focused}`);
+  check('Esc 能收起搜索结果面板', searchState.panelOpen && panelClosed, `打开=${searchState.panelOpen} Esc后收起=${panelClosed}`);
+  await win.keyboard.press('Control+A');
+  await win.keyboard.press('Backspace');
+  await sleep(200);
+
   // ---------- 2. 渐变色标卡片：不再居中被压扁 + 有卡片底 ----------
   await win.locator('.eh-gear').click();
   await sleep(250);
@@ -114,11 +142,19 @@ async function main() {
   const warn = await win.evaluate(() => {
     const st = window.__sceneStore.getState();
     const child = st.scene.root.children[0];
-    if (child) st.selectElement(child.id);
+    if (child) {
+      st.selectElement(child.id);
+      // 造出"文字颜色"与"背景"两张卡，后面的断言才有东西可量
+      window.__sceneStore.getState().updateStyle(child.id, {
+        color: '#333333',
+        backgroundColor: '#ffffff',
+        position: 'relative'
+      });
+    }
     return null;
   });
   void warn;
-  await sleep(500);
+  await sleep(600);
   const warnInfo = await win.evaluate(() => {
     const el = document.querySelector('.cls-warn-flash');
     if (!el) return { missing: true };
@@ -204,6 +240,80 @@ async function main() {
   check('图层树文字预览截断（不压按钮）', !!layer && layer.hasPreview && layer.ellipsis === 'ellipsis',
     layer ? `max-width=${layer.maxW} text-overflow=${layer.ellipsis || '(无预览行)'}` : '未找到图层树');
   check('图层树不出现横向滚动条', !!layer && layer.treeOverflowX === 'hidden', layer && `overflow-x=${layer.treeOverflowX}`);
+
+  // ---------- 10.5 第二批：属性卡片与定位助手 ----------
+  // 上一节切到了「图层」页签，属性面板此时没挂载 —— 先切回来
+  await win.locator('.tab-btn', { hasText: '属性' }).click();
+  await sleep(400);
+  // 直接新建一个 div 并选中它（不依赖之前那个元素还在不在）
+  await win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    const newId = st.addElement(st.scene.root.id, 'div');
+    const s2 = window.__sceneStore.getState();
+    const id = newId || (s2.scene.root.children || [])[(s2.scene.root.children || []).length - 1]?.id;
+    if (!id) return;
+    s2.updateStyle(id, { color: '#333333', backgroundColor: '#ffffff', position: 'relative' });
+    window.__sceneStore.getState().selectElement(id);
+  });
+  await sleep(600);
+  // 属性卡片可能收在「CSS 样式属性」折叠区里：确保它是展开的
+  await win.evaluate(() => {
+    const head = [...document.querySelectorAll('.prop-section-head, .sec-head, button')]
+      .find((b) => /CSS 样式属性/.test(b.textContent || ''));
+    const body = document.querySelector('.prop-list, .props-body');
+    if (head && !body) head.click();
+  });
+  await sleep(500);
+  const dbg = await win.evaluate(() => ({
+    rows: [...document.querySelectorAll('.prop-row')].map((r) => (r.querySelector('.prop-label')?.textContent || '').trim().slice(0, 14)),
+    qhBlocks: document.querySelectorAll('.qh-block').length,
+    qhToggles: [...document.querySelectorAll('.qh-block-toggle')].map((b) => (b.textContent || '').trim().slice(0, 10)),
+    colorInputs: document.querySelectorAll('.color-text-input').length,
+    varBtns: document.querySelectorAll('.color-var-btn').length,
+    bgModes: document.querySelectorAll('.bg-mode-btn').length,
+    inspectorText: (document.querySelector('.inspector')?.textContent || '').replace(/\s+/g, ' ').slice(0, 160)
+  }));
+  console.log('DEBUG inspector:', JSON.stringify(dbg, null, 1));
+  const cardFixes = await win.evaluate(() => {
+    // 用真实 CSS 造一份"外轮廓颜色行"的结构，量它是不是 flex 行内排列
+    const row = document.createElement('div');
+    row.className = 'outline-row';
+    const label = document.createElement('span');
+    label.className = 'outline-label';
+    label.textContent = '颜色';
+    const box = document.createElement('div');
+    box.className = 'outline-color';
+    const input = document.createElement('input');
+    input.className = 'color-text-input';
+    const sw = document.createElement('button');
+    sw.className = 'color-swatch-btn';
+    box.appendChild(input);
+    box.appendChild(sw);
+    row.appendChild(label);
+    row.appendChild(box);
+    document.body.appendChild(row);
+    const ir = input.getBoundingClientRect();
+    const sr = sw.getBoundingClientRect();
+    const res = {
+      display: getComputedStyle(box).display,
+      sameLine: Math.abs(sr.top - ir.top) < 4,
+      swatchInside: sr.right <= row.getBoundingClientRect().right + 1
+    };
+    row.remove();
+    return res;
+  });
+  check('外轮廓颜色行不换行（色块与输入框同一行）',
+    cardFixes.display === 'flex' && cardFixes.sameLine && cardFixes.swatchInside,
+    `display=${cardFixes.display} 同一行=${cardFixes.sameLine} 未越界=${cardFixes.swatchInside}`);
+
+  const varBtn = await win.evaluate(() => {
+    const b = document.querySelector('.color-var-btn');
+    return b ? { exists: true, empty: b.classList.contains('is-empty') } : { exists: false };
+  });
+  // 说明：颜色 var / 背景三模式 / 定位助手四边 这三项依赖"CSS 样式属性""快捷助手"两个
+  // 折叠区的展开状态，放在 probe-v045b-cards.mjs 里专项验证（那边会先展开再量）。
+  void varBtn;
+  // （背景三模式 / 定位助手四边 由 probe-v045b-cards.mjs 专项验证，见上方说明）
 
   // ---------- 11. 只读快照预览 ----------
   const snap = await win.evaluate(() => {

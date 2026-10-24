@@ -361,7 +361,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 6px 8px;
+  padding: 4px 8px;
   margin: 6px 0;
   border: 1px solid #fde68a;
   border-radius: 7px;
@@ -372,20 +372,35 @@
   flex-shrink: 0;
   color: #d97706;
 }
-.cls-warn-line {
+/* 两行小字：标题 + 一句原因。以前挤成一行会被截断成"样式还没有名字，…" */
+.cls-warn-body {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cls-warn-title {
   font-size: 11.5px;
-  line-height: 1.5;
+  font-weight: 600;
+  line-height: 1.4;
   color: #92400e;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.cls-warn-desc {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: #b45309;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cls-warn-btn {
   flex-shrink: 0;
   height: 22px;
-  padding: 0 8px;
+  padding: 0 7px;
   border: 1px solid #f59e0b;
   border-radius: 5px;
   background: #fff;
@@ -472,6 +487,73 @@
 }
 .pos-hint strong { color: var(--text); font-weight: 600; }
 
+/* —— B1：四边偏移不再溢出 ——
+   NumberUnitInput 本身是"数值 + 单位 + var"三段，塞进两列必然撑破面板。
+   改成单列四行，每行标签在左、输入在右，任何面板宽度都放得下。 */
+.pos-edges {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+.pos-edge { align-items: center; }
+.pos-edge > span { width: 20px; flex: 0 0 20px; }
+.pos-edge .num-unit-row { flex: 1 1 auto; min-width: 0; }
+.pos-edges.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.pos-static-note {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  padding: 0 2px;
+}
+
+/* —— B5：margin 冲突的内联确认条（不是全屏弹窗）—— */
+.pos-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 10px;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  background: #fffbeb;
+}
+.pos-confirm-text {
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: #92400e;
+}
+.pos-confirm-text strong { font-weight: 600; }
+.pos-confirm-text code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: #fef3c7;
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+}
+.pos-confirm-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.pos-confirm-btn {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.pos-confirm-btn:hover { border-color: #f59e0b; color: #92400e; background: #fef3c7; }
+.pos-confirm-btn.is-primary {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  color: #fff;
+  font-weight: 600;
+}
+.pos-confirm-btn.is-primary:hover { background: #d97706; color: #fff; }
+.pos-confirm-btn.is-ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
+.pos-confirm-btn.is-ghost:hover { background: #fef3c7; color: #92400e; }
+
 /* ---------- 12. 颜色色块：白色/透明也要看得见边界 ---------- */
 .color-swatch-btn { box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.1); }
 
@@ -485,3 +567,189 @@
 .fluent-content { max-width: 1080px; }
 /* 帮助中心正文（.help-doc 本身已有 900px 上限，这里只补左右呼吸位） */
 .help-scroll { padding-left: 32px; padding-right: 32px; }
+
+/* ---------- 15. 首页搜索：输入框永远可点，结果面板不吞点击 ----------
+   实测过的死锁：结果面板（.eh-results）挡住下面的按钮时，
+   点按钮的 mousedown 落在面板上 → 面板不关、按钮也点不到。
+   这里做三件事：输入框提到最上层；面板自身可滚动但不拦截空白区域；
+   面板高度受视口限制，不会盖住整页。 */
+.eh-search { position: relative; z-index: 4; }
+.eh-search input { position: relative; z-index: 1; }
+.eh-results {
+  max-height: min(340px, 46vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.eh-empty-hit { cursor: default; }
+
+/* ---------- 16. 添加属性菜单：↑↓ 键盘导航的高亮 ---------- */
+.add-prop-item.is-active,
+.add-prop-value-item.is-active {
+  background: var(--hover-accent, #eff6ff);
+  box-shadow: inset 2px 0 0 0 var(--accent, #1e88e5);
+}
+.add-prop-item.is-active.is-disabled { background: #f8fafc; box-shadow: none; }
+
+/* ============================================================================
+   17. 属性卡片体系（v0.4.5 第二批）
+   ========================================================================== */
+
+/* —— A1：颜色行不再换行 ——
+   .outline-color 以前是普通块级 div，ColorField 的「输入框（块级）+ 色块按钮」
+   只能上下堆叠，于是色块掉到第二行。改成 flex 行内排列。 */
+.outline-color {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.outline-color .color-text-input { flex: 1 1 0; min-width: 0; width: auto; }
+.outline-color .color-swatch-btn { flex: 0 0 28px; }
+.outline-color .color-var-btn { flex: 0 0 auto; }
+
+/* 兜底：任何属性行里的颜色字段都保持"输入框 + 色块 + var"同一行 */
+.prop-row-body .color-text-input { flex: 1 1 0; min-width: 0; width: auto; }
+.prop-row-body .color-swatch-btn { flex: 0 0 28px; }
+
+/* —— A2：var 入口常显（没有变量时也给指引） —— */
+.color-var-btn.is-empty { opacity: 0.55; }
+.color-var-btn.is-empty:hover { opacity: 1; }
+.cp-varmenu-empty {
+  padding: 10px 12px;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text-muted);
+  max-width: 232px;
+}
+
+/* —— A4：选中态统一成"淡底 + 描边 + 深色字"，不再整块实心蓝 —— */
+.seg-btn { border-radius: 6px; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+.seg-btn.active,
+.outline-style-btn.active,
+.grid-span-btn.active,
+.flex-mini-btn.active,
+.bg-mode-btn.active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(30, 136, 229, 0.10);
+}
+.seg-btn.active:hover,
+.outline-style-btn.active:hover,
+.grid-span-btn.active:hover,
+.flex-mini-btn.active:hover { background: #e3efff; border-color: #60a5fa; color: #1e40af; }
+
+/* —— A5：左侧色条只表示"分类"，「不生效」改用徽标 + 虚线表达 ——
+   以前不生效用 #fbbf24 黄条，和「边框与阴影」分类的 #f59e0b 几乎同色，
+   看起来像"同一种状态却长得不一样"，所以统一语义。 */
+.prop-row.is-inapplicable {
+  background: #fbfbfc;
+  border-left-color: #cbd5e1;
+  border-left-style: dashed;
+}
+.prop-row.is-inapplicable .prop-label { color: var(--text-muted); }
+.prop-row.is-inapplicable .prop-row-body { opacity: 0.82; }
+
+/* —— A6：线型按钮文字不再被挤成两行 —— */
+.outline-styles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  width: 100%;
+}
+.outline-style-btn { white-space: nowrap; justify-content: flex-start; padding: 0 8px; }
+.outline-style-btn .outline-sample { flex: 0 0 18px; }
+
+/* —— A3：背景图片模式 —— */
+.bg-image-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.bg-image-thumb {
+  height: 92px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-soft) center/cover no-repeat;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+.bg-image-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.bg-image-thumb.is-empty {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  gap: 6px;
+  grid-auto-flow: row;
+  align-content: center;
+  justify-items: center;
+}
+.bg-image-url-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bg-image-url {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+}
+.bg-image-url:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.bg-image-pick { flex: 0 0 auto; white-space: nowrap; }
+.bg-image-opts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.bg-image-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.bg-image-opt > span {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.bg-image-opt select {
+  height: 26px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+  min-width: 0;
+}
+.bg-image-clear {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.bg-image-clear:hover { color: var(--danger); background: #fef2f2; border-color: #fca5a5; }

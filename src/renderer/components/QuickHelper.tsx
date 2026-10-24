@@ -6,7 +6,7 @@ import { HelpButton } from './HelpButton';
 import { GradientEditor } from './GradientEditor';
 import { Collapse } from './Collapse';
 import { Icon } from './Icon';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { usePersistedBool } from '@lib/usePersisted';
 import {
   isGradient,
@@ -94,6 +94,7 @@ export function QuickHelper(props: Props) {
   // 折叠状态全部记住：下次打开还是用户熟悉的样子
   const [layoutOpen, setLayoutOpen] = usePersistedBool('qh-layout-open', true);
   const [posOpen, setPosOpen] = usePersistedBool('qh-position-open', false);
+  const [marginConfirm, setMarginConfirm] = useState<'x' | 'y' | null>(null);
   const [gradOpen, setGradOpen] = usePersistedBool('qh-textgrad-open', true);
   const gradDraftRef = useRef('');
 
@@ -101,6 +102,44 @@ export function QuickHelper(props: Props) {
   if (!node) return null;
 
   const eff = getEffectiveStyle(node, activeBreakpoint) as Record<string, string | undefined>;
+
+  // —— 定位助手：居中前先看原有 margin，避免和 margin:auto 打架（v0.4.5）——
+  const marginSides = ['marginTop', 'marginRight', 'marginBottom', 'marginLeft'] as const;
+  const marginVals = marginSides.map((k) => eff[k] ?? '');
+  const marginSummary = marginVals
+    .map((v, i) => `${['上', '右', '下', '左'][i]} ${v || '0'}`)
+    .join(' · ');
+  const marginDirty = marginVals.some((v) => !!v && v !== '0' && v !== '0px' && v !== 'auto');
+  const marginIrregular = new Set(marginVals.map((v) => v || '0px')).size > 1;
+
+  const applyCenter = (axis: 'x' | 'y', clearFirst: boolean) => {
+    beginStyleEdit();
+    const positioned = ['absolute', 'fixed'].includes(eff.position ?? '');
+    const clear = clearFirst
+      ? (axis === 'x'
+        ? { marginLeft: '0px', marginRight: '0px' }
+        : { marginTop: '0px', marginBottom: '0px' })
+      : {};
+    const center = axis === 'x'
+      ? (positioned
+        ? { left: '0px', right: '0px', marginLeft: 'auto', marginRight: 'auto' }
+        : { marginLeft: 'auto', marginRight: 'auto' })
+      : (positioned
+        ? { top: '0px', bottom: '0px', marginTop: 'auto', marginBottom: 'auto' }
+        : { marginTop: 'auto', marginBottom: 'auto' });
+    updateStyle(elementId, { ...clear, ...center });
+    endStyleEdit();
+    setMarginConfirm(null);
+  };
+
+  const requestCenter = (axis: 'x' | 'y') => {
+    if (marginDirty || marginIrregular) {
+      setMarginConfirm(axis);
+      return;
+    }
+    applyCenter(axis, false);
+  };
+
   const isContainer = CONTAINER_TAGS.has(elementType);
   const isText = TEXT_TAGS.has(elementType) || node.text !== undefined;
 
@@ -389,42 +428,30 @@ export function QuickHelper(props: Props) {
               </select>
             </div>
 
-            {(eff.position === 'absolute' || eff.position === 'fixed' || eff.position === 'relative' || eff.position === 'sticky') && (
-              <div className="pos-edges">
-                {([['top', '上'], ['right', '右'], ['bottom', '下'], ['left', '左']] as const).map(([k, label]) => (
-                  <div className="pos-edge" key={k}>
-                    <span>{label}</span>
-                    <NumberUnitInput elementId={elementId} schemaKey={k} unit="px" />
-                  </div>
-                ))}
-              </div>
+            {/* 四边偏移常显：static 时禁用并说明，避免"选了定位才出现"造成的困惑 */}
+            <div className={'pos-edges' + (['absolute', 'fixed', 'relative', 'sticky'].includes(eff.position ?? '') ? '' : ' is-disabled')}>
+              {([['top', '上'], ['right', '右'], ['bottom', '下'], ['left', '左']] as const).map(([k, label]) => (
+                <div className="pos-edge" key={k}>
+                  <span>{label}</span>
+                  <NumberUnitInput elementId={elementId} schemaKey={k} unit="px" />
+                </div>
+              ))}
+            </div>
+            {!['absolute', 'fixed', 'relative', 'sticky'].includes(eff.position ?? '') && (
+              <div className="pos-static-note">当前是默认流式布局：先在上面选一种定位方式，四边偏移才会生效。</div>
             )}
 
             <div className="pos-actions">
               <button
                 className="pos-btn"
-                onClick={() => {
-                  beginStyleEdit();
-                  const positioned = ['absolute', 'fixed'].includes(eff.position ?? '');
-                  updateStyle(elementId, positioned
-                    ? { left: '0px', right: '0px', marginLeft: 'auto', marginRight: 'auto' }
-                    : { marginLeft: 'auto', marginRight: 'auto' });
-                  endStyleEdit();
-                }}
+                onClick={() => requestCenter('x')}
                 title={['absolute', 'fixed'].includes(eff.position ?? '')
                   ? '左右都设 0 + 外边距自动 → 水平居中（需要元素有明确宽度）'
                   : '左右外边距自动 → 块级元素水平居中（需要元素有明确宽度）'}
               ><Icon name="columns" size={13} /> 水平居中</button>
               <button
                 className="pos-btn"
-                onClick={() => {
-                  beginStyleEdit();
-                  const positioned = ['absolute', 'fixed'].includes(eff.position ?? '');
-                  updateStyle(elementId, positioned
-                    ? { top: '0px', bottom: '0px', marginTop: 'auto', marginBottom: 'auto' }
-                    : { marginTop: 'auto', marginBottom: 'auto' });
-                  endStyleEdit();
-                }}
+                onClick={() => requestCenter('y')}
                 title="上下都设 0 + 外边距自动 → 垂直居中（需要元素有明确高度；流式元素需要父级是 Flex 才生效）"
               ><Icon name="rows" size={13} /> 垂直居中</button>
               <button
@@ -436,10 +463,32 @@ export function QuickHelper(props: Props) {
                     marginLeft: 'auto', marginRight: 'auto', marginTop: 'auto', marginBottom: 'auto'
                   });
                   endStyleEdit();
+                  setMarginConfirm(null);
                 }}
                 title="清掉定位与偏移，回到普通文档流"
               ><Icon name="undo" size={13} /> 清除定位</button>
             </div>
+
+            {/* 内联确认条（不是全屏弹窗）：原 margin 不对称/非零时，先问一句再清零 */}
+            {marginConfirm && (
+              <div className="pos-confirm">
+                <div className="pos-confirm-text">
+                  这个元素已有<strong>非零或不对称</strong>的外边距（{marginSummary}）。
+                  居中要用 <code>margin:auto</code>，会和它冲突。
+                </div>
+                <div className="pos-confirm-actions">
+                  <button className="pos-confirm-btn is-primary" onClick={() => applyCenter(marginConfirm, true)}>
+                    先清零再居中
+                  </button>
+                  <button className="pos-confirm-btn" onClick={() => applyCenter(marginConfirm, false)}>
+                    保留原 margin
+                  </button>
+                  <button className="pos-confirm-btn is-ghost" onClick={() => setMarginConfirm(null)}>
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="pos-hint">
               居中生效需要元素有<strong>明确宽/高</strong>（或由内容撑开）。fixed 定位相对窗口，滚动页面也不动。

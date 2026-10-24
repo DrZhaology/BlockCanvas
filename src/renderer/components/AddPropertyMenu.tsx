@@ -163,6 +163,22 @@ export function AddPropertyMenu(props: Props) {
 
   const q = search.trim().toLowerCase();
 
+  // v0.4.5：属性搜索框支持 ↑↓ 在结果间移动、Enter 直接插入。
+  // 用 DOM 顺序做导航（值命中排在前面、属性名按分组排在后面），
+  // 这样不用关心渲染结构怎么分组，索引永远和眼睛看到的一致。
+  const [activeIdx, setActiveIdx] = useState(0);
+  const navItems = (): HTMLElement[] =>
+    Array.from(menuRef.current?.querySelectorAll<HTMLElement>('.add-prop-item, .add-prop-value-item') ?? []);
+
+  useEffect(() => { setActiveIdx(0); }, [q]);
+
+  useEffect(() => {
+    if (!open) return;
+    const items = navItems();
+    items.forEach((el, i) => el.classList.toggle('is-active', i === activeIdx));
+    items[activeIdx]?.scrollIntoView({ block: 'nearest' });
+  }, [activeIdx, q, open, search]);
+
   /** 该属性的检索用"干草堆"（标签 / key / 连字符 key / 别名 / 4 边 key / 类别） */
   const hayOf = (s: PropertySchema): string => {
     const camelDash = s.key.replace(/([A-Z])/g, (m) => '-' + m.toLowerCase());
@@ -293,6 +309,24 @@ export function AddPropertyMenu(props: Props) {
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  const items = navItems();
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (!items.length) return;
+                    setActiveIdx((i) => {
+                      const n = items.length;
+                      const cur = Math.min(Math.max(i, 0), n - 1);
+                      return e.key === 'ArrowDown' ? (cur + 1) % n : (cur - 1 + n) % n;
+                    });
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    items[Math.min(Math.max(activeIdx, 0), items.length - 1)]?.click();
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeMenu();
+                  }
+                }}
                 placeholder="搜索属性：中文 / CSS 名（如：过渡、圆角、border、wrap）"
               />
               {search && (

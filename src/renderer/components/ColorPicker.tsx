@@ -376,17 +376,22 @@ export function ColorField(props: ColorFieldProps) {
         onClick={(e) => { e.stopPropagation(); openModal(); }}
         title={value === 'transparent' ? '当前颜色：透明 (transparent)' : '打开调色盘'}
       />
-      {/* v0.4.5：「var」快捷引用 —— 有颜色变量时显示，一键写入 var(--bc-*) */}
-      {colorTokens.length > 0 && (
+      {/* v0.4.5：「var」快捷引用 —— 与数值字段保持一致，**常显**。
+          以前只在"项目里已有颜色变量"时才出现，导致新项目里颜色字段全都没有 var 入口，
+          而旁边的数值字段却有 —— 看起来像功能缺失。现在没有变量时也会打开菜单，
+          里面给出"还没有颜色变量"的说明与新建指引。 */}
+      {!props.noTokens && (
         <button
           ref={varBtnRef}
-          className="color-var-btn"
+          className={'color-var-btn' + (colorTokens.length === 0 ? ' is-empty' : '')}
           onClick={(e) => {
             e.stopPropagation();
             if (varMenu) { setVarMenu(null); return; }
             openVarMenu();
           }}
-          title="引用设计变量：选一个变量写入 var() 引用（改变量全站一起变）"
+          title={colorTokens.length > 0
+            ? '引用设计变量：选一个变量写入 var() 引用（改变量全站一起变）'
+            : '还没有颜色变量：点开可以看到新建指引'}
         >var</button>
       )}
       {varMenu && createPortal(
@@ -394,6 +399,12 @@ export function ColorField(props: ColorFieldProps) {
           <div className="cp-varmenu-mask" onMouseDown={() => setVarMenu(null)} />
           <div className="cp-varmenu" style={{ left: varMenu.x, top: varMenu.y }}>
             <div className="cp-varmenu-title">引用设计变量</div>
+            {colorTokens.length === 0 && (
+              <div className="cp-varmenu-empty">
+                还没有颜色变量。<br />
+                到右侧面板「变量」页签点「模板 → 主色」，建一个后这里就能一键引用。
+              </div>
+            )}
             {colorTokens.map((t) => (
               <button
                 key={t.name}

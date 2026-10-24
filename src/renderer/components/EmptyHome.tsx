@@ -214,15 +214,40 @@ export function EmptyHome(props: {
   }, [panelOpen]);
 
   // 搜索框点外部 → 收起结果
+  // v0.4.5 修复：以前只监听 document 的 mousedown，且"点在 .eh-search 内部就不关"。
+  // 结果面板本身在 .eh-search 里，于是它挡住下面的按钮时，点按钮的 mousedown 落在面板上
+  // → 面板不关、按钮也点不到，形成死锁（用户反馈"首页搜索框点不进去"）。
+  // 现在：① 点面板的空白处也关；② 窗口失焦（弹原生对话框等）就关；
+  //       ③ Esc 关；④ 组件挂载时清空查询词与焦点状态。
   useEffect(() => {
     if (!focused) return;
     const onDown = (e: MouseEvent) => {
-      if (searchRef.current?.contains(e.target as Node)) return;
+      const t = e.target as HTMLElement | null;
+      // 点结果项本身要交给它自己的 onClick 处理
+      if (t?.closest?.('.eh-hit, .eh-result, .eh-search-clear')) return;
+      if (searchRef.current?.contains(e.target as Node) && !t?.closest?.('.eh-results')) return;
       setFocused(false);
     };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFocused(false); };
+    const onBlur = () => setFocused(false);
     document.addEventListener('mousedown', onDown, true);
-    return () => document.removeEventListener('mousedown', onDown, true);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      document.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('blur', onBlur);
+    };
   }, [focused]);
+
+  // 回到首页（组件重新挂载）时，搜索状态必须是干净的
+  // —— 否则上次的查询词 + 结果面板会挂在页面上挡住按钮。
+  useEffect(() => {
+    setQuery('');
+    setFocused(false);
+    setActiveIdx(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // —— 视频背景：窗口不可见 / 首页卸载时暂停，避免后台空转 ——
   const videoRef = useRef<HTMLVideoElement>(null);

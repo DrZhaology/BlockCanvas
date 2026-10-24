@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { useScene, findNode } from '@store/sceneStore';
 import { CSS_UNITS, UNIT_LABELS } from '@lib/propertySchema';
 import { useWheelAdjust } from '@lib/wheelAdjust';
-import { usePersistedBool } from '@lib/usePersisted';
 
 // BlockCanvas · 四值输入（上 / 右 / 下 / 左 分开填写）
 // 设计动机：过去是一个"简写输入框"（要用户自己记住 `8px 4px 8px 4px` 的 CSS 简写顺序），
@@ -36,8 +35,10 @@ export function TrblInput(props: Props) {
   const updateStyle = useScene((s) => s.updateStyle);
 
   const [u, setU] = useState(unit ?? 'px');
-  // 「四边同步」是操作习惯，记住它 —— 上次勾着，下次打开还勾着
-  const [sync, setSync] = usePersistedBool('trbl-sync', false);
+  // 「四边同步」是操作习惯，但 v0.4.5 起**不再记忆**：每次打开都是分边独立。
+  // 原因：上次勾着的话，用户改一边另外三边跟着变，很容易在不知情的情况下把
+  // 原本不对称的 padding/margin 抹平（用户反馈"为什么自动四边同步"）。
+  const [sync, setSync] = useState(false);
 
   const node = findNode(scene.root, elementId);
   const style = (node?.style ?? {}) as Record<string, string | undefined>;
