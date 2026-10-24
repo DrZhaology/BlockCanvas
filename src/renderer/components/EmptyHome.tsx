@@ -199,9 +199,17 @@ export function EmptyHome(props: {
   };
 
   // 面板点外部 / Esc 关闭
+  // v0.4.5 修复：调色盘 / 变量菜单 / 取色面板都是 createPortal 挂到 body 的，
+  // 在它们上面按下鼠标会被当成"点了面板外面"，于是选完色标颜色整个设置面板就关了。
+  // 这里把「属于调色盘体系」的浮层排除掉。
   useEffect(() => {
     if (!panelOpen) return;
+    const inPicker = (t: EventTarget | null) =>
+      !!(t as HTMLElement | null)?.closest?.(
+        '.cp-modal, .cp-modal-mask, .cp-varmenu, .cp-varmenu-mask, .cp-sv, .cp-hue, .cp-alpha, .bc-color-portal'
+      );
     const onDown = (e: MouseEvent) => {
+      if (inPicker(e.target)) return;
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) setPanelOpen(false);
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPanelOpen(false); };

@@ -85,6 +85,9 @@ export function Inspector() {
   const selectedIdForSync = scene.selectedId;
   useEffect(() => {
     setJustAddedKey(null);
+    // v0.4.5：选中元素时，无论当前停在「类名 / 页面 / 变量」哪个页签，都跳回「元素」。
+    // 用户的心智是"我点了一个元素，就要看这个元素的属性"；停在别处会让人以为没选中。
+    if (selectedIdForSync) setInspectorTabRaw('element');
   }, [selectedIdForSync]);
 
   // 中键属性搜索：右侧面板可能停在「页面 / 类名 / 变量」页签（ElementPropsBody 未挂载），
@@ -440,6 +443,16 @@ function PageCssBody() {
 }
 
 // ============ 页面属性卡片（与元素 CSS 属性行同一套视觉 / 编辑器） ============
+// v0.4.5：删除属性时先播一段"向右滑出"再真正删除，避免行"啪"地消失。
+// 系统开了"减少动态效果"时直接删（不做动画）。
+function animateRemove(el: Element | null, done: () => void) {
+  const row = el?.closest('.prop-row') as HTMLElement | null;
+  const reduce = typeof window !== 'undefined'
+    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (!row || reduce) { done(); return; }
+  row.classList.add('is-leaving');
+  window.setTimeout(done, 170);
+}
 // 只绑定「值 + 写回」，不碰元素 / 断点，所以能同时服务 body 常用项与任意全局 CSS。
 function PagePropRow(props: {
   label: string;
@@ -469,7 +482,7 @@ function PagePropRow(props: {
           {props.label}
           {schema?.help && <HelpButton title={schema.help.title} content={schema.help.content} />}
         </span>
-        <button className="prop-remove" title="删除此属性" onClick={props.onRemove}>
+        <button className="prop-remove" title="删除此属性" onClick={(e) => animateRemove(e.currentTarget, props.onRemove)}>
           <Icon name="close" size={12} />
         </button>
       </div>
@@ -2000,7 +2013,7 @@ function PropertyRow(props: {
 
   return (
     <div
-      className={'prop-row' + (highlight ? ' highlight' : '') + (flash ? ' flash' : '') + (!app.applicable ? ' is-inapplicable' : '')}
+      className={'prop-row' + (highlight ? ' highlight is-just-added' : '') + (flash ? ' flash' : '') + (!app.applicable ? ' is-inapplicable' : '')}
       // 分类配色：CSS 用 data-cat 给每类属性一条不同颜色的左边线，密集列表也能一眼分清
       data-cat={schemaItem.category}
       // 中键搜索定位用：找到这一行并滚动/高亮
@@ -2036,7 +2049,7 @@ function PropertyRow(props: {
           )}
           {highlight && <span className="prop-new-badge">新</span>}
         </span>
-        <button className="prop-remove" title="删除此属性" onClick={onRemove}><Icon name="close" size={12} /></button>
+        <button className="prop-remove" title="删除此属性" onClick={(e) => animateRemove(e.currentTarget, onRemove)}><Icon name="close" size={12} /></button>
       </div>
       <div className="prop-row-body">
         {schemaItem.input === 'font' && (

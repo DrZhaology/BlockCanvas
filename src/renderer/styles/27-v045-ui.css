@@ -368,10 +368,18 @@
   background: #fffbeb;
 }
 .cls-warn-flash .cls-warn-ico {
-  display: inline-flex;
-  flex-shrink: 0;
+  /* 必须保持 grid + place-items：13 号文件给它设了 28px 圆角方块，
+     改成 inline-flex 后 place-items 失效，图标会贴左上角（看起来"歪了"）。 */
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
   color: #d97706;
+  background: rgba(245, 158, 11, 0.16);
+  border-radius: 8px;
 }
+.cls-warn-flash .cls-warn-ico svg { display: block; }
 /* 两行小字：标题 + 一句原因。以前挤成一行会被截断成"样式还没有名字，…" */
 .cls-warn-body {
   flex: 1;
@@ -418,9 +426,19 @@
 .empty-home {
   align-items: center;
   padding: 24px;
-  overflow-y: auto;
+  /* 不能用 overflow-y:auto —— 媒体背景加了 filter:blur() 之后绘制范围会外扩，
+     会被算进滚动区域，于是调模糊度时右侧冒出滚动条、整页还能轻微上下滑（抽搐感）。
+     这里整体裁切，超出的部分交给右侧设置面板自己滚。 */
+  overflow: hidden;
 }
 .empty-home .eh-center { max-height: 100%; }
+/* 设置面板自己限高 + 内部滚动，不再把整页撑开 */
+.eh-settings { max-height: calc(100vh - 28px); display: flex; flex-direction: column; }
+.eh-panel {
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 /* 矮窗口仍然从上往下排，避免内容被压出屏幕 */
 @media (max-height: 760px) {
   .empty-home { align-items: flex-start; padding-top: 6vh; }
@@ -753,3 +771,55 @@
   cursor: pointer;
 }
 .bg-image-clear:hover { color: var(--danger); background: #fef2f2; border-color: #fca5a5; }
+
+/* ============================================================================
+   18. 属性卡片的增删动画（v0.4.5 第三批）
+   —— 加：从右侧面板外滑进来 + 轻微压缩；删：向右滑出 + 收起高度。
+   ========================================================================== */
+@keyframes propRowIn {
+  from {
+    opacity: 0;
+    transform: translateX(34px) scale(0.97);
+  }
+  60% { opacity: 1; }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes propRowOut {
+  from {
+    opacity: 1;
+    transform: none;
+    max-height: 720px;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(40px) scale(0.96);
+    max-height: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-width: 0;
+  }
+}
+
+/* 新添加的那一行：从右侧滑入（只有刚加的那行有 .is-just-added，不会全列表一起动）
+   注意不要加 overflow:hidden —— 这行会长期带着 highlight，裁切会把行内的
+   下拉/浮层（添加属性菜单等）切掉。 */
+.prop-row.is-just-added {
+  animation: propRowIn 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform, opacity;
+}
+/* 删除中：向右滑出后再真正移除（Inspector 里 animateRemove 加这个类） */
+.prop-row.is-leaving {
+  animation: propRowOut 0.17s cubic-bezier(0.4, 0, 1, 1) forwards;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* 尊重系统"减少动态效果" */
+@media (prefers-reduced-motion: reduce) {
+  .prop-row.is-just-added,
+  .prop-row.is-leaving { animation: none; }
+}

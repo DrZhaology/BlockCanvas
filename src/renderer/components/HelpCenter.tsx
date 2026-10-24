@@ -89,6 +89,20 @@ function anchorSlug(text: string): string {
 
 /** 把 markdown 按标题切成"段落块"（用于建搜索索引）；先剥掉围栏代码块避免误判标题 */
 
+// ============================================================================
+// 文档跳转：滚到视口正中 + 黄色荧光笔闪一下（v0.4.5）
+// 用户反馈"搜索结果跳过去不知道跳到哪了"：落点要在屏幕中间，并且短暂高亮。
+// ============================================================================
+const FLASH_CLASS = 'bc-doc-hit';
+function centerAndFlash(el: HTMLElement, scroller: HTMLElement) {
+  const top = el.offsetTop - (scroller.clientHeight - el.offsetHeight) / 2;
+  scroller.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  el.classList.remove(FLASH_CLASS);
+  void el.offsetWidth; // 强制重排：连续点同一个结果也能重新播动画
+  el.classList.add(FLASH_CLASS);
+  window.setTimeout(() => el.classList.remove(FLASH_CLASS), 2600);
+}
+
 export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack }: {
   initialDoc?: DocKey;
   /** 从首页搜索直达某份文档的某一节 */
@@ -337,6 +351,8 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
   }, [query, html]);
 
   // 待跳转（点搜索结果）→ 内容渲染完成后滚动到目标段落
+  // v0.4.5：改成"滚到视口正中 + 黄色荧光笔闪一下"，让用户一眼看到落点在哪
+  //（以前只滚到顶部附近，长文档里经常落在屏幕边缘，看着像没跳）
   useEffect(() => {
     if (!pendingJump.current) return;
     const id = pendingJump.current;
@@ -344,7 +360,7 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
       const el = docRef.current?.querySelector('#' + CSS.escape(id)) as HTMLElement | null;
       const scroller = scrollRef.current;
       if (el && scroller) {
-        scroller.scrollTo({ top: Math.max(0, el.offsetTop - 24), behavior: 'smooth' });
+        centerAndFlash(el, scroller);
         setActiveId(id);
       }
       pendingJump.current = '';
