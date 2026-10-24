@@ -94,21 +94,23 @@ html[data-bc-dark] .bc-storage-keep { background: rgba(255, 255, 255, 0.06); }
 .canvas [data-bc-sel="1"] {
   outline: 2px solid #f97316;
   outline-offset: -2px;
-  animation: bcSelGlow 1.6s ease-in-out infinite;
+  /* v0.4.5：不再做呼吸闪烁 —— 多选时每个元素都在跑无限动画，
+     满屏橙色闪光既刺眼又费 GPU。改成静态描边 + 一层很轻的固定光晕。 */
+  filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.5));
 }
+/* 保留 keyframes 以备将来做"一次性"提示用（目前无人引用，可安全删除） */
 @keyframes bcSelGlow {
   0%, 100% { filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.45)) drop-shadow(0 0 1px rgba(249, 115, 22, 0.65)); }
   50%      { filter: drop-shadow(0 0 13px rgba(249, 115, 22, 0.85)) drop-shadow(0 0 3px rgba(249, 115, 22, 0.95)); }
 }
-/* 可选样式：原来的蓝色单一边框（无光晕无闪烁） */
+/* 可选样式：蓝色单一边框（无光晕） */
 body.bc-sel-plain .canvas [data-bc-sel="1"] {
   outline: 2px solid #1e88e5;
-  animation: none;
   filter: none;
 }
 /* 行内元素合并外框（Canvas 层画的）跟随同一种样式 */
-.canvas-inline-sel { animation: bcSelGlow 1.6s ease-in-out infinite; }
-body.bc-sel-plain .canvas-inline-sel { animation: none; filter: none; }
+.canvas-inline-sel { filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.5)); }
+body.bc-sel-plain .canvas-inline-sel { filter: none; }
 
 /* v0.4.4：按住 Alt 时隐藏"已选中"的橙色框 ——
    这时用户看的是 Alt 悬停/拖动框，两个橙框叠在一起会分不清哪个是"选中"哪个是"正在改"。 */

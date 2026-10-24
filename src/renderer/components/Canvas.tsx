@@ -1761,7 +1761,9 @@ const CanvasNode = React.memo(function CanvasNode(props: {
           muted: node.attrs?.muted === '1',
           autoPlay: false,
           playsInline: node.type === 'video',
-          preload: 'metadata'
+          // v0.4.5 性能：没选中的媒体只读元数据，不预解码 ——
+          // 页面上有十几个视频时，全部预载会直接把 GPU/内存吃满。
+          preload: isSelected ? 'metadata' : 'none'
         }
       : {})
   } as const;
@@ -1782,6 +1784,10 @@ const CanvasNode = React.memo(function CanvasNode(props: {
       selfProps.alt = (node.attrs?.alt ?? '') || node.text || '';
       const rawSrc = node.attrs?.src;
       if (rawSrc) selfProps.src = toRenderableSrc(rawSrc);
+      // v0.4.5 性能：4K 图按原分辨率解码，每张约 33MB RGBA —— 50 张就是 1.6GB。
+      // lazy 让浏览器只解码视口附近的；async 让解码不阻塞主线程（滚动更顺）。
+      selfProps.loading = 'lazy';
+      selfProps.decoding = 'async';
     } else if (node.type === 'input') {
       selfProps.type = node.attrs?.typeAttr || 'text';
       if (node.attrs?.placeholder) selfProps.placeholder = node.attrs.placeholder;

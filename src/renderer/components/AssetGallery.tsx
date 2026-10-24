@@ -27,10 +27,18 @@ type CachedAsset = {
 
 const fmtKB = (n: number) => (n > 1024 * 1024 ? (n / 1024 / 1024).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 
+/**
+ * 一次只渲染这么多缩略图（v0.4.5 性能）。
+ * 50 张 4K 图全部挂到 DOM 上，每张解码后约 33MB RGBA，直接把内存吃穿 2~3GB。
+ * 配合 loading="lazy" 与 CSS 的 content-visibility，未滚到的卡片不解码、不排版。
+ */
+const PAGE = 36;
+
 export function AssetGallery() {
   const [items, setItems] = useState<CachedAsset[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [shown, setShown] = useState(PAGE);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,28 +104,35 @@ export function AssetGallery() {
       )}
 
       {!loading && items.length > 0 && (
-        <div className="asset-gallery-grid">
-          {items.map((a) => (
-            <button
-              key={a.name}
-              className="asset-item"
-              onClick={() => insert(a)}
-              title={`${a.name}\n${fmtKB(a.bytes)} · 点击插入到画布`}
-            >
-              <span className="asset-thumb">
-                {a.kind === 'image'
-                  ? <img src={a.url} alt="" draggable={false} />
-                  : <span className="asset-thumb-ico">
-                      <Icon name={a.kind === 'video' ? 'video' : 'note'} size={20} />
-                    </span>}
-              </span>
-              <span className="asset-meta">
-                <span className="asset-kind">{a.kind === 'image' ? '图片' : a.kind === 'video' ? '视频' : a.kind === 'audio' ? '音频' : '文件'}</span>
-                <span className="asset-size">{fmtKB(a.bytes)}</span>
-              </span>
+        <>
+          <div className="asset-gallery-grid">
+            {items.slice(0, shown).map((a) => (
+              <button
+                key={a.name}
+                className="asset-item"
+                onClick={() => insert(a)}
+                title={`${a.name}\n${fmtKB(a.bytes)} · 点击插入到画布`}
+              >
+                <span className="asset-thumb">
+                  {a.kind === 'image'
+                    ? <img src={a.url} alt="" draggable={false} loading="lazy" decoding="async" />
+                    : <span className="asset-thumb-ico">
+                        <Icon name={a.kind === 'video' ? 'video' : 'note'} size={20} />
+                      </span>}
+                </span>
+                <span className="asset-meta">
+                  <span className="asset-kind">{a.kind === 'image' ? '图片' : a.kind === 'video' ? '视频' : a.kind === 'audio' ? '音频' : '文件'}</span>
+                  <span className="asset-size">{fmtKB(a.bytes)}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          {items.length > shown && (
+            <button className="asset-gallery-more" onClick={() => setShown((n) => n + PAGE)}>
+              显示更多（还有 {items.length - shown} 个）
             </button>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
   );

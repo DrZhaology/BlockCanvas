@@ -1188,6 +1188,86 @@
   cursor: pointer;
   text-align: left;
   transition: border-color 0.15s ease, transform 0.12s ease;
+  /* v0.4.5 性能：屏幕外的卡片不排版、不解码、不绘制。
+     50 张 4K 图全渲染会吃掉 2~3GB 内存，这一条是主要的止血手段。 */
+  content-visibility: auto;
+  contain-intrinsic-size: 92px 96px;
+}
+.asset-gallery-more {
+  align-self: center;
+  margin-top: 4px;
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+/* ============================================================================
+   24. 用户反馈批次（v0.4.5 第四批）
+   ========================================================================== */
+
+/* —— A2：首页永远居中 ——
+   以前矮窗口（<760px）会退回顶部对齐，于是"窗口大的时候在中间、小的时候跑到上面"。
+   用户明确要求统一：一直都居中。 */
+@media (max-height: 760px) {
+  .empty-home { align-items: center; padding-top: 24px; }
+}
+
+/* —— C补11：选中边框不再呼吸闪烁 ——
+   多选时每个元素都在跑 1.6s 无限动画 → 满屏橙色闪光。
+   改成静态橙色描边 + 一层很轻的固定光晕，靠"有没有描边"表达选中即可。 */
+.canvas [data-bc-sel="1"] {
+  animation: none !important;
+  filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.5));
+}
+.canvas-inline-sel {
+  animation: none !important;
+  filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.5));
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* 只给"单选"一个极轻的入场提示：一次性，不循环 */
+  .canvas [data-bc-sel="1"] { animation: bcSelOnce 0.32s ease-out 1; }
+}
+@keyframes bcSelOnce {
+  from { filter: drop-shadow(0 0 10px rgba(249, 115, 22, 0.9)); }
+  to   { filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.5)); }
+}
+
+/* —— F1：外轮廓预览改成直角 ——
+   outline 本身跟随元素圆角，但预览框是我们自己画的示意盒子，
+   带圆角会让人以为"外轮廓是圆的"。 */
+.outline-preview-box { border-radius: 0; }
+
+/* —— N：设置页正文整体居中 ——
+   .fluent-content 是 flex 子项且有 max-width，不加 auto 外边距就贴在左边。 */
+.fluent-content {
+  max-width: 1080px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* —— M：更新中心可以上下滚（历史版本多的时候要能看全）——
+   两条旧规则在 overflow 上互相打架，这里统一成"页面自己滚"。 */
+.update-page {
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+.update-body { overflow: visible; min-height: auto; }
+
+/* 「查看更多历史版本」按钮太长太丑：改成居中窄胶囊 */
+.update-page button[class*="more"],
+.update-more-btn {
+  align-self: center;
+  max-width: 220px;
+  height: 26px;
+  padding: 0 14px;
+  border-radius: 999px;
 }
 .asset-item:hover { border-color: var(--accent); transform: translateY(-1px); }
 .asset-thumb {
