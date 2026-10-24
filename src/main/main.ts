@@ -18,6 +18,8 @@ import {
   readProject, writeProject, readManifestOnly, migrateAllProjectFilesAsync
 } from './projectFile';
 import * as projectFileApi from './projectFile';
+// v0.4.5：工程素材（保存时收集本地图片/视频进容器，打开时解包到缓存）
+import { collectSceneAssets, extractProjectAssets, resolveCachedAsset } from './assets';
 import {
   getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo,
   resolveInstallDir
@@ -484,18 +486,38 @@ ipcMain.handle('project:save', async (_evt, projectData: { name?: string; scene:
       }
     } catch { /* 历史保存失败不影响工程保存 */ }
 
-    // v2：写 ZIP 容器（manifest.json + scene.json），原子替换、自动继承 createdAt
+    // v0.4.5：素材打包 —— 把场景里 bc-img://file/<本地路径> 引用的文件读进容器
+    // （assets/<sha1>.<ext>），并把引用改写成 bc-img://asset/<hash>.<ext>。
+    // 这样工程换机器/换目录打开也不会丢图。
+    let sceneToSave = projectData.scene;
+    let collectedAssets: { name: string; data: Buffer; mime?: string }[] = [];
+    let missingAssets: string[] = [];
+    try {
+      const collected = collectSceneAssets(projectData.scene);
+      sceneToSave = collected.scene;
+      collectedAssets = collected.assets;
+      missingAssets = collected.missing;
+    } catch { /* 收集失败就按原样保存，至少不丢工程 */ }
+
+    // v2：写 ZIP 容器（manifest.json + scene.json + assets/），原子替换、自动继承 createdAt
     const w = writeProject(targetPath, {
       name: pName,
-      scene: projectData.scene,
+      scene: sceneToSave,
       meta: {
         ...(projectData.meta || {}),
         elementCount: countNodes(projectData.scene?.root)
       },
+      assets: collectedAssets,
       sections
     });
     if (!w.ok) return { ok: false, error: w.error || '写入工程文件失败' };
-    return { ok: true, path: targetPath, name: pName };
+    return {
+      ok: true,
+      path: targetPath,
+      name: pName,
+      assets: collectedAssets.length,
+      missingAssets
+    };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -518,8 +540,12 @@ ipcMain.handle('project:open-file', async (_evt, customPath?: string) => {
     // v1（纯 JSON）与 v2（ZIP 容器）都能读
     const r = readProject(targetPath);
     if (!r.ok || !r.payload) return { ok: false, error: r.error || '文件不是有效的 BlockCanvas 工程文件' };
+    // v0.4.5：把容器里的 assets/ 解到缓存目录，`bc-img://asset/...` 才有东西可服务
+    let extracted = 0;
+    try { extracted = extractProjectAssets(targetPath, r.payload); } catch { /* 解包失败不阻断打开 */ }
     return {
       ok: true, project: r.payload, path: targetPath, container: r.container,
+      extractedAssets: extracted,
       // 随工程保存的撤销历史（老工程没有这一节 → undefined）
       history: (r.payload as any)?.extraSections?.history
     };
@@ -641,16 +667,49 @@ ipcMain.handle('export:html-with-project', async (_evt, html: string, scene: any
     const htmlPath = res.filePath;
     const projectPath = htmlPath.replace(/\.html?$/i, '') + '.bcproj';
 
-    writeFileSync(htmlPath, html, 'utf-8');
+    // v0.4.5：把 HTML 里的 bc-img:// 引用内联成 data URI —— 否则导出的网页只有在本软件里
+    // 才能显示图片（协议是我们自己注册的），发给别人就是一堆破图。
+    // 资源来源有两种：容器素材（asset/，已解包到缓存）与本地文件（file/，绝对路径）。
+    let outHtml = html;
+    try {
+      const refs = new Set<string>();
+      for (const m of html.matchAll(/bc-img:\/\/(asset|file)\/([^"'\\\s)]+)/g)) refs.add(`${m[1]}/${m[2]}`);
+      for (const ref of refs) {
+        const [kind, ...rest] = ref.split('/');
+        const enc = rest.join('/');
+        let filePath = '';
+        try {
+          filePath = kind === 'asset'
+            ? (resolveCachedAsset(decodeURIComponent(enc)) || '')
+            : decodeURIComponent(enc);
+        } catch { filePath = ''; }
+        if (!filePath || !existsSync(filePath)) continue;
+        const buf = readFileSync(filePath);
+        const dataUrl = `data:${mediaMimeOf(filePath)};base64,${buf.toString('base64')}`;
+        outHtml = outHtml.split(`bc-img://${ref}`).join(dataUrl);
+      }
+    } catch { outHtml = html; }
+
+    writeFileSync(htmlPath, outHtml, 'utf-8');
+
+    // 同目录再存一份工程文件时，也要把素材一起打包（保持"换机器不丢图"）
+    let exportAssets: { name: string; data: Buffer; mime?: string }[] = [];
+    let exportScene = scene;
+    try {
+      const c = collectSceneAssets(scene);
+      exportAssets = c.assets;
+      exportScene = c.scene;
+    } catch { /* 收集失败按原样保存 */ }
 
     const w = writeProject(projectPath, {
       name: projectName,
-      scene,
+      scene: exportScene,
+      assets: exportAssets,
       meta: { elementCount: countNodes(scene?.root) }
     });
     if (!w.ok) return { ok: false, error: w.error || '写入工程文件失败' };
 
-    return { ok: true, htmlPath, projectPath };
+    return { ok: true, htmlPath, projectPath, inlinedAssets: exportAssets.length };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -1108,6 +1167,24 @@ app.whenReady().then(() => {
   protocol.handle('bc-img', async (request) => {
     try {
       const url = new URL(request.url);
+      // v0.4.5：bc-img://asset/<hash>.<ext> —— 工程容器里的素材（开机解包到缓存目录）。
+      // 这是"换机器不丢图"的关键：引用不再指向某台电脑上的绝对路径。
+      if (url.host === 'asset') {
+        const cached = resolveCachedAsset(decodeURIComponent(url.pathname));
+        if (!cached) return new Response(null, { status: 404 });
+        const buf = readFileSync(cached);
+        return new Response(buf, {
+          status: 200,
+          headers: {
+            'Content-Type': mediaMimeOf(cached),
+            'Content-Length': String(buf.length),
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'public, max-age=31536000, immutable'
+          }
+        });
+      }
       let rawPath = decodeURIComponent(url.pathname.replace(/^\/file\//i, '').replace(/^\//, ''));
       if (!rawPath) return new Response(null, { status: 400 });
 
