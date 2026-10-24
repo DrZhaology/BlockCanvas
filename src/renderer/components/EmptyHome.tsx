@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import logoUrl from '@renderer/assets/logo.svg';
 import { readPersisted, writePersisted } from '@lib/usePersisted';
 import { Icon } from './Icon';
@@ -238,9 +238,9 @@ export function EmptyHome(props: {
       );
     const onDown = (e: MouseEvent) => {
       if (inPicker(e.target)) return;
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setPanelOpen(false);
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) closePanel();
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPanelOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closePanel(); };
     document.addEventListener('mousedown', onDown, true);
     window.addEventListener('keydown', onKey);
     return () => {
@@ -442,6 +442,18 @@ export function EmptyHome(props: {
     if (src.trim()) applyBg({ kind: 'video', src: src.trim(), dim: d, blur: b });
   };
 
+  // v0.4.5（用户反馈 A补）：设置面板以前是"条件渲染 → 直接消失"，没有退场。
+  // 这里加一个 170ms 的收起过程：先挂 is-closing 播动画，再真正卸载。
+  const [panelClosing, setPanelClosing] = useState(false);
+  const closePanel = useCallback(() => {
+    if (!panelOpen || panelClosing) return;
+    setPanelClosing(true);
+    window.setTimeout(() => {
+      setPanelOpen(false);
+      setPanelClosing(false);
+    }, 170);
+  }, [panelOpen, panelClosing]);
+
   const saveCurrent = () => {
     const name = saveName.trim() || `我的背景 ${saved.length + 1}`;
     const item: SavedBg = { id: 'bg-' + Date.now().toString(36), name, spec: bg };
@@ -515,10 +527,10 @@ export function EmptyHome(props: {
           <Icon name="gear" size={16} />
         </button>
         {panelOpen && (
-          <div className="eh-panel">
+          <div className={"eh-panel" + (panelClosing ? " is-closing" : "")}>
             <div className="eh-panel-head">
               <span>页面设置</span>
-              <button className="eh-panel-x" onClick={() => setPanelOpen(false)} title="关闭">
+              <button className="eh-panel-x" onClick={closePanel} title="关闭">
                 <Icon name="close" size={13} />
               </button>
             </div>

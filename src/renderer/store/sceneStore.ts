@@ -253,6 +253,22 @@ function defaultTextFor(type: ElementType): string | undefined {
     case 'ul': return undefined;
     case 'ol': return undefined;
     case 'form': return undefined;
+    // v0.4.5（用户反馈 C补12）：这些也都是"有内容才有意义"的元素。
+    // 以前插入后是空的，在画布上是一个 0 尺寸的空盒子 —— 既看不见、也点不中，
+    // 用户以为"插进去了但选不上"。统一给一段可立即编辑的默认文案。
+    case 'h5': return '五级标题';
+    case 'h6': return '六级标题';
+    case 'strong': return '重点加粗';
+    case 'em': return '斜体强调';
+    case 'mark': return '高亮文字';
+    case 'small': return '小字说明';
+    case 'code': return 'code';
+    case 'del': return '删除线';
+    case 'sup': return '上标';
+    case 'sub': return '下标';
+    case 'blockquote': return '这里是一段引用内容。';
+    case 'figcaption': return '图片说明文字';
+    case 'pre': return '预格式化文本';
     default: return undefined;
   }
 }

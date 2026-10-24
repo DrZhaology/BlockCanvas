@@ -131,7 +131,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       .map((n) => `body.bc-outlines-on .canvas [data-bc-cg="${CSS.escape(n)}"]{outline-color:${classColor(n)};}`)
       .join('\n');
   }, [root]);
-  const selectedId = useScene((s) => s.scene.selectedId);
+  // v0.4.5：右下角那条"已选中元素…"提示已删除（跟随滚动、还会被浮层盖住），
+  // 于是这一层不再需要单独订阅 selectedId，只留 selectedIds。
   const selectedIds = useScene((s) => s.scene.selectedIds);
   const select = useScene((s) => s.selectElement);
   const activeBreakpoint = useScene((s) => s.activeBreakpoint);
@@ -1361,12 +1362,10 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
         <span className="canvas-resize-handle canvas-resize-handle-l" onPointerDown={(e) => onResizeStart(e, 'l')} title="拖动调整画布宽度" />
         <span className="canvas-resize-handle canvas-resize-handle-r" onPointerDown={(e) => onResizeStart(e, 'r')} title="拖动调整画布宽度" />
       </div>
-      {selectedId && (
-        <div className="canvas-hint">
-          已选中 {selectedIds.length > 1 ? `${selectedIds.length} 个元素` : '元素'}
-          {selectedIds.length > 1 ? '。Ctrl+点击可取消个别' : ''}。空白处拖框可批量选中（可拖出画布）
-        </div>
-      )}
+      {/* v0.4.5（用户反馈 C补1）：右下角"已选中 元素…"这条提示已删除。
+          它会跟随滚动、还可能被别的浮层盖住；鼠标移到空白画布也会冒出来，
+          既占地方又没有新信息（选中状态在图层树/属性面板里本来就看得到）。
+          批量选中的用法统一放到快捷键说明里。 */}
       {/* 框选矩形：fixed 覆盖层（client 坐标），可自由延伸到画布外的条纹区 */}
       {marquee && (
         <div

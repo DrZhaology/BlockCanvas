@@ -1269,6 +1269,56 @@
   padding: 0 14px;
   border-radius: 999px;
 }
+
+/* —— A补：页面设置面板的进出场动画 ——
+   进：从右上角轻微下滑淡入；出：往右上收回淡出（以前是"直接消失"）。
+   只动 transform/opacity，避免触发重排。 */
+@keyframes ehPanelIn {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes ehPanelOut {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(-6px) scale(0.98); }
+}
+.eh-panel { animation: ehPanelIn 0.18s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.eh-panel.is-closing {
+  animation: ehPanelOut 0.16s cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .eh-panel, .eh-panel.is-closing { animation: none; }
+}
+
+/* —— C1：左侧页签不要上下跳动 ——
+   三个页签的激活态内边距不一致，切换时整行会"弹"一下。
+   统一固定高度 + 只改颜色与下划线，位置永远不动。 */
+.inspector-tabs .inspector-tab {
+  height: 30px;
+  padding: 0 10px;
+  line-height: 30px;
+  border: none;
+  background: transparent;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.inspector-tabs .inspector-tab.active {
+  background: var(--bg-panel);
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+/* —— C1：素材页在左侧窄栏 / 底部布局下都要居中 —— */
+.asset-gallery-empty { text-align: center; }
+.asset-gallery-grid { justify-items: center; }
+.asset-item { width: 100%; max-width: 120px; }
+
+/* —— C补18：属性卡片退场要"完全滑出"而不是中途淡掉 ——
+   以前只位移 64px 再收高度，看着像卡了一下。改成先整块滑到容器外，再收高度。 */
+@keyframes propRowOut2 {
+  from { transform: none; max-height: 900px; opacity: 1; }
+  60%  { transform: translateX(calc(100% + 40px)); opacity: 1; }
+  to   { transform: translateX(calc(100% + 40px)); max-height: 0; margin-top: 0; margin-bottom: 0; opacity: 1; }
+}
+.prop-row.is-leaving { animation: propRowOut2 0.34s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
 .asset-item:hover { border-color: var(--accent); transform: translateY(-1px); }
 .asset-thumb {
   display: grid;
