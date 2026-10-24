@@ -396,9 +396,18 @@ export function ProjectsCenter(props: {
               return (
               <div
                 key={p.fileName}
-                className="pc-card"
-                onClick={() => { if (!isRenaming) handleOpenInNewTab(p); }}
-                title={`点击在新标签页打开项目「${p.name}」`}
+                className={'pc-card' + (p.missing ? ' is-missing' : '')}
+                onClick={() => {
+                  if (isRenaming) return;
+                  if (p.missing) {
+                    showToast('这个工程的文件已经不在原位置了，可能被移动或删除', 'err');
+                    return;
+                  }
+                  handleOpenInNewTab(p);
+                }}
+                title={p.missing
+                  ? `文件已不在原位置：${p.filePath}`
+                  : `点击在新标签页打开项目「${p.name}」`}
               >
                 <div className="pc-card-cover">
                   <span className="pc-cover-icon"><Icon name="file" size={34} /></span>
@@ -406,7 +415,15 @@ export function ProjectsCenter(props: {
                 </div>
 
                 <div className="pc-card-body">
-                  <div className="pc-card-name" title={p.name}>{p.name}</div>
+                  <div className="pc-card-name" title={p.name}>
+                    {p.name}
+                    {p.external && (
+                      <span className="pc-badge is-external" title={`不在默认目录，是从别处导入/打开的工程：\n${p.filePath}`}>外部</span>
+                    )}
+                    {p.missing && (
+                      <span className="pc-badge is-missing" title={p.filePath}>文件已丢失</span>
+                    )}
+                  </div>
                   {isRenaming ? (
                     <input
                       type="text"
@@ -429,6 +446,20 @@ export function ProjectsCenter(props: {
                 </div>
 
                 <div className="pc-card-foot">
+                  {p.missing && (
+                    <button
+                      className="pc-forget-btn"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await window.bc.forgetExternalProject(p.filePath);
+                        setProjects((prev) => prev.filter((x) => x.filePath !== p.filePath));
+                        showToast('已从列表移除（磁盘文件未删除）');
+                      }}
+                      title="只移除这条列表记录，不删除任何磁盘文件"
+                    >
+                      <Icon name="close" size={11} /> 移除记录
+                    </button>
+                  )}
                   <button
                     className="pc-backup-btn"
                     onClick={(e) => handleViewBackups(e, p)}

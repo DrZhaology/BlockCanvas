@@ -69,25 +69,46 @@ async function main() {
   check('登记表落盘（data/external-projects.json）', existsSync(regPath),
     existsSync(regPath) ? `${statSync(regPath).size} 字节` : '没写出来');
 
-  // 模拟"文件被删掉/移走" → 列表应保留一条 missing，而不是无声消失
-  const movedPath = outsidePath + '.moved';
+  // ---------- UI：项目中心里的「外部」徽标 ----------
+  await win.locator('button:has-text("全部项目")').first().click();
+  await sleep(1200);
+  const uiExternal = await win.evaluate(() => ({
+    cards: document.querySelectorAll('.pc-card').length,
+    externalBadges: document.querySelectorAll('.pc-badge.is-external').length
+  }));
+  check('项目中心卡片上有「外部」徽标', uiExternal.externalBadges >= 1,
+    `卡片 ${uiExternal.cards} 张，外部徽标 ${uiExternal.externalBadges} 个`);
+
+  // 回编辑器，再删掉外部文件（模拟"文件被移走"）
+  await win.locator('button:has-text("返回编辑器")').first().click();
+  await sleep(800);
   rmSync(outsidePath, { force: true });
-  void movedPath;
   await sleep(300);
+  await win.locator('button:has-text("全部项目")').first().click();
+  await sleep(1200);
+
+  const uiMissing = await win.evaluate(() => {
+    const card = document.querySelector('.pc-card.is-missing');
+    return {
+      missingCards: document.querySelectorAll('.pc-card.is-missing').length,
+      hasBadge: !!document.querySelector('.pc-badge.is-missing'),
+      hasForget: !!document.querySelector('.pc-forget-btn')
+    };
+  });
+  check('文件丢失的卡片有 is-missing 样式 + 徽标 + 移除按钮',
+    uiMissing.missingCards >= 1 && uiMissing.hasBadge && uiMissing.hasForget,
+    `卡片=${uiMissing.missingCards} 徽标=${uiMissing.hasBadge} 移除按钮=${uiMissing.hasForget}`);
+
+  // 点「移除记录」→ 卡片消失
+  await win.locator('.pc-forget-btn').first().click();
+  await sleep(800);
+  const afterForget = await win.evaluate(() => document.querySelectorAll('.pc-card.is-missing').length);
+  check('点「移除记录」后这条卡片消失', afterForget === 0, `剩余 ${afterForget} 张丢失卡片`);
+
+  // 列表层面也应清掉
   const afterDelete = await win.evaluate(() => window.bc.listProjects());
   const ghost = (afterDelete || []).find((p) => (p.filePath || '').endsWith('外部工程.bcproj'));
-  check('文件被删后仍保留一条"缺失"记录（不是无声消失）',
-    !!ghost && ghost.missing === true,
-    ghost ? `missing=${ghost.missing} 提示=${(ghost.previewText || '').slice(0, 12)}` : '记录被直接丢了');
-
-  // 从列表里忘记它
-  const forgotten = await win.evaluate(async (p) => {
-    const r = await window.bc.forgetExternalProject(p);
-    const list = await window.bc.listProjects();
-    return { r, stillThere: (list || []).some((x) => (x.filePath || '').endsWith('外部工程.bcproj')) };
-  }, outsidePath);
-  check('「从列表移除」能清掉这条记录', forgotten.r === true && !forgotten.stillThere,
-    `返回=${forgotten.r} 仍在列表=${forgotten.stillThere}`);
+  check('移除后列表里不再有这条记录', !ghost, ghost ? '仍在列表' : '已清空');
 
   await app.close();
   rmSync(DATA_DIR, { recursive: true, force: true });

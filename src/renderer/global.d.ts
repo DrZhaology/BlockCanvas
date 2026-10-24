@@ -11,6 +11,10 @@ export interface ProjectFileInfo {
   elementCount?: number;
   previewText?: string;
   backupCount?: number;
+  /** v0.4.5：来自 data/projects 以外（从别处导入/打开的工程） */
+  external?: boolean;
+  /** v0.4.5：登记过但磁盘上已经不在（被移动/删除） */
+  missing?: boolean;
 }
 
 export interface DataPathsInfo {
@@ -73,6 +77,8 @@ declare global {
 
       // 项目工程管理 (.bcproj)
       listProjects: () => Promise<ProjectFileInfo[]>;
+      /** v0.4.5：把外部工程从列表移除（不动磁盘文件） */
+      forgetExternalProject: (filePath: string) => Promise<boolean>;
       saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown; history?: { past?: unknown[]; future?: unknown[] } }, saveAs?: boolean, customPath?: string) => Promise<{ ok: boolean; path?: string; name?: string; error?: string; canceled?: boolean }>;
       openProjectFile: (customPath?: string) => Promise<{ ok: boolean; project?: any; path?: string; error?: string; canceled?: boolean; container?: string; history?: { past?: any[]; future?: any[] } }>;
       deleteProject: (fileName: string, projectName?: string) => Promise<{ ok: boolean; error?: string }>;

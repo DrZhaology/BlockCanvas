@@ -990,3 +990,55 @@
   text-overflow: ellipsis;
   pointer-events: none;
 }
+
+/* ============================================================================
+   21. 项目中心：外部工程 / 文件已丢失（v0.4.5）
+   ========================================================================== */
+.pc-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 600;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+.pc-badge.is-external {
+  background: #eef2f8;
+  color: #475569;
+  border: 1px solid #dbe3ec;
+}
+.pc-badge.is-missing {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+/* 文件已丢失：整张卡降透明 + 虚线边，明确"点不开" */
+.pc-card.is-missing {
+  opacity: 0.72;
+  border-style: dashed;
+  cursor: default;
+}
+.pc-card.is-missing .pc-card-cover { filter: grayscale(1); }
+/* 丢失的卡片只留「移除记录」，其余操作藏起来（避免点了报错） */
+.pc-card.is-missing .pc-backup-btn,
+.pc-card.is-missing .pc-card-ren-btn,
+.pc-card.is-missing .pc-card-del-btn { display: none; }
+.pc-forget-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid #fca5a5;
+  border-radius: 5px;
+  background: #fff;
+  color: #b91c1c;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.pc-forget-btn:hover { background: #fef2f2; border-color: #f87171; }
