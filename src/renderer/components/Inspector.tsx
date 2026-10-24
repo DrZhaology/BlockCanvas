@@ -443,15 +443,17 @@ function PageCssBody() {
 }
 
 // ============ 页面属性卡片（与元素 CSS 属性行同一套视觉 / 编辑器） ============
-// v0.4.5：删除属性时先播一段"向右滑出"再真正删除，避免行"啪"地消失。
+// v0.4.5：删除属性时先播完"向右滑出 + 高度收起"，再真正删除。
+// 时长要和 CSS 里的 .is-leaving 动画（0.34s）对齐：提前删会看到"走一半突然消失"。
 // 系统开了"减少动态效果"时直接删（不做动画）。
+const PROP_REMOVE_MS = 340;
 function animateRemove(el: Element | null, done: () => void) {
   const row = el?.closest('.prop-row') as HTMLElement | null;
   const reduce = typeof window !== 'undefined'
     && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   if (!row || reduce) { done(); return; }
   row.classList.add('is-leaving');
-  window.setTimeout(done, 170);
+  window.setTimeout(done, PROP_REMOVE_MS);
 }
 // 只绑定「值 + 写回」，不碰元素 / 断点，所以能同时服务 body 常用项与任意全局 CSS。
 function PagePropRow(props: {

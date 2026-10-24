@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTasks, pickHeadTask } from '@store/taskStore';
 import { isActive, RESUMABLE_STATUS, STATUS_LABEL, fmtMB, type BgTask } from '@lib/taskTypes';
 import { useHoverPop } from '@lib/hoverPop';
@@ -36,13 +36,31 @@ export function TaskButton() {
   const { open, setOpen, scheduleOpen, scheduleClose, cancel, toggle } = useHoverPop();
   const btnRef = useRef<HTMLButtonElement>(null);
 
+  // 任务刚完成时给 6 秒"✓"，之后回到普通图标（避免一直显示完成态）
+  const [doneGraceOn, setDoneGraceOn] = useState(false);
+  const doneCountRef = useRef(0);
+  useEffect(() => {
+    const doneCount = tasks.filter((t) => t.status === 'done').length;
+    if (doneCount > doneCountRef.current) {
+      setDoneGraceOn(true);
+      const timer = window.setTimeout(() => setDoneGraceOn(false), 6000);
+      doneCountRef.current = doneCount;
+      return () => window.clearTimeout(timer);
+    }
+    if (doneCount === 0) doneCountRef.current = 0;
+    return undefined;
+  }, [tasks]);
+
   const head = pickHeadTask(tasks);
   const running = tasks.filter(isActive).length;
   const resumable = tasks.filter((t) => RESUMABLE_STATUS.includes(t.status) && t.status !== 'error').length;
   const failed = tasks.filter((t) => t.status === 'error').length;
 
   // 有任务在跑 → 一直显示环形进度；否则只在"有可继续/失败"时给一个提示点
-  const showRing = Boolean(head && (isActive(head) || head.status === 'done' || head.status === 'error'));
+  // v0.4.5：任务完成后的"✓"只保留 6 秒（以前永远挂着，看起来像一直没结束）。
+  const showRing = Boolean(
+    head && (isActive(head) || head.status === 'error' || (head.status === 'done' && doneGraceOn))
+  );
   const badge = !running && (resumable + failed) > 0
     ? <span className="tb-task-dot" title={`${resumable + failed} 条未完成的任务`} />
     : null;
@@ -50,6 +68,9 @@ export function TaskButton() {
   const title = !head
     ? '任务：当前没有进行中的下载或更新'
     : `${head.title}\n${head.detail}\n（鼠标浮上来管理任务）`;
+
+  // 完全没任务时整个按钮都不显示（不占工具栏位置）
+  if (tasks.length === 0) return null;
 
   return (
     <div className="tb-task-wrap">
