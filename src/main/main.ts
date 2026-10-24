@@ -419,6 +419,9 @@ ipcMain.handle('project:list', () => listProjects());
 // v0.4.5：把某个外部工程从列表里移除（不动磁盘文件）
 ipcMain.handle('project:forget-external', (_evt, filePath: string) => forgetExternalProject(filePath));
 
+// v0.4.5：抢救损坏的工程（只读，不改原文件）
+ipcMain.handle('project:salvage', (_evt, filePath: string) => projectFileApi.salvageProject(filePath));
+
 /**
  * 工程名 → 安全文件名：**保留中文等 Unicode 字符**，只剔除 Windows 文件名的非法字符。
  * （修复：以前用 sanitizeId 只留 a-z0-9，中文名整个被清空 → 首次保存弹出的默认文件名

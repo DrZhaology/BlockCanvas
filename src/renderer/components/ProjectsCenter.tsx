@@ -214,7 +214,34 @@ export function ProjectsCenter(props: {
       }
       onBack();
     } else {
-      showToast('打开失败：' + (res.error || '无效文件'), 'err');
+      // v0.4.5：工程打不开时不要只丢一句"无效文件"——给出可走的路。
+      // 说明具体坏在哪，并让用户选择"尝试修复 / 从快照恢复 / 放弃"。
+      const tryRepair = await appConfirm({
+        title: '这个工程打不开',
+        body:
+          `「${p.name}」读取失败：\n${res.error || '文件结构不完整'}\n\n` +
+          '常见原因：保存过程中断电/磁盘满、文件被别的程序改过、或从网盘同步了半截文件。\n\n' +
+          '点「尝试修复」我会尽量从文件里把场景数据抢救出来（不动原文件）；\n' +
+          '如果修不回来，还可以到「历史快照」里找上一个可用的版本。',
+        okText: '尝试修复',
+        cancelText: '先不动'
+      });
+      if (!tryRepair) return;
+      const salv = await window.bc.salvageProject(p.filePath);
+      if (salv.ok && salv.scene) {
+        newTab(`${p.name}（已修复）`, salv.scene as never, null);
+        showToast('已从损坏文件里恢复出场景，请另存为新工程');
+        onBack();
+      } else {
+        await appConfirm({
+          title: '修复没能成功',
+          body:
+            `${salv.error || '没能从文件里提取出场景数据'}\n\n` +
+            (salv.notes?.length ? '过程记录：\n' + salv.notes.join('\n') + '\n\n' : '') +
+            '建议到该项目的「历史快照」里恢复上一个可用版本。',
+          okText: '知道了'
+        });
+      }
     }
   };
 

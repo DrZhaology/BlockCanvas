@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('bc', {
   /** v0.4.5：把外部工程从列表里移除（不动磁盘文件） */
   forgetExternalProject: (filePath: string) =>
     ipcRenderer.invoke('project:forget-external', filePath),
+  /** v0.4.5：抢救损坏的工程文件（只读） */
+  salvageProject: (filePath: string) =>
+    ipcRenderer.invoke('project:salvage', filePath),
   saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown; history?: unknown }, saveAs = false, customPath?: string) =>
     ipcRenderer.invoke('project:save', projectData, saveAs, customPath),
   openProjectFile: (customPath?: string) =>
