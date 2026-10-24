@@ -99,6 +99,8 @@ const GROUPS: { title: string; items: ElementDef[] }[] = [
     title: '多媒体与其他',
     items: [
       { type: 'img', label: '图片', help: { tag: 'img', what: '插入一张图片', where: '任意位置；src 选本地文件或填网址' } },
+      { type: 'video', label: '视频', help: { tag: 'video', what: '插入一段视频（带播放控件，可循环）', where: '任意位置；选本地 mp4/webm 或填网址' } },
+      { type: 'audio', label: '音频', help: { tag: 'audio', what: '插入一段音频（带播放控件）', where: '任意位置；选本地 mp3/wav 或填网址' } },
       { type: 'figcaption', label: '图注', help: { tag: 'figcaption', what: 'figure 图文块的说明文字', where: '只能放在 figure 内部' } },
       { type: 'hr', label: '分割线', help: { tag: 'hr', what: '一条水平分割线，隔开两段内容', where: '任意两个区块之间' } }
       // 「换行 br」已从插入面板移除（v0.4.4）：文本里直接敲回车就会自动生成 <br>，

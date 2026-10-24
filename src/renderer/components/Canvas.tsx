@@ -1,6 +1,6 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { useScene, findParent, findNode, getEffectiveStyle } from '@store/sceneStore';
-import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS, TEXT_TAGS } from '@lib/types';
+import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS, TEXT_TAGS, MEDIA_TAGS } from '@lib/types';
 import type { SceneElement } from '@lib/types';
 import { selectorForNode, collectStyleClasses, buildStyleBlock, createStyleClassSet, quickCssToCss, cssTextToObject, simplifyStyle } from '@lib/styleClass';
 import { classColor } from '@lib/classColor';
@@ -1751,7 +1751,19 @@ const CanvasNode = React.memo(function CanvasNode(props: {
           rowSpan: Math.max(1, Number(node.attrs?.rowspan) || 1)
         }
       : {}),
-    ...(node.type === 'th' && node.attrs?.scope ? { scope: node.attrs.scope } : {})
+    ...(node.type === 'th' && node.attrs?.scope ? { scope: node.attrs.scope } : {}),
+    // v0.4.5：媒体元素 —— 画布上要能真的播放/预览，属性与导出一致
+    ...(MEDIA_TAGS.has(node.type)
+      ? {
+          src: node.attrs?.src ? toRenderableSrc(node.attrs.src) : undefined,
+          controls: true,
+          loop: node.attrs?.loop === '1',
+          muted: node.attrs?.muted === '1',
+          autoPlay: false,
+          playsInline: node.type === 'video',
+          preload: 'metadata'
+        }
+      : {})
   } as const;
 
   // 统一点击逻辑：Ctrl=多选切换；Alt=选中父级；否则选中自己；locked 不可选

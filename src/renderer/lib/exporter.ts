@@ -36,6 +36,15 @@ function buildAttrsString(node: SceneElement, ctx: StyleClassSet): { attrsStr: s
     if (src) out.push(`src="${escapeAttr(src)}"`);
   }
   if (node.type === 'a' && get('href')) out.push(`href="${escapeAttr(get('href'))}"`);
+  // v0.4.5：媒体元素 —— 导出必须带真实 src 与 controls，否则网页里就是个空盒子
+  if (node.type === 'video' || node.type === 'audio') {
+    const src = get('src');
+    if (src) out.push(`src="${escapeAttr(src)}"`);
+    out.push('controls');
+    if (get('loop') === '1') out.push('loop');
+    if (get('muted') === '1') out.push('muted');
+    if (node.type === 'video') out.push('playsinline');
+  }
   if ((node.type === 'input' || node.type === 'textarea') && get('placeholder')) {
     out.push(`placeholder="${escapeAttr(get('placeholder'))}"`);
   }
