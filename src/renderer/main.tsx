@@ -29,6 +29,11 @@ import './styles/24-v044h-ui.css'; // v0.4.4h：Alt 墙提示 + 拖到墙外改�
 import './styles/25-v044-storage-ui.css'; // v0.4.4：设置→存储占用明细（分类互斥可加和 + 分类清理）
 import './styles/26-empty-home.css'; // v0.4.4：空页面（关掉全部标签后的首页）+ 全局轻提示 toast
 import './styles/27-v045-ui.css'; // v0.4.5：只读快照预览 / 色标卡片 / 外轮廓 / 面板密度
+// v0.4.5：语义主题变量（深色插件化的地基）。
+// 必须**最后**加载：旧的 foundation 里已经定义过 --danger-tint 等同名变量，
+// 这里要覆盖它们，才能让"只写一次语义变量、深色自动切换"成立。
+// 详见 docs/v0.4.5-待实施-多页与深色插件化.md
+import './styles/00-theme-tokens.css';
 import './animations.css'; // 统一动画体系：token + 全部 keyframes（分片里只写引用）
 
 createRoot(document.getElementById('root')!).render(

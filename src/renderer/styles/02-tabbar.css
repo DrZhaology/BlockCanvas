@@ -133,13 +133,11 @@
   opacity: 0.9;
 }
 .tab-close-btn:hover {
-  background: #fee2e2;
-  color: #ef4444;
+  /* v0.4.5：改用语义变量（深色插件化第 2 步的示范）——
+     不再写 html[data-bc-dark] 分支，深色下由 --danger-tint 自动切换 */
+  background: var(--danger-tint);
+  color: var(--danger);
   opacity: 1;
-}
-html[data-bc-dark] .tab-close-btn:hover {
-  background: #7f1d1d;
-  color: #fca5a5;
 }
 /* 未保存 (is-dirty)：默认展示实心小圆点，隐藏关闭叉 */
 .tab-dirty-dot {
