@@ -46,6 +46,34 @@ const BG_PRESETS: { label: string; value: string }[] = [
 const DEFAULT_BG: BgSpec = { kind: 'preset', value: BG_PRESETS[0].value };
 const DEFAULT_GRADIENT = 'linear-gradient(160deg, #dbeafe 0%, #ffffff 100%)';
 
+/**
+ * 视频能不能解（v0.4.5）。
+ * Chromium 遇到解不了的编码会打 `Unsupported pixel format: -1`（ffmpeg_common.cc），
+ * 那条日志来自原生解码器，JS 没法屏蔽；能做的是**事先探一次**，
+ * 解不了就不套用，避免每次进首页都刷同一条错误。
+ */
+function probeVideoPlayable(src: string, timeoutMs = 4000): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!src) { resolve(false); return; }
+    const v = document.createElement('video');
+    v.muted = true;
+    v.preload = 'metadata';
+    v.crossOrigin = 'anonymous';
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      v.removeAttribute('src');
+      v.load();
+      resolve(ok);
+    };
+    const timer = window.setTimeout(() => done(false), timeoutMs);
+    v.onloadedmetadata = () => { window.clearTimeout(timer); done(true); };
+    v.onerror = () => { window.clearTimeout(timer); done(false); };
+    v.src = src;
+  });
+}
+
 /** 本地路径 → bc-img://（与画布同一套协议；相对路径由主进程按 data / app 目录解析） */
 function mediaSrc(src: string): string {
   const s = (src || '').trim();
@@ -390,6 +418,12 @@ export function EmptyHome(props: {
         applyBg({ kind: 'image', src: res.path, dim, blur });
         setTab('image');
       } else {
+        // v0.4.5：先探一次能不能解码，解不了就别套用（否则每次进首页都刷 ffmpeg 错误）
+        const playable = await probeVideoPlayable(mediaSrc(res.path));
+        if (!playable) {
+          showToast('这段视频的编码浏览器解不了（例如某些特殊像素格式），换一个 mp4 / webm 吧', 'err');
+          return;
+        }
         setVidSrc(res.path);
         applyBg({ kind: 'video', src: res.path, dim, blur });
         setTab('video');
@@ -456,6 +490,12 @@ export function EmptyHome(props: {
           preload="auto"
           disablePictureInPicture
           crossOrigin={isLocalMedia(media) ? 'anonymous' : undefined}
+          // v0.4.5：解码失败（例如 ffmpeg Unsupported pixel format）就回退到默认背景，
+          // 并把这条坏配置从本地存储覆盖掉 —— 否则每次进首页都会重试、刷同一条错误。
+          onError={() => {
+            applyBg(DEFAULT_BG);
+            showToast('这段视频的编码浏览器解不了，已暂时切回默认背景', 'err');
+          }}
           style={{
             filter: mediaBlur > 0 ? `blur(${mediaBlur}px)` : undefined,
             transform: mediaBlur > 0 ? `scale(${(1 + mediaBlur / 400).toFixed(3)})` : undefined

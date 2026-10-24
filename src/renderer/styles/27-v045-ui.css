@@ -444,6 +444,43 @@
   .empty-home { align-items: flex-start; padding-top: 6vh; }
 }
 
+/* ---------- 10.5 首页入场动画（v0.4.5 重做）----------
+   以前整块 .eh-center 一起上移 7px，观感"啪"地跳一下。
+   现在改成：背景先就位，内容**逐项错峰上浮**（Logo → 标题 → 搜索 → 按钮 → 最近项目），
+   用 ease-out 曲线收尾，整体 0.5s 左右，进场更有层次但不拖。 */
+@keyframes ehRiseIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.empty-home .eh-center { animation: none; }
+.empty-home .eh-center > * {
+  animation: ehRiseIn 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.empty-home .eh-center > *:nth-child(1) { animation-delay: 0.02s; }
+.empty-home .eh-center > *:nth-child(2) { animation-delay: 0.06s; }
+.empty-home .eh-center > *:nth-child(3) { animation-delay: 0.10s; }
+.empty-home .eh-center > *:nth-child(4) { animation-delay: 0.14s; }
+.empty-home .eh-center > *:nth-child(5) { animation-delay: 0.18s; }
+.empty-home .eh-center > *:nth-child(6) { animation-delay: 0.22s; }
+.empty-home .eh-center > *:nth-child(n + 7) { animation-delay: 0.26s; }
+/* 右上角齿轮稍晚一点出现，不跟标题抢注意力 */
+.empty-home .eh-settings { animation: ehRiseIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) 0.16s both; }
+/* 离场仍然整块淡出（点击"打开工程"的瞬间要干脆） */
+.empty-home.is-leaving .eh-center,
+.empty-home.is-leaving .eh-settings {
+  animation: ehOut 0.15s var(--ease-standard, ease) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .empty-home .eh-center > *,
+  .empty-home .eh-settings { animation: none; }
+}
+
 /* ---------- 11. 定位助手（快捷助手内新增） ---------- */
 .pos-helper {
   display: flex;
