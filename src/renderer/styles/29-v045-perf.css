@@ -195,45 +195,107 @@ html[data-bc-dark] .snapshot-info-solo {
 }
 
 /* ============================================================================
-   8. 「幽灵卡片」：快捷助手样式被隐藏时的占位说明（v0.4.5 第 11 批）
+   8. 定位「幽灵卡片」（v0.4.5 第十六批 · 用户澄清后的真实需求）
    ---------------------------------------------------------------------------
-   开关关掉后，代管属性从列表里消失，但样式仍在生效 —— 用户会以为"这个元素没有样式"。
-   这张卡只在"开关关着 + 确实有代管样式"时出现，一行说明 + 两个出口。
+   用户原话：「中间选中元素输入 position，Enter 就可以直接定位到这个元素右侧的
+              position 的幽灵卡片，只是用来临时数据修改，避免去快捷助手里面改。」
+   它是一张**临时**的定位编辑卡（蓝色左边框 = "临时/悬浮工具"），
+   与"快捷助手 → 定位助手"不冲突：后者是长期面板，这张是改完就走。
+   （上一轮那张"快捷助手隐藏属性占位说明"按用户要求已删除。）
    ========================================================================== */
-.prop-ghost-card {
+.pos-ghost {
+  margin: 6px 0 10px;
+  border: 1px solid var(--line, var(--border));
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+  animation: bcSwapIn var(--dur-pop) var(--ease-standard);
+}
+.pos-ghost-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line, var(--border));
+  background: var(--panel-soft);
+  border-radius: 7px 7px 0 0;
+}
+.pos-ghost-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-1, var(--text));
+}
+.pos-ghost-title svg { color: var(--accent); }
+.pos-ghost-x {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3, var(--text-muted));
+  cursor: pointer;
+  padding: 0;
+}
+.pos-ghost-x:hover { background: var(--hover); color: var(--text-1, var(--text)); }
+.pos-ghost-body {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  margin: 4px 0 8px;
-  padding: 9px 10px;
-  border: 1px dashed var(--line-strong, var(--border));
-  border-radius: 8px;
-  background: var(--surface-sunken, var(--panel-soft));
+  gap: 8px;
+  padding: 9px 10px 10px;
 }
-.prop-ghost-main { display: flex; gap: 7px; align-items: flex-start; }
-.prop-ghost-ico { flex: none; color: var(--text-3, var(--text-muted)); margin-top: 1px; }
-.prop-ghost-text {
-  font-size: 11.5px;
-  line-height: 1.65;
-  color: var(--text-2, var(--text-muted));
+.pos-ghost-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
-.prop-ghost-text b,
-.prop-ghost-text strong { color: var(--text-1, var(--text)); font-weight: 600; }
-.prop-ghost-actions { display: flex; gap: 6px; }
-.prop-ghost-btn {
+.pos-ghost-mode {
   height: 24px;
   padding: 0 9px;
   border: 1px solid var(--line, var(--border));
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--bg-panel);
-  color: var(--text-2, var(--text));
-  font-size: 11.5px;
+  color: var(--text-2, var(--text-muted));
   font-family: inherit;
+  font-size: 11px;
   cursor: pointer;
 }
-.prop-ghost-btn:hover { border-color: var(--accent); color: var(--accent); }
-.prop-ghost-btn.is-ghost { border-color: transparent; background: transparent; color: var(--text-3, var(--text-muted)); }
-.prop-ghost-btn.is-ghost:hover { background: var(--hover); color: var(--accent); }
+.pos-ghost-mode:hover { border-color: var(--accent); color: var(--accent); }
+.pos-ghost-mode.is-on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.pos-ghost-hint {
+  font-size: 10.5px;
+  line-height: 1.65;
+  color: var(--text-3, var(--text-muted));
+  word-break: break-word;
+}
+
+/* ============================================================================
+   15. 页面 / 变量里的字体字段（v0.4.5 第十六批 · 用户反馈）
+   ---------------------------------------------------------------------------
+   用户原话：「页面和变量里面的字体还是原始的，没有类似单个元素的
+              font family 的设置方式（是有一个弹窗）。」
+   现在这一行 = 可以手填的文本框 + 「字体库…」按钮（打开与元素完全同一个弹窗：
+   可搜索本机字体、看预览、看商用许可证徽章）。
+   ========================================================================== */
+.page-font-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.page-font-field .page-font-input { flex: 1 1 auto; min-width: 0; }
+.page-font-field .page-font-pick { flex: none; white-space: nowrap; }
 
 /* ============================================================================
    9. 深色模式：把剩下这批"硬编码浅色"换成语义变量（v0.4.5 第 11 批）
@@ -327,6 +389,19 @@ html[data-bc-dark] .fp-badge.lic-unknown { color: var(--text-3); border-color: v
   background: var(--bg-panel);
   box-shadow: var(--shadow-2, 0 8px 28px rgba(15, 23, 42, 0.18));
   animation: bcPopIn 0.16s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/*
+ * v0.4.5 第十六批（用户反馈「全部项目上方的信息按钮没有关闭动画」）：
+ * 进场动画带 `both` 填充，播完后会一直占着 opacity/transform —— 动画的优先级高于
+ * 普通声明与 transition，所以只写 `opacity: 0` 是无效的（和快照抽屉是同一个坑）。
+ * 退场必须**显式关掉动画**（animation: none），transition 才真正生效。
+ */
+.pc-kindhelp-pop.is-closing {
+  animation: none;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.985);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  pointer-events: none;
 }
 .pc-kindhelp-head {
   font-size: 12px;
@@ -527,4 +602,43 @@ html[data-bc-dark] .help-doc mark.hc-hit {
 @keyframes bcMarkPulse {
   0%, 100% { box-shadow: 0 0 0 1px rgba(240, 180, 0, 0.45); }
   50%      { box-shadow: 0 0 0 4px rgba(240, 180, 0, 0.35); }
+}
+
+/* ============================================================================
+   13. 「切换板块没有动画」的两处补齐（v0.4.5 第十六批 · 用户反馈）
+   ---------------------------------------------------------------------------
+   用户原话：「注意右上角的页面设置，多个板块切换的时候没有动画。」
+            「下方元素插入栏没有切换板块的动画。」
+   原因相同：内容用 `{tab === 'x' && …}` 条件渲染，切换时 DOM 直接替换 —— 硬切。
+   做法：外层容器 + `key={当前板块}` 强制重建 → 每次切换播一次 bcSwapIn
+   （与右侧属性面板的 `.insp-tab-anim` 同一套 token，节奏一致）。
+
+   ⚠ 布局陷阱（第一版踩过，整块面板挤到左边）：
+   `.element-panel` 在底部布局下是 **flex-direction: row**（页签竖排在左、内容在右），
+   而 `.elem-main-wrap` / `.tpl-body` 都是靠 `flex: 1 1 0` 撑满剩余宽度的。
+   中间插一层包装 div 后，包装层默认是 `flex: 0 1 auto` —— 它只按内容宽度收缩，
+   于是"所有东西挤到左边"。所以包装层必须自己变成 `flex: 1 1 0` 的
+   纵向 flex 容器，把"撑满"这件事继续传给里面的内容。
+   ========================================================================== */
+.element-panel > .elem-tab-anim {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: bcSwapIn var(--dur-pop) var(--ease-standard);
+  /* 两个板块高度不同时会出现滚动条槽位抖动，稳定住 */
+  scrollbar-gutter: stable;
+}
+/* 素材库根节点自己也要能撑满（它不在 .elem-main-wrap 里） */
+.element-panel > .elem-tab-anim > .asset-gallery {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* 首页「页面设置」四个板块（预设/渐变/图片/视频）—— 同样是条件渲染 */
+.eh-panel-tabbody {
+  animation: bcSwapIn var(--dur-pop) var(--ease-standard);
+  min-width: 0;
 }

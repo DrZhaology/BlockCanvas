@@ -75,6 +75,8 @@ const PROBES = [
   'probe-v045-snapshot-ui',
   'probe-v045-thumbs',
   'probe-v045-ghostcard',
+  'probe-v045-batch16',
+  'probe-v045-batch16b',
   'probe-input-focus',
   'probe-ui-overflow'
 ];

@@ -1,4 +1,4 @@
-﻿# =========================================================
+# =========================================================
 # BlockCanvas - one-click build (green portable folder)
 #   ⚠ 本文件必须保存为「UTF-8 带 BOM」：Windows PowerShell 5.1 对无 BOM 的文件按 ANSI(GBK) 解码，
 #     下面的中文会变成乱码、连字符串引号都被截断，报一堆莫名语法错误（踩过一次）。改完确认 BOM 还在。
@@ -63,7 +63,19 @@ if (Test-Path $srcExt) {
 
 Write-Host '[5/5] compress to zip...' -ForegroundColor Cyan
 Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-Compress-Archive -Path (Join-Path $appDir '*') -DestinationPath $zipPath
+# ⚠ v0.4.5 第十六批（用户要求）：
+#   以前是 `Compress-Archive -Path $appDir\*` —— 压缩的是 **目录内容**，
+#   用户解压后文件直接散在解压目录里，目录名由"解压到哪"决定（于是出现
+#   `BlockCanvas-0.4.5-Alpha-2026年10月25日15点36分-win64` 这种名字）。
+#   现在先做一个只含 `BlockCanvas/` 的暂存目录，压缩**这个目录本身** →
+#   解压出来固定是 `BlockCanvas\BlockCanvas.exe`，和更新时改名的目标一致。
+$stageRoot = Join-Path $root 'dist\.zip-stage'
+$stageApp = Join-Path $stageRoot 'BlockCanvas'
+if (Test-Path $stageRoot) { Remove-Item $stageRoot -Recurse -Force -ErrorAction SilentlyContinue }
+New-Item -ItemType Directory -Path $stageApp -Force | Out-Null
+Copy-Item -Path (Join-Path $appDir '*') -Destination $stageApp -Recurse -Force
+Compress-Archive -Path $stageApp -DestinationPath $zipPath
+Remove-Item $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
 if (-not (Test-Path $zipPath)) { throw "[5/5] 压缩失败：$zipPath 不存在。" }
 
 Write-Host ''

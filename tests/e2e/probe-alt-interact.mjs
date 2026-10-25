@@ -441,17 +441,69 @@ async function main() {
       && whereHas(relStyle, 'left') === null,
     JSON.stringify({ bp: relStyle.bp, ml: relMl, mr: relMr, left: whereHas(relStyle, 'left') }));
 
-  // ============ 5. Alt + 滚轮 = 缩放 ============
+  // ============ 5. Alt + 滚轮 = 精准微调（v0.4.5 第十六批改契约） ============
+  // 用户原话：「Alt + 滚轮是精准定位」——1px/格、Shift 加速到 10px。
+  // 缩放让位给 Ctrl + 滚轮（下面第 6 段验证）。
+  // 自己造一个元素来测（不依赖前面步骤留下的元素 —— 它可能已经被删掉了）
+  const nud = await win.evaluate(async () => {
+    const st = window.__sceneStore.getState();
+    st.addElement('div', null);
+    const id = window.__sceneStore.getState().scene.selectedId;
+    window.__sceneStore.getState().updateStyle(id, { position: 'relative', left: '0px', top: '0px' });
+    await new Promise((r) => setTimeout(r, 500));
+    const find = (n, x) => (n.id === x ? n : (n.children || []).reduce((a, k) => a || find(k, x), null));
+    const bp = window.__sceneStore.getState().activeBreakpoint;
+    const read = () => {
+      const n = find(window.__sceneStore.getState().scene.root, id);
+      return n ? { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) } : {};
+    };
+    const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
+    if (!el) return { id, missing: true };
+    try { el.scrollIntoView({ block: 'center' }); } catch { /* 忽略 */ }
+    const r = el.getBoundingClientRect();
+    return { id, missing: false, top0: read().top, x: Math.max(4, r.left + r.width / 2), y: Math.max(4, r.top + r.height / 2) };
+  });
+  ok('准备：微调测试元素就绪', nud.missing === false && String(nud.top0) === '0px', JSON.stringify(nud));
+
+  if (!nud.missing) {
+    await win.keyboard.down('Alt');
+    await win.mouse.move(nud.x, nud.y);
+    await win.mouse.wheel(0, -1);
+    await sleep(300);
+    const nudged = await win.evaluate((id) => {
+      const bp = window.__sceneStore.getState().activeBreakpoint;
+      const find = (n, x) => (n.id === x ? n : (n.children || []).reduce((a, k) => a || find(k, x), null));
+      const n = find(window.__sceneStore.getState().scene.root, id);
+      const m = n ? { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) } : {};
+      return { top: m.top, boxModel: !!document.querySelector('.bc-boxm') };
+    }, nud.id);
+    await win.keyboard.down('Shift');
+    await win.mouse.wheel(0, -1);
+    await win.keyboard.up('Shift');
+    await sleep(300);
+    const nudged2 = await win.evaluate((id) => {
+      const bp = window.__sceneStore.getState().activeBreakpoint;
+      const find = (n, x) => (n.id === x ? n : (n.children || []).reduce((a, k) => a || find(k, x), null));
+      const n = find(window.__sceneStore.getState().scene.root, id);
+      const m = n ? { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) } : {};
+      return m.top;
+    }, nud.id);
+    await win.keyboard.up('Alt');
+    ok('Alt + 滚轮一格 = 精准微调 1px（不再是缩放）',
+      String(nudged.top) === '-1px', `${nud.top0} → ${nudged.top}`);
+    ok('Alt + Shift + 滚轮 = 加速到 10px（累计 -11px）',
+      String(nudged2) === '-11px', String(nudged2));
+    ok('Alt + 滚轮期间不显示盒模型', nudged.boxModel === false, String(nudged.boxModel));
+  }
+
+  // ============ 6. Ctrl + 滚轮 = 缩放（Alt 已让给微调） ============
   const z0 = await win.evaluate(() => document.querySelector('.canvas').getBoundingClientRect().width);
-  await win.keyboard.down('Alt');
-  await win.mouse.move(rf.x + rf.w / 2, rf.y + rf.h / 2);
+  await win.keyboard.down('Control');
   await win.mouse.wheel(0, -120);
-  await sleep(200);
-  await win.mouse.wheel(0, -120);
-  await sleep(300);
-  await win.keyboard.up('Alt');
+  await sleep(250);
+  await win.keyboard.up('Control');
   const z1 = await win.evaluate(() => document.querySelector('.canvas').getBoundingClientRect().width);
-  ok('Alt + 滚轮能缩放画布', z1 > z0 + 1, `${Math.round(z0)} → ${Math.round(z1)}`);
+  ok('Ctrl + 滚轮能缩放画布', z1 > z0 + 1, `${Math.round(z0)} → ${Math.round(z1)}`);
 
   ok('无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));
 

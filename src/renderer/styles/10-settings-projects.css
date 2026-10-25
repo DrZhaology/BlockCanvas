@@ -639,9 +639,23 @@ html[data-bc-dark] .pc-cover-badge {
   animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
   transition: opacity 0.24s ease;
 }
-/* 关闭：先播出场动画再卸载 */
-.pc-drawer-mask.is-closing { opacity: 0; }
+/*
+ * 关闭：先播出场动画再卸载。
+ *
+ * ⚠ v0.4.5 第十六批（用户反馈「历史快照侧边栏没有关闭动画」）：
+ * 以前这里只写了 `opacity: 0` / `translateX(100%)`，但遮罩与抽屉各自还挂着
+ * **入场**动画 `bcPopIn` / `bcDrawerIn`，而且都带 `both` 填充模式 ——
+ * 带 `both` 的动画在结束后会一直"占着"这些属性（动画的优先级高于普通声明与 transition），
+ * 所以 `opacity: 0` 和 `transform` 被入场动画的终态死死盖住，看起来就是"点关闭啪一下就没了"。
+ * 修法：关闭态**显式把动画关掉**（animation: none），transition 才真正生效。
+ */
+.pc-drawer-mask.is-closing {
+  animation: none;
+  opacity: 0;
+  pointer-events: none;
+}
 .pc-drawer-mask.is-closing .pc-drawer {
+  animation: none;
   transform: translateX(100%);
   opacity: 0.7;
 }
@@ -692,9 +706,31 @@ html[data-bc-dark] .pc-cover-badge {
   border-radius: 6px;
   background: var(--panel-soft);
 }
-.pc-backup-meta { display: flex; flex-direction: column; gap: 2px; }
+.pc-backup-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pc-backup-tag { font-size: 12.5px; font-weight: 600; color: var(--text); }
 .pc-backup-time { font-size: 11px; color: var(--text-muted); }
+/*
+ * 快照卡片右侧的两个动作按钮。
+ *
+ * ⚠ v0.4.5 第十六批（用户反馈「只读预览和作为草稿打开按钮靠得很近」）：
+ * 以前 `.pc-backup-action` **完全没有样式**，两个 `.btn-mini` 直接相邻，
+ * 视觉上几乎粘成一颗按钮。这里给它们一条明确的间距 + 不换行 + 不被挤压。
+ */
+.pc-backup-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+.pc-backup-action > button {
+  white-space: nowrap;
+  flex: none;
+}
+/* 窄屏时允许换行，避免两个按钮把文字区挤没 */
+@media (max-width: 720px) {
+  .pc-backup-item { flex-direction: column; align-items: stretch; }
+  .pc-backup-action { justify-content: flex-end; }
+}
 
 /* 快捷键速查模态弹窗 */
 .shortcuts-modal-card {

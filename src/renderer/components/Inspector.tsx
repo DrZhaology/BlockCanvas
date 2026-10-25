@@ -15,9 +15,11 @@ import { useShowBr } from '@lib/showBr';
 import { peekPendingPropFocus, subscribePropFocus, takePendingPropFocus, type PropFocusRequest } from '@lib/propFocus';
 import { TrblInput } from './TrblInput';
 import { MediaPropsCard } from './MediaPropsCard';
+import { PositionGhostCard } from './PositionGhostCard';
 import { ColorPicker, ColorField } from './ColorPicker';
 import { NumberUnitInput } from './NumberUnitInput';
 import { FontFamilyInput } from './FontFamilyInput';
+import { FontPickerModal } from './FontPickerModal';
 import { TransformInput } from './TransformInput';
 import { BorderInput } from './BorderInput';
 import { BoxShadowInput } from './BoxShadowInput';
@@ -222,7 +224,12 @@ type PageQuickKey = keyof NonNullable<SceneGraph['quickCss']> & string;
 interface PagePropDef {
   key: PageQuickKey;
   label: string;
-  type: 'color' | 'text';
+  /**
+   * 卡片用哪种编辑器。
+   * v0.4.5 第十六批新增 `'font'`：字体走元素那一套「字体库」弹窗
+   * （用户反馈「页面和变量里面的字体还是原始的，没有类似单个元素的 font family 的设置方式」）。
+   */
+  type: 'color' | 'text' | 'font';
   placeholder?: string;
   /** 对应元素 SCHEMA 的 key：决定这张卡片用哪种专属编辑器 */
   schemaKey?: string;
@@ -232,7 +239,7 @@ const PAGE_PROPS: PagePropDef[] = [
   { key: 'bodyBg', label: '页面背景色', type: 'color', schemaKey: 'backgroundColor' },
   { key: 'textColor', label: '文字颜色', type: 'color', schemaKey: 'color' },
   { key: 'linkColor', label: '链接颜色', type: 'color', schemaKey: 'color' },
-  { key: 'fontFamily', label: '页面字体', type: 'text', schemaKey: 'fontFamily' },
+  { key: 'fontFamily', label: '页面字体', type: 'font', schemaKey: 'fontFamily' },
   { key: 'bodyFontSize', label: '正文字号', type: 'text', schemaKey: 'fontSize' },
   { key: 'bodyLineHeight', label: '正文行高', type: 'text', schemaKey: 'lineHeight' },
   { key: 'headingColor', label: '标题颜色（h1~h6）', type: 'color', schemaKey: 'color' }
@@ -477,6 +484,8 @@ function PagePropRow(props: {
   const unit = schema?.unit;
   const value = props.value ?? '';
   const canSides = Boolean(schema?.sides && props.sideGet && props.sideSet);
+  // 页面/变量的字体：复用元素的「字体库」弹窗（v0.4.5 第十六批）
+  const [fontPickerOpen, setFontPickerOpen] = useState(false);
 
   return (
     <div className="prop-row page-prop-row" data-cat={schema?.category ?? '其他'}>
@@ -510,6 +519,35 @@ function PagePropRow(props: {
             onFocusStart={props.onFocusStart}
             onFocusEnd={props.onFocusEnd}
           />
+        ) : input === 'font' ? (
+          /*
+           * v0.4.5 第十六批（用户反馈）：「页面和变量里面的字体还是原始的，
+           * 没有类似单个元素的 font family 的设置方式（是有一个弹窗）。」
+           * 这里直接复用元素那一套「字体库」弹窗（FontPickerModal）：
+           * 同样的搜索、同样的预览、同样的商用许可证徽章，只是写进 bodyExtra / token。
+           */
+          <div className="page-font-field">
+            <input
+              className="page-quick-input page-font-input"
+              value={value}
+              placeholder="留空 = 用浏览器默认字体"
+              spellCheck={false}
+              onFocus={props.onFocusStart}
+              onChange={(e) => props.onChange(e.target.value)}
+              onBlur={props.onFocusEnd}
+            />
+            <button
+              className="btn-mini page-font-pick"
+              title="打开字体库：可搜索本机字体、预览效果、查看商用许可"
+              onClick={() => { props.onFocusStart(); setFontPickerOpen(true); }}
+            >字体库…</button>
+            <FontPickerModal
+              open={fontPickerOpen}
+              initial={value}
+              onClose={() => { setFontPickerOpen(false); props.onFocusEnd(); }}
+              onApply={(v) => { props.onChange(v); setFontPickerOpen(false); props.onFocusEnd(); }}
+            />
+          </div>
         ) : input === 'select' && schema?.options ? (
           <select
             className="page-quick-input"
@@ -943,23 +981,6 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
     }
   }
 
-  // ============ "幽灵卡片"（v0.4.5 第 11 批）============
-  // 用户把「快捷助手 → 是否显示到下方 CSS 属性」关掉之后，快捷助手代管的那些属性
-  // 会从下面的列表里整块消失。问题是：**它们其实还在生效**（display:flex、gap、文字渐变…），
-  // 用户看到"列表是空的"就会以为"这个元素没有任何样式"，于是反复去添加、重复写。
-  //
-  // 这里给一张"幽灵卡片"：只在"开关关着 + 这个元素确实有代管样式"时出现，
-  // 一行灰底说明 + 「显示出来」按钮，点一下就把它们放回列表（并记住这个开关）。
-  const ghostManaged = (() => {
-    if (showHelperInCss) return [] as string[];
-    const keys: string[] = [];
-    for (const k of HELPER_MANAGED_KEYS) {
-      const v = styleForPresence[k];
-      if (v != null && String(v).trim() !== '') keys.push(k);
-    }
-    return keys;
-  })();
-
   // ============ "添加属性"回调 ============
   const onAddProperty = (key: string, value?: string) => {
     const item = getSchemaItem(key);
@@ -983,10 +1004,24 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   // ============ 中键搜索：定位到某条 CSS 属性（橙色高亮）============
   // 画布上对元素按中键 → 敲属性名 → Enter → 这里展开「CSS 样式属性」、确保该行存在、滚动并闪烁高亮。
   const [flashKey, setFlashKey] = useState<string | null>(null);
+  /**
+   * 定位「幽灵卡片」（v0.4.5 第十六批 · 用户澄清后的真实需求）
+   * ------------------------------------------------------------------
+   * 用户原话：「中间选中元素输入 position，Enter 就可以直接定位到这个元素右侧的
+   *            position 的幽灵卡片，只是用来临时数据修改，避免去快捷助手里面改。」
+   *
+   * 所以：中键搜到 position（或 left/top/right/bottom）时，除了展开 CSS 属性区，
+   * 还额外弹出这张**临时**卡片 —— 因为 position 的可编辑项分散在快捷助手里，
+   * 用户搜 position 却"点不进去"（反馈原话："对于定位 position 元素没有用"）。
+   */
+  const [showPosGhost, setShowPosGhost] = useState(false);
   useEffect(() => {
     const apply = (req: PropFocusRequest) => {
       const key = req.key;
       if (!key) return;
+      // 定位相关属性 → 同时亮出临时卡片
+      const POS_KEYS = new Set(['position', 'left', 'right', 'top', 'bottom', 'zIndex', 'inset']);
+      if (POS_KEYS.has(key)) setShowPosGhost(true);
       // add 默认 true（老行为）；中键搜索在"未添加"时按 Enter 会传 false —— 只提示、不偷偷加
       const shouldAdd = req.add !== false;
       setSecOpen((p) => ({ ...p, css: true }));
@@ -1285,6 +1320,16 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
         </Collapse>
       </div>
 
+      {/* 0. 定位「幽灵卡片」（v0.4.5 第十六批）：中键搜 position / left / top… 时临时出现，
+             就地改定位，不用去快捷助手里翻。Esc 或 × 关闭。 */}
+      {showPosGhost && (
+        <PositionGhostCard
+          elementId={elementId}
+          elementType={elementType}
+          onClose={() => setShowPosGhost(false)}
+        />
+      )}
+
       {/* 1.5 媒体属性卡（v0.4.5）：video / audio 专用，只有这几个属性，不该让人手填 src */}
       {(elementType === 'video' || elementType === 'audio') && (
         <MediaPropsCard elementId={elementId} elementType={elementType} />
@@ -1582,33 +1627,9 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
               visibleKeys={visibleSchema.map((s) => s.key)}
               onAdd={onAddProperty}
             />
-            {visibleSchema.length === 0 && ghostManaged.length === 0 && (
+            {visibleSchema.length === 0 && (
               <div className="props-empty-hint">
                 暂未添加特殊样式。点击上方 <b>+ 添加属性</b> 自由设定。
-              </div>
-            )}
-            {/* 幽灵卡片：快捷助手的样式在生效，但列表里被隐藏了 —— 说明一下并提供入口 */}
-            {ghostManaged.length > 0 && (
-              <div className="prop-ghost-card">
-                <div className="prop-ghost-main">
-                  <span className="prop-ghost-ico"><Icon name="lightbulb" size={13} /></span>
-                  <span className="prop-ghost-text">
-                    这个元素有 <b>{ghostManaged.length}</b> 条样式由<strong>快捷助手</strong>管理，
-                    当前设置为「不显示在下方列表」（<b>样式依然生效</b>）。
-                  </span>
-                </div>
-                <div className="prop-ghost-actions">
-                  <button
-                    className="prop-ghost-btn"
-                    onClick={() => changeShowHelperInCss(true)}
-                    title="把这些属性放回下面的列表，方便逐条查看与微调（可在快捷助手里再关掉）"
-                  >显示出来</button>
-                  <button
-                    className="prop-ghost-btn is-ghost"
-                    onClick={() => setSecOpen((p) => ({ ...p, layout: true }))}
-                    title="到「快捷助手」里直接改这些样式"
-                  >去快捷助手</button>
-                </div>
               </div>
             )}
             <div className="props-list">

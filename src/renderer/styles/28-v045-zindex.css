@@ -184,21 +184,21 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
 }
 
 /* ============================================================================
-   3. 中键属性搜索浮层：抬高到浮层档 + **只保留一种蓝色**
+   3. 中键属性搜索浮层（v0.4.5 第十六批：逻辑与视觉一起简化）
    ---------------------------------------------------------------------------
-   用户反馈原话：「只有一种蓝色的显示，蓝色的选项就对应选中的选项，现在第一个是蓝色的，
-   最后一个是蓝色的，中键选中的又是前面一部分蓝色，很奇怪完全弄不明白。」
-   原因：以前同时有 4 个类会刷蓝底 —— `.is-best`（权重第一）/ `.is-added`（已添加）/
-   `.is-added:hover` / `.is-active`（键盘选中）。
-   现在：**蓝色底只有一个来源 —— `.is-active`（键盘/鼠标当前指向的那一项）**；
-   "已添加 / 未添加"降级成右侧小徽章的文字与颜色，不再抢底色。
+   用户原话（逐条对应）：
+     · 「输入框的结果只显示三个」        → 组件侧 MAX_HITS = 3（这里只管样式）
+     · 「把这个卡片结果变成淡蓝色就行，左边的蓝色样式不要了」
+        → 选中态 = **淡蓝卡片底**；**删掉**原来那条 `inset 2px 0 0` 的左侧蓝色竖线
+     · 「原来的属性值搜索和快捷添加不要了」 → `.bc-prop-vals*` 全部作废
+   于是这里只有一种"蓝"：`.is-active` 的淡蓝底。已添加/未添加只由右侧徽章表达。
    ========================================================================== */
 .bc-prop-search {
   z-index: var(--z-popover);
   position: fixed;
   max-width: calc(100vw - 16px);
 }
-/* 全部"除了当前激活项以外"的蓝色底一律清掉 */
+/* 除当前激活项外，一律无底色（把历史上 is-best / is-added / is-added:hover 的蓝底全部清掉） */
 .bc-prop-search-item,
 .bc-prop-search-item.is-best,
 .bc-prop-search-item.is-added,
@@ -210,52 +210,63 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
   box-shadow: none;
 }
 .bc-prop-search-item:hover { background: var(--hover); }
-/* 唯一的蓝色：当前激活项 */
+/* 唯一的蓝：当前选中项 = 淡蓝色卡片底，**没有左侧竖线** */
 .bc-prop-search-item.is-active,
-.bc-prop-search-item.is-active:hover {
-  background: var(--hover-accent, #eff6ff);
-  box-shadow: inset 2px 0 0 0 var(--accent, #1e88e5);
+.bc-prop-search-item.is-active:hover,
+.bc-prop-search-item.is-active.is-added,
+.bc-prop-search-item.is-active.is-missing {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: none;
 }
-/* 已添加 / 未添加：只影响文字与徽章，不影响底色 */
+/* 已添加 / 未添加：只影响徽章，不影响底色与文字色（避免"整行都是蓝的"） */
 .bc-prop-search-item.is-added .bc-prop-search-label,
-.bc-prop-search-item.is-added .bc-prop-search-key { color: var(--accent); }
-.bc-prop-search-item.is-missing .bc-prop-search-label { color: var(--text, inherit); }
+.bc-prop-search-item.is-added .bc-prop-search-key { color: var(--text-1, var(--text)); }
+.bc-prop-search-item.is-missing .bc-prop-search-label,
+.bc-prop-search-item.is-missing .bc-prop-search-key { color: var(--text-2, var(--text-muted)); }
 .bc-prop-search-badge { border: 1px solid var(--line, var(--border)); border-radius: 999px; padding: 1px 5px; }
-.bc-prop-search-item.is-added .bc-prop-search-badge { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.bc-prop-search-item.is-added .bc-prop-search-badge {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
 .bc-prop-search-item.is-missing .bc-prop-search-badge { color: var(--text-3, var(--text-muted)); }
 
-/* 属性值预测行（中键搜索新增：敲 `display fl` 直接预测到 display: flex） */
-.bc-prop-vals {
+/* ============================================================================
+   3b. 中键搜索：只显示 3 条 + 末尾"已添加/未添加"（v0.4.5 第十六批）
+   ---------------------------------------------------------------------------
+   用户原话：「输入框的结果只显示三个，每一个按照下面的显示：
+              属性中文名称 属性英文名 最后末尾显示有没有添加。原来的属性值搜索和快捷添加不要了。」
+   所以这里只保留「中文名（自适应省略）+ 英文名（等宽）+ 状态徽章（右对齐）」三段，
+   并且**删掉**了原来的 `.bc-prop-vals / .bc-prop-val` 值预测样式（功能已移除）。
+   ========================================================================== */
+.bc-prop-search-list { gap: 3px; }
+.bc-prop-search-item {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 6px 8px 2px;
-  border-top: 1px dashed var(--line, var(--border));
-  margin-top: 5px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
 }
-.bc-prop-vals-label {
-  flex: 0 0 100%;
-  font-size: 10px;
-  color: var(--text-3, var(--text-muted));
-  margin-bottom: 1px;
+.bc-prop-search-item .bc-prop-search-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
 }
-.bc-prop-val {
-  padding: 3px 7px;
-  border: 1px solid var(--line, var(--border));
-  border-radius: 999px;
-  background: var(--bg-panel);
-  font-size: 11px;
+.bc-prop-search-item .bc-prop-search-key {
+  flex: 0 0 auto;
   font-family: Consolas, Menlo, monospace;
-  color: var(--text-2, var(--text));
-  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-3, var(--text-muted));
 }
-.bc-prop-val:hover { border-color: var(--accent); color: var(--accent); background: var(--hover-accent, #eff6ff); }
-.bc-prop-val.is-active,
-.bc-prop-val.is-active:hover {
-  background: var(--hover-accent, #eff6ff);
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
+.bc-prop-search-item .bc-prop-search-badge {
+  flex: 0 0 auto;
+  margin-left: 2px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: nowrap;
 }
 
 /* ============================================================================

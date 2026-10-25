@@ -282,6 +282,12 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   // v0.4.5：按住 Alt 拖动时，按浏览器 F12 的方式把盒模型画出来 ——
   // margin / border / padding / content 四层 + 各边数值 + 中央定位方式 + relative 的偏移距离箭头。
   const [boxModel, setBoxModel] = useState<AltBoxModelData | null>(null);
+  /**
+   * Alt+滚轮之后的短暂"不要弹盒模型"窗口（v0.4.5 第十六批）。
+   * 用户原话：「Alt + 滚轮不要触发页面上的盒模型显示。」
+   * 滚轮本身会带出 pointermove 事件，若不挡一下，刚清掉的盒模型会立刻又出现。
+   */
+  const wheelNoBoxUntil = useRef(0);
   const readBoxModel = (el: HTMLElement): AltBoxModelData => {
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);
@@ -626,7 +632,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const next = { id, edge, mode, rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
     // v0.4.5：Alt **悬停**就把盒模型浮层显示出来（以前只在拖动中出现）。
     // 放在"位置未变就提前 return"之前 —— 否则鼠标停在同一元素上时浮层永远不会挂载。
-    if (!altDragRef.current) setBoxModel(readBoxModel(el));
+    // ⚠ 但 Alt+滚轮刚用过的 0.8 秒内不弹（用户明确要求"滚轮不要触发盒模型"）。
+    if (!altDragRef.current && Date.now() > wheelNoBoxUntil.current) setBoxModel(readBoxModel(el));
     const prev = altHoverRef.current;
     if (prev && prev.id === id && prev.edge === edge && prev.mode === mode
       && Math.abs(prev.rect.x - next.rect.x) < 0.5 && Math.abs(prev.rect.y - next.rect.y) < 0.5
@@ -1354,20 +1361,65 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   }, []);
 
   const onCanvasWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    // v0.4.4：Alt 拖动元素期间，滚轮改成**上下滚动画布**（不再缩放）——
-    // 拖动时手已经被占住，缩放手感反而会干扰；需要缩放松开后再滚。
     const drag = altDragRef.current;
+
+    /**
+     * ① Alt + 按住拖动中 + 滚轮 = **滚动画布**（v0.4.4 起）。
+     *
+     * v0.4.5 第十六批修正（用户反馈）：「Alt + 左键按住元素 + 滚轮就是滚动页面，
+     * 但是现在元素不会跟手，会突然瞬移到上面或者下面，很不方便。」
+     *
+     * 原因：拖拽是以"按下那一刻的屏幕 rect + 指针位移"为基准算目标位置的。
+     * 画布滚动 S 像素后，元素在屏幕上的位置整体上移了 S，但基准 `d.rect` 还是旧的
+     * —— 下一帧算出来的目标位置就凭空多了 S 的偏差，看起来就是"瞬移"。
+     * 修法：把基准 rect（以及纵向墙）一起平移 S，元素才会**跟着内容走**。
+     */
     if (e.altKey && drag?.engaged && drag.mode === 'move') {
       e.preventDefault();
       const wrapEl = canvasRef.current?.parentElement;
+      const before = wrapEl?.scrollTop ?? 0;
       wrapEl?.scrollBy({ top: e.deltaY });
+      const scrolled = (wrapEl?.scrollTop ?? 0) - before;
+      if (scrolled !== 0) {
+        drag.rect = { ...drag.rect, top: drag.rect.top - scrolled };
+        drag.bounds = {
+          ...drag.bounds,
+          minY: drag.bounds.minY - scrolled,
+          maxY: Number.isFinite(drag.bounds.maxY) ? drag.bounds.maxY - scrolled : drag.bounds.maxY,
+          barT: drag.bounds.barT ? { ...drag.bounds.barT, y: drag.bounds.barT.y - scrolled } : drag.bounds.barT,
+          barB: drag.bounds.barB ? { ...drag.bounds.barB, y: drag.bounds.barB.y - scrolled } : drag.bounds.barB
+        };
+      }
       return;
     }
+
+    /**
+     * ② Alt + 滚轮（没在拖动）= **精准微调位置**（v0.4.5 第十六批 · 用户明确要求）。
+     *
+     * 用户原话：「Alt + 滚轮不要触发页面上的盒模型显示；只有 Alt + 鼠标放到一个元素上
+     *            但不按住，可以显示盒模型和定位等；Alt + 滚轮是精准定位。」
+     * 步长按用户选择：**1px / 格，按住 Shift 加速到 10px**。
+     * （以前 Alt+滚轮是"以光标为锚点缩放"，现在让位给微调；缩放到 Ctrl+滚轮。）
+     */
+    if (e.altKey && !drag) {
+      e.preventDefault();
+      // 滚轮期间不弹盒模型（用户明确要求），并且挡掉随后 pointermove 立刻又把它带出来
+      wheelNoBoxUntil.current = Date.now() + 800;
+      setBoxModel(null);
+      const hover = altHoverRef.current;
+      if (hover) {
+        const step = e.shiftKey ? 10 : 1;
+        const delta = e.deltaY < 0 ? -step : step;
+        nudgeElement(hover.id, delta);
+      }
+      return;
+    }
+
     // 滚轮时先收掉 Alt 悬停高亮（避免缩放时还挂着"可编辑"虚线框与光标）
     if (altHover) setAltHover(null);
     tagAltCursor(null, '');
-    // Ctrl+滚轮 / Alt+滚轮 都是缩放；Alt 额外做"以鼠标位置为锚点"的精准缩放
-    if (!e.ctrlKey && !e.altKey) return;
+    // Ctrl+滚轮 = 缩放（Alt 已经让给"精准微调"了）
+    if (!e.ctrlKey) return;
     e.preventDefault();
     const canvasEl = canvasRef.current;
     if (!canvasEl) return;
@@ -1376,17 +1428,37 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const dir = e.deltaY < 0 ? 1 : -1;
     const next = Math.min(2, Math.max(0.5, Math.round(oldZoom * (1 + dir * 0.04) * 100) / 100));
     if (next === oldZoom) return;
-    if (e.altKey && next !== 1) {
-      // 以鼠标位置为缩放锚点：把 transform-origin 设到光标处（相对画布百分比），
-      // 缩放时该点保持不动 —— 比"补偿滚动"更可靠（画布居中时滚动是无效的）。
-      const r = canvasEl.getBoundingClientRect();
-      const ox = r.width ? ((e.clientX - r.left) / r.width) * 100 : 0;
-      const oy = r.height ? ((e.clientY - r.top) / r.height) * 100 : 0;
-      setZoomOrigin(`${Math.max(0, Math.min(100, ox)).toFixed(2)}% ${Math.max(0, Math.min(100, oy)).toFixed(2)}%`);
-    } else {
-      setZoomOrigin('left top');
-    }
+    setZoomOrigin('left top');
     onZoomChange?.(() => next);
+  };
+
+  /**
+   * 精准微调：把元素沿纵向挪 delta 个 CSS 像素（v0.4.5 第十六批）。
+   *   · 定位元素 → 改它当前锚定的那一边（top 或 bottom，只动一条）；
+   *   · 普通流元素 → 改 marginTop（这是流式布局里唯一"位移"的表达方式）。
+   * 绝对/固定定位的负值由 store 统一钳到 0（见 sceneStore.updateStyle）。
+   */
+  const nudgeElement = (id: string, delta: number) => {
+    const node = findNode(root, id);
+    if (!node) return;
+    const cs = node.style as Record<string, string | undefined>;
+    const pos = cs.position ?? 'static';
+    const positioned = pos === 'absolute' || pos === 'fixed' || pos === 'relative' || pos === 'sticky';
+    const z = zoomRef.current || 1;
+    const step = delta / z;
+    if (!positioned) {
+      const cur = parseFloat(cs.marginTop ?? '') || 0;
+      useScene.getState().updateStyle(id, { marginTop: Math.round(cur + step) + 'px' } as never);
+      return;
+    }
+    // relative / sticky 的偏移是相对自身原位的位移 → 用 top
+    const useBottom = pos !== 'relative' && pos !== 'sticky'
+      && hasSideValue(cs.bottom) && !hasSideValue(cs.top);
+    const key = useBottom ? 'bottom' : 'top';
+    const cur = parseFloat(cs[key] ?? '') || 0;
+    // bottom 方向相反：往下挪 = bottom 变小
+    const nextVal = useBottom ? cur - step : cur + step;
+    useScene.getState().updateStyle(id, { [key]: Math.round(nextVal) + 'px' } as never);
   };
 
   const selectParent = (id: string) => {

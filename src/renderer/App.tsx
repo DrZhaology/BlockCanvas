@@ -313,8 +313,17 @@ export default function App() {
 
       try {
         const result = (await window.bc.checkUpdate()) as unknown as { ok: boolean; hasUpdate: boolean };
-        // v0.4.1：不再弹窗 —— 发现新版本直接切到软件内「更新中心」页面展示详情
-        if (result.ok && result.hasUpdate) switchView('update');
+        /*
+         * v0.4.5 第十六批修正：**不再强行把视图切到「更新中心」**。
+         *
+         * 老行为（v0.4.1 起）：发现新版本就 `switchView('update')`。
+         * 副作用很大 —— 用户刚打开软件 5 秒、正在画东西，界面突然整个换成更新页；
+         * 对自动化测试更致命：任何跑超过 5 秒的探针都会被切走视图，
+         * 画布/右侧面板全部卸载，后续断言全崩（probe-inspector 就是这样超时的）。
+         *
+         * 现在改成：底部飘一条提示（不抢视图、不锁操作），用户想看再点进去。
+         */
+        if (result.ok && result.hasUpdate) showToast('发现新版本 —— 点工具栏右侧的「任务」或「设置 → 更新中心」查看');
       } catch {}
     };
     const timer = window.setTimeout(checkAndNotify, 5000);
@@ -754,10 +763,42 @@ function AppToasts() {
 // ============ 更新进行中的全屏遮罩（v0.4.3） ============
 // 更新要替换程序本体，这期间必须锁死编辑器：盖一层 z-index 最高的浮层，
 // 进度条 + 提示常驻，拦截全部鼠标事件；配合 switchView / 快捷键 / 菜单的守卫。
+//
+// v0.4.5 第十六批（用户要求：「只弹出一个窗口，然后内部写所有的操作，日志全部输出，
+// 输出到 data 里面」）：这个遮罩就是那"唯一一个窗口" —— 它把更新过程全部装在里面，
+// 包括**实时日志**（读主进程 data/logs/update-YYYYMMDD.log 的尾部，每秒刷新）。
+// 用户不用去翻文件夹，也不会再看到一堆控制台窗口闪过。
 function UpdateBusyOverlay() {
   const busy = useUpdateBusy((s) => s.busy);
   const message = useUpdateBusy((s) => s.message);
   const pct = useUpdateBusy((s) => s.pct);
+  const [lines, setLines] = useState<string[]>([]);
+  const [showLog, setShowLog] = useState(true);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!busy) { setLines([]); return undefined; }
+    let alive = true;
+    const pull = async () => {
+      try {
+        // IPC 返回的是"整段文本"（历史实现如此，保持兼容）→ 这里拆成行
+        const t = await window.bc.updateLogTail(120);
+        if (alive && typeof t === 'string') setLines(t.split(/\r?\n/).filter(Boolean));
+      } catch { /* 读不到就不显示 */ }
+    };
+    void pull();
+    const timer = window.setInterval(pull, 1000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [busy]);
+
+  // 日志自动滚到底（用户在往上翻时不打扰）
+  useEffect(() => {
+    const el = logRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [lines]);
+
   if (!busy) return null;
   return (
     <div className="bc-update-blocker" role="alertdialog" aria-busy="true">
@@ -768,10 +809,31 @@ function UpdateBusyOverlay() {
         <div className="bc-update-blocker-bar">
           <div className="bc-update-blocker-fill" style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
         </div>
+
+        <div className="bc-update-log-head">
+          <button
+            className="bc-update-log-toggle"
+            onClick={() => setShowLog((v) => !v)}
+            title="展开 / 收起更新日志"
+          >{showLog ? '▾' : '▸'} 更新日志（实时）</button>
+          <button
+            className="bc-update-log-open"
+            onClick={() => void window.bc.openDataPath('logs')}
+            title="在文件管理器里打开日志目录（data/logs/）"
+          >打开日志目录</button>
+        </div>
+        {showLog && (
+          <div className="bc-update-log" ref={logRef}>
+            {lines.length === 0
+              ? <div className="bc-update-log-empty">正在准备…</div>
+              : lines.map((l, i) => <div className="bc-update-log-line" key={i}>{l}</div>)}
+          </div>
+        )}
+
         <div className="bc-update-blocker-hint">
-          正在替换程序本体，这期间锁定编辑器操作。完成后程序会自动重启，
+          正在替换程序本体，这期间锁定编辑器操作。完成后程序会<b>自动重新启动</b>，
           <b>data/ 里的全部工程与快照都会保留</b>；
-          程序文件夹还会自动改名带上新版本号（必要时会弹出一次系统授权框）。
+          程序文件夹会改成固定的 <b>BlockCanvas</b>，临时目录 <b>.update</b> 会自动清掉。
         </div>
       </div>
     </div>

@@ -79,13 +79,13 @@ async function main() {
   });
   await sleep(500);
 
-  // 默认开关是开着的 → 不应出现幽灵卡片
+  // 默认开关是开着的 → 不应出现「代管属性占位卡」（该卡已按用户要求删除）
   const before = await win.evaluate(() => ({
-    ghost: document.querySelectorAll('.prop-ghost-card').length,
+    oldGhost: document.querySelectorAll('.prop-ghost-card').length,
     rows: document.querySelectorAll('.props-list .prop-row').length
   }));
-  check('开关打开时：代管属性直接列在列表里，没有幽灵卡片',
-    before.ghost === 0 && before.rows > 0, JSON.stringify(before));
+  check('开关打开时：代管属性直接列在列表里，没有占位卡',
+    before.oldGhost === 0 && before.rows > 0, JSON.stringify(before));
 
   // 关掉「是否显示到下方 CSS 属性」。
   // ⚠ 这个开关在「快捷助手」板块里，而该板块默认是收起的 —— 探针必须先展开它，
@@ -104,54 +104,37 @@ async function main() {
   });
   await sleep(800);
 
-  const ghost = await win.evaluate(() => {
-    const card = document.querySelector('.prop-ghost-card');
-    return {
-      exists: !!card,
-      text: (card?.textContent || '').replace(/\s+/g, ' ').trim(),
-      buttons: [...(card?.querySelectorAll('.prop-ghost-btn') || [])].map((b) => (b.textContent || '').trim()),
-      rows: document.querySelectorAll('.props-list .prop-row').length
-    };
-  });
-  check('关掉开关后：代管属性从列表消失，但出现「幽灵卡片」说明它们仍在生效',
-    ghost.exists && /快捷助手/.test(ghost.text) && /依然生效/.test(ghost.text),
-    ghost.text.slice(0, 70));
-  check('幽灵卡片给出两个出口（显示出来 / 去快捷助手）',
-    ghost.buttons.includes('显示出来') && ghost.buttons.includes('去快捷助手'),
-    ghost.buttons.join(' / '));
-
-  // 点「显示出来」→ 卡片消失、属性回到列表、开关被记住
-  await win.evaluate(() => {
-    const b = [...document.querySelectorAll('.prop-ghost-btn')].find((x) => /显示出来/.test(x.textContent || ''));
-    if (b) b.click();
-  });
-  await sleep(700);
-  const afterShow = await win.evaluate(() => ({
-    ghost: document.querySelectorAll('.prop-ghost-card').length,
-    rows: document.querySelectorAll('.props-list .prop-row').length,
-    checked: !!document.querySelector('.qh-sync-label input[type="checkbox"]')?.checked
+  /**
+   * v0.4.5 第十六批（用户明确要求）：
+   * 「幽灵卡片完全没有做……而幽灵卡片就是临时的作用，比如中间选中元素输入 position，
+   *   Enter 就可以直接定位到这个元素右侧的 position 的幽灵卡片。」
+   * → 上一轮那张"快捷助手隐藏属性时的占位说明"（`.prop-ghost-card`）已删除，
+   *   现在唯一的"幽灵卡片"是**定位临时卡**（`[data-bc-pos-ghost]`），
+   *   它的行为在 probe-v045-batch16b 里逐条验证。
+   */
+  const ghost = await win.evaluate(() => ({
+    oldGhost: document.querySelectorAll('.prop-ghost-card').length,
+    posGhost: document.querySelectorAll('[data-bc-pos-ghost="1"]').length,
+    rows: document.querySelectorAll('.props-list .prop-row').length
   }));
-  check('点「显示出来」→ 卡片消失、属性回到列表、开关回到"开"',
-    afterShow.ghost === 0 && afterShow.rows > 0 && afterShow.checked === true, JSON.stringify(afterShow));
+  check('关掉开关后：代管属性从列表消失（快捷助手开关的原有作用仍在）',
+    ghost.rows < before.rows, JSON.stringify({ before: before.rows, after: ghost.rows }));
+  check('旧「占位说明型」幽灵卡片已彻底移除', ghost.oldGhost === 0, String(ghost.oldGhost));
 
-  // 再关一次 → 卡片回来（状态是全局记忆的，不是一次性）
-  await win.evaluate(() => {
-    const box = document.querySelector('.qh-sync-label input[type="checkbox"]');
-    if (box && box.checked) box.click();
-  });
-  await sleep(700);
-  const again = await win.evaluate(() => document.querySelectorAll('.prop-ghost-card').length);
-  check('再关一次开关 → 幽灵卡片重新出现（不是一次性的）', again === 1, `count=${again}`);
-
-  // 元素完全没有代管样式时，不该出现幽灵卡片（避免噪音）
+  // 普通元素不该凭空冒出任何幽灵卡片（避免噪音）
   const clean = await win.evaluate(async () => {
     const st = window.__sceneStore.getState();
     st.addElement('div', null);
     const id3 = window.__sceneStore.getState().scene.selectedId;
     await new Promise((r) => setTimeout(r, 400));
-    return { id: id3, ghost: document.querySelectorAll('.prop-ghost-card').length };
+    return {
+      id: id3,
+      oldGhost: document.querySelectorAll('.prop-ghost-card').length,
+      posGhost: document.querySelectorAll('[data-bc-pos-ghost="1"]').length
+    };
   });
-  check('元素没有代管样式时不会显示幽灵卡片（避免无意义噪音）', clean.ghost === 0, JSON.stringify(clean));
+  check('普通元素不会凭空出现任何幽灵卡片',
+    clean.oldGhost === 0 && clean.posGhost === 0, JSON.stringify(clean));
 
   // 深色模式：切过去后语义变量真的变了（不是只有 data-bc-dark 这个属性）
   const dark = await win.evaluate(() => {

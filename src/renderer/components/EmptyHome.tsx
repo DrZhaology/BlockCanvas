@@ -671,6 +671,11 @@ export function EmptyHome(props: {
               ))}
             </div>
 
+            {/* v0.4.5 第十六批（用户反馈「多个板块切换的时候没有动画」）：
+                四个板块是条件渲染，切换时 DOM 直接替换 —— 硬切。
+                包一层 + key={tab} 强制重建，每次切换播一次 bcSwapIn。
+                （.eh-panel 是普通块级容器，不是 flex，所以这层包装不影响布局） */}
+            <div className="eh-panel-tabbody" key={tab}>
             {tab === 'preset' && (
               <>
                 <div className="eh-bggrid">
@@ -839,6 +844,7 @@ export function EmptyHome(props: {
                 <div className="eh-panel-foot">支持 mp4 / webm / ogv；窗口不可见时自动暂停，不占显卡。</div>
               </>
             )}
+            </div>
 
             <div className="eh-panel-foot">只影响首页，不会进入工程导出</div>
           </div>

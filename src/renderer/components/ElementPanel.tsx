@@ -266,6 +266,13 @@ export function ElementPanel() {
         >素材</button>
       </div>
 
+      {/*
+        v0.4.5 第十六批（用户反馈「下方元素插入栏没有切换板块的动画」）：
+        以前三个板块是各自 `{tab === 'x' && …}` 条件渲染 —— 切换时内容直接替换，没有过渡。
+        现在外面套一层 `.elem-tab-anim` 并用 `key={tab}` 强制重建，
+        每次切换都会播一次进场动画（与右侧属性面板的 `.insp-tab-anim` 用同一套 bcSwapIn）。
+      */}
+      <div className="elem-tab-anim" key={tab}>
       {tab === 'element' && (
         <div className="elem-main-wrap">
           <div className="elem-top-bar">
@@ -389,6 +396,7 @@ export function ElementPanel() {
 
       {/* v0.4.5：素材库 */}
       {tab === 'assets' && <AssetGallery />}
+      </div>
     </div>
   );
 }

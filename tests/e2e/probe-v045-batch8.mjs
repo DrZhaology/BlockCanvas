@@ -191,36 +191,39 @@ async function main() {
     await sleep(300);
     await win.mouse.click(br.x + br.w / 2, br.y + br.h / 2, { button: 'middle' });
     await sleep(450);
-    await win.locator('.bc-prop-search-input').fill('display fl');
+    /**
+     * v0.4.5 第十六批（用户明确要求，已改变契约）：
+     * 「原来的属性值搜索和快捷添加不要了」——「属性 值」预测与 `.bc-prop-val` 已整块删除。
+     * 现在只验证"敲属性名 → 只出 3 条结果、每行三段信息"。
+     */
+    await win.locator('.bc-prop-search-input').fill('display');
     await sleep(400);
     const pred = await win.evaluate(() => {
-      const vals = [...document.querySelectorAll('.bc-prop-val')].map((b) => (b.textContent || '').trim());
-      return { vals, hasFlex: vals.some((v) => /^flex$/.test(v)), label: (document.querySelector('.bc-prop-vals-label')?.textContent || '').trim() };
+      const items = [...document.querySelectorAll('.bc-prop-search-item')];
+      return {
+        count: items.length,
+        hasVals: !!document.querySelector('.bc-prop-vals, .bc-prop-val'),
+        segs: items.map((it) => ({
+          label: (it.querySelector('.bc-prop-search-label')?.textContent || '').trim(),
+          key: (it.querySelector('.bc-prop-search-key')?.textContent || '').trim(),
+          badge: (it.querySelector('.bc-prop-search-badge')?.textContent || '').trim()
+        }))
+      };
     });
-    check('中键搜索支持「属性 值」预测（display fl → flex）',
-      pred.hasFlex, JSON.stringify(pred));
-    // 点预测值 → 写入属性 + 值
-    await win.evaluate(() => {
-      const b = [...document.querySelectorAll('.bc-prop-val')].find((x) => /^flex$/.test((x.textContent || '').trim()));
-      if (b) b.click();
-    });
-    await sleep(700);
-    const applied = await win.evaluate((eid) => {
-      const st = window.__sceneStore.getState();
-      const bp = st.activeBreakpoint;
-      const find = (n, x) => (n.id === x ? n : (n.children || []).reduce((a, k) => a || find(k, x), null));
-      const n = find(st.scene.root, eid);
-      const resp = n.responsive || {};
-      const allLayers = { base: n.style.display ?? '', ...Object.fromEntries(Object.entries(resp).map(([k, v]) => [k, v.display ?? ''])) };
-      const shown = (bp && resp[bp] && resp[bp].display) || n.style.display || '';
-      return { display: shown, bp, allLayers };
-    }, id);
-    check('点预测值 → 属性名 + 属性值一起写入并定位',
-      applied.display === 'flex', JSON.stringify(applied));
+    // 「只显示三个」是**上限**：命中少于 3 条时当然只出这几条（搜 display 就只命中 1 条）
+    check('中键搜索结果最多 3 条，且每行是「中文名 + 英文名 + 已添加/未添加」',
+      pred.count >= 1 && pred.count <= 3 && pred.segs.every((s) => s.label && s.key && /已添加|未添加/.test(s.badge)),
+      `count=${pred.count} first=${JSON.stringify(pred.segs[0] || null)}`);
+    check('属性值预测已按用户要求移除（不再出现值预测区）',
+      pred.hasVals === false, String(pred.hasVals));
 
     // 浮层避让：中键搜索框与底部元素面板不重叠
+    // ⚠ 上一次的搜索框还开着（里面有内容）—— 先 Esc 关掉再重新中键打开，
+    //    否则中键落在浮层自身上，新的搜索框根本不会出现（fill 就会超时）。
+    await win.keyboard.press('Escape');
+    await sleep(350);
     await win.mouse.click(br.x + br.w / 2, br.y + br.h / 2, { button: 'middle' });
-    await sleep(450);
+    await sleep(500);
     await win.locator('.bc-prop-search-input').fill('宽度');
     await sleep(400);
     const avoid = await win.evaluate(() => {

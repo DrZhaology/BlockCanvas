@@ -60,10 +60,11 @@ export function ProjectsCenter(props: {
   const [drawerClosing, setDrawerClosing] = useState(false);
   const closeDrawer = () => {
     setDrawerClosing(true);
+    // 退场动画 0.24s，这里多留 40ms 再卸载（正好 240 会在动画最后一帧就移除，看起来"没播完"）
     window.setTimeout(() => {
       setDrawerClosing(false);
       setSelectedProjectForBackups(null);
-    }, 240);
+    }, 280);
   };
   const [projectBackups, setProjectBackups] = useState<ProjectFileInfo[]>([]);
   const [backupsLoading, setBackupsLoading] = useState(false);
@@ -860,6 +861,10 @@ const KIND_META: Array<{
 function ProjectKindHelp({ kinds }: { kinds: Record<string, number> }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
+  // v0.4.5 第十六批（用户反馈「全部项目上方的信息按钮没有关闭动画」）：
+  // 以前是 `{open && <div/>}` 条件渲染 —— 只有进场没有退场，关掉时"啪一下没了"。
+  // 用 useClosing 拆成 挂载 / 退场 / 卸载 三段，退场时长与 CSS 的 0.16s 对齐。
+  const { mounted, closing } = useClosing(open, 160);
 
   // 点外面 / Esc 关闭（问号按钮本身不算"外面"）
   useEffect(() => {
@@ -889,8 +894,12 @@ function ProjectKindHelp({ kinds }: { kinds: Record<string, number> }) {
       >
         <Icon name="info" size={13} />
       </button>
-      {open && (
-        <div className="pc-kindhelp-pop" role="dialog" aria-label="项目类型说明">
+      {mounted && (
+        <div
+          className={'pc-kindhelp-pop' + (closing ? ' is-closing' : '')}
+          role="dialog"
+          aria-label="项目类型说明"
+        >
           <div className="pc-kindhelp-head">项目类型说明</div>
           {KIND_META.map((k) => (
             <div className="pc-kindhelp-row" key={k.id}>

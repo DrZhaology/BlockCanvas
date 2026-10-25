@@ -165,10 +165,34 @@ function LayerRow(props: {
   const canPasteInto = isContainer;
 
   // 选中元素时自动滚动到该行
+  //
+  // v0.4.5 第十六批（用户反馈）：「图层页面的时候，选中下面的元素，
+  // 选中的元素在图层这个页面居然是最后一个，应该在中间一点吧。」
+  //
+  // 原因：以前用 `scrollIntoView({ block: 'nearest' })` —— 它的语义是"只要可见就不动"，
+  // 所以选中的行会贴在容器**最下沿**（看起来像"列表的最后一条"），上方留白极多，
+  // 用户没法一眼看出它前后还有哪些兄弟。
+  //
+  // 改成：只滚**最近的滚动容器**（不用 scrollIntoView，避免把整页也带着滚），
+  // 把选中行放到容器**垂直中线**位置。
   useEffect(() => {
-    if (isSelected && rowRef.current) {
-      rowRef.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (!isSelected) return;
+    const row = rowRef.current;
+    if (!row) return;
+    // 往上找第一个真正能滚的祖先
+    let scroller: HTMLElement | null = row.parentElement;
+    while (scroller) {
+      const oy = getComputedStyle(scroller).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && scroller.scrollHeight > scroller.clientHeight + 1) break;
+      scroller = scroller.parentElement;
     }
+    if (!scroller) return;
+    const sr = scroller.getBoundingClientRect();
+    const rr = row.getBoundingClientRect();
+    // 目标：行的中线对齐容器中线
+    const delta = (rr.top + rr.height / 2) - (sr.top + sr.height / 2);
+    if (Math.abs(delta) < 2) return;
+    scroller.scrollBy({ top: delta, behavior: 'smooth' });
   }, [isSelected]);
 
   // 拖拽事件处理

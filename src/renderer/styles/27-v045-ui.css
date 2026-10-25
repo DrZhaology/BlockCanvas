@@ -548,12 +548,13 @@
 }
 .pos-hint strong { color: var(--text); font-weight: 600; }
 
-/* —— B1：四边偏移不再溢出 ——
+/* —— B1：偏移输入不再溢出 ——
    NumberUnitInput 本身是"数值 + 单位 + var"三段，塞进两列必然撑破面板。
-   改成单列四行，每行标签在左、输入在右，任何面板宽度都放得下。 */
+   v0.4.5 第十六批：从"四边各一格"改成**两根轴各一行**（每行 = 锚定边选择 + 一个输入），
+   既满足"不要四边都给"，又比原来更省纵向空间。 */
 .pos-edges {
   grid-template-columns: minmax(0, 1fr);
-  gap: 6px;
+  gap: 8px;
 }
 .pos-edge { align-items: center; }
 .pos-edge > span { width: 20px; flex: 0 0 20px; }
@@ -562,6 +563,73 @@
   opacity: 0.5;
   pointer-events: none;
 }
+/* 一根轴一行：左边是"左/右"或"上/下"的分段选择，右边是数值输入 */
+.pos-axis {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'label seg'
+    'input input';
+  align-items: center;
+  gap: 5px 8px;
+  min-width: 0;
+}
+.pos-axis-label {
+  grid-area: label;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.pos-axis-seg {
+  grid-area: seg;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  min-width: 0;
+}
+.pos-axis-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pos-axis-btn:hover:not(:disabled) { color: var(--text); }
+.pos-axis-btn.is-on {
+  background: var(--bg-panel);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+.pos-axis-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.pos-axis .num-unit-row { grid-area: input; min-width: 0; }
+/* 相对定位的"原文档流位置"说明：以前是裸文字，宽度算错就跑到框外面 */
+.pos-rel-note,
+.pos-clamp-note {
+  display: flex;
+  gap: 5px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--panel-soft);
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+.pos-rel-note svg { flex: none; margin-top: 2px; }
+.pos-rel-note strong,
+.pos-clamp-note strong { color: var(--text); }
 .pos-static-note {
   font-size: 11px;
   line-height: 1.6;
@@ -1346,12 +1414,12 @@
   to   { transform: translateX(calc(100% + 40px)); max-height: 0; margin-top: 0; margin-bottom: 0; opacity: 1; }
 }
 
-/* 中键属性搜索：↑↓ 高亮当前项（v0.4.5 补；以前上下键完全没反应） */
+/* 中键属性搜索：↑↓ 高亮当前项（v0.4.5 补；以前上下键完全没反应）
+   ⚠ v0.4.5 第十六批：选中态改为**淡蓝色卡片底**、去掉左侧蓝条，
+   具体样式统一写在 28-v045-zindex.css（加载更晚，会覆盖这里的旧值）。 */
 .bc-prop-search-item.is-active {
   background: var(--hover-accent, #eff6ff);
-  box-shadow: inset 2px 0 0 0 var(--accent, #1e88e5);
 }
-.bc-prop-search-item.is-active.is-missing { background: #fffdf5; }
 
 /* ============================================================================
    25. 全界面溢出审计的修复（v0.4.5）

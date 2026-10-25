@@ -94,8 +94,14 @@ async function main() {
   const btns = await win.evaluate(() =>
     [...document.querySelectorAll('button')].map((b) => (b.textContent || '').trim()).filter(Boolean)
   );
-  check('（环境说明）当前没有可安装的新版本，故无安装按钮',
-    !btns.some((t) => /重新安装|更新到|立即更新/.test(t)),
+  /**
+   * 这条原本是"环境说明"性质的断言（假定没有新版本 → 不该出现安装按钮）。
+   * 但线上确实可能有更新的版本（探针读到 v0.4.999），那时出现「更新到 …」按钮是**正确**行为，
+   * 断言就变成了"看运气"。改成验证**真正要保证的事**：
+   * 进入更新中心**不会自动开始下载/安装**（按钮只是入口，要用户点）。
+   */
+  check('进入更新中心不会自动出现"正在下载/正在安装"状态',
+    !btns.some((t) => /正在下载|正在安装|正在替换/.test(t)),
     btns.slice(0, 8).join(' | '));
 
   const tasksAfter = await win.evaluate(() => (window.__taskStore?.getState?.().tasks || []).length);
