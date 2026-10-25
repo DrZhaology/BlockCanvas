@@ -88,6 +88,111 @@ html[data-bc-anim-paused='1'] .app-toast {
 }
 
 /* ============================================================================
+   6. 只读快照：**单一右侧面板**（v0.4.5 第 10 批 · 用户反馈 J）
+   ---------------------------------------------------------------------------
+   用户原话：「只读快照面板：只保留右侧那一个面板，把所有文字都并进去，
+   去掉下面那条栏，面板宽度不要记忆。」
+   于是顶部快照条与左侧提示块都不再渲染，右侧这一张卡片承担全部信息 + 动作。
+   ========================================================================== */
+.snapshot-info-solo {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 14px 18px;
+  overflow-y: auto;
+  background: linear-gradient(180deg, #faf8ff 0%, var(--bg-panel) 140px);
+}
+html[data-bc-dark] .snapshot-info-solo {
+  background: linear-gradient(180deg, #1a1626 0%, var(--bg-panel) 140px);
+}
+.snap-solo-head { display: flex; align-items: center; gap: 8px; }
+.snap-solo-title {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-1, var(--text));
+  overflow-wrap: anywhere;
+}
+.snap-solo-sub { font-size: 11.5px; color: var(--text-3, var(--text-muted)); }
+.snap-solo-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+.snap-solo-stats > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  border: 1px solid var(--line, var(--border));
+  border-radius: 8px;
+  background: var(--surface-1, var(--panel-soft));
+}
+.snap-solo-stats b { font-size: 15px; font-weight: 700; color: var(--text-1, var(--text)); }
+.snap-solo-stats span { font-size: 10.5px; color: var(--text-3, var(--text-muted)); }
+.snap-solo-actions { display: flex; flex-direction: column; gap: 6px; }
+.snap-solo-actions .snap-btn { width: 100%; justify-content: center; height: 30px; }
+.snap-solo-note {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 2px;
+  padding: 10px 11px;
+  border-radius: 8px;
+  background: var(--surface-sunken, var(--panel-soft));
+  border: 1px solid var(--line, var(--border));
+}
+.snap-solo-note p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text-2, var(--text-muted));
+}
+.snap-solo-note b { color: var(--text-1, var(--text)); }
+.snap-solo-more { font-size: 11.5px; color: var(--text-3, var(--text-muted)); }
+.snap-solo-more > summary {
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+  list-style: none;
+}
+.snap-solo-more > summary::marker,
+.snap-solo-more > summary::-webkit-details-marker { display: none; }
+.snap-solo-more > summary::before { content: '▸ '; }
+.snap-solo-more[open] > summary::before { content: '▾ '; }
+/* 只读布局下画布占满：左侧面板不渲染时 grid 里不能留空列 */
+.workspace.is-readonly { grid-template-areas: 'canvas right'; }
+.workspace.is-readonly[data-layout='bottom'] { grid-template-areas: 'canvas right'; }
+.workspace.is-readonly:not([data-layout='bottom']) {
+  grid-template-columns: minmax(100px, 1fr) var(--bc-right-width, 372px);
+}
+
+/* ============================================================================
+   7. 项目中心：「外部」到底是什么（v0.4.5 第 10 批 · 用户反馈 J）
+   ---------------------------------------------------------------------------
+   以前只有一个"外部"小徽章，用户完全猜不到它指的是"文件不在默认目录里"。
+   现在表头常显一个「?『外部』是什么？」说明入口（悬停看完整解释），徽章本身也补了完整 tooltip。
+   ========================================================================== */
+.pc-explain {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--line, var(--border));
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-3, var(--text-muted));
+  cursor: help;
+  white-space: nowrap;
+}
+.pc-explain:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--hover-accent, #eff6ff);
+}
+/* ============================================================================
    4. 加载页的深色底（跟随"记住的主界面颜色模式"，避免启动时白→黑闪一下）
    ========================================================================== */
 .bc-loading.is-dark { background: #0f1420; }
@@ -96,3 +201,53 @@ html[data-bc-anim-paused='1'] .app-toast {
 .bc-loading.is-dark .bc-loading-pct { color: #6f7d92; }
 .bc-loading.is-dark .bc-loading-meta { color: #a8b4c6; }
 .bc-loading.is-dark .bc-loading-bar { background: #1b2231; }
+
+/* ============================================================================
+   5. 文档搜索落点：**黄色荧光笔**（v0.4.5 第 10 批）
+   ---------------------------------------------------------------------------
+   用户反馈（A5）：「文档搜索关键词要黄色标记背景，现在只有一个淡入」。
+   原因很直接：以前只往标题上加了 `.bc-doc-hit` 类，但**这个类从来没有写样式** ——
+   全仓库只有 `.hc-hit` 有黄底。所以"看起来只有一个淡入"。
+
+   现在两层都有：
+     · `.help-doc .bc-doc-hit`    → 命中的标题整行铺一层荧光笔黄，右侧一条竖色条
+     · `.help-doc mark.hc-hit`    → 小节正文里的**关键词**逐处标黄（与搜索框内高亮同款）
+     · `mark.hc-hit.is-focus`     → 第一个命中再"跳"一下，视线立刻锁定
+   ========================================================================== */
+.help-doc .bc-doc-hit {
+  position: relative;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(255, 226, 128, 0.85), rgba(255, 226, 128, 0.25) 82%, transparent);
+  box-shadow: -10px 0 0 0 rgba(255, 226, 128, 0.85);
+  padding-left: 10px;
+  margin-left: -10px;
+  animation: bcDocHit 3.2s ease-out forwards;
+}
+@keyframes bcDocHit {
+  0%   { background-size: 0% 100%; }
+  12%  { background-size: 100% 100%; }
+  70%  { background-size: 100% 100%; }
+  100% { background-size: 100% 100%; background-position: 0 0; }
+}
+html[data-bc-dark] .help-doc .bc-doc-hit {
+  background: linear-gradient(90deg, rgba(255, 213, 79, 0.28), rgba(255, 213, 79, 0.08) 82%, transparent);
+  box-shadow: -10px 0 0 0 rgba(255, 213, 79, 0.28);
+}
+/* 关键词荧光笔：比"命中词淡入"更明确 —— 底色是实打实的黄 */
+.help-doc mark.hc-hit {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: #ffe58a;
+  color: #4a3300;
+  box-shadow: 0 0 0 1px rgba(240, 180, 0, 0.45);
+}
+html[data-bc-dark] .help-doc mark.hc-hit {
+  background: #7a5c00;
+  color: #ffe9a8;
+  box-shadow: 0 0 0 1px rgba(255, 213, 79, 0.4);
+}
+.help-doc mark.hc-hit.is-focus { animation: bcMarkPulse 0.9s ease-out 2; }
+@keyframes bcMarkPulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(240, 180, 0, 0.45); }
+  50%      { box-shadow: 0 0 0 4px rgba(240, 180, 0, 0.35); }
+}

@@ -90,23 +90,100 @@ function anchorSlug(text: string): string {
 /** 把 markdown 按标题切成"段落块"（用于建搜索索引）；先剥掉围栏代码块避免误判标题 */
 
 // ============================================================================
-// 文档跳转：滚到视口正中 + 黄色荧光笔闪一下（v0.4.5）
-// 用户反馈"搜索结果跳过去不知道跳到哪了"：落点要在屏幕中间，并且短暂高亮。
+// 文档跳转：滚到视口正中 + 黄色荧光笔标出关键词（v0.4.5 第 10 批重做）
+// ----------------------------------------------------------------------------
+// 用户反馈（A5）：「文档搜索关键词要黄色标记背景，现在只有一个淡入」+「定位有偏差」。
+//
+// 两个问题分别处理：
+//  1. **定位偏差**：以前用 `el.offsetTop` 算目标位置 —— 它相对的是最近的**定位祖先**
+//     （offsetParent），不一定是滚动容器；文档根里只要有一层 position:relative，
+//     落点就会整体偏一段。现在改用两个 getBoundingClientRect() 的差值，与定位祖先无关。
+//  2. **只有淡入没有黄色标记**：以前只加了一个 `.bc-doc-hit` 类，但**那个类根本没有样式**
+//     （grep 全仓库只有 `.hc-hit` 有黄色背景）—— 所以看起来"只有淡入"。
+//     现在：① 标题本身加黄色荧光笔底；② 小节内所有关键词都用 `<mark class="hc-hit">` 标出，
+//     和搜索框里的高亮是同一套视觉。
 // ============================================================================
 const FLASH_CLASS = 'bc-doc-hit';
+const FLASH_MS = 3200;
+
+/** 把某个小节正文里的关键词包成 <mark class="hc-hit">（幂等：先拆掉旧的 mark） */
+function markKeywordInSection(section: HTMLElement[], keyword: string): number {
+  const q = keyword.trim().toLowerCase();
+  if (!q || q.length < 2) return 0;
+  let count = 0;
+  for (const el of section) {
+    // 先把上一次标过的还原成纯文本，避免反复跳转时嵌套 mark
+    el.querySelectorAll('mark.hc-hit').forEach((m) => {
+      const t = document.createTextNode(m.textContent || '');
+      m.parentNode?.replaceChild(t, m);
+    });
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const targets: Text[] = [];
+    let n: Node | null = walker.nextNode();
+    while (n) {
+      const p = n.parentElement;
+      const tag = p?.tagName;
+      if (n.nodeValue && tag !== 'CODE' && tag !== 'PRE' && !p?.closest('.hc-hint')) {
+        if (n.nodeValue.toLowerCase().includes(q)) targets.push(n as Text);
+      }
+      n = walker.nextNode();
+    }
+    for (const t of targets) {
+      const text = t.nodeValue || '';
+      const frag = document.createDocumentFragment();
+      let from = 0;
+      for (;;) {
+        const at = text.toLowerCase().indexOf(q, from);
+        if (at < 0) { frag.appendChild(document.createTextNode(text.slice(from))); break; }
+        if (at > from) frag.appendChild(document.createTextNode(text.slice(from, at)));
+        const mark = document.createElement('mark');
+        mark.className = 'hc-hit';
+        mark.textContent = text.slice(at, at + q.length);
+        frag.appendChild(mark);
+        count += 1;
+        from = at + q.length;
+      }
+      t.parentNode?.replaceChild(frag, t);
+    }
+  }
+  return count;
+}
+
+/**
+ * 滚到"这个标题在小节里居中"的位置，并加荧光笔。
+ * 位置用 rect 差值算（不依赖 offsetParent），所以不会再偏。
+ */
 function centerAndFlash(el: HTMLElement, scroller: HTMLElement) {
-  const top = el.offsetTop - (scroller.clientHeight - el.offsetHeight) / 2;
+  const sr = scroller.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  // 目标：标题中心落在滚动容器中心偏上一点（上方留出上下文，读起来更自然）
+  const delta = er.top - sr.top - Math.max(24, (scroller.clientHeight - er.height) / 2 - 40);
+  const top = scroller.scrollTop + delta;
   scroller.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
   el.classList.remove(FLASH_CLASS);
   void el.offsetWidth; // 强制重排：连续点同一个结果也能重新播动画
   el.classList.add(FLASH_CLASS);
-  window.setTimeout(() => el.classList.remove(FLASH_CLASS), 2600);
+  window.setTimeout(() => el.classList.remove(FLASH_CLASS), FLASH_MS);
+}
+
+/** 目标小节的正文元素（标题之后、下一个同级或更高级标题之前的**真实 DOM 节点**） */
+function sectionBodyOf(heading: HTMLElement): HTMLElement[] {
+  const level = Number(/^H([1-4])$/.exec(heading.tagName)?.[1] ?? 4);
+  const out: HTMLElement[] = [];
+  let cur: Element | null = heading.nextElementSibling;
+  while (cur) {
+    const m = /^H([1-4])$/.exec(cur.tagName);
+    if (m && Number(m[1]) <= level) break;
+    if (cur instanceof HTMLElement) out.push(cur);
+    cur = cur.nextElementSibling;
+  }
+  return out;
 }
 
 export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack }: {
   initialDoc?: DocKey;
-  /** 从首页搜索直达某份文档的某一节 */
-  initialTarget?: { doc: DocKey; id: string } | null;
+  /** 从首页搜索直达某份文档的某一节（q = 当时的搜索词，用来标黄关键词） */
+  initialTarget?: { doc: DocKey; id: string; q?: string } | null;
   onBack: () => void;
 }) {
   const [docKey, setDocKey] = useState<DocKey>(initialTarget?.doc ?? initialDoc);
@@ -125,6 +202,8 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
   const searchRef = useRef<HTMLDivElement>(null);
   const tocJson = useRef('');
   const pendingJump = useRef<string>(initialTarget?.id ?? '');
+  /** v0.4.5：跳转时要用黄色荧光笔标出的关键词（来自首页搜索） */
+  const pendingKeyword = useRef<string>(initialTarget?.q ?? '');
   /** 标题锚点 slug → 元素 id（文档里的 `[x](#锚点)` 靠它跳转） */
   const slugMap = useRef<Map<string, string>>(new Map());
 
@@ -351,19 +430,29 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
   }, [query, html]);
 
   // 待跳转（点搜索结果）→ 内容渲染完成后滚动到目标段落
-  // v0.4.5：改成"滚到视口正中 + 黄色荧光笔闪一下"，让用户一眼看到落点在哪
-  //（以前只滚到顶部附近，长文档里经常落在屏幕边缘，看着像没跳）
+  // v0.4.5 第 10 批：① 落点位置改用 rect 差值算（不再受 offsetParent 影响）；
+  // ② 关键词用**黄色荧光笔**标出来（以前只加了个没有样式的类，看起来只有淡入）。
   useEffect(() => {
     if (!pendingJump.current) return;
     const id = pendingJump.current;
+    const kw = pendingKeyword.current;
     const t = window.setTimeout(() => {
       const el = docRef.current?.querySelector('#' + CSS.escape(id)) as HTMLElement | null;
       const scroller = scrollRef.current;
       if (el && scroller) {
+        // 先标黄（会影响行高，所以要**在滚动之前**做，否则落点会偏）
+        if (kw) markKeywordInSection([el, ...sectionBodyOf(el)], kw);
         centerAndFlash(el, scroller);
         setActiveId(id);
+        // 关键词标在正文里时，再把第一个 mark 也闪一下（视觉焦点更明确）
+        const first = el.parentElement?.querySelector('mark.hc-hit') as HTMLElement | null;
+        if (first) {
+          first.classList.add('is-focus');
+          window.setTimeout(() => first.classList.remove('is-focus'), FLASH_MS);
+        }
       }
       pendingJump.current = '';
+      pendingKeyword.current = '';
     }, 60);
     return () => window.clearTimeout(t);
   }, [html, docKey]);

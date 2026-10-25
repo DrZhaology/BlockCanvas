@@ -5,15 +5,22 @@ import { appConfirm } from '@lib/appConfirm';
 import { Icon } from './Icon';
 
 // ============================================================================
-// BlockCanvas · 快照只读预览（v0.4.5）
+// BlockCanvas · 快照只读预览（v0.4.5，第 10 批重构）
 // ----------------------------------------------------------------------------
-// 用户在「全部项目 → 历史快照」里点「预览」时，会开一个 kind='snapshot' 的标签：
-//   · 画布、属性面板全部只读（改不了），标签带相机图标、淡紫底色；
-//   · 顶部工具条换成三个动作：覆盖回项目 / 另存为新项目 / 退出预览；
-//   · 关闭标签不提示保存（本来就没得保存）。
+// 用户在「全部项目 → 历史快照」里点「预览」时，会开一个 kind='snapshot' 的标签。
 //
-// 覆盖回项目是危险动作：二次确认 + **先把当前项目状态存一份快照**，再写回，
-// 完成后明确告知"已回退到 X 时间的快照"，并把已打开的原工程标签同步刷新。
+// v0.4.5 第 10 批（用户反馈 J）：
+//   「只读快照面板：只保留右侧那一个面板，把所有文字都并进去，去掉下面那条栏，
+//     面板宽度不要记忆。」
+//
+// 以前是"三处分散"：顶部一条 SnapshotBar（信息 + 三个动作）、左侧一块 SnapshotNotice
+// （又一段说明）、右侧 SnapshotInfoPanel（再一份信息）—— 同一件事说了三遍，
+// 还各占一块版面。现在**只剩右侧一张卡片**：
+//   · 顶部那条栏不再出现（画布上方只保留标签栏）；
+//   · 左侧元素面板整块不渲染（快照不能改内容，留个空面板只会挤占画布）；
+//   · 右侧宽度固定 372px，**不读写 localStorage**，退出预览后编辑器宽度原样回来。
+//
+// 覆盖回项目仍然是危险动作：二次确认 + 先把当前项目状态存一份快照再写回。
 // ============================================================================
 
 function fmtTime(iso: string): string {
@@ -26,9 +33,18 @@ function stamp(): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
-export function SnapshotBar({ tab }: { tab: ProjectTab }) {
+/**
+ * 只读快照的**唯一**面板：快照信息 + 三个动作 + 说明，全部收在这一张卡片里。
+ * （原来分散在顶部工具条 / 左侧提示 / 右侧信息三处）
+ */
+export function SnapshotInfoPanel({ tab }: { tab: ProjectTab }) {
+  const scene = useScene((s) => s.scene);
   const snap = tab.snapshot!;
   const [busy, setBusy] = useState<'overwrite' | 'saveas' | null>(null);
+
+  let elements = 0;
+  const walk = (n: any) => { elements += 1; (n.children || []).forEach(walk); };
+  try { walk(scene.root); } catch { /* 忽略 */ }
 
   const exitPreview = () => {
     useTabStore.getState().closeTab(tab.id);
@@ -51,7 +67,11 @@ export function SnapshotBar({ tab }: { tab: ProjectTab }) {
     });
     if (!ok) return;
     if (!snap.projectPath) {
-      await appConfirm({ title: '无法覆盖', body: '这份快照没有记录原工程路径（可能是从外部文件导入的），请改用「另存为新项目」。', okText: '知道了' });
+      await appConfirm({
+        title: '无法覆盖',
+        body: '这份快照没有记录它属于哪个工程文件，所以不知道该写回哪里。\n\n请改用「另存为新项目」，把这份快照存成一个新工程。',
+        okText: '知道了'
+      });
       return;
     }
     setBusy('overwrite');
@@ -65,9 +85,8 @@ export function SnapshotBar({ tab }: { tab: ProjectTab }) {
       } catch { /* 当前工程读不出来也继续：至少把快照写回去 */ }
 
       // 2) 把快照场景写回原工程文件
-      const scene = tab.scene;
       const res = await window.bc.saveProject(
-        { name: snap.projectName, scene, meta: { restoredFromSnapshot: snap.takenAt } },
+        { name: snap.projectName, scene: tab.scene, meta: { restoredFromSnapshot: snap.takenAt } },
         false,
         snap.projectPath
       );
@@ -109,60 +128,45 @@ export function SnapshotBar({ tab }: { tab: ProjectTab }) {
   };
 
   return (
-    <div className="snapshot-bar" data-bc-avoid="snapshotbar">
-      <span className="snap-badge"><Icon name="camera" size={13} /> 只读快照</span>
-      <span className="snap-title">{snap.projectName}</span>
-      <span className="snap-time">{fmtTime(snap.takenAt)}</span>
-      <span className="snap-spacer" />
-      <span className="snap-hint">预览状态：内容不可修改</span>
-      <button className="snap-btn is-danger" disabled={busy !== null} onClick={() => void overwrite()}>
-        <Icon name="undo" size={13} /> {busy === 'overwrite' ? '覆盖中…' : '覆盖回项目'}
-      </button>
-      <button className="snap-btn" disabled={busy !== null} onClick={() => void saveAs()}>
-        <Icon name="save" size={13} /> {busy === 'saveas' ? '保存中…' : '另存为新项目'}
-      </button>
-      <button className="snap-btn is-ghost" onClick={exitPreview}>
-        <Icon name="close" size={13} /> 退出预览
-      </button>
-    </div>
-  );
-}
+    <div className="panel snapshot-info snapshot-info-solo">
+      <div className="snap-solo-head">
+        <span className="snap-badge"><Icon name="camera" size={13} /> 只读快照</span>
+      </div>
+      <div className="snap-solo-title">{snap.projectName}</div>
+      <div className="snap-solo-sub">{fmtTime(snap.takenAt)}</div>
 
-/** 只读模式下左侧面板的占位说明（替代元素面板） */
-export function SnapshotNotice() {
-  return (
-    <div className="panel snapshot-notice">
-      <div className="snap-notice-icon"><Icon name="camera" size={26} /></div>
-      <div className="snap-notice-title">快照只读预览</div>
-      <div className="snap-notice-desc">
-        你现在看到的是某次保存时留下的历史快照。<br />
-        画布与属性面板都不可修改，避免误改。
+      <div className="snap-solo-stats">
+        <div><b>{elements}</b><span>元素</span></div>
+        <div><b>{scene.tokens?.length ?? 0}</b><span>变量</span></div>
+        <div><b>{scene.root.children.length}</b><span>顶层块</span></div>
       </div>
-      <div className="snap-notice-tip">
-        想继续编辑？点顶部「另存为新项目」，或用「覆盖回项目」把这份快照还原回原工程。
-      </div>
-    </div>
-  );
-}
 
-/** 只读模式下右侧面板：快照信息 + 结构统计 */
-export function SnapshotInfoPanel({ tab }: { tab: ProjectTab }) {
-  const scene = useScene((s) => s.scene);
-  const snap = tab.snapshot!;
-  let elements = 0;
-  const walk = (n: any) => { elements += 1; (n.children || []).forEach(walk); };
-  try { walk(scene.root); } catch { /* 忽略 */ }
-  return (
-    <div className="panel snapshot-info">
-      <div className="snap-info-head"><Icon name="camera" size={14} /> 快照信息</div>
-      <div className="snap-info-row"><span>项目</span><b>{snap.projectName}</b></div>
-      <div className="snap-info-row"><span>时间</span><b>{fmtTime(snap.takenAt)}</b></div>
-      <div className="snap-info-row"><span>元素</span><b>{elements} 个</b></div>
-      <div className="snap-info-row"><span>变量</span><b>{scene.tokens?.length ?? 0} 个</b></div>
-      <div className="snap-info-path" title={snap.snapshotPath}>{snap.snapshotPath}</div>
-      <div className="snap-info-tip">
-        这份快照是只读的。想改内容，请用顶部「另存为新项目」；想还原原工程，用「覆盖回项目」。
+      <div className="snap-solo-actions">
+        <button className="snap-btn is-danger" disabled={busy !== null} onClick={() => void overwrite()}>
+          <Icon name="undo" size={13} /> {busy === 'overwrite' ? '覆盖中…' : '覆盖回项目'}
+        </button>
+        <button className="snap-btn" disabled={busy !== null} onClick={() => void saveAs()}>
+          <Icon name="save" size={13} /> {busy === 'saveas' ? '保存中…' : '另存为新项目'}
+        </button>
+        <button className="snap-btn is-ghost" onClick={exitPreview}>
+          <Icon name="close" size={13} /> 退出预览
+        </button>
       </div>
+
+      <div className="snap-solo-note">
+        <p><b>这是只读的历史快照。</b>画布上的内容不能修改，避免误改已保存的工程。</p>
+        <p><b>「覆盖回项目」</b>会把这份快照写回它原来的工程文件，替换掉现在的版本（覆盖前会自动备份一份，可再恢复）。</p>
+        <p><b>「另存为新项目」</b>把这份快照存成一个新工程，之后可以正常编辑。</p>
+        <p><b>「退出预览」</b>只是关掉这个只读标签，不会改动任何文件。</p>
+      </div>
+
+      <details className="snap-solo-more">
+        <summary>快照文件在哪</summary>
+        <div className="snap-info-path" title={snap.snapshotPath}>{snap.snapshotPath}</div>
+        {snap.projectPath
+          ? <div className="snap-info-path" title={snap.projectPath}>原工程：{snap.projectPath}</div>
+          : <div className="snap-info-path">原工程路径未记录（无法覆盖回项目，只能另存）</div>}
+      </details>
     </div>
   );
 }

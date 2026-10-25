@@ -27,7 +27,7 @@ import { applySelHighlightClass } from '@lib/selHighlight';
 import { showToast, type ToastType } from '@lib/toast';
 import { requestPropFocus } from '@lib/propFocus';
 import { EmptyHome } from '@comp/EmptyHome';
-import { SnapshotBar, SnapshotNotice, SnapshotInfoPanel } from '@comp/SnapshotBar';
+import { SnapshotInfoPanel } from '@comp/SnapshotBar';
 import { LoadingScreen } from '@comp/LoadingScreen';
 import { useLoadScreen } from '@store/loadStore';
 
@@ -50,6 +50,8 @@ const BOTTOM_HEIGHT_DEFAULT = 250;
 const BOTTOM_HEIGHT_MIN = 175;
 const RIGHT_WIDTH_DEFAULT = 456;
 const RIGHT_WIDTH_MIN = 340;
+/** 只读快照预览的右侧面板固定宽度（不写进持久化，退出后编辑器宽度原样恢复） */
+const SNAPSHOT_PANE_WIDTH = 372;
 
 export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 'help';
 
@@ -85,7 +87,7 @@ export default function App() {
   // 帮助中心默认打开哪份文档（菜单「使用手册」→ manual；别处要开特定文档可先 setHelpDoc）
   const [helpDoc, setHelpDoc] = useState<DocKey>('manual');
   // 首页搜索点中某节文档时，带一个精确跳转目标（文档 + 段落 id）
-  const [helpTarget, setHelpTarget] = useState<{ doc: DocKey; id: string } | null>(null);
+  const [helpTarget, setHelpTarget] = useState<{ doc: DocKey; id: string; q?: string } | null>(null);
   // 所有「整页切换」都走原生视图过渡：旧页面淡出 + 新页面淡入
   // （不重挂载视图、不丢状态；宿主不支持或系统开了"减少动态效果"时自动降级为直接切换）
   const switchView = useCallback((next: AppView) => {
@@ -342,7 +344,7 @@ export default function App() {
     };
     const openAbout = () => setShowAbout(true);
     // 「使用手册」入口统一打开《使用手册》文档（不是项目介绍）
-    const openHelp = (doc: DocKey = 'manual', target: { doc: DocKey; id: string } | null = null) => {
+    const openHelp = (doc: DocKey = 'manual', target: { doc: DocKey; id: string; q?: string } | null = null) => {
       if (useUpdateBusy.getState().busy) return;
       setHelpDoc(doc);
       setHelpTarget(target);
@@ -353,11 +355,13 @@ export default function App() {
       const d = (e as CustomEvent).detail as DocKey | undefined;
       openHelp(d === 'intro' || d === 'history' || d === 'manual' ? d : 'manual');
     };
-    // 首页搜索：直达某份文档的某一节
+    // 首页搜索：直达某份文档的某一节。
+    // v0.4.5：把搜索词一起带过去 —— 落地后要把**关键词**用黄色荧光笔标出来，
+    // 而不是只让整段淡一下（用户原话："关键词要黄色标记背景，现在只有一个淡入"）。
     const onOpenHelpDocEvent = (e: Event) => {
-      const d = (e as CustomEvent).detail as { doc?: DocKey; id?: string } | undefined;
+      const d = (e as CustomEvent).detail as { doc?: DocKey; id?: string; q?: string } | undefined;
       if (!d?.doc) return;
-      openHelp(d.doc, d.id ? { doc: d.doc, id: d.id } : null);
+      openHelp(d.doc, d.id ? { doc: d.doc, id: d.id, ...(d.q ? { q: d.q } : {}) } : null);
     };
 
     const onNewTab = () => {
@@ -593,9 +597,12 @@ export default function App() {
           ) : (
             <>
               <ProjectTabBar />
-              {readonly && activeTab ? (
-                <SnapshotBar tab={activeTab} />
-              ) : (
+              {/* v0.4.5（J 重构）：只读快照**不再占用顶部一整条工具条**。
+                  以前这里换成 SnapshotBar，把"快照信息 + 三个动作"摊在顶栏，
+                  用户反馈"信息散在上下两处、还占掉一行高度"。
+                  现在所有文字与动作都收进右侧那一张卡片（SnapshotInfoPanel），
+                  顶部只保留标签栏本身。 */}
+              {!(readonly && activeTab) && (
                 <Toolbar
                   canvasWidth={canvasWidth}
                   onCanvasWidthChange={setCanvasWidth}
@@ -610,6 +617,9 @@ export default function App() {
             const effectiveLeftWidth = pocketExpanded
               ? Math.max(580, Math.round(window.innerWidth * 0.45))
               : leftWidth;
+            // 只读快照：**不沿用用户拖过的面板宽度**（那是给编辑器的），
+            // 固定一个够放卡片说明的宽度，退出预览后编辑器宽度原样恢复。
+            const effectiveRightWidth = readonly ? SNAPSHOT_PANE_WIDTH : rightWidth;
 
             return (
               <div
@@ -617,25 +627,28 @@ export default function App() {
                 data-layout={layout}
                 style={{
                   '--bc-bottom-height': effectiveBottomHeight + 'px',
-                  '--bc-right-width': rightWidth + 'px',
+                  '--bc-right-width': effectiveRightWidth + 'px',
                   '--bc-left-width': effectiveLeftWidth + 'px'
                 } as React.CSSProperties}
               >
-                <div className="elem-pane-wrap" data-bc-avoid="elem-pane">
-                  {readonly ? <SnapshotNotice /> : <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>}
-                  {layout === 'left' && (
-                    <div
-                      className={"panel-resizer panel-resizer-left" + (pocketExpanded ? " is-disabled" : "")}
-                      onMouseDown={(e) => {
-                        if (pocketExpanded) return;
-                        startResize(e, 'left', setLeftWidth, LEFT_WIDTH_MIN, leftWidth);
-                      }}
-                      title={pocketExpanded ? "已撑开口袋，宽度调整已锁定" : undefined}
-                    >
-                      <div className="panel-resizer-handle" />
-                    </div>
-                  )}
-                </div>
+                {/* 只读模式下左侧元素面板整个不出现（快照不能改内容，留一个空面板只会挤占画布） */}
+                {!readonly && (
+                  <div className="elem-pane-wrap" data-bc-avoid="elem-pane">
+                    <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>
+                    {layout === 'left' && (
+                      <div
+                        className={"panel-resizer panel-resizer-left" + (pocketExpanded ? " is-disabled" : "")}
+                        onMouseDown={(e) => {
+                          if (pocketExpanded) return;
+                          startResize(e, 'left', setLeftWidth, LEFT_WIDTH_MIN, leftWidth);
+                        }}
+                        title={pocketExpanded ? "已撑开口袋，宽度调整已锁定" : undefined}
+                      >
+                        <div className="panel-resizer-handle" />
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="canvas-area">
                   <ErrorBoundary label="画布">
                     <Canvas
@@ -660,12 +673,15 @@ export default function App() {
                   )}
                 </div>
                 <div className="right-pane-wrap" data-bc-avoid="right-pane">
-                  <div
-                    className="panel-resizer panel-resizer-vertical"
-                    onMouseDown={(e) => startResize(e, 'right', setRightWidth, RIGHT_WIDTH_MIN, rightWidth)}
-                  >
-                    <div className="panel-resizer-handle" />
-                  </div>
+                  {/* 只读快照：右侧面板宽度是**固定**的，所以不给拖手（拖了也不保存，只会让人困惑） */}
+                  {!readonly && (
+                    <div
+                      className="panel-resizer panel-resizer-vertical"
+                      onMouseDown={(e) => startResize(e, 'right', setRightWidth, RIGHT_WIDTH_MIN, rightWidth)}
+                    >
+                      <div className="panel-resizer-handle" />
+                    </div>
+                  )}
                   <div className="right-pane">
                     {readonly && activeTab ? (
                       <SnapshotInfoPanel tab={activeTab} />

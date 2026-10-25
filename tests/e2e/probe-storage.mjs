@@ -97,7 +97,11 @@ async function main() {
   const bd = await win.evaluate(() => window.bc.getStorageBreakdown());
   const cat = (id) => bd.categories.find((c) => c.id === id) || { bytes: 0, cleanable: false, label: id };
 
-  ok('拿到分类占用明细', Array.isArray(bd.categories) && bd.categories.length === 8, 'n=' + bd.categories.length);
+  // v0.4.5 第 10 批：新增「素材缩略图缓存」分类（可清理），所以从 8 类变 9 类、
+  // 可清理从 3 类变 4 类。断言改成"包含"而不是"等于"，避免每加一类就要改一次。
+  ok('拿到分类占用明细（含 v0.4.5 新增的缩略图缓存）',
+    Array.isArray(bd.categories) && bd.categories.length >= 9 && !!cat('thumbs'),
+    'n=' + bd.categories.length);
   ok('Chromium 缓存被识别（Cache + Code Cache）', cat('chromiumCache').bytes >= 30000, String(cat('chromiumCache').bytes));
   ok('系统 Temp 里属于我们的文件被识别', cat('temp').bytes >= 2048 * 2 + 1024, String(cat('temp').bytes));
   ok('更新包下载被识别', cat('downloads').bytes >= 4096, String(cat('downloads').bytes));
@@ -112,7 +116,9 @@ async function main() {
 
   // —— 可清 / 不可清 标记 ——
   const cleanableIds = bd.categories.filter((c) => c.cleanable).map((c) => c.id).sort().join(',');
-  ok('只有 3 类标记为可清理', cleanableIds === 'chromiumCache,downloads,temp', cleanableIds);
+  // 可清理 = Chromium 缓存 / 临时文件 / 更新包 / 素材缩略图（都是"可再生成"的东西）
+  ok('可清理分类正好是那几类可再生成的（缓存 / 临时 / 更新包 / 缩略图）',
+    cleanableIds === 'chromiumCache,downloads,temp,thumbs', cleanableIds);
   ok('"界面偏好与会话" 被标记为不可清', cat('userState').cleanable === false, String(cat('userState').bytes));
   ok('"界面偏好与会话" 确实统计到了状态文件', cat('userState').bytes >= 5000 + 1200, String(cat('userState').bytes));
 
@@ -234,9 +240,10 @@ async function main() {
     keepTags: document.querySelectorAll('.bc-storage-keep').length,
     total: (document.querySelector('.bc-storage-total')?.textContent || '').replace(/\s+/g, ' ').trim()
   }));
-  ok('设置页渲染出 8 行占用明细', ui.rows === 8, JSON.stringify(ui));
-  ok('其中 3 行是可清理的（带清理按钮）', ui.cleanable === 3 && ui.cleanBtns === 3, JSON.stringify(ui));
-  ok('其余 5 行标为"保留"', ui.keepTags === 5, JSON.stringify(ui));
+  // v0.4.5 第 10 批：9 行（新增「素材缩略图缓存」），可清理 4 行、保留 5 行
+  ok('设置页渲染出全部占用明细行（9 行）', ui.rows >= 9, JSON.stringify(ui));
+  ok('其中 4 行是可清理的（带清理按钮）', ui.cleanable === 4 && ui.cleanBtns === 4, JSON.stringify(ui));
+  ok('其余行标为"保留"', ui.keepTags === ui.rows - ui.cleanable, JSON.stringify(ui));
   ok('合计行同时显示 data/ 与 Temp', /data\/\s*目录/.test(ui.total) && /系统 Temp/.test(ui.total), ui.total);
 
   ok('阶段 A 无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));

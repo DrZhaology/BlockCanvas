@@ -361,8 +361,11 @@ async function main() {
       barText: bar ? bar.textContent.replace(/\s+/g, ' ').trim().slice(0, 40) : ''
     };
   });
-  check('快照标签出现只读工具条', snapUi.bar, snapUi.barText);
-  check('快照标签左侧显示只读说明', snapUi.notice);
+  // v0.4.5 第 10 批（用户反馈 J）**反转了两条断言**：
+  // 用户要求「只保留右侧那一个面板，把所有文字并进去，去掉下面那条栏」——
+  // 所以顶部快照条与左侧说明块现在是**不该出现**的，出现反而是 bug。
+  check('快照标签**不再**出现顶部只读工具条（信息已并入右侧面板）', !snapUi.bar, snapUi.barText || '（没有顶栏）');
+  check('快照标签**不再**在左侧显示说明块（整块不渲染，画布占满）', !snapUi.notice);
   check('快照标签右侧显示快照信息（不显示属性面板）', snapUi.info && snapUi.inspectorHidden);
   check('快照标签在标签栏有独立配色', snapUi.tabTint);
   check('只读模式下画布不可编辑（pointer-events:none）', snapUi.pointer === 'none', `pointer-events=${snapUi.pointer}`);

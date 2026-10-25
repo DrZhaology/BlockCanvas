@@ -465,7 +465,8 @@ export function EmptyHome(props: {
   };
 
   const openDocHit = (h: DocHit) => {
-    window.dispatchEvent(new CustomEvent('bc:open-help-doc', { detail: { doc: h.doc, id: h.id } }));
+    // v0.4.5：把搜索词带上 —— 落地后 HelpCenter 要用黄色荧光笔标出关键词
+    window.dispatchEvent(new CustomEvent('bc:open-help-doc', { detail: { doc: h.doc, id: h.id, q: q.trim() } }));
     setFocused(false);
   };
 

@@ -20,6 +20,8 @@ import type { ElementType } from '@lib/types';
 type CachedAsset = {
   name: string;
   url: string;
+  /** v0.4.5：磁盘缩略图地址（图片才有）。没有时退回原图 */
+  thumbUrl?: string | null;
   bytes: number;
   mtime: string;
   kind: 'image' | 'video' | 'audio' | 'other';
@@ -115,7 +117,23 @@ export function AssetGallery() {
               >
                 <span className="asset-thumb">
                   {a.kind === 'image'
-                    ? <img src={a.url} alt="" draggable={false} loading="lazy" decoding="async" />
+                    ? (
+                      // v0.4.5：优先用**磁盘缩略图**（主进程用 nativeImage 生成，256px JPEG）。
+                      // 以前直接加载原图：50 张 4K 图 = 50 次全尺寸解码（每张约 33MB RGBA），
+                      // 一进素材页就吃掉 1.5GB+。缩略图只有几十 KB。
+                      // 万一没有缩略图（生成失败 / 本来就是小图）就退回原图，绝不让素材消失。
+                      <img
+                        src={a.thumbUrl || a.url}
+                        alt=""
+                        draggable={false}
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                          const img = e.currentTarget;
+                          if (a.thumbUrl && img.src !== a.url) img.src = a.url; // 缩略图坏了 → 回退原图
+                        }}
+                      />
+                    )
                     : <span className="asset-thumb-ico">
                         <Icon name={a.kind === 'video' ? 'video' : 'note'} size={20} />
                       </span>}

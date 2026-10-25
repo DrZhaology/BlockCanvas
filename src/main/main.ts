@@ -20,7 +20,10 @@ import {
 } from './projectFile';
 import * as projectFileApi from './projectFile';
 // v0.4.5：工程素材（保存时收集本地图片/视频进容器，打开时解包到缓存）
-import { collectSceneAssets, extractProjectAssets, resolveCachedAsset, listAssetCache, importAssetToCache } from './assets';
+import {
+  collectSceneAssets, extractProjectAssets, resolveCachedAsset, listAssetCache, importAssetToCache,
+  resolveThumbPath
+} from './assets';
 import {
   getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo,
   resolveInstallDir, updateLogPath, ulog
@@ -1314,6 +1317,24 @@ app.whenReady().then(() => {
       // v0.4.5：bc-img://asset/<hash>.<ext> —— 工程容器里的素材（开机解包到缓存目录）。
       // 这是"换机器不丢图"的关键：引用不再指向某台电脑上的绝对路径。
       if (url.host === 'asset') {
+        // v0.4.5 第 10 批：`?thumb=256` → 返回磁盘上的缩略图。
+        // 素材库网格每格只显示 62px 高，没必要为它解码 4K 原图（每张约 33MB RGBA）。
+        // 缩略图生成失败（损坏/不支持格式）就往下走原图，绝不让素材"消失"。
+        if (url.searchParams.has('thumb')) {
+          const thumbPath = resolveThumbPath(decodeURIComponent(url.pathname));
+          if (thumbPath && existsSync(thumbPath)) {
+            const buf = readFileSync(thumbPath);
+            return new Response(buf, {
+              status: 200,
+              headers: {
+                'Content-Type': 'image/jpeg',
+                'Content-Length': String(buf.length),
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'public, max-age=31536000, immutable'
+              }
+            });
+          }
+        }
         const cached = resolveCachedAsset(decodeURIComponent(url.pathname));
         if (!cached) return new Response(null, { status: 404 });
         const buf = readFileSync(cached);

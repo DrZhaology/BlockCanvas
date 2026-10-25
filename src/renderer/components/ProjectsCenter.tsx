@@ -389,6 +389,23 @@ export function ProjectsCenter(props: {
           </button>
           <span className="pc-title"><Icon name="folder" size={16} /> 本地全部项目库</span>
           <span className="pc-count-badge">{projects.length} 个工程</span>
+          {/* v0.4.5（J）：把「外部」到底是什么意思直接写出来 ——
+              以前只有一个"外部"小徽章，用户完全猜不到它指的是"文件不在默认目录里"。 */}
+          <span
+            className="pc-explain"
+            title={
+              '这里的工程分两种存放位置：\n\n' +
+              '· 默认位置：本软件的 data/projects/ 目录（新建、保存都在这里）\n' +
+              '· 外部位置：你自己放在别处的 .bcproj 文件（比如桌面、U 盘、网盘目录），\n' +
+              '  是通过「导入外部项目…」或双击文件打开时才出现在这个列表里的。\n\n' +
+              '标着「外部」的工程：文件本体还在你放的地方，这里只是记了一笔路径；\n' +
+              '  把那个文件移走或删掉，列表里就会显示「文件已丢失」。\n' +
+              '标着「文件已丢失」的工程：原位置的 .bcproj 已经不在了，点开会提示，\n' +
+              '  可以删掉这条记录，或把文件放回原位置。'
+            }
+          >
+            <Icon name="info" size={12} /> 「外部」是什么？
+          </span>
         </div>
 
         <div className="pc-header-right">
@@ -448,10 +465,20 @@ export function ProjectsCenter(props: {
                   <div className="pc-card-name" title={p.name}>
                     {p.name}
                     {p.external && (
-                      <span className="pc-badge is-external" title={`不在默认目录，是从别处导入/打开的工程：\n${p.filePath}`}>外部</span>
+                      <span
+                        className="pc-badge is-external"
+                        title={
+                          `这个工程的文件不在默认的 data/projects/ 里，而是在你自己放的位置：\n${p.filePath}\n\n` +
+                          '它是通过「导入外部项目…」或双击 .bcproj 打开时才被记进列表的。\n' +
+                          '文件本体仍在原位置 —— 把它移走/删掉，这里就会显示「文件已丢失」。'
+                        }
+                      >外部</span>
                     )}
                     {p.missing && (
-                      <span className="pc-badge is-missing" title={p.filePath}>文件已丢失</span>
+                      <span
+                        className="pc-badge is-missing"
+                        title={`原位置已经找不到这个文件了：\n${p.filePath}\n\n可能是被移动、重命名或删除。`}
+                      >文件已丢失</span>
                     )}
                   </div>
                   {isRenaming ? (

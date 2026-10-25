@@ -14,8 +14,9 @@
 // 协议按 hash 取文件，不需要知道它原来叫什么、在哪。
 // ============================================================================
 import { createHash } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { basename, extname, join } from 'path';
+import { nativeImage } from 'electron';
 import { dataRoot } from './userData';
 import { readAsset, type ProjectManifest } from './projectFile';
 
@@ -172,6 +173,8 @@ export interface CachedAsset {
   name: string;
   /** 直接能放进 src / background-image 的地址 */
   url: string;
+  /** v0.4.5：缩略图地址（图片才有；没有则为 null → 界面用原图兜底） */
+  thumbUrl?: string | null;
   bytes: number;
   mtime: string;
   kind: 'image' | 'video' | 'audio' | 'other';
@@ -185,7 +188,7 @@ function kindOfName(name: string): CachedAsset['kind'] {
   return 'other';
 }
 
-/** 列出素材缓存里的文件（新的在前） */
+/** 列出素材缓存里的文件（新的在前）。图片会附带缩略图地址（v0.4.5，避免首屏解码全尺寸原图） */
 export function listAssetCache(): CachedAsset[] {
   try {
     const dir = assetCacheDir();
@@ -194,12 +197,14 @@ export function listAssetCache(): CachedAsset[] {
       if (!f.isFile()) continue;
       try {
         const st = statSync(join(dir, f.name));
+        const kind = kindOfName(f.name);
         out.push({
           name: f.name,
           url: `${ASSET_PREFIX}${f.name}`,
+          thumbUrl: kind === 'image' ? assetThumbUrl(f.name) : null,
           bytes: st.size,
           mtime: st.mtime.toISOString(),
-          kind: kindOfName(f.name)
+          kind
         });
       } catch { /* 单个文件读不到就跳过 */ }
     }
@@ -207,6 +212,109 @@ export function listAssetCache(): CachedAsset[] {
   } catch {
     return [];
   }
+}
+
+// ============================================================================
+// 素材缩略图磁盘缓存（v0.4.5 第 10 批）
+// ----------------------------------------------------------------------------
+// 用户反馈：「现在动不动一个视频占用很大的内容，要优化」「素材库首屏还是会卡」。
+//
+// 素材库网格以前直接 `<img src="bc-img://asset/...">` 加载**原图**：
+// 50 张 4K 图 = 50 次全尺寸解码（每张约 33MB RGBA），一进素材页就吃掉 1.5GB+。
+// 网格里每张缩略图实际只显示 62px 高。
+//
+// 现在：主进程用 Electron 的 nativeImage 生成一张 256px 的 webp 缩略图，
+// 存到 data/cache/thumbs/<原文件名>.<尺寸>.webp，界面加载缩略图 URL。
+//   · 缩略图只生成一次（内容哈希命名 → 原图变了名字就变了，天然不会过期）；
+//   · 生成失败（损坏文件 / 不支持的格式）就回退用原图，绝不因此让素材"消失"。
+// ============================================================================
+const THUMB_SIZE = 256;
+
+export function thumbCacheDir(): string {
+  const dir = join(dataRoot(), 'cache', 'thumbs');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+/** 这个素材在缩略图缓存里的文件名（带尺寸，便于将来换尺寸时并存）。
+ *  实际编码是 JPEG（nativeImage 直接吐 JPEG 字节，体积最小），所以扩展名用 .jpg，别写 .webp。 */
+export function thumbNameOf(assetName: string): string {
+  return `${String(assetName).replace(/\.[^.]+$/, '')}.${THUMB_SIZE}.jpg`;
+}
+
+/** 协议层用：`bc-img://asset/<name>` → 缩略图文件的绝对路径（不存在返回 null） */
+export function resolveThumbPath(assetName: string): string | null {
+  try {
+    const clean = String(assetName || '').replace(/^\/+/, '');
+    if (!clean || clean.includes('..')) return null;
+    const p = join(thumbCacheDir(), thumbNameOf(clean));
+    return existsSync(p) ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 取（必要时生成）某个图片素材的缩略图。
+ * 返回可直接给 `<img src>` 的 URL；返回 null 表示"没有缩略图，请用原图"。
+ */
+export function assetThumbUrl(assetName: string): string | null {
+  try {
+    const clean = String(assetName || '').replace(/^\/+/, '');
+    if (!clean || clean.includes('..')) return null;
+    const src = resolveCachedAsset(clean);
+    if (!src) return null;
+    // 只给图片做缩略图（视频/音频没有可解码的静态帧）
+    if (kindOfName(clean) !== 'image') return null;
+    const target = join(thumbCacheDir(), thumbNameOf(clean));
+    if (existsSync(target)) return `${ASSET_PREFIX}${clean}?thumb=${THUMB_SIZE}`;
+    const img = nativeImage.createFromPath(src);
+    if (img.isEmpty()) return null;
+    const size = img.getSize();
+    // 原图本来就比缩略图小 → 没必要再生成（直接用原图更清晰）
+    if (size.width <= THUMB_SIZE && size.height <= THUMB_SIZE) return null;
+    const ratio = Math.min(THUMB_SIZE / size.width, THUMB_SIZE / size.height);
+    const resized = img.resize({
+      width: Math.max(1, Math.round(size.width * ratio)),
+      height: Math.max(1, Math.round(size.height * ratio)),
+      quality: 'good'
+    });
+    const buf = resized.toJPEG(82);
+    if (!buf || buf.length === 0) return null;
+    writeFileSync(target, buf);
+    return `${ASSET_PREFIX}${clean}?thumb=${THUMB_SIZE}`;
+  } catch {
+    return null;   // 任何失败都回退原图
+  }
+}
+
+/** 缩略图缓存占用（给存储面板统计 / 清理用） */
+export function thumbCacheBytes(): number {
+  const dir = thumbCacheDir();
+  if (!existsSync(dir)) return 0;
+  let total = 0;
+  try {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      if (!f.isFile()) continue;
+      try { total += statSync(join(dir, f.name)).size; } catch { /* 忽略 */ }
+    }
+  } catch { /* 忽略 */ }
+  return total;
+}
+
+/** 清空缩略图缓存（可再生成，安全） */
+export function clearThumbCache(): number {
+  const dir = thumbCacheDir();
+  if (!existsSync(dir)) return 0;
+  let freed = 0;
+  try {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      if (!f.isFile()) continue;
+      const full = join(dir, f.name);
+      try { freed += statSync(full).size; unlinkSync(full); } catch { /* 忽略 */ }
+    }
+  } catch { /* 忽略 */ }
+  return freed;
 }
 
 /** 把一个本地文件收进素材缓存（内容哈希命名，天然去重），返回它在库里的条目 */

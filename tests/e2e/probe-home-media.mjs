@@ -32,6 +32,8 @@ async function main() {
   win.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
   win.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
   await win.waitForSelector('.empty-home', { timeout: 20000 });
+  // v0.4.5：加载页（最短 520ms + 淡出 300ms）期间会拦住点击，先等它退场
+  await win.waitForSelector('.bc-loading', { state: 'detached', timeout: 15000 }).catch(() => {});
   await sleep(600);
 
   // 1. 现场录一段 1 秒 webm

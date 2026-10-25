@@ -147,14 +147,23 @@ async function main() {
   const bpExpect = bpWidth <= 480 ? '手机' : bpWidth <= 768 ? '平板' : '电脑';
   ok(`默认高亮由画布宽度决定（画布 ${bpWidth}px → ${bpExpect}）`, bp.active.includes(bpExpect), bp.active);
 
-  // 切到手机 → 手机分段高亮
+  // 切到手机 → 手机分段高亮。
+  // v0.4.5：串跑时机器负载高，固定 sleep(600) 偶尔等不到状态更新（单跑必过）。
+  // 改成**等条件成立**而不是等时间，探针才不会因为"跑得慢"误报。
   await win.evaluate(() => window.dispatchEvent(new CustomEvent('bc:set-device', { detail: 'mobile' })));
-  await sleep(600);
+  await win.waitForFunction(
+    () => /手机/.test(document.querySelector('.bp-tab-btn.active')?.textContent || ''),
+    { timeout: 6000 }
+  ).catch(() => {});
   const activeMobile = await win.evaluate(() => document.querySelector('.bp-tab-btn.active')?.textContent || '');
   ok('切到手机宽度 → 手机分段高亮', activeMobile.includes('手机'), activeMobile);
   // 点自适应：按钮本身不加 active，高亮仍按实际宽度（手机 375px）
   await win.locator('.bp-auto-btn').click();
-  await sleep(500);
+  await win.waitForFunction(
+    () => !document.querySelector('.bp-auto-btn')?.classList.contains('active'),
+    { timeout: 6000 }
+  ).catch(() => {});
+  await sleep(400);
   const autoState = await win.evaluate(() => ({
     autoActive: document.querySelector('.bp-auto-btn')?.classList.contains('active') || false,
     active: document.querySelector('.bp-tab-btn.active')?.textContent || '',
@@ -193,7 +202,16 @@ async function main() {
   });
   await sleep(400);
   await win.evaluate(() => window.dispatchEvent(new CustomEvent('bc:focus-prop', { detail: { key: 'opacity', add: true } })));
-  await sleep(900);
+  // 定位是"平滑滚动 + 多次重试校正"，机器忙的时候 900ms 不一定滚到位 —— 等条件成立
+  const inView = async () => win.evaluate(() => {
+    const row = document.querySelector('[data-prop-key="opacity"]');
+    const sc = document.querySelector('.right-pane .panel') || document.querySelector('.right-pane .tab-body');
+    if (!row || !sc) return false;
+    const rr = row.getBoundingClientRect();
+    const sr = sc.getBoundingClientRect();
+    return rr.top >= sr.top - 2 && rr.bottom <= sr.bottom + 2;
+  });
+  for (let i = 0; i < 20 && !(await inView()); i += 1) await sleep(250);
   const pos = await win.evaluate(() => {
     const row = document.querySelector('[data-prop-key="opacity"]');
     const sc = document.querySelector('.right-pane .panel') || document.querySelector('.right-pane .tab-body');
