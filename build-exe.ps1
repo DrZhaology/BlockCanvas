@@ -1,4 +1,4 @@
-# =========================================================
+﻿# =========================================================
 # BlockCanvas - one-click build (green portable folder)
 #   ⚠ 本文件必须保存为「UTF-8 带 BOM」：Windows PowerShell 5.1 对无 BOM 的文件按 ANSI(GBK) 解码，
 #     下面的中文会变成乱码、连字符串引号都被截断，报一堆莫名语法错误（踩过一次）。改完确认 BOM 还在。
@@ -74,6 +74,9 @@ $stageApp = Join-Path $stageRoot 'BlockCanvas'
 if (Test-Path $stageRoot) { Remove-Item $stageRoot -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Path $stageApp -Force | Out-Null
 Copy-Item -Path (Join-Path $appDir '*') -Destination $stageApp -Recurse -Force
+# 清掉不该随包发布的残留：electron-builder 偶尔会把调试日志写进产物根目录
+Get-ChildItem -Path $stageApp -Filter 'debug.log' -File -Recurse -ErrorAction SilentlyContinue |
+  Remove-Item -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path $stageApp -DestinationPath $zipPath
 Remove-Item $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
 if (-not (Test-Path $zipPath)) { throw "[5/5] 压缩失败：$zipPath 不存在。" }
