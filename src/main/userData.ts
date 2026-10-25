@@ -174,6 +174,14 @@ export function writeAppConfig(patch: Partial<AppConfig>): AppConfig {
 // 这里不再保留实现，避免出现"两份会话逻辑"。
 
 // ============ 项目与备份管理 ============
+/**
+ * 项目类型（v0.4.5 第 14 批）。
+ *
+ * 用户要求：「不同的项目类型要单独标注，可以有这几种：网页项目、网站项目（对应后续的多网页管理，
+ * 这一轮没让你做）、外部项目（不在 data/project），以及别的，所有的解释都在上方的小问号。」
+ */
+export type ProjectKind = 'page' | 'site' | 'external' | 'missing';
+
 export interface ProjectFileInfo {
   fileName: string;
   filePath: string;
@@ -187,6 +195,10 @@ export interface ProjectFileInfo {
   external?: boolean;
   /** v0.4.5：登记过但磁盘上已经不在了（被移动/删除），列表里置灰提示 */
   missing?: boolean;
+  /** v0.4.5：项目类型（列表里单独标注） */
+  kind?: ProjectKind;
+  /** v0.4.5：页面数（多页工程 > 1；现在恒为 1，为下一轮的多页管理预留） */
+  pageCount?: number;
 }
 
 /** 外部工程登记表（data/external-projects.json） */
@@ -250,6 +262,19 @@ export function sanitizeProjectFolder(name: string): string {
   return (name || '').trim().replace(/[\\/:*?"<>|]+/g, '_') || '_general';
 }
 
+/**
+ * 从 manifest 推断项目类型与页面数。
+ *
+ * 现在只有「网页项目」（单页）一种；多页工程（网站项目）是下一轮的事，
+ * 但这里先把判定写出来 —— 只要 manifest.meta.pageCount > 1 就自动标成「网站项目」，
+ * 将来实现多页时**列表侧不用再改**。
+ */
+function kindOfManifest(m: { meta?: Record<string, unknown> } | null | undefined): { kind: ProjectKind; pageCount: number } {
+  const raw = Number((m?.meta as Record<string, unknown> | undefined)?.pageCount ?? 1);
+  const pageCount = Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 1;
+  return { kind: pageCount > 1 ? 'site' : 'page', pageCount };
+}
+
 export function listProjects(): ProjectFileInfo[] {
   const dir = join(dataRoot(), 'projects');
   if (!existsSync(dir)) return [];
@@ -276,7 +301,8 @@ export function listProjects(): ProjectFileInfo[] {
         updatedAt: stat.mtime.toISOString(),
         elementCount: m.manifest.meta?.elementCount ?? 0,
         previewText: m.manifest.meta?.description || '',
-        backupCount
+        backupCount,
+        ...kindOfManifest(m.manifest)
       });
     } catch {}
   }
@@ -298,7 +324,9 @@ export function listProjects(): ProjectFileInfo[] {
         previewText: '文件已不在原位置（可能被移动或删除）',
         backupCount: 0,
         external: true,
-        missing: true
+        missing: true,
+        kind: 'missing',
+        pageCount: 1
       });
       continue;
     }
@@ -319,7 +347,10 @@ export function listProjects(): ProjectFileInfo[] {
         elementCount: (m.ok && m.manifest?.meta?.elementCount) || 0,
         previewText: (m.ok && m.manifest?.meta?.description) || '',
         backupCount,
-        external: true
+        external: true,
+        // 外部工程即使有多个页面也优先标「外部项目」—— 位置信息对用户更重要
+        kind: 'external',
+        pageCount: m.ok && m.manifest ? kindOfManifest(m.manifest).pageCount : 1
       });
     } catch { /* 单个外部工程读不出来就跳过 */ }
   }

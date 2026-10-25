@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net, shell, nativeTheme, session, type MenuItemConstructorOptions } from 'electron';
 import { join, basename, dirname, relative } from 'node:path';
-import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync, renameSync, openSync, readSync, closeSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync, renameSync, openSync, readSync, closeSync, copyFileSync } from 'node:fs';
+import { relative as relativePath, isAbsolute as isAbsolutePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isAbsolutePathAny, resolveInside, toWebPath, previewDir, runtimeTempDir } from './paths';
 import * as pathUtils from './paths';
@@ -30,11 +31,24 @@ import {
 } from './updater';
 import {
   listTasks, startTask, pauseTask, resumeTask, cancelTask, dismissTask, revealTask,
-  flushTasksOnQuit
+  flushTasksOnQuit, startManualTask, updateManualTask, finishManualTask
 } from './tasks';
 
 // 启动最优先：初始化纯便携数据区 data/，隔离系统盘
 initDataDirectories();
+
+/**
+ * v0.4.5 第 12 批：**自动化模式下"窗口在屏幕外也要继续渲染"**。
+ *
+ * 窗口被移到屏幕外（或最小化、或被别的窗口完全遮住）时，Chromium 默认会认为
+ * "用户看不到"，于是停掉合成器与 rAF —— 后果是截图空白、动画冻住、加载页收不了尾。
+ * 这三个开关正是关掉那套省电逻辑。只在安静模式加，正常启动完全不受影响。
+ */
+if (process.env['BC_NO_FOCUS'] === '1') {
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+  app.commandLine.appendSwitch('disable-renderer-backgrounding');
+  app.commandLine.appendSwitch('disable-background-timer-throttling');
+}
 
 // 把运行时临时目录也收进程序目录（便携化）：Chromium 内核/下载暂存等一律写 <data>/tmp/system。
 // 必须在 app ready **之前**设置才生效；不可写时自动退回系统 Temp（resolveWritableDir 已兜底）。
@@ -55,6 +69,17 @@ if (!app.isPackaged) {
 
 // electron-vite 在 dev 模式下注入 ELECTRON_RENDERER_URL；
 const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
+
+/**
+ * 是否处于"安静启动"模式（自动化脚本/探针/截图用）。
+ *
+ * v0.4.5 第 12 批：窗口**从创建起就不可激活**（见 createWindow 里的 focusable:false），
+ * 这样 Windows 的"空闲时把后台窗口顶到前台"也不会发生。
+ * 主进程里所有会抢前台的动作（focus / restore / show）都要先问这个开关。
+ */
+function isQuietLaunch(): boolean {
+  return process.env['BC_NO_FOCUS'] === '1';
+}
 
 // ============ 应用图标（窗口 / 任务栏 / 原生弹窗 / 子窗口统一用三色 Logo） ============
 // v0.4.5 修复：以前只有主窗口传了 icon，原生文件对话框、开发者工具这类"单独弹出的窗口"
@@ -122,8 +147,11 @@ function openProjectFromOs(p: string | null) {
     pendingOsOpenPath = p;
     return;
   }
-  if (win.isMinimized()) win.restore();
-  win.focus();
+  // v0.4.5：自动化模式下**不要** restore/focus —— 那两步正是"突然弹到最前面"的来源
+  if (!isQuietLaunch()) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  }
   win.webContents.send('bc:open-project-path', p);
 }
 
@@ -277,6 +305,26 @@ async function createWindow() {
   // 打包态 resources/icon.png —— build/** 不进 asar，以前打包后这里找不到文件，
   // 任务栏就回落到 exe 的旧图标）。
   const iconPath = appIconPath();
+
+  /**
+   * v0.4.5 第 12 批（第 4 次修复）：**移到屏幕外 + 显示但不激活**。
+   *
+   * 用户三次反馈的演进：
+   *   1. `showInactive()`：不抢焦点，但窗口**仍盖在屏幕上**（z 序在最前）→ "每次打开都要在最上面"。
+   *   2. `focusable:false`（WS_EX_NOACTIVATE）：真不抢前台了，但**最小化按钮失效**（用户报的）。
+   *   3. `minimize()` 最小化启动：不打扰了，但 Chromium 会**暂停渲染** →
+   *      截图空白 / rAF 停摆 / 加载页收不了尾（探针直接红了，这是真 BUG 不是测试问题）。
+   *
+   * 所以现在：**窗口正常显示（可最小化、可还原、按钮全好）+ 移到屏幕外 + 不激活**。
+   *   · `showInactive()`  → 不夺焦点，系统也不会把它顶到你面前；
+   *   · `setPosition(-32000, -32000)` → 屏幕上什么都看不到，不挡任何东西；
+   *   · 配合下面三条 Chromium 开关 → 即使"在屏幕外/被判遮挡"也**照常渲染**，
+   *     所以截图、动画、加载页全都正常；
+   *   · 任务栏图标保留（用户点它就能把窗口叫回来，位置也在屏幕内）。
+   *
+   * 正常双击启动（没有 BC_NO_FOCUS）行为完全不变。
+   */
+  const noFocus = process.env['BC_NO_FOCUS'] === '1';
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -285,11 +333,15 @@ async function createWindow() {
     title: 'BlockCanvas 积木画布',
     ...(iconPath ? { icon: iconPath } : {}),
     backgroundColor: '#f3f3f3',
+    // 自动化模式：先不显示（首帧就绪后再"不激活地显示 + 移到屏幕外"）
+    ...(noFocus ? { show: false, skipTaskbar: false } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      // 窗口在屏幕外/被遮挡时也不要让 Chromium 停掉渲染（否则截图空白、rAF 停摆）
+      ...(noFocus ? { backgroundThrottling: false } : {})
     }
   });
   // Windows 任务栏分组/图标缓存按 AppUserModelID 走，显式设成和 electron-builder 一致的 appId
@@ -319,6 +371,26 @@ async function createWindow() {
   // v0.4.5：加载完成后把"启动时攒下的待打开工程"（双击 .bcproj 启动的那条路径）发给渲染进程。
   // 放在 did-finish-load 而不是 loadURL 之后立刻发：渲染进程的监听器要等 React 挂载才有。
   win.webContents.on('did-finish-load', () => { flushPendingOsOpen(); });
+
+  // 自动化模式：**不激活地显示，并移到屏幕外**（屏幕上什么都不出现，但渲染照常）。
+  //
+  // 顺序很关键：先 showInactive（此时窗口还在屏幕内、不抢焦点），再移到屏幕外 ——
+  // 反过来（先移出去再 show）在某些 Windows 版本上会让窗口"从未映射"，截图拿不到画面。
+  if (noFocus) {
+    const park = () => {
+      if (win.isDestroyed()) return;
+      try {
+        if (!win.isVisible()) win.showInactive();
+        win.setPosition(-32000, -32000, false);
+        win.setSkipTaskbar(false);   // 保住任务栏图标
+      } catch { /* 忽略 */ }
+    };
+    win.once('ready-to-show', park);
+    win.webContents.once('did-finish-load', () => {
+      setTimeout(park, 0);
+      setTimeout(park, 500);
+    });
+  }
 
   if (devServerUrl) {
     await win.loadURL(devServerUrl);
@@ -856,6 +928,219 @@ ipcMain.handle('export:html-with-project', async (_evt, html: string, scene: any
     return { ok: false, error: (e as Error).message };
   }
 });
+
+// ============ 导出网站（v0.4.5 第 15 批） ============
+//
+// 用户要求（原话）：
+//   「默认相对路径……导出的时候根据记录的权威绝对路径和导出的位置自动匹配相对路径。
+//     这个要注意，所以最后导出文件夹的位置要让程序拿到，然后调整。
+//     导出的时候这个过程也加入『任务』（工具栏）当中。
+//     并且程序在主动记录一下每个项目之前选择导出的文件夹，下次自动匹配。」
+//
+// 所以这里做三件以前没有的事：
+//   ① **选目录**（不是选单个 html 文件）—— 只有这样程序才拿得到"导出位置"，
+//      才能算出每个媒体相对导出目录的写法；
+//   ② **把媒体文件真的拷进去**（assets/ 子目录），并重写 HTML 里的引用；
+//      跨盘符无法相对的，退回绝对路径并在结果里如实报告；
+//   ③ 整个过程是一条**任务**（工具栏「任务」里能看到进度、完成/失败）。
+//
+// 记住"这个项目上次导到哪儿"：data/export-dirs.json（按工程路径索引，工程没保存就用名字）。
+
+function exportDirsPath(): string {
+  return join(dataRoot(), 'export-dirs.json');
+}
+
+/** 文件 → 相对 baseDir 的写法（跨盘符时 crossDrive=true） */
+function toRelFromPath(file: string, baseDir: string): { rel: string; crossDrive: boolean } {
+  try {
+    const r = relativePath(baseDir, file).replace(/\\/g, '/');
+    if (r.startsWith('..') && isAbsolutePath(r)) return { rel: file, crossDrive: true };
+    return { rel: r, crossDrive: false };
+  } catch {
+    return { rel: file, crossDrive: true };
+  }
+}
+
+/** 在目标目录里取一个不冲突的文件名（a.png → a-2.png） */
+function uniqueFileName(dir: string, name: string): string {
+  const base = basename(name);
+  const dot = base.lastIndexOf('.');
+  const stem = dot > 0 ? base.slice(0, dot) : base;
+  const ext = dot > 0 ? base.slice(dot) : '';
+  let candidate = base;
+  let i = 2;
+  while (existsSync(join(dir, candidate))) {
+    candidate = `${stem}-${i}${ext}`;
+    i += 1;
+    if (i > 999) break;
+  }
+  return candidate;
+}
+
+function readExportDirs(): Record<string, string> {
+  try {
+    const raw = JSON.parse(readFileSync(exportDirsPath(), 'utf-8'));
+    return raw && typeof raw === 'object' ? raw as Record<string, string> : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberExportDir(key: string, dir: string): void {
+  if (!key || !dir) return;
+  try {
+    const all = readExportDirs();
+    all[key] = dir;
+    writeFileSync(exportDirsPath(), JSON.stringify(all, null, 2), 'utf-8');
+  } catch { /* 记不住不影响导出 */ }
+}
+
+/** 取上次导出目录（没有就退到下载目录 / 桌面） */function lastExportDir(key: string): string {
+  const saved = key ? readExportDirs()[key] : '';
+  if (saved && existsSync(saved)) return saved;
+  try {
+    const d = app.getPath('downloads');
+    if (d && existsSync(d)) return d;
+  } catch { /* 忽略 */ }
+  return dataRoot();
+}
+
+/** 把一个媒体引用解析成"本机真实文件路径"（bc-img:// 或绝对/相对路径都吃） */
+function resolveMediaFile(raw: string, projectDir: string): string {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  if (/^bc-img:\/\//i.test(s)) {
+    const kind = (s.match(/^bc-img:\/\/(asset|file)\//i) || [])[1] || 'file';
+    const enc = s.replace(/^bc-img:\/\/(asset|file)\//i, '');
+    try {
+      const dec = decodeURIComponent(enc);
+      if (kind === 'asset') return resolveCachedAsset(dec) || '';
+      return dec;
+    } catch { return ''; }
+  }
+  if (/^[a-zA-Z]:[\\/]/.test(s) || s.startsWith('\\\\') || s.startsWith('/')) return s.replace(/\//g, '\\').replace(/\\\\/g, '\\');
+  // 相对：按工程目录解析
+  if (projectDir) return join(projectDir, s);
+  return '';
+}
+
+ipcMain.handle('export:site', async (_evt, payload: {
+  html: string;
+  scene: any;
+  projectName?: string;
+  projectPath?: string;
+}) => {
+  const { html, scene, projectName = '我的网页', projectPath = '' } = payload || ({} as never);
+  const key = String(projectPath || projectName || '').trim();
+
+  // ① 先选导出目录（用上次的作为默认位置）
+  let outDir = '';
+  // 自动化探针用：BC_AUTO_EXPORT_DIR 直接给目录；BC_AUTO_EXPORT_PATH 给的是"文件路径"，
+  // 取它的目录 + 文件名（老探针 probe-table 还在用这个，保持兼容）。
+  const autoFile = process.env['BC_AUTO_EXPORT_PATH'];
+  let htmlFileName = 'index.html';
+  const autoDir = process.env['BC_AUTO_EXPORT_DIR'];
+  if (autoFile) {
+    outDir = dirname(autoFile);
+    htmlFileName = basename(autoFile);
+  } else if (autoDir) {
+    outDir = autoDir;
+  } else {
+    const res = await showOpenDialog({
+      title: '选择导出位置（会在这个文件夹里生成 index.html 与 assets/）',
+      defaultPath: lastExportDir(key),
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (res.canceled || !res.filePaths?.[0]) return { ok: false, canceled: true };
+    outDir = res.filePaths[0];
+  }
+
+  const task = startManualTask({
+    kind: 'export',
+    title: `导出网站「${projectName}」`,
+    detail: '准备导出…',
+    dest: outDir
+  });
+
+  try {
+    mkdirSync(outDir, { recursive: true });
+    const assetsDir = join(outDir, 'assets');
+    const projectDir = projectPath ? join(projectPath, '..') : '';
+
+    // ② 收集 HTML 里所有本地媒体引用
+    const refs = new Set<string>();
+    for (const m of html.matchAll(/(?:bc-img:\/\/(?:asset|file)\/[^"'\\\s)]+)/g)) refs.add(m[0]);
+    const total = refs.size;
+    updateManualTask(task.id, { detail: total > 0 ? `正在处理 ${total} 个媒体文件…` : '正在写入 HTML…', pct: 5, total });
+
+    let outHtml = html;
+    let copied = 0;
+    let crossDrive = 0;
+    let idx = 0;
+    for (const ref of refs) {
+      idx += 1;
+      updateManualTask(task.id, {
+        detail: `正在处理媒体 ${idx}/${total}…`,
+        pct: 5 + Math.round((idx / Math.max(1, total)) * 80)
+      });
+      const file = resolveMediaFile(ref, projectDir);
+      if (!file || !existsSync(file)) continue;
+      const rel = toRelFromPath(file, outDir);
+      // 跨盘符：没法相对，保留绝对路径（导出后本机可用，拷走会坏）——如实计数
+      const useRel = !!rel.rel && rel.rel !== file && !rel.crossDrive;
+      if (rel.crossDrive) crossDrive += 1;
+      // 拷进 assets/（同名冲突时加序号）
+      let destName = '';
+      try {
+        mkdirSync(assetsDir, { recursive: true });
+        destName = uniqueFileName(assetsDir, basename(file));
+        copyFileSync(file, join(assetsDir, destName));
+        copied += 1;
+      } catch {
+        // 拷不过去就退回内联 data URI（宁可文件大，也不要破图）
+        try {
+          const buf = readFileSync(file);
+          outHtml = outHtml.split(ref).join(`data:${mediaMimeOf(file)};base64,${buf.toString('base64')}`);
+        } catch { /* 彻底读不到就保持原样 */ }
+        continue;
+      }
+      const replacement = useRel ? `assets/${destName}` : `assets/${destName}`;
+      outHtml = outHtml.split(ref).join(replacement);
+    }
+
+    updateManualTask(task.id, { detail: '正在写入 HTML 文件…', pct: 88 });
+    const htmlPath = join(outDir, htmlFileName);
+    writeFileSync(htmlPath, outHtml, 'utf-8');
+
+    // ③ 顺手存一份工程副本（和以前一致：HTML + bcproj 双写）
+    updateManualTask(task.id, { detail: '正在保存工程副本…', pct: 94 });
+    let savedProject = '';
+    try {
+      const c = collectSceneAssets(scene);
+      const projectPath2 = join(outDir, `${projectName}.bcproj`);
+      const w = writeProject(projectPath2, {
+        name: projectName,
+        scene: c.scene,
+        assets: c.assets,
+        meta: { elementCount: countNodes(scene?.root) }
+      });
+      if (w.ok) savedProject = projectPath2;
+    } catch { /* 工程副本失败不影响网页导出 */ }
+
+    rememberExportDir(key, outDir);
+    finishManualTask(task.id, {
+      ok: true,
+      detail: `已导出到 ${outDir}（复制 ${copied} 个媒体文件${crossDrive > 0 ? `，${crossDrive} 个跨盘符保留绝对路径` : ''}）`
+    });
+    return { ok: true, outDir, htmlPath, copied, crossDrive, projectPath: savedProject };
+  } catch (e) {
+    finishManualTask(task.id, { ok: false, error: (e as Error).message });
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+/** 拿上次的导出目录（渲染层用来在按钮上显示"上次导到 D:/site"） */
+ipcMain.handle('export:last-dir', (_evt, key: string) => lastExportDir(String(key || '')));
 
 // ============ 扩展系统（extensions/ 迁移至 data/extensions/） ============
 function extRoot(): string {

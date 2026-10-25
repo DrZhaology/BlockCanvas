@@ -50,6 +50,8 @@ interface AnimState {
   goodStreak: number;
   /** 是否处于"窗口不可见/失焦"的暂停态 */
   paused: boolean;
+  /** 是否**真的**不可见（最小化/切到别的应用）—— 比 paused 更严格 */
+  windowHidden: boolean;
 }
 
 const state: AnimState = {
@@ -58,7 +60,8 @@ const state: AnimState = {
   p95: 0,
   badStreak: 0,
   goodStreak: 0,
-  paused: false
+  paused: false,
+  windowHidden: false
 };
 
 let started = false;
@@ -77,20 +80,34 @@ function prefersReduced(): boolean {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
 }
 
-/** 把当前状态写到 <html> 上（CSS 全靠这两个属性工作） */
-function apply(mode: AnimMode, paused: boolean) {
+/**
+ * 把当前状态写到 <html> 上（CSS 全靠这几个属性工作）
+ *
+ * v0.4.5 第 15 批（用户反馈：「加载了图片后 CPU 利用率上升，最小化/静默到后台也下不来」）：
+ * 除了 `data-bc-anim` / `data-bc-anim-paused`，再单独挂一个 **`data-bc-window-hidden`**。
+ *
+ * 两者的区别很关键：
+ *   · `anim-paused` = "不可见 **或** 只是失焦" → 只暂停我们自己的几个装饰动画；
+ *   · `window-hidden` = "**真的**最小化/切走了"（document.hidden）→
+ *     把页面里**所有**无限循环动画与过渡都停住（含插件/用户自定义的），
+ *     这才是"后台还把 CPU 吃满"的根因。
+ * 分开挂是为了不误伤"只是失焦"的场景（那时动画该继续，用户看得见）。
+ */
+function apply(mode: AnimMode, paused: boolean, windowHidden = false) {
   try {
     const el = document.documentElement;
     el.setAttribute('data-bc-anim', mode);
     if (paused) el.setAttribute('data-bc-anim-paused', '1');
     else el.removeAttribute('data-bc-anim-paused');
+    if (windowHidden) el.setAttribute('data-bc-window-hidden', '1');
+    else el.removeAttribute('data-bc-window-hidden');
   } catch { /* 忽略 */ }
 }
 
 function setMode(mode: AnimMode, paused = state.paused) {
   state.mode = mode;
   state.paused = paused;
-  apply(mode, paused);
+  apply(mode, paused, state.windowHidden);
 }
 
 /** 一帧的采样：满一个窗口就统计 p95，决定要不要降级/恢复 */
@@ -128,19 +145,42 @@ function tick(ts: number) {
   }
 }
 
-/** 窗口可见性 / 失焦 → 暂停装饰动画 */
+/**
+ * 窗口可见性 / 失焦 → 暂停装饰动画。
+ *
+ * v0.4.5 第 12 批：**安静启动模式**下窗口是不可激活的（Windows: WS_EX_NOACTIVATE），
+ * `document.hasFocus()` 永远返回 false —— 如果照旧拿它当信号，
+ * 装饰动画会被永久冻住（看起来像"动效坏了"）。
+ * 所以这里先看 `window.bc.quietLaunch`：那个模式下只认 `document.hidden`（真正的最小化/隐藏）。
+ *
+ * `quietOverride` 只给探针用：它需要**同时验证两条分支**（普通模式失焦要暂停、
+ * 安静模式失焦不能暂停），又不能重启一次程序。生产代码永远不会设置它。
+ */
+let quietOverride: boolean | null = null;
+
 function bindVisibility() {
+  const quietLaunch = (() => {
+    try { return window.bc?.quietLaunch === true; } catch { return false; }
+  })();
   const sync = () => {
-    const hidden = document.hidden || !document.hasFocus();
+    const quiet = quietOverride ?? quietLaunch;
+    const hidden = document.hidden || (!quiet && !document.hasFocus());
     // 「暂停」只是**再叠一层**状态：lite 档遇到不可见也照样停
     state.paused = hidden;
-    apply(state.mode, hidden);
+    // 只有"真的不可见"才连所有循环动画一起停（最小化/切走），
+    // "只是失焦"时用户还看得见画面，不能停。
+    state.windowHidden = document.hidden;
+    apply(state.mode, hidden, state.windowHidden);
   };
   document.addEventListener('visibilitychange', sync);
   window.addEventListener('focus', sync);
   window.addEventListener('blur', sync);
   sync();
+  // 供探针切换分支（不影响生产行为）
+  syncRef.current = sync;
 }
+
+const syncRef: { current: (() => void) | null } = { current: null };
 
 /**
  * 启动总督（幂等，可以重复调用）。
@@ -171,6 +211,16 @@ export function startAnimGovernor(): (mode: AnimMode | null) => void {
     get paused() { return state.paused; },
     get p95() { return state.p95; },
     get override() { return state.override; },
+    /** 窗口是否"真的不可见"（最小化/切走）——此时所有循环动画都会停 */
+    get windowHidden() { return state.windowHidden; },
+    /** 探针用：安静启动模式下窗口不可激活，需要能切换"要不要把无焦点当失焦"这一分支 */
+    get quiet() {
+      try { return quietOverride ?? (window.bc?.quietLaunch === true); } catch { return quietOverride === true; }
+    },
+    setQuiet(v: boolean | null) {
+      quietOverride = v;
+      syncRef.current?.();
+    },
     setMode: setAnimMode
   };
   try { (window as unknown as Record<string, unknown>).__bcAnim = api; } catch { /* 忽略 */ }

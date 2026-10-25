@@ -83,7 +83,7 @@ async function main() {
   const legacySizeBefore = sizeOf(join(PROJECTS, LEGACY_FILE));
   ok('准备：老格式工程是纯 JSON（不是 zip）', isZip(join(PROJECTS, LEGACY_FILE)) === false, String(legacySizeBefore) + 'B');
 
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();

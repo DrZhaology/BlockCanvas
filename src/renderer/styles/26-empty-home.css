@@ -515,23 +515,37 @@ html[data-bc-dark] .eh-tab.is-active { background: var(--bg-panel); }
 .empty-home.is-dark-bg .eh-empty-hit { color: rgba(255, 255, 255, 0.6); }
 
 /* —— 全局轻提示（toast）—— */
+/*
+ * v0.4.5 第 15 批（用户反馈）：「红色的提示放到正中间，现在偏左，歪了。」
+ *
+ * 老写法 `left: 50% + translateX(-50%)` 依赖"自己是相对视口定位的 fixed"，
+ * 一旦某个祖先有 transform / filter / contain，fixed 就会以那个祖先为基准 →
+ * 居中基准从"整个窗口"变成"那个容器"，于是看起来偏左。
+ *
+ * 现在改成**左右都锚 0 + 内容居中**：不依赖任何百分比位移，
+ * 也不受祖先 transform 影响（依旧 fixed 到视口，但用 inset 撑满宽度再内部居中）。
+ */
 .bc-toast-wrap {
   position: fixed;
-  left: 50%;
+  left: 0;
+  right: 0;
   bottom: 34px;
-  transform: translateX(-50%);
   /* 高于面板（700），低于模态（900+） */
-  z-index: 800;
+  z-index: var(--z-toast, 980);
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  padding: 0 16px;
   pointer-events: none;
 }
 .bc-toast {
   max-width: 460px;
   padding: 9px 16px;
   font-size: 12.5px;
+  line-height: 1.55;
+  text-align: center;
   color: #fff;
   background: rgba(17, 24, 39, 0.92);
   border-radius: 8px;

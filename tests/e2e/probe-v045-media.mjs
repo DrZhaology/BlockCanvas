@@ -24,7 +24,7 @@ async function main() {
   const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
 
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -68,23 +68,45 @@ async function main() {
 
   const dom = await win.evaluate(() => {
     const v = document.querySelector('.canvas video');
-    const a = document.querySelector('.canvas audio');
+    const slot = document.querySelector('.canvas .bc-audio-slot');
+    const inner = slot ? slot.querySelector('audio') : null;
     const pick = (el) => (el ? {
       src: el.getAttribute('src') || '',
       controls: el.hasAttribute('controls'),
       loop: el.hasAttribute('loop')
     } : null);
-    return { video: pick(v), audio: pick(a) };
+    return { video: pick(v), audio: pick(inner), hasSlot: !!slot };
   });
   console.log('DOM:', JSON.stringify(dom));
 
   check('canvas 里真的渲染出了 <video> 且带 src', !!dom.video && dom.video.src.includes('clip.mp4'),
     dom.video ? dom.video.src : '没找到 video');
-  check('video 带播放控件与 loop 属性', !!dom.video && dom.video.controls && dom.video.loop,
+  // v0.4.5 第 15 批：视频**未选中时不挂控制条**（否则控制条吃掉点击、也挡排版），
+  // 选中后才出现。loop 属性与选中无关，始终保留。
+  check('video 带 loop 属性，未选中时不出控制条（选中后才出）',
+    !!dom.video && dom.video.loop && dom.video.controls === false,
     dom.video ? `controls=${dom.video.controls} loop=${dom.video.loop}` : '');
-  check('canvas 里真的渲染出了 <audio> 且带 src', !!dom.audio && dom.audio.src.includes('tone.mp3'),
-    dom.audio ? dom.audio.src : '没找到 audio');
-  check('audio 带播放控件', !!dom.audio && dom.audio.controls, dom.audio ? `controls=${dom.audio.controls}` : '');
+  // 音频：编辑器用 .bc-audio-slot 外壳承载（UA 规则让无 controls 的 <audio> 永远 display:none，
+  // 而 <audio controls> 的 shadow DOM 又会吃掉点击 → 只能套外壳）
+  check('canvas 里音频由 .bc-audio-slot 外壳承载（可点中）', dom.hasSlot === true, `hasSlot=${dom.hasSlot}`);
+  check('刚插入的音频是选中态 → 外壳里露出真 audio 且带 src',
+    !!dom.audio && dom.audio.controls && dom.audio.src.includes('tone.mp3'),
+    JSON.stringify(dom.audio));
+  // 取消选中 → 外壳退回"♪ 音频"占位条（不挂真 audio，点击才不会被控件吃掉）
+  await win.evaluate(() => window.__sceneStore.getState().selectElement(null));
+  await sleep(450);
+  const deselected = await win.evaluate(() => {
+    const slot = document.querySelector('.canvas .bc-audio-slot');
+    return {
+      hasSlot: !!slot,
+      isReal: !!slot && slot.classList.contains('is-real'),
+      innerAudio: !!slot?.querySelector('audio'),
+      h: slot ? Math.round(slot.getBoundingClientRect().height) : 0
+    };
+  });
+  check('未选中时外壳只显示占位条（不挂真 audio），且仍然可见可点',
+    deselected.hasSlot && deselected.isReal === false && deselected.innerAudio === false && deselected.h > 10,
+    JSON.stringify(deselected));
 
   // 图层树能标出这两个元素（说明类型系统认得它们）
   await win.locator('.tab-btn', { hasText: '图层' }).click();

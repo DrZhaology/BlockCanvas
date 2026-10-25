@@ -15,6 +15,10 @@ export interface ProjectFileInfo {
   external?: boolean;
   /** v0.4.5：登记过但磁盘上已经不在（被移动/删除） */
   missing?: boolean;
+  /** v0.4.5：项目类型 —— page 网页项目 / site 网站项目（多页，下一轮）/ external 外部项目 / missing 文件已丢失 */
+  kind?: 'page' | 'site' | 'external' | 'missing';
+  /** v0.4.5：页面数（多页工程 > 1；现在恒为 1，为下一轮多页管理预留） */
+  pageCount?: number;
 }
 
 export interface DataPathsInfo {
@@ -73,6 +77,27 @@ declare global {
       // 导出与网页管理
       exportHTML: (html: string, defaultName?: string) => Promise<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>;
       exportHTMLWithProject: (html: string, scene: unknown, defaultName?: string, projectName?: string) => Promise<{ ok: boolean; htmlPath?: string; projectPath?: string; error?: string; canceled?: boolean }>;
+      /**
+       * v0.4.5：导出为"网站文件夹"（index.html + assets/），按导出位置重算相对路径。
+       * 这是一条主进程任务，进度可在工具栏「任务」里看到。
+       */
+      exportSite: (payload: {
+        html: string;
+        scene: unknown;
+        projectName?: string;
+        projectPath?: string;
+      }) => Promise<{
+        ok: boolean;
+        outDir?: string;
+        htmlPath?: string;
+        projectPath?: string;
+        copied?: number;
+        crossDrive?: number;
+        error?: string;
+        canceled?: boolean;
+      }>;
+      /** 取某个工程上次导出的目录（没有就返回默认目录） */
+      exportLastDir: (key: string) => Promise<string>;
       previewOpen: (html: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
 
       // 项目工程管理 (.bcproj)
@@ -215,6 +240,8 @@ declare global {
       ) => Promise<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>;
 
       onMenu: (channel: string, cb: () => void) => () => void;
+      /** v0.4.5：安静启动模式（自动化脚本）—— 此时窗口不可激活，document.hasFocus() 恒为 false */
+      quietLaunch: boolean;
       /** v0.4.5：系统层要求打开某个 .bcproj（双击文件 / 第二个实例 / macOS open-file） */
       onOpenProjectPath: (cb: (path: string) => void) => () => void;
       /** v0.4.5：启动加载页的真实进度（主进程逐条播报） */

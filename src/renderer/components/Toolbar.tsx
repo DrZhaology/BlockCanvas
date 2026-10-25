@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useMemo, Fragment } from 'react';
 import { useScene } from '@store/sceneStore';
 import { exportHTML, type ExportResult } from '@lib/exporter';
+import { useTabStore } from '@store/tabStore';
 import type { SceneElement } from '@lib/types';
 import {
   useToolbar, dockOf, getSortedItems,
@@ -123,14 +124,40 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   const doPreview = () => runWithHealthGuard(previewNow);
 
   const exportNow = async () => {
+    /**
+     * v0.4.5 第 15 批：导出改为**选一个文件夹**（而不是选单个 html 文件）。
+     *
+     * 用户要求：「最后导出文件夹的位置要让程序拿到，然后调整」「导出的时候这个过程也加入任务」。
+     * 只有拿到"导出目录"，才能把每个媒体按它算相对写法、并把文件一起拷过去；
+     * 整个过程在主进程里是一条任务，工具栏「任务」能看到进度。
+     */
     const result = exportHTML(useScene.getState().scene);
-    const res = await window.bc.exportHTML(result.html, 'index.html');
-    if (!res.ok && !res.canceled) {
+    const tab = useTabStore.getState().tabs.find((t) => t.id === useTabStore.getState().activeTabId);
+    const res = await window.bc.exportSite({
+      html: result.html,
+      scene: useScene.getState().scene,
+      projectName: tab?.name || '我的网页',
+      projectPath: tab?.filePath || ''
+    });
+    if (res.canceled) return;
+    if (!res.ok) {
       void appAlert('导出失败：' + (res.error ?? '未知错误'), '导出失败');
-    } else if (res.ok && res.path) {
-      showExportTips(result);
-      void appAlert('HTML 网页导出成功！\n\n文件保存路径：\n' + res.path, '导出成功');
+      return;
     }
+    showExportTips(result);
+    const extra = res.copied
+      ? `\n\n已把 ${res.copied} 个媒体文件复制到 assets/ 子目录，并按导出位置重算了相对路径。`
+      : '';
+    const cross = res.crossDrive
+      ? `\n\n注意：有 ${res.crossDrive} 个媒体在另一个磁盘上，无法写相对路径（已保留绝对路径）。`
+      : '';
+    void appAlert(
+      '网站已导出到：\n' + res.outDir +
+      '\n\n入口文件：index.html' + (res.projectPath ? '\n工程副本：' + res.projectPath : '') +
+      extra + cross +
+      '\n\n下次导出会自动用这个文件夹。',
+      '导出成功'
+    );
   };
   const previewNow = async () => {
     const result = exportHTML(useScene.getState().scene);

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import { ErrorBoundary } from '@comp/ErrorBoundary';
 import { startAnimGovernor } from '@lib/animGovernor';
+import { warmHomeBackground } from '@lib/preloadHomeBg';
 import './styles/01-foundation.css';
 import './styles/02-tabbar.css';
 import './styles/03-toolbar.css';
@@ -42,6 +43,11 @@ import './animations.css'; // 统一动画体系：token + 全部 keyframes（�
 // v0.4.5：动画性能总督（不可见即暂停 / 掉帧自动精简 / 尊重系统"减少动态效果"）。
 // 必须在渲染之前启动：它要往 <html> 上写 data-bc-anim，避免首帧先按完整动效画一遍。
 startAnimGovernor();
+
+// v0.4.5：**趁加载页还盖着**就把首页背景（图片/视频）预热起来。
+// 否则"进首页 → 才开始下载背景图"会有明显的空白延迟（用户反馈过）。
+// 放在 render 之前：它只是发请求，不阻塞首帧。
+warmHomeBackground();
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

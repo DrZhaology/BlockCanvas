@@ -322,15 +322,144 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
 }
 .canvas [data-bc-play-lock='1']:hover { outline-color: rgba(220, 38, 38, 0.8); }
 
+/* ============================================================================
+   6c. 媒体路径三写法：相对 / 绝对 / URL（v0.4.5 第 15 批）
+   ========================================================================== */
+.media-path-modes {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line, var(--border));
+  border-radius: 7px;
+  background: var(--surface-sunken, var(--panel-soft));
+}
+.media-path-mode {
+  height: 23px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3, var(--text-muted));
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.media-path-mode:hover { color: var(--text-1, var(--text)); }
+.media-path-mode.is-on {
+  background: var(--bg-panel, #fff);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+}
+.media-path-auth {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 6px 0 2px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  min-width: 0;
+}
+.media-path-auth-k { flex: none; color: var(--text-3, var(--text-muted)); }
+.media-path-auth-v {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;          /* 长路径优先露出结尾的文件名 */
+  text-align: left;
+  font-family: Consolas, Menlo, monospace;
+  color: var(--text-2, var(--text-muted));
+}
+.media-path-auth.is-warn .media-path-auth-v { color: var(--danger, #dc2626); }
+.media-path-relnote {
+  display: flex;
+  gap: 5px;
+  align-items: flex-start;
+  margin: 6px 0 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--surface-2, var(--panel-soft));
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--text-3, var(--text-muted));
+}
+.media-path-relnote svg { flex: none; margin-top: 2px; }
+.media-path-relnote b { color: var(--text-2, var(--text-muted)); }
+
 /* 自动播放 → 静音开关必须锁死在"开"，这里给个明确的禁用观感 */
 .media-toggle.is-forced { opacity: 0.72; cursor: not-allowed; }
 .media-toggle.is-forced input { cursor: not-allowed; }
+
+/* ============================================================================
+   6b. 音频在编辑器里的外壳（v0.4.5 第 15 批）
+   ---------------------------------------------------------------------------
+   用户反复反馈「音频根本点击无法选中」。查明的两条硬约束：
+     · `<audio controls>` 的控件是 UA shadow DOM，**点击被控件内部吃掉**
+       （实测点击中心后 selectedId 仍是 null，click 根本没派发到宿主元素）；
+     · 不挂 controls 时，UA 样式表 `audio:not([controls]) { display: none !important }`
+       生效，而 **UA 的 !important 高于作者样式** → 永远 0×0，连占位块都画不出来。
+   所以编辑器给音频套一层自己的 `<span>`：
+     · 未选中 → 显示"♪ 音频"占位条（看得见、点得中，就是普通元素点击）；
+     · 已选中 → 才露出真正的 `<audio controls>` 试听。
+   导出仍然只有 `<audio>`（exporter 按 node 生成，不认识这个外壳）。
+   ========================================================================== */
+.bc-audio-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 220px;
+  min-height: 54px;
+  border: 1px dashed var(--line-strong, #94a3b8);
+  border-radius: 8px;
+  background:
+    repeating-linear-gradient(45deg,
+      var(--surface-sunken, #f1f5f9) 0 8px,
+      var(--surface-2, #f8fafc) 8px 16px);
+  cursor: pointer;
+  vertical-align: middle;
+}
+.bc-audio-slot.is-real {
+  display: block;
+  border-style: solid;
+  border-color: var(--line, #cbd5e1);
+  background: transparent;
+  cursor: default;
+}
+.bc-audio-ph {
+  font-size: 11.5px;
+  color: var(--text-3, #64748b);
+  pointer-events: none;
+  user-select: none;
+}
+html[data-bc-dark] .bc-audio-slot {
+  border-color: var(--line-strong, #475569);
+  background:
+    repeating-linear-gradient(45deg,
+      var(--surface-sunken, #131a28) 0 8px,
+      var(--surface-2, #182033) 8px 16px);
+}
+
+/* 视频：未选中时至少有个框，别让人以为画布坏了 */
+.canvas video:not([controls]) {
+  background-color: var(--surface-sunken, #0f172a);
+  cursor: pointer;
+}
 
 /* ============================================================================
    6. 启动 / 打开工程 的加载页（components/LoadingScreen.tsx）
    ---------------------------------------------------------------------------
    必须在**所有东西之上**（--z-critical），并且在主界面画出第一帧之前一直盖着 ——
    这就是"不会先闪一下首页再进编辑器"的保证。
+
+   v0.4.5 第 14 批（用户反馈）：
+     · 「加载页面变成始终黑色了，程序内写成白色的就行」→ 底色**固定白**，不再跟首页深色模式走；
+       深色插件将来要改，由插件覆盖 `html[data-bc-dark] .bc-loading`。
+     · 「淡入淡出太快、还有卡顿」→ 进场 0.42s、淡出 0.55s，且**只过渡 opacity**
+       （不动 transform / filter），避免整块重绘造成的抖动。
    ========================================================================== */
 .bc-loading {
   position: fixed;
@@ -338,11 +467,12 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
   z-index: var(--z-critical);
   display: grid;
   place-items: center;
-  background: var(--surface-0, #fff);
-  animation: bcLoadIn 0.22s ease-out both;
+  /* 固定白底：不跟随首页深色模式（深色由插件适配） */
+  background: #ffffff;
+  animation: bcLoadIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .bc-loading.is-leaving {
-  animation: bcLoadOut 0.3s ease-in both;
+  animation: bcLoadOut 0.55s cubic-bezier(0.4, 0, 0.2, 1) both;
   /* 淡出过程中**不能再吃鼠标**：它盖在最上层，若还拦截点击，
      用户会觉得"界面卡住、点不动"（探针里表现为 click 超时）。 */
   pointer-events: none;
@@ -367,24 +497,26 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
   font-size: 19px;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: var(--text-1, #0f172a);
+  color: #0f172a;
 }
-.bc-loading-stage { font-size: 11.5px; color: var(--text-3, #94a3b8); }
+.bc-loading-stage { font-size: 11.5px; color: #94a3b8; }
 .bc-loading-bar {
   position: relative;
   width: 100%;
   height: 6px;
   margin-top: 20px;
   border-radius: 999px;
-  background: var(--surface-sunken, #f1f5f9);
+  background: #f1f5f9;
   overflow: hidden;
 }
 .bc-loading-bar-fill {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #2965F1, #E34F26 55%, #F7DF1E);
-  /* 进度条"追"目标值：每一步都平滑地走过去，不是一格一格跳 */
-  transition: width 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+  /* 进度条"追"目标值：每一步都平滑地走过去，不是一格一格跳。
+     0.36 → 0.5s：配合"至少显示 0.9s"，观感更从容。 */
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: width;
 }
 .bc-loading-meta {
   display: flex;
@@ -393,9 +525,9 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
   width: 100%;
   margin-top: 8px;
   font-size: 11.5px;
-  color: var(--text-2, #475569);
+  color: #475569;
 }
-.bc-loading-pct { font-family: Consolas, Menlo, monospace; color: var(--text-3, #94a3b8); }
+.bc-loading-pct { font-family: Consolas, Menlo, monospace; color: #94a3b8; }
 
 @keyframes bcLoadIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes bcLoadOut { from { opacity: 1; } to { opacity: 0; } }

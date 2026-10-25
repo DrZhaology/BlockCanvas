@@ -5,6 +5,7 @@ import type { SceneElement } from '@lib/types';
 import { selectorForNode, collectStyleClasses, buildStyleBlock, createStyleClassSet, quickCssToCss, cssTextToObject, simplifyStyle } from '@lib/styleClass';
 import { classColor } from '@lib/classColor';
 import { downscaleBigImages } from '@lib/imgDownscale';
+import { getProjectDir } from '@lib/projectDir';
 import { useShowBr } from '@lib/showBr';
 import { CanvasTextMenu, isTextStylable, type TextMenuPayload } from './CanvasTextMenu';
 import { CanvasPropSearch } from './CanvasPropSearch';
@@ -33,6 +34,9 @@ import { Icon } from './Icon';
  * 不需要再改任何调用点。
  */
 const ALT_REPARENT_ENABLED = false;
+
+/** 播放锁定时要定格的帧：30fps 的第 30 帧 ≈ 1 秒 */
+const LOCK_FRAME_SEC = 1;
 
 /** Alt 拖动时 F12 式盒模型的数据（全部是 client 坐标 / px 数值） */
 type AltBoxModelData = {
@@ -364,6 +368,13 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     /** 移动基准：定位元素用计算后的 left/top；常规流用 margin */
     positioned: boolean; isFixed: boolean;
     posKind: 'static' | 'relative' | 'absolute' | 'fixed' | 'sticky';
+    /**
+     * v0.4.5 第 15 批：**双边约束**（left+right / top+bottom 且没写 width/height）。
+     * 这类元素的尺寸是两边撑出来的，拖动必须"两边一起平移"，否则盒子会塌掉。
+     * 这里记下起始的右/下偏移，平移时用它算（而不是每帧按距离反推，避免夹取误差累积）。
+     */
+    startRight: number; startBottom: number;
+    stretchX: boolean; stretchY: boolean;
     startLeft: number; startTop: number;
     startMarginL: number; startMarginT: number;
     /** 允许移动/缩放的 client 坐标范围（"墙"）+ 每面墙要画的整条边 + 吸附参考线 */
@@ -685,7 +696,24 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     const startMarginL = Number.isFinite(parseFloat(cs.marginLeft)) ? parseFloat(cs.marginLeft) : 0;
     const startMarginT = Number.isFinite(parseFloat(cs.marginTop)) ? parseFloat(cs.marginTop) : 0;
     // 这一趟拖动锚定在哪一边（决定后中途不再变，避免 left/right 来回争抢造成的抖动）
-    const axisSide = pickAxisSide(posKind, (findNode(root, h.id)?.style ?? {}) as Record<string, string | undefined>, rect, cb);
+    const styleNow = (findNode(root, h.id)?.style ?? {}) as Record<string, string | undefined>;
+    const axisSide = pickAxisSide(posKind, styleNow, rect, cb);
+    /**
+     * v0.4.5：**双边约束**判定 + 起始右/下偏移。
+     * left+right（且没写 width）→ 横向尺寸由两边撑出来 → 拖动要"两边一起平移"；
+     * top+bottom（且没写 height）同理。startRight/startBottom 取起始值，
+     * 平移时用 `起始值 ∓ 位移` 直接算，避免每帧按距离反推带来的夹取误差。
+     */
+    const stretchX = positioned && hasSideValue(styleNow.left) && hasSideValue(styleNow.right) && !hasSideValue(styleNow.width);
+    const stretchY = positioned && hasSideValue(styleNow.top) && hasSideValue(styleNow.bottom) && !hasSideValue(styleNow.height);
+    const parsedRight = parseFloat(cs.right);
+    const parsedBottom = parseFloat(cs.bottom);
+    const startRight = hasSideValue(styleNow.right)
+      ? (Number.isFinite(parsedRight) ? parsedRight : (cb ? cb.right - rect.right : 0))
+      : (cb ? cb.right - rect.right : 0);
+    const startBottom = hasSideValue(styleNow.bottom)
+      ? (Number.isFinite(parsedBottom) ? parsedBottom : (cb ? cb.bottom - rect.bottom : 0))
+      : (cb ? cb.bottom - rect.bottom : 0);
     altDragRef.current = {
       id: h.id, mode: h.mode, edge: h.edge,
       startX: e.clientX, startY: e.clientY,
@@ -693,6 +721,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       startW: rect.width, startH: rect.height,
       positioned, isFixed, posKind,
       startLeft, startTop, startMarginL, startMarginT,
+      startRight, startBottom, stretchX, stretchY,
       bounds,
       walls: [bounds.barL, bounds.barR, bounds.barT, bounds.barB].filter(Boolean) as Bar[],
       reparent: false,
@@ -886,15 +915,19 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       const patch: Record<string, string> = { width: Math.round(nw / z) + 'px' };
       if (hasT || hasB) patch.height = Math.round(nh / z) + 'px';
 
-      // v0.4.5（用户反馈 C补5）：图片 / 视频 / 音频**只能按比例缩放**，不能拉伸变形。
-      // 做法：算出宽度方向的比例，再把高度按原比例推回去（反之亦然）。
-      const isMediaEl = node.type === 'img' || node.type === 'video' || node.type === 'audio';
-      if (isMediaEl && d.startW > 0 && d.startH > 0 && (hasL || hasR)) {
+      // v0.4.5（用户第 2 次反馈，规则改了）：
+      //   · **有 src 的图片 / 视频** → 只能按比例缩放，不允许拉伸变形
+      //     （用户原话："从素材插入的图片或者 img 元素设置了图片路径，那么从画布上你就不要让图片比例能修改"）
+      //   · **没有 src 的 img 占位元素** → 自由缩放（以前连占位框都锁比例，用户明确不要）
+      //   · 音频没有"画面"，也不锁比例
+      const hasSrc = String(node.attrs?.src ?? '').trim() !== '';
+      const ratioLocked = (node.type === 'img' && hasSrc) || (node.type === 'video' && hasSrc);
+      if (ratioLocked && d.startW > 0 && d.startH > 0 && (hasL || hasR)) {
         const scale = nw / d.startW;
         nh = Math.max(8, d.startH * scale);
         patch.height = Math.round(nh / z) + 'px';
       }
-      if (isMediaEl && d.startW > 0 && d.startH > 0 && !(hasL || hasR) && (hasT || hasB)) {
+      if (ratioLocked && d.startW > 0 && d.startH > 0 && !(hasL || hasR) && (hasT || hasB)) {
         const scale = nh / d.startH;
         nw = Math.max(8, d.startW * scale);
         patch.width = Math.round(nw / z) + 'px';
@@ -1009,6 +1042,15 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
       if (Number.isFinite(d.bounds.maxY) && targetTop > d.bounds.maxY) { targetTop = d.bounds.maxY; hit = bar('b'); }
       const ax = targetLeft - d.rect.left;
       const ay = targetTop - d.rect.top;
+      /**
+       * v0.4.5 第 15 批：**双边约束的轴改用"指针原始位移"**。
+       *
+       * 原因：墙（bounds.minY 等）是按"单边锚定 + 固定尺寸"推出来的，
+       * 对一个 top+bottom 撑出来的元素根本不成立（实测会把元素弹到 -320px 之外）。
+       * 这类元素本来就正好卡在容器里，平移不会破坏布局，所以直接跟手最稳。
+       */
+      const axMove = d.stretchX ? (ev.clientX - d.startX) : ax;
+      const ayMove = d.stretchY ? (ev.clientY - d.startY) : ay;
       const patch: Record<string, string | undefined> = {};
       const elNow = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLElement | null;
       const parentNow = elNow?.parentElement;
@@ -1050,14 +1092,37 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
             const dR = (cb.right - (targetLeft + d.rect.width)) / zNow;
             const dT = (targetTop - cb.top) / zNow;
             const dB = (cb.bottom - (targetTop + d.rect.height)) / zNow;
-            if (d.axisSide.x === 'right') {
+            /**
+             * v0.4.5 第 15 批（用户反复反馈："position: fixed 要自动用两边作为定位基准，现在拖不动"）：
+             *
+             * 真因：一个元素如果**两边都锚着**（`left+right` 或 `top+bottom`，且没写 width/height），
+             * 它的尺寸是**由这两边撑出来的**。以前拖动只写一边、把对边清掉 →
+             * 尺寸约束瞬间消失，盒子塌成内容宽度/0 高度（实测 849px 宽的元素一拖变 60px、
+             * 四边全设的元素高度直接变 0）—— 看起来就是"拖不动 / 拖一下就废了"。
+             *
+             * 现在：**双边约束的轴改成"两边一起平移"**（left 加多少、right 就减多少），
+             * 盒子尺寸完全不变，只是整体挪位置。这才是设计工具里"拉伸约束"的正确行为，
+             * 也正好是用户说的"用两边作为定位基准"。
+             */
+            // 双边约束的轴：**两边一起平移**（用起始值 ∓ 位移直接算，尺寸严格不变）
+            if (d.stretchX) {
+              const nx = d.startLeft + axMove / zNow;
+              const nr = d.startRight - axMove / zNow;
+              patch.left = Math.round(nx) + 'px';
+              patch.right = Math.round(nr) + 'px';
+            } else if (d.axisSide.x === 'right') {
               patch.right = Math.round(dR) + 'px';
               patch.left = undefined;
             } else {
               patch.left = Math.round(dL) + 'px';
               patch.right = undefined;
             }
-            if (d.axisSide.y === 'bottom') {
+            if (d.stretchY) {
+              const ny = d.startTop + ayMove / zNow;
+              const nb = d.startBottom - ayMove / zNow;
+              patch.top = Math.round(ny) + 'px';
+              patch.bottom = Math.round(nb) + 'px';
+            } else if (d.axisSide.y === 'bottom') {
               patch.bottom = Math.round(dB) + 'px';
               patch.top = undefined;
             } else {
@@ -1176,10 +1241,23 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           const nearRight = (cv ? cv.right : Infinity) - Math.min(r.right, d.lastX) <= 12;
           const nearLeft = Math.min(r.left, d.lastX) - (cv ? cv.left : -Infinity) <= 12;
           if (d.isFixed && cv) {
-            if (nearBottom) { patch.bottom = '0px'; patch.top = undefined; }
-            else if (nearTop) { patch.top = '0px'; patch.bottom = undefined; }
-            if (nearRight) { patch.right = '0px'; patch.left = undefined; }
-            else if (nearLeft) { patch.left = '0px'; patch.right = undefined; }
+            /**
+             * v0.4.5 第 15 批（用户反复反馈："fixed 要自动用两边做定位基准，现在拖不动"）：
+             *
+             * 松手时的"贴边吸附"会写 `bottom: 0` 并**清掉 top**。
+             * 对一个双边约束（top+bottom、没写 height）的元素来说，这一下就把高度约束打没了 ——
+             * 实测四边全设的元素一拖，高度从 520 直接变 0。
+             *
+             * 所以：**双边约束的轴不做贴边归一化**（那两边本来就是用户要的定位基准）。
+             */
+            if (!d.stretchY) {
+              if (nearBottom) { patch.bottom = '0px'; patch.top = undefined; }
+              else if (nearTop) { patch.top = '0px'; patch.bottom = undefined; }
+            }
+            if (!d.stretchX) {
+              if (nearRight) { patch.right = '0px'; patch.left = undefined; }
+              else if (nearLeft) { patch.left = '0px'; patch.right = undefined; }
+            }
           }
 
           // —— relative / 常规流：贴边与居中都用"更稳定的 CSS"表达 ——
@@ -1848,6 +1926,26 @@ const CanvasNode = React.memo(function CanvasNode(props: {
     if (!editingText) setInlineDraft(node.text ?? '');
   }, [node.text, editingText]);
 
+  /**
+   * v0.4.5（用户反馈）：**点下播放锁的瞬间，正在播的媒体要立刻停住**。
+   *
+   * 只靠 `onPlay` 拦截是不够的 —— 那只能在"将要播放"时按回去；
+   * 如果锁上之前它已经在播，React 改 `controls`/`muted` 属性并不会让它暂停，
+   * 于是会出现"点了锁死，视频还在放"（探针抓到的就是这个）。
+   * 这里在 playLock 变成 '1' 时直接对 DOM 调 pause()，一次到位。
+   */
+  useEffect(() => {
+    if (node.attrs?.playLock !== '1') return;
+    if (!MEDIA_TAGS.has(node.type)) return;
+    try {
+      const host = document.querySelector(`.canvas [data-bc-id="${CSS.escape(node.id)}"]`);
+      // 音频外面套了一层编辑器外壳（.bc-audio-slot），真正能 pause 的是里面的 <audio>
+      const el = (host?.querySelector?.('audio, video') as HTMLMediaElement | null)
+        || (host as HTMLMediaElement | null);
+      if (el && typeof el.pause === 'function' && !el.paused) el.pause();
+    } catch { /* 忽略 */ }
+  }, [node.attrs?.playLock, node.id, node.type]);
+
   const autoGrow = (ta: HTMLTextAreaElement) => {
     ta.style.height = 'auto';
     ta.style.height = Math.max(ta.scrollHeight, 24) + 'px';
@@ -1996,6 +2094,111 @@ const CanvasNode = React.memo(function CanvasNode(props: {
   };
   const editDeco = pick('textDecoration');
 
+  /**
+   * 媒体元素（video / audio）的专属属性 —— 提前算好放成变量。
+   * v0.4.5：音频要用自己的外壳渲染（见下方 `node.type === 'audio'` 分支），
+   * 外壳里需要这份 props，所以不能再塞在 commonProps 里。
+   */
+  const mediaProps: Record<string, unknown> = MEDIA_TAGS.has(node.type)
+    ? (() => {
+        // v0.4.5（用户反馈 C补2 / C补3 / C补8）：
+        //  · 原生控件会吃掉鼠标事件 —— 音频整块都是控件区，所以"怎么点都选不中"；
+        //    视频也要精准点到左下角播放键才响。编辑时这很碍事。
+        //  · 方案：**未选中时不渲染控制条**（点击落到元素上 → 正常选中元素）；
+          //    选中后才显示控件，可以就地播放预览。想永远不要控件就用「背景模式」。
+          const bgMode = node.attrs?.controls === '0';   // 背景模式：永不显示控制条
+          const wantsAutoplay = node.attrs?.autoplay === '1';
+          // v0.4.5：**播放锁**（右侧媒体卡片上的「锁死播放」）。
+          //
+          // 用户第 2 次反馈（原话）：「理想状态：点一下，然后视频锁死，永远不会触发播放，
+          // 同时如果点之前视频正在播放，就关闭。并且锁死后显示视频的第 30 帧（或者别的帧），
+          // 用来体现这是视频，但是现在锁死后完全白色了，根本不对。如果是音频也要做好。」
+          //
+          // 之前为什么变白：锁死时我给了 `preload="none"` 且不挂控件 ——
+          // 浏览器手里一帧数据都没有，自然画不出任何东西。
+          //
+          // 现在：
+          //   · 视频 → `preload="metadata"`，加载到元数据后**定位到第 30 帧**（30fps 约 1 秒）并暂停，
+          //     于是画面停在一帧上（看得出是视频），但永远不会播放；
+          //   · 音频 → 保留控制条（不然就是一条空白），但拦截 play 并立刻暂停；
+          //   · 锁的瞬间如果正在播，`pause()` 立刻停掉（onPlay/onLoadedMetadata/锁标记变化都会按一次）。
+          const playLock = node.attrs?.playLock === '1';
+          const isAudio = node.type === 'audio';
+          /**
+           * v0.4.5 第 15 批（用户反复反馈："音频根本点击无法选中"）：**已查明真因，改走另一条路**。
+           *
+           * 一度想让"未选中的音频"渲染成一个 CSS 占位块（不挂 controls）。实测行不通：
+           * Chromium 的 UA 样式表里有 `audio:not([controls]) { display: none !important }`，
+           * 而 **UA 的 !important 优先级高于作者样式**（CSS 层叠顺序：
+           * author !important < user !important < UA !important），
+           * 所以没有 controls 的 <audio> 永远是 display:none，占位块根本画不出来（实测 0×0）。
+           *
+           * 正确做法：**音频始终带控制条**（这样它才有盒子、看得见），
+           * 选中与否只影响"点它是选中元素还是操作播放条"——
+           * 靠 `onPointerDownCapture` 只 stopPropagation（**不 preventDefault**）来选中，
+           * 因为 Chromium 在原生控件上被 preventDefault 之后连 click 都不再派发。
+           *
+           * 视频不一样：`<video>` 即使没有 controls 也能显示画面（首帧/定格帧），
+           * 所以视频仍然"选中后才出控制条"，排版时不挡手。
+           */
+          const showControls = bgMode ? false : (isAudio ? true : (isSelected && !playLock));
+          return {
+            src: node.attrs?.src ? toRenderableSrc(node.attrs.src, node.attrs.srcAbs) : undefined,
+            controls: showControls,
+            loop: node.attrs?.loop === '1',
+            // 自动播放必须静音，否则浏览器会直接拦掉（HTML 规范）
+            muted: node.attrs?.muted === '1' || wantsAutoplay || playLock,
+            autoPlay: wantsAutoplay && !playLock,
+            playsInline: node.type === 'video',
+            // 预载策略（v0.4.5 第 15 批微调）：
+            //   · 选中 / 锁死 → 必须读 metadata：前者要出控制条，后者要定格到第 30 帧；
+            //   · 未选中且未锁死 → **不预载**（一个页面里可能有十几个视频，
+            //     全部吃 metadata + 首帧解码会把 GPU 拖住 —— 用户反馈过 CPU 降不下来）。
+            preload: (isSelected || playLock) ? 'metadata' : 'none',
+            // 锁死标记：给 CSS 挂"禁止播放"的虚线描边 + 拦掉所有播放事件
+            // ⚠ 不要复用 data-bc-locked —— 那个是"元素锁定"（不可作为拖放目标），语义不同
+            'data-bc-play-lock': playLock ? '1' : undefined,
+            ...(playLock ? {
+              /** 把画面停在"第 30 帧"（30fps ≈ 1 秒；短视频取 20% 处，避免超出时长） */
+              onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => {
+                const el = e.currentTarget;
+                try {
+                  el.pause();
+                  if (el.dataset.bcLockSeek === '1') return;
+                  const dur = Number.isFinite(el.duration) ? el.duration : 0;
+                  const target = dur > 0
+                    ? Math.min(LOCK_FRAME_SEC, Math.max(0, dur * 0.2))
+                    : LOCK_FRAME_SEC;
+                  el.dataset.bcLockSeek = '1';
+                  if (Math.abs(el.currentTime - target) > 0.05) el.currentTime = target;
+                } catch { /* 忽略 */ }
+              },
+              // 定格帧定位完成后也再按一次暂停（有些浏览器 seek 会自动恢复播放）
+              onSeeked: (e: React.SyntheticEvent<HTMLMediaElement>) => { e.currentTarget.pause(); },
+              // 任何播放尝试一律按回去（用户点播放键、脚本 play()、浏览器自动播放都拦）
+              onPlay: (e: React.SyntheticEvent<HTMLMediaElement>) => { e.currentTarget.pause(); },
+              onPlaying: (e: React.SyntheticEvent<HTMLMediaElement>) => { e.currentTarget.pause(); },
+              // 锁死状态下的点击一律用于"选中元素"，任何情况下都不播放
+              // （同样不能 preventDefault，否则元素选不中）
+              onPointerDownCapture: (e: React.PointerEvent) => {
+                e.stopPropagation();
+                onSelect(node.id);
+              }
+            } : {
+              // 未选中时：这一次点击只用来**选中元素**，不交给原生控件
+              //（音频整块都是控件区，以前怎么点都选不中）。
+              onPointerDownCapture: (e: React.PointerEvent) => {
+                if (isSelected) return;
+                // ⚠ 不要 preventDefault：Chromium 在原生控件上被 preventDefault 后连 click 都不派发，
+                //    那样元素就永远选不中（用户反馈的"音频点击无法选中"）。只拦冒泡就够了。
+                e.stopPropagation();
+                onSelect(node.id);
+              }
+            })
+          };
+        })()
+    : {};
+
   const commonProps = {
     'data-bc-id': node.id,
     'data-bc-locked': node.locked ? '1' : '0',
@@ -2015,59 +2218,7 @@ const CanvasNode = React.memo(function CanvasNode(props: {
         }
       : {}),
     ...(node.type === 'th' && node.attrs?.scope ? { scope: node.attrs.scope } : {}),
-    // v0.4.5：媒体元素 —— 画布上要能真的播放/预览，属性与导出一致
-    ...(MEDIA_TAGS.has(node.type)
-      ? (() => {
-          // v0.4.5（用户反馈 C补2 / C补3 / C补8）：
-          //  · 原生控件会吃掉鼠标事件 —— 音频整块都是控件区，所以"怎么点都选不中"；
-          //    视频也要精准点到左下角播放键才响。编辑时这很碍事。
-          //  · 方案：**未选中时不渲染控制条**（点击落到元素上 → 正常选中元素）；
-          //    选中后才显示控件，可以就地播放预览。想永远不要控件就用「背景模式」。
-          const bgMode = node.attrs?.controls === '0';   // 背景模式：永不显示控制条
-          const wantsAutoplay = node.attrs?.autoplay === '1';
-          // v0.4.5：**播放锁**（右侧媒体卡片上的「锁死播放」）。
-          // 锁上之后画布上这个媒体永远不播：不挂控件、强制 paused、任何 play 都被按回去，
-          // 于是"按住 Alt 拖动排版"时绝不会误触播放（用户反馈的原话）。
-          // 注意：这个标记只存在编辑器里，exporter 不写它，导出后的网页行为完全不变。
-          const playLock = node.attrs?.playLock === '1';
-          return {
-            src: node.attrs?.src ? toRenderableSrc(node.attrs.src) : undefined,
-            // v0.4.5 修正（用户反馈：不选中就"什么都不显示"了）：
-            // 控制条**始终显示** —— 否则未选中的音频是零高度、视频是空白框，
-            // 既看不见也点不着，比"控件吃点击"更糟。
-            controls: !bgMode && !playLock,
-            loop: node.attrs?.loop === '1',
-            // 自动播放必须静音，否则浏览器会直接拦掉（HTML 规范）
-            muted: node.attrs?.muted === '1' || wantsAutoplay || playLock,
-            autoPlay: wantsAutoplay && !playLock,
-            playsInline: node.type === 'video',
-            // 锁死时：不预载、不回放，连元数据都不读（真正做到"永远不响"）
-            preload: playLock ? 'none' : (isSelected ? 'metadata' : 'none'),
-            // 锁死标记：给 CSS 挂"禁止播放"的虚线描边 + 拦掉所有播放事件
-            // ⚠ 不要复用 data-bc-locked —— 那个是"元素锁定"（不可作为拖放目标），语义不同
-            'data-bc-play-lock': playLock ? '1' : undefined,
-            ...(playLock ? {
-              onPlay: (e: React.SyntheticEvent<HTMLMediaElement>) => { e.currentTarget.pause(); },
-              onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => { e.currentTarget.pause(); },
-              // 锁死状态下的点击一律用于"选中元素"，任何情况下都不播放
-              onPointerDownCapture: (e: React.PointerEvent) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onSelect(node.id);
-              }
-            } : {
-              // 未选中时：这一次点击只用来**选中元素**，不交给原生控件
-              //（音频整块都是控件区，以前怎么点都选不中）。
-              onPointerDownCapture: (e: React.PointerEvent) => {
-                if (isSelected) return;
-                e.preventDefault();
-                e.stopPropagation();
-                onSelect(node.id);
-              }
-            })
-          };
-        })()
-      : {})
+    ...mediaProps
   } as const;
 
   // 统一点击逻辑：Ctrl=多选切换；Alt=选中父级；否则选中自己；locked 不可选
@@ -2082,14 +2233,44 @@ const CanvasNode = React.memo(function CanvasNode(props: {
   // 自闭合：无 children、无 text
   if (SELF_CLOSING_TAGS.has(node.type)) {
     const selfProps: Record<string, string> = {};
+    /** 图片加载完成后：把外框比例校成真实比例（只在差得明显时动，避免无意义的样式写入） */
+    let onImgLoad: ((e: React.SyntheticEvent<HTMLImageElement>) => void) | undefined;
     if (node.type === 'img') {
       selfProps.alt = (node.attrs?.alt ?? '') || node.text || '';
       const rawSrc = node.attrs?.src;
-      if (rawSrc) selfProps.src = toRenderableSrc(rawSrc);
+      if (rawSrc) selfProps.src = toRenderableSrc(rawSrc, node.attrs?.srcAbs);
       // v0.4.5 性能：4K 图按原分辨率解码，每张约 33MB RGBA —— 50 张就是 1.6GB。
       // lazy 让浏览器只解码视口附近的；async 让解码不阻塞主线程（滚动更顺）。
       selfProps.loading = 'lazy';
       selfProps.decoding = 'async';
+
+      // v0.4.5（用户反馈）：**有 src 的图片不允许改比例**，那外框就必须一开始就是真实比例。
+      // 以前插入素材后固定成 200×120（默认占位尺寸），图片被拉变形，
+      // 而缩放又锁比例 → 用户看到"比例完全不对、还被锁死了"。
+      // 这里在图片解码完成后按真实宽高比校正高度（只在偏差 > 2% 时写一次）。
+      if (rawSrc) {
+        onImgLoad = (e) => {
+          const img = e.currentTarget;
+          const natW = img.naturalWidth;
+          const natH = img.naturalHeight;
+          if (!natW || !natH) return;
+          const boxW = img.clientWidth;
+          const boxH = img.clientHeight;
+          if (!boxW || !boxH) return;
+          const boxRatio = boxW / boxH;
+          const natRatio = natW / natH;
+          if (Math.abs(boxRatio - natRatio) / natRatio < 0.02) return; // 比例已经对了
+          // 画布可能被缩放（transform: scale(zoom)）：clientWidth 是缩放后的视觉像素，
+          // 写进 CSS 的必须是**未缩放**的 CSS 像素，所以这里用 DOM 上的实际缩放比换算。
+          const canvasEl = img.closest('.canvas') as HTMLElement | null;
+          const scale = canvasEl && canvasEl.offsetWidth
+            ? canvasEl.getBoundingClientRect().width / canvasEl.offsetWidth
+            : 1;
+          useScene.getState().updateStyle(node.id, {
+            height: Math.round((boxW / (scale || 1)) / natRatio) + 'px'
+          });
+        };
+      }
     } else if (node.type === 'input') {
       selfProps.type = node.attrs?.typeAttr || 'text';
       if (node.attrs?.placeholder) selfProps.placeholder = node.attrs.placeholder;
@@ -2097,6 +2278,7 @@ const CanvasNode = React.memo(function CanvasNode(props: {
     return (
       <Tag
         {...selfProps}
+        {...(onImgLoad ? { onLoad: onImgLoad as unknown as React.ReactEventHandler<Element> } : {})}
         style={baseStyle}
         onClick={handleClick}
         {...commonProps}
@@ -2118,6 +2300,47 @@ const CanvasNode = React.memo(function CanvasNode(props: {
         onClick={handleClick}
         {...commonProps}
       />
+    );
+  }
+
+  /**
+   * v0.4.5 第 15 批（用户反复反馈："音频根本点击无法选中"）：**音频单独走一条渲染路径**。
+   *
+   * 为什么不能直接渲染 `<audio controls>`：
+   *   · `<audio>` 的控制条是 UA 的 shadow DOM，指针事件被控件内部吃掉 ——
+   *     实测点击音频中心后 `scene.selectedId` 仍然是 null（click 根本没派发到宿主元素）；
+   *   · 而不挂 controls 时，Chromium 的 UA 样式表里有
+   *     `audio:not([controls]) { display: none !important }`，
+   *     而 **UA 的 !important 高于作者样式**，所以"不挂控件"的音频永远是 display:none，
+   *     连占位块都画不出来（实测 0×0）。
+   *
+   * 结论：编辑器里给音频套一层**自己的外壳**（`<span>`），
+   *   · 未选中：外壳显示成一条"♪ 音频"占位条（看得见、点得中，点击就是普通元素点击）；
+   *   · 已选中：外壳里才露出真正的 `<audio controls>`，可以试听。
+   * 导出的 HTML 仍然只有 `<audio>`（exporter 按 node 生成，不认识这个外壳）。
+   *
+   * ⚠ 位置很关键：`audio` **不在** `SELF_CLOSING_TAGS`（那里只有 img/input/hr/br），
+   * 所以这个分支必须放在"容器型 return"之前，否则永远不会执行（第一版就踩了这个坑）。
+   */
+  if (node.type === 'audio') {
+    const showReal = isSelected && node.attrs?.controls !== '0';
+    const userCls = (commonProps as { className?: string }).className;
+    return (
+      <span
+        {...commonProps}
+        className={'bc-audio-slot' + (showReal ? ' is-real' : '') + (userCls ? ' ' + userCls : '')}
+        style={baseStyle}
+        onClick={handleClick}
+      >
+        {showReal ? (
+          <audio
+            {...(mediaProps as Record<string, unknown>)}
+            style={{ display: 'block', width: '100%' }}
+          />
+        ) : (
+          <span className="bc-audio-ph" aria-hidden="true">♪ 音频</span>
+        )}
+      </span>
     );
   }
 
@@ -2190,24 +2413,46 @@ const CanvasNode = React.memo(function CanvasNode(props: {
   );
 });
 
-// 图片 src 转换：保证画布实时预览任何相对路径、绝对路径、网络 URL 和 base64
-function toRenderableSrc(raw: string): string {
-  const t = raw.trim();
-  if (!t) return t;
+/**
+ * 图片/媒体 src → 画布能直接加载的地址（v0.4.5 第 15 批重写）。
+ *
+ * 用户反馈：「图片现在预览不显示，导出的话因为导出位置可能不是自己想要的位置，导致可能不能显示图片。」
+ *
+ * 老实现的问题：相对路径被原样塞进 `bc-img://file/<相对路径>`，
+ * 主进程只能拿几个"猜测目录"去试（data/projects、data、程序目录…）——
+ * 工程存在别处、或者相对路径是 `./assets/x.png` 这种，就猜不到 → 404 → 画布空白。
+ *
+ * 现在：
+ *   1. **优先用权威路径 `srcAbs`**（选文件/设路径时记下的绝对路径），这是唯一真相；
+ *   2. 没有 srcAbs 时，把相对路径按**当前工程目录**解析成绝对路径再交给协议；
+ *   3. 仍然是相对路径且工程未保存 → 回落给主进程去猜（保持旧行为，不至于直接坏）。
+ */
+function toRenderableSrc(raw: string, absHint?: string): string {
+  const hint = String(absHint ?? '').trim();
+  const t = (hint || String(raw ?? '')).trim();
+  if (!t) return '';
   // 网络链接 / Base64 / Blob
   if (/^(https?:|data:|blob:)/i.test(t)) return t;
-  // 已经带有协议头的路径
+  // 已经是我们自己的协议
+  if (t.startsWith('bc-img://')) return t;
+  // 其它协议（file:// 转成我们的协议，其它原样）
   if (/^[a-z0-9+.-]+:\/\//i.test(t)) {
     if (t.startsWith('file://')) {
-      const pathPart = t.replace(/^file:\/\/\/?/i, '');
+      const pathPart = decodeURIComponent(t.replace(/^file:\/\/\/?/i, ''));
       return 'bc-img://file/' + encodeURIComponent(pathPart);
     }
     return t;
   }
-  // Windows 盘符绝对路径 (C:\... 或 C:/...)
-  if (/^[a-zA-Z]:[\\/]/.test(t) || t.startsWith('\\\\')) {
-    return 'bc-img://file/' + encodeURIComponent(t);
+  // 绝对路径（Windows 盘符 / UNC / POSIX 根）→ 直接交给协议
+  if (/^[a-zA-Z]:[\\/]/.test(t) || t.startsWith('\\\\') || t.startsWith('/')) {
+    return 'bc-img://file/' + encodeURIComponent(t.replace(/\\/g, '/'));
   }
-  // 相对路径（如 ./images/pic.png、images/pic.png、../pic.jpg 或 /pic.png）
+  // 相对路径：按当前工程目录解析成绝对路径（这样"工程放哪都能找到图"）
+  const dir = getProjectDir();
+  if (dir) {
+    const joined = (dir.replace(/\/+$/, '') + '/' + t.replace(/^\.\//, '')).replace(/\/\.\//g, '/');
+    return 'bc-img://file/' + encodeURIComponent(joined);
+  }
+  // 工程还没保存：交给主进程按候选目录猜（旧行为，兜底）
   return 'bc-img://file/' + encodeURIComponent(t);
 }

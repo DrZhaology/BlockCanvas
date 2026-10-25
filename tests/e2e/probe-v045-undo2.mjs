@@ -24,17 +24,20 @@ async function main() {
   const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
 
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
   await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(1440, 900); w.center(); });
   await win.waitForSelector('.empty-home', { timeout: 20000 });
+  // v0.4.5：加载页（最短 520ms + 淡出 300ms）期间会拦住点击 —— 串跑时这里超时会连累后面
+  await win.waitForSelector('.bc-loading', { state: 'detached', timeout: 15000 }).catch(() => {});
   await sleep(700);
 
   await win.locator('.eh-btn', { hasText: '新建项目' }).click();
   await sleep(1000);
   await win.waitForSelector('.project-tab-bar', { timeout: 15000 });
+  await win.waitForSelector('.bc-loading', { state: 'detached', timeout: 15000 }).catch(() => {});
 
   // 场景 1：点画布（焦点在文档体）后按 Ctrl+Z
   const before = await win.evaluate(() => (window.__sceneStore.getState().scene.root.children || []).length);
@@ -133,7 +136,14 @@ async function main() {
     card.click();
     return true;
   });
-  await sleep(1500);
+  // 打开工程会走加载页（进度到 100% 才收尾）→ 等它退场，再读历史
+  await win.waitForSelector('.bc-loading', { state: 'detached', timeout: 15000 }).catch(() => {});
+  // 历史装回是"载入场景之后"的一步，串跑时机器慢会晚一点 —— 等条件成立
+  for (let i = 0; i < 20; i += 1) {
+    const n = await win.evaluate(() => (window.__sceneStore.getState().history?.past || []).length);
+    if (n > 0) break;
+    await sleep(250);
+  }
 
   const restored = await win.evaluate(() => {
     const st = window.__sceneStore.getState();

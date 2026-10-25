@@ -25,7 +25,7 @@ async function main() {
     args: ['.', '--disable-gpu', '--disable-software-rasterizer', '--no-sandbox'],
     cwd: ROOT,
     executablePath: electronPath,
-    env: { ...process.env, BC_DATA_DIR: DATA_DIR }
+    env: { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR }
   });
   const win = await app.firstWindow();
   const errs = [];

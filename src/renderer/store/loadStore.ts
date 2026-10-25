@@ -14,10 +14,14 @@ import { create } from 'zustand';
 //     且在"主界面已经画出第一帧"之后才淡出（见 LoadingScreen 的 double-rAF）。
 // ============================================================================
 
-/** 一次加载至少显示这么久，避免"闪一下" */
-export const MIN_VISIBLE_MS = 520;
-/** 淡出时长（要和 28-v045-zindex.css 里的 .bc-loading.is-leaving 动画一致） */
-export const LEAVE_MS = 300;
+/**
+ * 一次加载至少显示这么久，避免"闪一下"。
+ * v0.4.5 第 14 批：用户反馈"淡入淡出太快了，还有卡顿，时长可以长一点" —— 520 → 900。
+ * 这 0.9 秒同时也让"淡入 0.42s + 停顿 + 淡出 0.55s"有空间，观感才不仓促。
+ */
+export const MIN_VISIBLE_MS = 900;
+/** 淡出时长（必须和 28-v045-zindex.css 里 `.bc-loading.is-leaving` 的动画时长一致） */
+export const LEAVE_MS = 550;
 
 interface LoadState {
   /** 是否正在显示加载页 */

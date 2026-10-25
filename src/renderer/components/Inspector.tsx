@@ -943,6 +943,23 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
     }
   }
 
+  // ============ "幽灵卡片"（v0.4.5 第 11 批）============
+  // 用户把「快捷助手 → 是否显示到下方 CSS 属性」关掉之后，快捷助手代管的那些属性
+  // 会从下面的列表里整块消失。问题是：**它们其实还在生效**（display:flex、gap、文字渐变…），
+  // 用户看到"列表是空的"就会以为"这个元素没有任何样式"，于是反复去添加、重复写。
+  //
+  // 这里给一张"幽灵卡片"：只在"开关关着 + 这个元素确实有代管样式"时出现，
+  // 一行灰底说明 + 「显示出来」按钮，点一下就把它们放回列表（并记住这个开关）。
+  const ghostManaged = (() => {
+    if (showHelperInCss) return [] as string[];
+    const keys: string[] = [];
+    for (const k of HELPER_MANAGED_KEYS) {
+      const v = styleForPresence[k];
+      if (v != null && String(v).trim() !== '') keys.push(k);
+    }
+    return keys;
+  })();
+
   // ============ "添加属性"回调 ============
   const onAddProperty = (key: string, value?: string) => {
     const item = getSchemaItem(key);
@@ -1565,9 +1582,33 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
               visibleKeys={visibleSchema.map((s) => s.key)}
               onAdd={onAddProperty}
             />
-            {visibleSchema.length === 0 && (
+            {visibleSchema.length === 0 && ghostManaged.length === 0 && (
               <div className="props-empty-hint">
                 暂未添加特殊样式。点击上方 <b>+ 添加属性</b> 自由设定。
+              </div>
+            )}
+            {/* 幽灵卡片：快捷助手的样式在生效，但列表里被隐藏了 —— 说明一下并提供入口 */}
+            {ghostManaged.length > 0 && (
+              <div className="prop-ghost-card">
+                <div className="prop-ghost-main">
+                  <span className="prop-ghost-ico"><Icon name="lightbulb" size={13} /></span>
+                  <span className="prop-ghost-text">
+                    这个元素有 <b>{ghostManaged.length}</b> 条样式由<strong>快捷助手</strong>管理，
+                    当前设置为「不显示在下方列表」（<b>样式依然生效</b>）。
+                  </span>
+                </div>
+                <div className="prop-ghost-actions">
+                  <button
+                    className="prop-ghost-btn"
+                    onClick={() => changeShowHelperInCss(true)}
+                    title="把这些属性放回下面的列表，方便逐条查看与微调（可在快捷助手里再关掉）"
+                  >显示出来</button>
+                  <button
+                    className="prop-ghost-btn is-ghost"
+                    onClick={() => setSecOpen((p) => ({ ...p, layout: true }))}
+                    title="到「快捷助手」里直接改这些样式"
+                  >去快捷助手</button>
+                </div>
               </div>
             )}
             <div className="props-list">

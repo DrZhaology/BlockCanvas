@@ -76,27 +76,44 @@ function markBadVideo(src: string): void {
 /**
  * 视频能不能解（v0.4.5）。
  * Chromium 遇到解不了的编码会打 `Unsupported pixel format: -1`（ffmpeg_common.cc），
- * 那条日志来自原生解码器，JS 没法屏蔽；能做的是**事先探一次**，
- * 解不了就不套用，避免每次进首页都刷同一条错误。
+ * 那条日志来自原生解码器，JS 没法屏蔽；能做的是**事先探一次**。
+ *
+ * ⚠ v0.4.5 第 15 批修正（用户反馈）：「我的一个 mp4 明明正常播放下方还红色提示解码不了，退回默认壁纸。」
+ *
+ * 老实现把"探测超时"也当成"解不了"（4 秒没 metadata 就判死）。可大一点的 mp4 走自定义协议
+ * 光读 metadata 就要几秒 —— 于是一个**完全正常**的视频被误判、拉黑、还弹红字。
+ *
+ * 现在区分三种结果：
+ *   · 'ok'        → 有 metadata，正常
+ *   · 'timeout'   → 只是**慢**，不代表坏：**不拉黑、不换壁纸**，让它继续加载
+ *   · 'unsupported' → 明确报错（MEDIA_ERR_SRC_NOT_SUPPORTED / DECODE）才判定解不了
  */
-function probeVideoPlayable(src: string, timeoutMs = 4000): Promise<boolean> {
+type VideoProbe = 'ok' | 'timeout' | 'unsupported';
+
+function probeVideoPlayable(src: string, timeoutMs = 9000): Promise<VideoProbe> {
   return new Promise((resolve) => {
-    if (!src) { resolve(false); return; }
+    if (!src) { resolve('unsupported'); return; }
     const v = document.createElement('video');
     v.muted = true;
     v.preload = 'metadata';
     v.crossOrigin = 'anonymous';
     let settled = false;
-    const done = (ok: boolean) => {
+    const done = (r: VideoProbe) => {
       if (settled) return;
       settled = true;
+      window.clearTimeout(timer);
       v.removeAttribute('src');
       v.load();
-      resolve(ok);
+      resolve(r);
     };
-    const timer = window.setTimeout(() => done(false), timeoutMs);
-    v.onloadedmetadata = () => { window.clearTimeout(timer); done(true); };
-    v.onerror = () => { window.clearTimeout(timer); done(false); };
+    const timer = window.setTimeout(() => done('timeout'), timeoutMs);
+    v.onloadedmetadata = () => done('ok');
+    v.onerror = () => {
+      // 只有"真的不支持/解码失败"才算坏；网络类错误（被中断、暂时读不到）不拉黑
+      const code = v.error?.code;
+      const bad = code === MediaError.MEDIA_ERR_DECODE || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
+      done(bad ? 'unsupported' : 'timeout');
+    };
     v.src = src;
   });
 }
@@ -505,15 +522,19 @@ export function EmptyHome(props: {
         applyBg({ kind: 'image', src: res.path, dim, blur });
         setTab('image');
       } else {
-        // v0.4.5：先探一次能不能解码，解不了就别套用（否则每次进首页都刷 ffmpeg 错误）
-        const playable = await probeVideoPlayable(mediaSrc(res.path));
-        if (!playable) {
-          showToast('这段视频的编码浏览器解不了（例如某些特殊像素格式），换一个 mp4 / webm 吧', 'err');
+        // v0.4.5：先探一次能不能解码。注意区分"慢"和"坏"——
+        // 慢（timeout）照样套用，让浏览器继续加载；只有明确不支持才拦下并说明。
+        const probe = await probeVideoPlayable(mediaSrc(res.path));
+        if (probe === 'unsupported') {
+          showToast('这段视频的编码在编辑器里解不了（导出后在浏览器里仍可正常播放）。建议换一个 mp4 / webm。', 'err');
           return;
         }
         setVidSrc(res.path);
         applyBg({ kind: 'video', src: res.path, dim, blur });
         setTab('video');
+        if (probe === 'timeout') {
+          showToast('这个视频比较大，正在后台继续加载…');
+        }
       }
     } catch {
       showToast('选择文件失败', 'err');
@@ -591,14 +612,21 @@ export function EmptyHome(props: {
           preload="auto"
           disablePictureInPicture
           crossOrigin={isLocalMedia(media) ? 'anonymous' : undefined}
-          // v0.4.5：解码失败（例如 ffmpeg Unsupported pixel format）就回退到默认背景，
-          // 并把这条坏配置从本地存储覆盖掉 —— 否则每次进首页都会重试、刷同一条错误。
+          // v0.4.5 第 15 批修正（用户反馈："我的 mp4 明明正常播放还提示解码不了、退回默认壁纸"）：
+          // 只有**明确的解码/格式错误**才拉黑并回退；网络中断、临时读不到一律不算坏
+          //（否则一次偶发失败就会把这个视频永久打进黑名单）。
           onError={() => {
-            // 记进黑名单：以后连挂载都不挂，从根上不再触发原生解码错误
+            const code = videoRef.current?.error?.code;
+            const reallyBad = code === MediaError.MEDIA_ERR_DECODE || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
+            if (!reallyBad) {
+              // 只是暂时读不到：等下一轮（切回首页/重开）再试，不动用户的背景设置
+              showToast('视频暂时加载不出来（文件可能正被占用或移动），稍后会自动重试');
+              return;
+            }
             markBadVideo(bg.src);
             setBadVideos((prev) => (prev.includes(bg.src) ? prev : [...prev, bg.src]));
             applyBg(DEFAULT_BG);
-            showToast('这段视频的编码浏览器解不了，已切回默认背景（以后不会再尝试它）', 'err');
+            showToast('这段视频的编码在编辑器里解不了，已切回默认背景（导出后在浏览器里仍可正常播放）', 'err');
           }}
           style={{
             filter: mediaBlur > 0 ? `blur(${mediaBlur}px)` : undefined,

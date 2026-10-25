@@ -24,7 +24,7 @@ async function main() {
   const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
 
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -55,23 +55,32 @@ async function main() {
   const unselected = await win.evaluate(() => {
     const v = document.querySelector('.canvas video');
     const a = document.querySelector('.canvas audio');
+    const slot = document.querySelector('.canvas .bc-audio-slot');
     return {
       videoControls: v ? v.hasAttribute('controls') : null,
-      audioControls: a ? a.hasAttribute('controls') : null,
+      // v0.4.5 第 15 批：音频在编辑器里由 `.bc-audio-slot` 外壳承载，
+      // 未选中时**不渲染 <audio>**（UA 规则让它 display:none，且原生控件会吃掉点击）
+      audioPresent: !!a,
+      slotPresent: !!slot,
+      slotControls: slot ? !!slot.querySelector('audio[controls]') : null,
       videoPreload: v ? v.getAttribute('preload') : null
     };
   });
-  check('C补8 未选中时音频仍然可见（控件常显，点它就选中元素）',
-    unselected.audioControls === true, `audio controls=${unselected.audioControls}`);
-  check('C补2 未选中时视频也保持可见（不再变成空白框）',
-    unselected.videoControls === true, `video controls=${unselected.videoControls}`);
+  check('C补8 未选中时音频仍然可见（渲染成 .bc-audio-slot 占位条，点它就选中）',
+    unselected.slotPresent === true && unselected.audioPresent === false,
+    JSON.stringify(unselected));
+  check('C补2 未选中时视频也保持可见（不挂控制条，但保留画面）',
+    unselected.videoControls === false, `video controls=${unselected.videoControls}`);
   const visible = await win.evaluate(() => {
-    const a = document.querySelector('.canvas audio');
+    const slot = document.querySelector('.canvas .bc-audio-slot');
     const v = document.querySelector('.canvas video');
-    return { aH: a ? Math.round(a.getBoundingClientRect().height) : 0, vH: v ? Math.round(v.getBoundingClientRect().height) : 0 };
+    return {
+      aH: slot ? Math.round(slot.getBoundingClientRect().height) : 0,
+      vH: v ? Math.round(v.getBoundingClientRect().height) : 0
+    };
   });
   check('C补2 未选中时媒体不是零高度/不可见（用户反馈"直接不显示了"）',
-    visible.aH > 0 && visible.vH > 0, `音频高 ${visible.aH}px · 视频高 ${visible.vH}px`);
+    visible.aH > 0 && visible.vH > 0, `音频槽高 ${visible.aH}px · 视频高 ${visible.vH}px`);
 
   // 选中后应该出现控件，可以就地试播
   await win.evaluate(() => {
@@ -86,6 +95,44 @@ async function main() {
   });
   check('C补2 选中后出现控制条（可就地播放预览）',
     selected.controls === true, `controls=${selected.controls}`);
+
+  // v0.4.5 第 15 批：**音频点击必须能选中**（用户反复反馈"根本点不中"）。
+  // 现在未选中时是 `.bc-audio-slot` 占位条 —— 直接点它的中心，必须真的选中。
+  const audioPick = await win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    const a = (st.scene.root.children || []).find((c) => c.type === 'audio');
+    st.selectElement(null);
+    const slot = document.querySelector('.canvas .bc-audio-slot');
+    const r = slot ? slot.getBoundingClientRect() : null;
+    return { id: a?.id || null, box: r ? { x: r.x, y: r.y, w: r.width, h: r.height } : null };
+  });
+  if (audioPick.box) {
+    await win.mouse.click(audioPick.box.x + audioPick.box.w / 2, audioPick.box.y + audioPick.box.h / 2);
+    await sleep(450);
+  }
+  const audioSelected = await win.evaluate(() => window.__sceneStore.getState().scene.selectedId);
+  check('音频点一下就选中（不再"根本点不中"）',
+    !!audioPick.id && audioSelected === audioPick.id,
+    `期望 ${audioPick.id} 实际 ${audioSelected}`);
+  // 选中后外壳里才出现真正的 <audio controls>
+  const audioReal = await win.evaluate(() => {
+    const slot = document.querySelector('.canvas .bc-audio-slot');
+    return {
+      isReal: !!slot && slot.classList.contains('is-real'),
+      hasAudio: !!slot?.querySelector('audio[controls]')
+    };
+  });
+  check('选中后音频才露出真正的 <audio controls>（可就地试听）',
+    audioReal.isReal === true && audioReal.hasAudio === true, JSON.stringify(audioReal));
+
+  // 还原选中回视频：后面的断言都是围绕"视频 + 媒体卡"写的，别被这次点击改掉状态
+  await win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    const v = (st.scene.root.children || []).find((c) => c.type === 'video');
+    if (v) st.selectElement(v.id);
+  });
+  await sleep(600);
+
   check('选中后才会读元数据（未选中不预载，省 GPU/内存）',
     selected.preload === 'metadata', `preload=${selected.preload}`);
 

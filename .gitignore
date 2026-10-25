@@ -37,6 +37,8 @@ tests/e2e/shots*/
 tests/e2e/*.html
 tests/e2e/report*.txt
 tests/e2e/last-run.log
+# 探针跑起来会顺手存工程（比如"未命名项目 1.bcproj"），它们是运行产物不是源码
+tests/e2e/*.bcproj
 
 # ---- electron-builder 调试 / 临时清单 ----
 builder-debug.yml

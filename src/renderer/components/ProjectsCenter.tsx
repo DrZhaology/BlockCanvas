@@ -118,6 +118,37 @@ export function ProjectsCenter(props: {
     return () => window.clearTimeout(t);
   }, [delStep, allSlidesDone]);
 
+  /**
+   * v0.4.5 第 14 批（用户反馈）：「删除项目的时候有个问题，在滑块验证的后面加一个提示，
+   * 如果当前编辑器内会话有这个项目会提示要不要关闭，如果不关闭就是取消，关闭按钮点一下就关闭会话。
+   * 现在删除项目后，如果会话还在，再次 Ctrl + S 项目会回来。」
+   *
+   * 做法：第 3 关（最后确认）里先检查"这个工程是否还开在某个标签里"。
+   *   · 开着 → 显示一条醒目提示 + 「关闭这个会话」按钮；**没关掉就不允许删**（等于取消）；
+   *   · 点一下「关闭这个会话」→ 直接关掉那个标签（关标签本身不弹窗，弹窗在标签栏的 × 上）；
+   *   · 关掉后提示消失，删除按钮才可用 —— 这样删完不会被 Ctrl+S 复活。
+   */
+  const openTabForTarget = (() => {
+    if (!deleteTarget) return null;
+    const tabs = useTabStore.getState().tabs;
+    const norm = (p: string) => String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
+    return tabs.find((t) => t.kind !== 'snapshot' && t.filePath && norm(t.filePath) === norm(deleteTarget.filePath)) ?? null;
+  })();
+  // 会话状态变化时刷新（关掉标签后提示要立刻消失）
+  const [, bumpTabs] = useState(0);
+  useEffect(() => {
+    if (!deleteTarget) return;
+    const off = useTabStore.subscribe(() => bumpTabs((n) => n + 1));
+    return off;
+  }, [deleteTarget]);
+
+  const closeTabForTarget = () => {
+    if (!openTabForTarget) return;
+    useTabStore.getState().closeTab(openTabForTarget.id);
+    bumpTabs((n) => n + 1);
+    showToast(`已关闭「${openTabForTarget.name}」的编辑会话，现在可以安全删除了`);
+  };
+
   // —— 滑块拖动 ——
   const trackRefs = useRef<(HTMLDivElement | null)[]>([]);
   const dragIdxRef = useRef<number | null>(null);
@@ -300,6 +331,11 @@ export function ProjectsCenter(props: {
   const executeDeleteProject = async () => {
     if (!deleteTarget || busy) return;
     if (deleteConfirmInput.trim() !== deleteTarget.name.trim()) return;
+    // v0.4.5：会话还开着就**不允许**删 —— 否则那个标签再按 Ctrl+S 会把文件写回来
+    if (openTabForTarget) {
+      showToast('请先关闭上面那个编辑会话，否则删除后会被 Ctrl + S 写回来', 'err');
+      return;
+    }
     setBusy(true);
     const res = await window.bc.deleteProject(deleteTarget.fileName, deleteTarget.name);
     setBusy(false);
@@ -379,6 +415,13 @@ export function ProjectsCenter(props: {
 
   const nameMatches = !!deleteTarget && deleteConfirmInput.trim() === deleteTarget.name.trim();
 
+  /** 各类型数量（给上方问号的说明里显示"你现在有 N 个网页项目 / N 个外部项目…"） */
+  const kindCounts: Record<string, number> = { page: 0, site: 0, external: 0, missing: 0 };
+  for (const p of projects) {
+    const k = p.kind ?? (p.missing ? 'missing' : p.external ? 'external' : 'page');
+    kindCounts[k] = (kindCounts[k] ?? 0) + 1;
+  }
+
   return (
     <div className="pc-page">
       {/* 顶部标题与快速操作栏 */}
@@ -389,23 +432,10 @@ export function ProjectsCenter(props: {
           </button>
           <span className="pc-title"><Icon name="folder" size={16} /> 本地全部项目库</span>
           <span className="pc-count-badge">{projects.length} 个工程</span>
-          {/* v0.4.5（J）：把「外部」到底是什么意思直接写出来 ——
-              以前只有一个"外部"小徽章，用户完全猜不到它指的是"文件不在默认目录里"。 */}
-          <span
-            className="pc-explain"
-            title={
-              '这里的工程分两种存放位置：\n\n' +
-              '· 默认位置：本软件的 data/projects/ 目录（新建、保存都在这里）\n' +
-              '· 外部位置：你自己放在别处的 .bcproj 文件（比如桌面、U 盘、网盘目录），\n' +
-              '  是通过「导入外部项目…」或双击文件打开时才出现在这个列表里的。\n\n' +
-              '标着「外部」的工程：文件本体还在你放的地方，这里只是记了一笔路径；\n' +
-              '  把那个文件移走或删掉，列表里就会显示「文件已丢失」。\n' +
-              '标着「文件已丢失」的工程：原位置的 .bcproj 已经不在了，点开会提示，\n' +
-              '  可以删掉这条记录，或把文件放回原位置。'
-            }
-          >
-            <Icon name="info" size={12} /> 「外部」是什么？
-          </span>
+          {/* v0.4.5（用户反馈）：以前这里是一个「『外部』是什么？」按钮，点了没反应（只有 title 提示，
+              而 title 要点着停住才出现，还经常被系统忽略）。现在换成**一个真正的小问号**，
+              点开/悬停都能看到完整说明；所有项目类型的解释都集中在这里。 */}
+          <ProjectKindHelp kinds={kindCounts} />
         </div>
 
         <div className="pc-header-right">
@@ -464,22 +494,18 @@ export function ProjectsCenter(props: {
                 <div className="pc-card-body">
                   <div className="pc-card-name" title={p.name}>
                     {p.name}
-                    {p.external && (
-                      <span
-                        className="pc-badge is-external"
-                        title={
-                          `这个工程的文件不在默认的 data/projects/ 里，而是在你自己放的位置：\n${p.filePath}\n\n` +
-                          '它是通过「导入外部项目…」或双击 .bcproj 打开时才被记进列表的。\n' +
-                          '文件本体仍在原位置 —— 把它移走/删掉，这里就会显示「文件已丢失」。'
-                        }
-                      >外部</span>
-                    )}
-                    {p.missing && (
-                      <span
-                        className="pc-badge is-missing"
-                        title={`原位置已经找不到这个文件了：\n${p.filePath}\n\n可能是被移动、重命名或删除。`}
-                      >文件已丢失</span>
-                    )}
+                    {/* v0.4.5：**每个项目都单独标注类型**（以前只有"外部"和"已丢失"两种） */}
+                    {(() => {
+                      const kind = p.kind ?? (p.missing ? 'missing' : p.external ? 'external' : 'page');
+                      const meta = KIND_META.find((k) => k.id === kind) ?? KIND_META[0];
+                      const extra = kind === 'external' || kind === 'missing' ? `\n\n${p.filePath}` : '';
+                      return (
+                        <span
+                          className={'pc-badge ' + meta.cls}
+                          title={`${meta.label}\n${meta.desc}${extra}`}
+                        >{meta.label}</span>
+                      );
+                    })()}
                   </div>
                   {isRenaming ? (
                     <input
@@ -710,14 +736,37 @@ export function ProjectsCenter(props: {
               {/* ---- 第 3 关：最后确认 ---- */}
               {delStep === 3 && (
                 <div>
-                  <div className="dd-final-warn">
-                    第 3 关 · 最后确认：点击下方按钮后，项目 <b>「{deleteTarget.name}」</b> 会被<b>立即永久删除</b>，
-                    且该项目名下<b>所有历史快照 / 自动备份</b>会一并清理，<b>无法撤销、无法恢复</b>。
-                  </div>
-                  <ul className="dd-final-list">
-                    <li>工程文件：{deleteTarget.fileName}</li>
-                    <li>历史快照：{deleteTarget.backupCount ?? 0} 份（将一并清理）</li>
-                  </ul>
+                  {/* v0.4.5：先查"这个工程还开着吗"—— 开着就不让删，否则删完 Ctrl+S 会把它写回来 */}
+                  {openTabForTarget ? (
+                    <div className="dd-session-warn">
+                      <div className="dd-session-warn-head">
+                        <Icon name="warning" size={14} /> 这个项目还开在编辑器里
+                      </div>
+                      <div className="dd-session-warn-body">
+                        标签页 <b>「{openTabForTarget.name}」</b> 正在编辑这个工程。
+                        如果现在直接删除，那个会话里再按一次 <b>Ctrl + S</b> 就会把文件重新写回来 ——
+                        看起来像"删了又出现"。
+                        <br />
+                        所以这里要先把它关掉。点下面的按钮会<b>直接关闭这个会话</b>（不弹保存提示），
+                        不想关就点「取消」，本次删除不会执行。
+                      </div>
+                      <button className="dd-session-warn-btn" onClick={closeTabForTarget}>
+                        <Icon name="close" size={12} /> 关闭这个会话，然后继续删除
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="dd-final-warn">
+                        第 3 关 · 最后确认：点击下方按钮后，项目 <b>「{deleteTarget.name}」</b> 会被<b>立即永久删除</b>，
+                        且该项目名下<b>所有历史快照 / 自动备份</b>会一并清理，<b>无法撤销、无法恢复</b>。
+                      </div>
+                      <ul className="dd-final-list">
+                        <li>工程文件：{deleteTarget.fileName}</li>
+                        <li>历史快照：{deleteTarget.backupCount ?? 0} 份（将一并清理）</li>
+                        <li>编辑器会话：已关闭（删除后不会被 Ctrl + S 写回来）</li>
+                      </ul>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -744,10 +793,11 @@ export function ProjectsCenter(props: {
               {delStep === 3 && (
                 <button
                   className="btn-danger"
-                  disabled={busy}
+                  disabled={busy || !!openTabForTarget}
+                  title={openTabForTarget ? '请先关闭上面那个编辑会话，否则删了也会被 Ctrl + S 写回来' : undefined}
                   onClick={executeDeleteProject}
                 >
-                  {busy ? '正在删除…' : '我已确认，永久删除该项目'}
+                  {busy ? '正在删除…' : openTabForTarget ? '先关闭编辑会话' : '我已确认，永久删除该项目'}
                 </button>
               )}
             </div>
@@ -755,5 +805,107 @@ export function ProjectsCenter(props: {
         </div>
       )}
     </div>
+  );
+}
+
+// ============================================================================
+// 项目类型说明（v0.4.5 第 14 批 · 用户反馈）
+// ----------------------------------------------------------------------------
+// 用户原话：「项目管理里面界面上方做的优美一点。上方的『外部是什么』按钮点了没用。
+//            我觉得你可以用小问号代替，然后不同的项目类型要单独标注，可以有这几种：
+//            网页项目、网站项目（对应后续的多网页管理，这一轮没让你做）、
+//            外部项目（不在 data/project），以及别的，所有的解释都在上方的小问号。」
+//
+// 所以：**上方只留一个小问号**，点开是一张说明卡（点外面/Esc 关闭），
+// 里面把所有类型、颜色、存放位置、点了会发生什么讲清楚。
+// ============================================================================
+
+const KIND_META: Array<{
+  id: string;
+  label: string;
+  cls: string;
+  desc: string;
+}> = [
+  {
+    id: 'page',
+    label: '网页项目',
+    cls: 'is-page',
+    desc: '最常见的一种：一个工程 = 一个网页。文件存在本软件的 data/projects/ 里，点开就能编辑。'
+  },
+  {
+    id: 'site',
+    label: '网站项目',
+    cls: 'is-site',
+    desc: '一个工程里包含多个网页（多页管理）。这个能力还在做，等做好后这里会自动出现这种标注。'
+  },
+  {
+    id: 'external',
+    label: '外部项目',
+    cls: 'is-external',
+    desc:
+      '文件不在 data/projects/ 里，而是你自己放在别处（桌面、U 盘、网盘目录…）的 .bcproj。\n' +
+      '它是通过「导入外部项目…」或双击文件打开时才被记进这个列表的 —— 文件本体始终在你放的位置，' +
+      '这里只记了一条路径。把那个文件移走或删掉，这里就会变成「文件已丢失」。'
+  },
+  {
+    id: 'missing',
+    label: '文件已丢失',
+    cls: 'is-missing',
+    desc:
+      '登记过，但原位置的 .bcproj 已经不在了（被移动、改名或删除）。\n' +
+      '点它会提示，不会打开任何东西。你可以删掉这条记录，或把文件放回原位置后刷新。'
+  }
+];
+
+function ProjectKindHelp({ kinds }: { kinds: Record<string, number> }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+
+  // 点外面 / Esc 关闭（问号按钮本身不算"外面"）
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (wrapRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    // 延迟挂载：否则"打开它的那次点击"会立刻把它关掉
+    const t = window.setTimeout(() => document.addEventListener('pointerdown', onDown, true), 60);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.clearTimeout(t);
+      document.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <span className="pc-kindhelp" ref={wrapRef}>
+      <button
+        className={'pc-kindhelp-btn' + (open ? ' is-open' : '')}
+        onClick={() => setOpen((v) => !v)}
+        title="项目类型说明：网页项目 / 网站项目 / 外部项目 / 文件已丢失"
+        aria-expanded={open}
+      >
+        <Icon name="info" size={13} />
+      </button>
+      {open && (
+        <div className="pc-kindhelp-pop" role="dialog" aria-label="项目类型说明">
+          <div className="pc-kindhelp-head">项目类型说明</div>
+          {KIND_META.map((k) => (
+            <div className="pc-kindhelp-row" key={k.id}>
+              <span className={'pc-badge ' + k.cls}>{k.label}</span>
+              <span className="pc-kindhelp-count">
+                {kinds[k.id] ?? 0}
+              </span>
+              <span className="pc-kindhelp-desc">{k.desc}</span>
+            </div>
+          ))}
+          <div className="pc-kindhelp-foot">
+            小提示：卡片上悬停也能看到这条说明；标着「文件已丢失」的可以点垃圾桶清掉记录。
+          </div>
+        </div>
+      )}
+    </span>
   );
 }

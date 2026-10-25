@@ -4,11 +4,26 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 // 向渲染进程安全注入原生能力与便携数据区中枢
 
 contextBridge.exposeInMainWorld('bc', {
+  /**
+   * v0.4.5 第 12 批：是否"安静启动"（自动化脚本/探针/截图）。
+   *
+   * 安静模式下窗口是**不可激活**的（Windows: WS_EX_NOACTIVATE），所以
+   * `document.hasFocus()` 永远是 false。渲染层里凡是拿"有没有焦点"当信号的地方
+   * （目前只有动画总督的"窗口不可见就暂停"）都必须先看这个开关，
+   * 否则会误判成"用户切走了"，把装饰动画一直冻住。
+   */
+  quietLaunch: process.env['BC_NO_FOCUS'] === '1',
+
   // 导出与网页管理
   exportHTML: (html: string, defaultName?: string) =>
     ipcRenderer.invoke('export:html', html, defaultName),
   exportHTMLWithProject: (html: string, scene: unknown, defaultName?: string, projectName?: string) =>
     ipcRenderer.invoke('export:html-with-project', html, scene, defaultName, projectName),
+  /** v0.4.5：导出为网站文件夹（index.html + assets/，按导出位置重算相对路径；是一条任务） */
+  exportSite: (payload: { html: string; scene: unknown; projectName?: string; projectPath?: string }) =>
+    ipcRenderer.invoke('export:site', payload),
+  /** v0.4.5：这个工程上次导出到哪（按钮/提示上显示用） */
+  exportLastDir: (key: string) => ipcRenderer.invoke('export:last-dir', key),
   previewOpen: (html: string) =>
     ipcRenderer.invoke('preview:open', html),
 

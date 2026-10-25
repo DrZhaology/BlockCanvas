@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { SceneGraph } from '@lib/types';
 import { useScene } from './sceneStore';
+import { nextFrame } from '@lib/nextFrame';
+import { setProjectFilePath } from '@lib/projectDir';
 
 // BlockCanvas · Windows Notepad 风格多工程标签页状态机 (TabStore)
 // - 管理多个同时打开的网页工程标签
@@ -188,7 +190,7 @@ export const useTabStore = create<TabState>((set, get) => ({
   loadSceneSilently: (scene: SceneGraph) => {
     isSwitchingTab = true;
     useScene.getState().setScene(scene);
-    requestAnimationFrame(() => { isSwitchingTab = false; });
+    nextFrame(() => { isSwitchingTab = false; });
   },
 
   newTab: (name, customScene, filePath = null, history, kind = 'project', snapshot) => {
@@ -225,6 +227,8 @@ export const useTabStore = create<TabState>((set, get) => ({
 
     // 让画布渲染器载入新场景（静默：不算内容修改）
     get().loadSceneSilently(scene);
+    // v0.4.5：告诉"媒体路径解析器"当前工程在哪 —— 相对路径要靠它算绝对路径
+    setProjectFilePath(filePath);
     // 撤销历史随工程保存（v0.4.4）：工程文件里带了 history 节就恢复 ——
     // 下次打开还能 Ctrl+Z 回退到上次关闭前的状态（条数由设置里的阈值控制）
     restoreHistory(newT.history);
@@ -282,11 +286,13 @@ export const useTabStore = create<TabState>((set, get) => ({
     });
 
     useScene.getState().setScene(target.scene);
+    // v0.4.5：切标签 = 换工程目录 → 相对路径的解析基准要跟着换
+    setProjectFilePath(target.filePath);
     // v0.4.5：把目标标签自己的撤销栈装回来 ——
     // 以前 setScene() 会把 history 清空，所以"切走再切回来 Ctrl+Z 就失效了"。
     restoreHistory(target.history);
     // 等下一帧让 subscribe 走完后再解除标记
-    requestAnimationFrame(() => { isSwitchingTab = false; });
+    nextFrame(() => { isSwitchingTab = false; });
     debouncePersistSession(get);
   },
 
@@ -338,6 +344,8 @@ export const useTabStore = create<TabState>((set, get) => ({
       );
       return { tabs };
     });
+    // v0.4.5：第一次保存后工程才有目录 → 相对路径的解析基准要更新（否则仍是"未保存"状态）
+    if (get().activeTabId === tabId) setProjectFilePath(filePath);
     debouncePersistSession(get);
   },
 
@@ -365,7 +373,7 @@ export const useTabStore = create<TabState>((set, get) => ({
       isSwitchingTab = true;
       useScene.getState().setScene(scene);
       useScene.setState({ history: { past: [], future: [] } });
-      requestAnimationFrame(() => { isSwitchingTab = false; });
+      nextFrame(() => { isSwitchingTab = false; });
     }
     debouncePersistSession(get);
   },
@@ -402,6 +410,8 @@ export const useTabStore = create<TabState>((set, get) => ({
     });
 
     get().loadSceneSilently(activeTab.scene);
+    // v0.4.5：会话恢复也要把"工程目录"带上，否则相对路径的图会全部失效
+    setProjectFilePath(activeTab.filePath);
     // 关键：loadSceneSilently → setScene() 会把 history 清空，所以必须**在它之后**装回来。
     // 这正是用户说的「说了保存最近的 100 个 Ctrl+Z / Ctrl+Y，但重新打开完全无法执行」——
     // 历史其实写进了 history.json（工程容器）与会话，只是一直没有人在"载入场景之后"把它装回去。

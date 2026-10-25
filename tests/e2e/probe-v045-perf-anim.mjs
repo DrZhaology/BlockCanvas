@@ -23,7 +23,7 @@ async function main() {
   mkdirSync(DATA_DIR, { recursive: true });
   const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -96,10 +96,12 @@ async function main() {
   // ==========================================================================
   // C. 窗口不可见 / 失焦 → 装饰动画暂停
   // ==========================================================================
-  // 真实"失焦"在自动化里不好造（窗口一直是激活的），这里直接把 document.hasFocus
-  // 打成 false 再触发 blur —— 这正是总督判断用的那个条件，等价且稳定。
+  // v0.4.5 第 12 批：探针自己就是在**安静模式**下跑的（窗口不可激活 → hasFocus 恒为 false），
+  // 而安静模式按设计**不该**把"无焦点"当失焦（否则动效会被永久冻住）。
+  // 所以要验两条分支：先切到普通模式验"失焦要暂停"，再切回安静模式验"无焦点也不暂停"。
   await win.evaluate(() => {
     window.__origHasFocus = document.hasFocus.bind(document);
+    window.__bcAnim.setQuiet(false);      // 模拟普通用户启动（窗口可激活）
     document.hasFocus = () => false;
     window.dispatchEvent(new Event('blur'));
   });
@@ -108,7 +110,7 @@ async function main() {
     flag: document.documentElement.getAttribute('data-bc-anim-paused'),
     paused: window.__bcAnim.paused
   }));
-  check('窗口失焦 / 不可见时装饰动画进入暂停态（省 GPU / 电量）',
+  check('普通模式：窗口失焦 / 不可见时装饰动画进入暂停态（省 GPU / 电量）',
     paused.flag === '1' && paused.paused === true, JSON.stringify(paused));
   await win.evaluate(() => {
     document.hasFocus = window.__origHasFocus;
@@ -120,6 +122,38 @@ async function main() {
     paused: window.__bcAnim.paused
   }));
   check('重新获得焦点后恢复播放', resumed.flag === null && resumed.paused === false, JSON.stringify(resumed));
+
+  // 安静启动模式：窗口是"最小化 + 不可激活"的，hasFocus 恒 false。
+  // 这里要验的是：**"没有焦点"本身不该被当成失焦**（否则动效会被永久冻住）。
+  // 所以先把 document.hidden 固定成 false（模拟"窗口没被最小化"的情形），再看暂停标记。
+  const quietBranch = await win.evaluate(() => {
+    window.__origHidden = Object.getOwnPropertyDescriptor(Document.prototype, 'hidden');
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    window.__bcAnim.setQuiet(true);
+    document.hasFocus = () => false;
+    window.dispatchEvent(new Event('blur'));
+    return { quiet: window.__bcAnim.quiet, paused: window.__bcAnim.paused, flag: document.documentElement.getAttribute('data-bc-anim-paused') };
+  });
+  check('安静启动模式：窗口"不可激活/无焦点"不会被误判成失焦（动效不会永久冻住）',
+    quietBranch.quiet === true && quietBranch.paused === false && quietBranch.flag === null,
+    JSON.stringify(quietBranch));
+  // 但真正的最小化/隐藏仍然要暂停
+  const hiddenBranch = await win.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    const r = { paused: window.__bcAnim.paused, flag: document.documentElement.getAttribute('data-bc-anim-paused') };
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+    document.dispatchEvent(new Event('visibilitychange'));
+    return r;
+  });
+  check('安静启动模式下真正隐藏/最小化时仍然暂停（省电那一层没丢）',
+    hiddenBranch.paused === true && hiddenBranch.flag === '1', JSON.stringify(hiddenBranch));
+  await win.evaluate(() => {
+    window.__bcAnim.setQuiet(null);
+    document.hasFocus = window.__origHasFocus;
+    if (window.__origHidden) Object.defineProperty(Document.prototype, 'hidden', window.__origHidden);
+  });
+  await sleep(150);
 
   // ==========================================================================
   // D. 主界面颜色模式记忆（首帧就对，不再"等一会儿才变白"）

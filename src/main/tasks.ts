@@ -25,7 +25,13 @@ import { DOWNLOAD_ORDER, mirrorById, finishUpdateFromZip, type MirrorDef } from 
 //   3. **任务记录有上限**（保留最近 40 条），别让 tasks.json 无限膨胀。
 // ============================================================================
 
-export type TaskKind = 'download' | 'update';
+/**
+ * 任务种类。
+ * v0.4.5 第 15 批：新增 `'export'` —— 导出网站时也要出现在工具栏「任务」里
+ * （用户要求："导出的时候这个过程也加入任务（工具栏）当中"）。
+ * 导出任务不是下载，它的进度由**执行方主动上报**（见 startManualTask / updateManualTask）。
+ */
+export type TaskKind = 'download' | 'update' | 'export';
 export type TaskStatus =
   | 'running'      // 正在跑
   | 'paused'       // 用户点「停止」——分片文件保留，可继续
@@ -137,6 +143,72 @@ function broadcastNow(): void {
   if (pendingBroadcast) { clearTimeout(pendingBroadcast); pendingBroadcast = null; }
   lastBroadcast = Date.now();
   broadcast();
+}
+
+// ============ 手动任务（导出等由调用方主动上报进度的任务）============
+
+/**
+ * v0.4.5 第 15 批：新建一个**非下载**任务（例如"导出网站"）。
+ *
+ * 下载任务由 drive() 自己推进；导出这种任务没有 URL、进度由执行方一步步报上来，
+ * 所以单独开一对 API：startManualTask / updateManualTask / finishManualTask。
+ * 记录结构复用 TaskRecord（url 留空、dest 记导出目录），
+ * 这样工具栏「任务」按钮和任务浮层**不用改**就能显示它。
+ */
+export function startManualTask(input: { kind: TaskKind; title: string; detail?: string; dest?: string; tag?: string }): TaskRecord {
+  load();
+  const now = new Date().toISOString();
+  const t: TaskRecord = {
+    id: newId(),
+    kind: input.kind,
+    title: input.title,
+    detail: input.detail || '正在准备…',
+    url: '',
+    fileName: input.dest ? input.dest.replace(/^.*[\\/]/, '') : '',
+    dest: input.dest || '',
+    status: 'running',
+    received: 0,
+    total: 0,
+    pct: 0,
+    tag: input.tag,
+    createdAt: now,
+    updatedAt: now
+  };
+  tasks.push(t);
+  trim();
+  scheduleSave();
+  broadcastNow();
+  return t;
+}
+
+/** 更新手动任务的进度/说明（pct 0~100） */
+export function updateManualTask(id: string, patch: { detail?: string; pct?: number; total?: number; received?: number }): void {
+  const t = getTask(id);
+  if (!t) return;
+  if (patch.detail !== undefined) t.detail = patch.detail;
+  if (typeof patch.total === 'number') t.total = patch.total;
+  if (typeof patch.received === 'number') t.received = patch.received;
+  if (typeof patch.pct === 'number') t.pct = Math.max(0, Math.min(100, Math.round(patch.pct)));
+  t.updatedAt = new Date().toISOString();
+  scheduleSave();
+  broadcastThrottled();
+}
+
+/** 收尾手动任务（成功 / 失败 / 取消） */
+export function finishManualTask(
+  id: string,
+  result: { ok: boolean; detail?: string; error?: string; canceled?: boolean }
+): void {
+  const t = getTask(id);
+  if (!t) return;
+  t.status = result.ok ? 'done' : result.canceled ? 'canceled' : 'error';
+  t.pct = result.ok ? 100 : t.pct;
+  if (result.detail) t.detail = result.detail;
+  if (result.error) t.error = result.error;
+  t.updatedAt = new Date().toISOString();
+  trim();
+  scheduleSave();
+  broadcastNow();
 }
 
 // ============ 查询 ============

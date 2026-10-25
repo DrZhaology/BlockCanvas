@@ -55,7 +55,7 @@ async function main() {
 
   // 注意：若宿主环境带 ELECTRON_RUN_AS_NODE=1，Electron 会退化成纯 Node，
   // 表现为 Playwright "Process failed to launch!"，这里显式剔除。
-  const childEnv = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const childEnv = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete childEnv.ELECTRON_RUN_AS_NODE;
 
   const app = await electron.launch({

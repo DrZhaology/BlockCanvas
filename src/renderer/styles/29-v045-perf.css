@@ -60,6 +60,31 @@ html[data-bc-anim-paused='1'] .app-toast {
 }
 
 /* ============================================================================
+   2b. 窗口彻底不可见（最小化 / 切到别的应用）→ 把**所有**无限循环动画停下来
+   ---------------------------------------------------------------------------
+   用户反馈（原话）：「有时候我可能加载了一些图片，导致 CPU 利用率上升，
+   但是我都最小化或者都静默到后台了，这个 CPU 利用率下不来。后续把优化性能列入任务列表。」
+   —— 已经进任务列表；这里先做**当下就能见效**的那一半：
+
+   上面 2 只暂停了我们自己声明的几个装饰动画，但页面里还有
+   插件/扩展/用户自定义的无限循环动画，以及各种 `animation` 简写带来的循环。
+   窗口已经最小化（document.hidden = true）时，把它们统统停下：
+     · 用 `[data-bc-window-hidden='1']`（由 animGovernor 在"真正不可见"时挂上），
+       而不是 `[data-bc-anim-paused]`（那个还包含"只是失焦"，失焦时动画该继续）；
+     · 只停 `animation-play-state` 与 `transition`，**不删**动画，
+       所以窗口一恢复就接着跑，不会出现"动画从头再来"的突兀感。
+   ========================================================================== */
+html[data-bc-window-hidden='1'] *,
+html[data-bc-window-hidden='1'] *::before,
+html[data-bc-window-hidden='1'] *::after {
+  animation-play-state: paused !important;
+  transition-property: none !important;
+}
+/* 例外：正在跑的任务要先保住（用户切走也要继续下载/应用更新），
+   这几条只是视觉反馈，恢复窗口后也不会错位。 */
+html[data-bc-window-hidden='1'] .tb-spin { animation-play-state: running !important; }
+
+/* ============================================================================
    3. 顺带修掉几处"动画属性选得不划算"的地方
    ---------------------------------------------------------------------------
    · 画布宽度切换的过渡里原来还带着 box-shadow 与 border-radius：
@@ -170,37 +195,289 @@ html[data-bc-dark] .snapshot-info-solo {
 }
 
 /* ============================================================================
-   7. 项目中心：「外部」到底是什么（v0.4.5 第 10 批 · 用户反馈 J）
+   8. 「幽灵卡片」：快捷助手样式被隐藏时的占位说明（v0.4.5 第 11 批）
    ---------------------------------------------------------------------------
-   以前只有一个"外部"小徽章，用户完全猜不到它指的是"文件不在默认目录里"。
-   现在表头常显一个「?『外部』是什么？」说明入口（悬停看完整解释），徽章本身也补了完整 tooltip。
+   开关关掉后，代管属性从列表里消失，但样式仍在生效 —— 用户会以为"这个元素没有样式"。
+   这张卡只在"开关关着 + 确实有代管样式"时出现，一行说明 + 两个出口。
    ========================================================================== */
-.pc-explain {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  border: 1px solid var(--line, var(--border));
-  border-radius: 999px;
-  font-size: 11px;
-  color: var(--text-3, var(--text-muted));
-  cursor: help;
-  white-space: nowrap;
+.prop-ghost-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 4px 0 8px;
+  padding: 9px 10px;
+  border: 1px dashed var(--line-strong, var(--border));
+  border-radius: 8px;
+  background: var(--surface-sunken, var(--panel-soft));
 }
-.pc-explain:hover {
+.prop-ghost-main { display: flex; gap: 7px; align-items: flex-start; }
+.prop-ghost-ico { flex: none; color: var(--text-3, var(--text-muted)); margin-top: 1px; }
+.prop-ghost-text {
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--text-2, var(--text-muted));
+}
+.prop-ghost-text b,
+.prop-ghost-text strong { color: var(--text-1, var(--text)); font-weight: 600; }
+.prop-ghost-actions { display: flex; gap: 6px; }
+.prop-ghost-btn {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--line, var(--border));
+  border-radius: 5px;
+  background: var(--bg-panel);
+  color: var(--text-2, var(--text));
+  font-size: 11.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.prop-ghost-btn:hover { border-color: var(--accent); color: var(--accent); }
+.prop-ghost-btn.is-ghost { border-color: transparent; background: transparent; color: var(--text-3, var(--text-muted)); }
+.prop-ghost-btn.is-ghost:hover { background: var(--hover); color: var(--accent); }
+
+/* ============================================================================
+   9. 深色模式：把剩下这批"硬编码浅色"换成语义变量（v0.4.5 第 11 批）
+   ---------------------------------------------------------------------------
+   目标文件里原本有 ~35 条 html[data-bc-dark] 覆盖。这里按"同一块表面/同一组文字"
+   收敛成几条，用的都是 00-theme-tokens.css 里的语义变量 —— 以后加主题不用再逐条改。
+   保留 data-bc-dark 分支的只剩两类（见 00-theme-tokens.css 的说明）：
+     · 需要"仅深色"的特殊效果（发光、特殊阴影、半透明遮罩）
+     · 品牌色/许可证徽章这种本身就带强语义色的
+   ========================================================================== */
+/* 弹层遮罩：深色下要更暗，浅色下保持原来的柔和 —— 这属于"仅深色的特殊效果" */
+html[data-bc-dark] .cp-backdrop { background: rgba(0, 0, 0, 0.72); }
+html[data-bc-dark] .hc-backdrop { background: rgba(0, 0, 0, 0.62); }
+
+/* 警示条：底色/文字全部走语义变量，深色自动切换 */
+.cls-warn-flash {
+  background: var(--danger-tint);
+  border-color: var(--danger);
+}
+.cls-warn-flash .cls-warn-title,
+.cls-warn-flash .cls-warn-ico { color: var(--danger); }
+.cls-warn-flash .cls-warn-ico { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+
+/* 首页玻璃控件：深色用半透明白，浅色用半透明白底 —— 用语义表面色统一 */
+html[data-bc-dark] .eh-gear,
+html[data-bc-dark] .eh-btn,
+html[data-bc-dark] .eh-card { background: var(--surface-2); }
+html[data-bc-dark] .eh-search input { background: var(--surface-sunken); }
+html[data-bc-dark] .eh-tabs { background: color-mix(in srgb, #fff 5%, transparent); }
+html[data-bc-dark] .eh-tab.is-active { background: var(--bg-panel); }
+
+/* 存储面板 / 项目中心 / 设置页：原来各自写死 #475569 / rgba(255,255,255,.06) 之类 */
+html[data-bc-dark] .fluent-card:hover { background: var(--surface-2); }
+html[data-bc-dark] .fluent-slider { background-color: var(--line-strong); }
+html[data-bc-dark] .pc-cover-badge { background: var(--surface-2); color: var(--text-2); }
+html[data-bc-dark] .dd-modal-header { background: var(--surface-1); border-bottom-color: var(--line); }
+html[data-bc-dark] .bc-storage-keep { background: color-mix(in srgb, #fff 6%, transparent); }
+
+/* 画布内文字输入 / 换行标记 / 恢复提示 / 断点提示条 */
+html[data-bc-dark] .canvas-inline-text-input { background: var(--surface-2); color: var(--text-1); }
+html[data-bc-dark] .bc-br-mark { color: var(--text-3); }
+html[data-bc-dark] .recovery-banner { background: var(--surface-2); border-color: var(--line-strong); }
+html[data-bc-dark] .inspector-bp-banner { background: var(--surface-2); border-color: var(--line-strong); }
+html[data-bc-dark] .inspector-bp-banner-head { color: var(--text-2); }
+html[data-bc-dark] .canvas-tips,
+html[data-bc-dark] .device-bar { background: var(--surface-2); border-color: var(--line); }
+html[data-bc-dark] .update-mirror-tip { color: var(--text-3); }
+
+/* 字体许可证徽章：这些颜色本身就是"语义色"（免费绿 / 受限黄 / 通用灰），保留 */
+html[data-bc-dark] .fp-badge.lic-free { color: #4ade80; border-color: #166534; background: #052e16; }
+html[data-bc-dark] .fp-badge.lic-restricted { color: #fbbf24; border-color: #92400e; background: #451a03; }
+html[data-bc-dark] .fp-badge.lic-generic { color: var(--text-2); border-color: var(--line-strong); background: var(--surface-2); }
+html[data-bc-dark] .fp-badge.lic-unknown { color: var(--text-3); border-color: var(--line-strong); background: transparent; }
+
+/* ============================================================================
+   10. 项目中心：表头「小问号」+ 项目类型标注（v0.4.5 第 14 批 · 用户反馈）
+   ---------------------------------------------------------------------------
+   用户原话：「项目管理里面界面上方做的优美一点。上方的『外部是什么』按钮点了没用。
+   我觉得你可以用小问号代替，然后不同的项目类型要单独标注……所有的解释都在上方的小问号。」
+   所以：表头只留一个圆形小问号；点开是一张说明卡；每种类型都有自己的颜色徽章。
+   ========================================================================== */
+.pc-kindhelp { position: relative; display: inline-flex; }
+.pc-kindhelp-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line, var(--border));
+  border-radius: 50%;
+  background: var(--bg-panel);
+  color: var(--text-3, var(--text-muted));
+  cursor: pointer;
+  padding: 0;
+}
+.pc-kindhelp-btn:hover,
+.pc-kindhelp-btn.is-open {
   color: var(--accent);
   border-color: var(--accent);
   background: var(--hover-accent, #eff6ff);
 }
+.pc-kindhelp-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: var(--z-popover);
+  width: 380px;
+  max-width: calc(100vw - 48px);
+  padding: 12px 14px 10px;
+  border: 1px solid var(--line, var(--border));
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-2, 0 8px 28px rgba(15, 23, 42, 0.18));
+  animation: bcPopIn 0.16s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.pc-kindhelp-head {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-1, var(--text));
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line, var(--border));
+}
+.pc-kindhelp-row {
+  display: grid;
+  grid-template-columns: auto 22px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--line, var(--border));
+}
+.pc-kindhelp-row:last-of-type { border-bottom: none; }
+.pc-kindhelp-count {
+  font-size: 11px;
+  font-family: Consolas, monospace;
+  color: var(--text-3, var(--text-muted));
+  text-align: center;
+  line-height: 18px;
+}
+.pc-kindhelp-desc {
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--text-2, var(--text-muted));
+  white-space: pre-line;
+}
+.pc-kindhelp-foot {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line, var(--border));
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--text-3, var(--text-muted));
+}
+
+/* 项目类型徽章：每种一个颜色（网页=蓝 / 网站=紫 / 外部=橙 / 已丢失=红） */
+.pc-badge.is-page {
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+.pc-badge.is-site {
+  color: #6d28d9;
+  border-color: #ddd6fe;
+  background: #f5f3ff;
+}
+.pc-badge.is-external {
+  color: #b45309;
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+.pc-badge.is-missing {
+  color: var(--danger, #dc2626);
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 40%, transparent);
+  background: var(--danger-tint, #fef2f2);
+}
+html[data-bc-dark] .pc-badge.is-page { color: #93c5fd; border-color: #1e3a8a; background: #0f1c33; }
+html[data-bc-dark] .pc-badge.is-site { color: #c4b5fd; border-color: #4c1d95; background: #1d1533; }
+html[data-bc-dark] .pc-badge.is-external { color: #fcd34d; border-color: #78350f; background: #2a1f0a; }
+
 /* ============================================================================
-   4. 加载页的深色底（跟随"记住的主界面颜色模式"，避免启动时白→黑闪一下）
+   11. 删除项目：第 3 关的"会话还开着"提示（v0.4.5 第 14 批）
    ========================================================================== */
-.bc-loading.is-dark { background: #0f1420; }
-.bc-loading.is-dark .bc-loading-name { color: #e8edf6; }
-.bc-loading.is-dark .bc-loading-stage,
-.bc-loading.is-dark .bc-loading-pct { color: #6f7d92; }
-.bc-loading.is-dark .bc-loading-meta { color: #a8b4c6; }
-.bc-loading.is-dark .bc-loading-bar { background: #1b2231; }
+.dd-session-warn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #fcd34d;
+  border-left: 3px solid #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+}
+.dd-session-warn-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #92400e;
+}
+.dd-session-warn-body {
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: #78350f;
+}
+.dd-session-warn-body b { color: #451a03; }
+.dd-session-warn-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  background: #fff;
+  color: #92400e;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.dd-session-warn-btn:hover { background: #fef3c7; border-color: #d97706; }
+html[data-bc-dark] .dd-session-warn {
+  border-color: #78350f;
+  border-left-color: #b45309;
+  background: #2a1f0a;
+}
+html[data-bc-dark] .dd-session-warn-head { color: #fcd34d; }
+html[data-bc-dark] .dd-session-warn-body { color: #d6c9a8; }
+html[data-bc-dark] .dd-session-warn-body b { color: #fde68a; }
+html[data-bc-dark] .dd-session-warn-btn {
+  background: #1b2231;
+  border-color: #b45309;
+  color: #fcd34d;
+}
+html[data-bc-dark] .dd-session-warn-btn:hover { background: #2a1f0a; }
+
+/* ============================================================================
+   12. 属性卡片删除后不该出现横向滚动条（v0.4.5 第 14 批 · 用户反馈）
+   ---------------------------------------------------------------------------
+   用户原话：「css 样式属性里面的属性卡片删除后，下方会短暂出现可以左右滑动的条，
+   修一下，不出现也滑动不了。」
+   原因：卡片退场动画是 `translateX(calc(100% + 40px))` —— 它会真的把卡片推到容器右侧外面，
+   于是容器在动画期间短暂出现横向溢出。这里给容器**永久**裁掉横向溢出并禁止横向滚动。
+   ========================================================================== */
+.props-list,
+.inspector-sec-body,
+.tab-body .panel {
+  overflow-x: clip;          /* clip 不会创建滚动容器，比 hidden 更彻底 */
+  overscroll-behavior-x: none;
+}
+/* 兼容不支持 overflow: clip 的内核 */
+@supports not (overflow: clip) {
+  .props-list,
+  .inspector-sec-body,
+  .tab-body .panel { overflow-x: hidden; }
+}
+/* ============================================================================
+   4. 加载页的底色 —— **固定白**（v0.4.5 第 14 批修正）
+   ---------------------------------------------------------------------------
+   以前这里有一套 `.bc-loading.is-dark`（跟着"记住的首页深色模式"铺深底），
+   结果用户首页是深色背景时，启动加载页整片黑 —— 用户反馈「始终黑色了」。
+   现在程序内固定白底；深色适配交给插件（插件可以覆盖 `html[data-bc-dark] .bc-loading`）。
+   ========================================================================== */
 
 /* ============================================================================
    5. 文档搜索落点：**黄色荧光笔**（v0.4.5 第 10 批）

@@ -25,7 +25,7 @@ async function main() {
   mkdirSync(resolve(DATA_DIR, 'projects'), { recursive: true });
   const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -37,28 +37,53 @@ async function main() {
   await sleep(900);
 
   // ==========================================================================
-  // A. 项目中心：「外部」说明
+  // A. 项目中心：表头小问号 + 项目类型标注（v0.4.5 第 14 批改版）
   // ==========================================================================
   await win.evaluate(() => window.dispatchEvent(new CustomEvent('bc:open-projects')));
   await sleep(900);
-  const pc = await win.evaluate(() => {
-    const ex = document.querySelector('.pc-explain');
-    const badge = document.querySelector('.pc-badge.is-external');
-    return {
-      onPage: !!document.querySelector('.pc-page, .pc-header'),
-      hasExplain: !!ex,
-      explainText: (ex?.textContent || '').trim(),
-      explainTip: ex?.getAttribute('title') || '',
-      badgeTip: badge?.getAttribute('title') || ''
-    };
+  const pcBefore = await win.evaluate(() => ({
+    onPage: !!document.querySelector('.pc-page, .pc-header'),
+    hasHelpBtn: !!document.querySelector('.pc-kindhelp-btn'),
+    popOpen: !!document.querySelector('.pc-kindhelp-pop'),
+    // 每个卡片都必须有一个类型徽章
+    cards: [...document.querySelectorAll('.pc-card')].map((c) => {
+      const b = c.querySelector('.pc-badge');
+      return { badge: (b?.textContent || '').trim(), cls: b?.className || '' };
+    })
+  }));
+  check('项目中心表头有一个小问号（不再是点了没反应的文字按钮）',
+    pcBefore.onPage && pcBefore.hasHelpBtn, JSON.stringify({ helpBtn: pcBefore.hasHelpBtn }));
+
+  // 点一下 → 说明卡弹出，四种类型都解释清楚
+  await win.evaluate(() => document.querySelector('.pc-kindhelp-btn')?.click());
+  await sleep(400);
+  const pcPop = await win.evaluate(() => {
+    const pop = document.querySelector('.pc-kindhelp-pop');
+    const rows = [...document.querySelectorAll('.pc-kindhelp-row')].map((r) => ({
+      badge: (r.querySelector('.pc-badge')?.textContent || '').trim(),
+      desc: (r.querySelector('.pc-kindhelp-desc')?.textContent || '').trim()
+    }));
+    return { open: !!pop, text: (pop?.textContent || '').replace(/\s+/g, ' '), rows };
   });
-  check('项目中心表头有「『外部』是什么？」常显说明', pc.onPage && pc.hasExplain && pc.explainText.includes('外部'), JSON.stringify({ has: pc.hasExplain, text: pc.explainText }));
-  check('说明里讲清了"外部 = 文件不在默认目录"',
-    /不在默认|别处|data\/projects/.test(pc.explainTip) && /外部位置/.test(pc.explainTip),
-    pc.explainTip.slice(0, 60));
-  check('「外部」徽章的悬停提示也补全了（含具体路径与后果）',
-    pc.badgeTip === '' || (/文件不在默认|外部位置/.test(pc.badgeTip) && /文件已丢失/.test(pc.badgeTip)),
-    pc.badgeTip.slice(0, 60) || '（当前没有外部工程，跳过）');
+  check('点小问号 → 弹出说明卡（四种类型都在）',
+    pcPop.open && pcPop.rows.length === 4
+      && pcPop.rows.some((r) => r.badge.includes('网页项目'))
+      && pcPop.rows.some((r) => r.badge.includes('网站项目'))
+      && pcPop.rows.some((r) => r.badge.includes('外部项目'))
+      && pcPop.rows.some((r) => r.badge.includes('文件已丢失')),
+    pcPop.rows.map((r) => r.badge).join(' / '));
+  check('说明卡里讲清了"外部项目 = 不在 data/projects"',
+    /data\/projects/.test(pcPop.text) && /不在/.test(pcPop.text),
+    pcPop.rows.find((r) => r.badge.includes('外部'))?.desc.slice(0, 60));
+  check('每个项目卡片都有类型标注',
+    pcBefore.cards.length === 0 || pcBefore.cards.every((c) => !!c.badge),
+    JSON.stringify(pcBefore.cards.slice(0, 3)));
+
+  // 再点一下收起
+  await win.evaluate(() => document.querySelector('.pc-kindhelp-btn')?.click());
+  await sleep(300);
+  const closed = await win.evaluate(() => !!document.querySelector('.pc-kindhelp-pop'));
+  check('再点一下能收起说明卡', closed === false, String(closed));
 
   // 回到编辑器
   await win.evaluate(() => window.dispatchEvent(new CustomEvent('bc:set-layout', { detail: 'bottom' })));

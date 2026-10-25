@@ -27,7 +27,7 @@ async function launch(extraArgs = [], opts = {}) {
     const SRC = resolve(ROOT, 'builtin-extensions');
     if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
   }
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({
     args: ['.', '--disable-gpu', '--no-sandbox', ...extraArgs],
@@ -430,7 +430,7 @@ async function main() {
     // 先用一次正常启动造一个 .bcproj（含场景），再用"带路径启动"验证 argv 路径
     const projPath = resolve(DATA_DIR, 'projects', '双击打开演示.bcproj');
     {
-      const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+      const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
       delete env.ELECTRON_RUN_AS_NODE;
       const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
       const win = await app.firstWindow();
@@ -449,7 +449,7 @@ async function main() {
       await sleep(600);
     }
     {
-      const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+      const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
       delete env.ELECTRON_RUN_AS_NODE;
       // 模拟 Windows 双击：把工程路径作为命令行参数传进去
       const app = await electron.launch({

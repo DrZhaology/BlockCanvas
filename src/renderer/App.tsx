@@ -23,6 +23,7 @@ import { withViewTransition } from '@lib/viewTransition';
 import { useHorizontalWheel } from '@lib/hScroll';
 import { DEVICE_LIST, widthToBreakpoint, type DeviceId } from '@lib/device';
 import { tokensToRootCss } from '@lib/designTokens';
+import { nextFrame, nextFrames } from '@lib/nextFrame';
 import { applySelHighlightClass } from '@lib/selHighlight';
 import { showToast, type ToastType } from '@lib/toast';
 import { requestPropFocus } from '@lib/propFocus';
@@ -200,10 +201,12 @@ export default function App() {
         console.warn('恢复会话失败:', e);
       } finally {
         useLoadScreen.getState().report('正在准备界面…', 92);
-        // 等主界面真正渲染出来（下一帧）再放开闸门并淡出加载页
-        requestAnimationFrame(() => {
+        // 等主界面真正渲染出来（下一帧）再放开闸门并淡出加载页。
+        // ⚠ 用 nextFrames 而不是裸 rAF：窗口最小化时 rAF 会被 Chromium 暂停，
+        //   那样加载页会永远挡在最上层（用户最小化着等启动就会遇到）。
+        nextFrames(() => {
           setSessionReady(true);
-          requestAnimationFrame(() => useLoadScreen.getState().finish());
+          nextFrame(() => useLoadScreen.getState().finish());
         });
       }
     })();
@@ -437,8 +440,8 @@ export default function App() {
         }
       } finally {
         if (withSplash) {
-          // 等主界面画完这一帧再淡出（和启动流程同样的处理）
-          requestAnimationFrame(() => useLoadScreen.getState().finish());
+          // 等主界面画完这一帧再淡出（和启动流程同样的处理；同样不能用裸 rAF）
+          nextFrames(() => useLoadScreen.getState().finish());
         }
       }
     };

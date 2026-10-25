@@ -137,7 +137,7 @@ async function main() {
     // v0.4.2：若宿主终端带 ELECTRON_RUN_AS_NODE=1（常见于在 Electron 系终端里跑脚本），
     // Electron 会退化成纯 Node → Playwright "Process failed to launch!"，这里显式剔除。
     env: (() => {
-      const e = { ...process.env, BC_AUTO_EXPORT_PATH: EXPORT_CHECK, BC_DATA_DIR: DATA_DIR };
+      const e = { ...process.env, BC_NO_FOCUS: '1', BC_AUTO_EXPORT_PATH: EXPORT_CHECK, BC_DATA_DIR: DATA_DIR };
       delete e.ELECTRON_RUN_AS_NODE;
       return e;
     })()
