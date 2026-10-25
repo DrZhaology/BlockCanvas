@@ -4,7 +4,7 @@
 import { createRequire } from 'module';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
-import { mkdirSync, rmSync, cpSync, existsSync } from 'fs';
+import { mkdirSync, rmSync, cpSync, existsSync, writeFileSync } from 'fs';
 import { ensureEditor } from './ensure-editor.mjs';
 
 const require = createRequire(import.meta.url);
@@ -23,9 +23,9 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-home-probe');
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC = resolve(ROOT, 'extensions');
+  const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -124,17 +124,57 @@ async function main() {
   ok('填图片路径 → 立刻切到图片背景并渲染媒体层',
     imgState.saved?.kind === 'image' && imgState.media === 1, JSON.stringify(imgState));
 
-  // 视频页同理（这里只验证"填了就生效"，不依赖真实视频文件）
+  // 视频页：**必须用一段真视频**。
+  // v0.4.5 起 A9 黑名单生效：填一个不存在的路径 → <video> 立刻 onError → 记黑名单并回退默认背景
+  //（这是设计行为，不是 BUG）。所以这里现场录一段 1 秒 webm 再填进去，测真正的"填了就生效"。
+  const b64 = await win.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 160; c.height = 90;
+    const ctx = c.getContext('2d');
+    const stream = c.captureStream(24);
+    const rec = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
+    const chunks = [];
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    rec.start();
+    for (let i = 0; i < 16; i++) {
+      ctx.fillStyle = i % 2 ? '#1e3a8a' : '#0f172a';
+      ctx.fillRect(0, 0, 160, 90);
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    await new Promise((r) => { rec.onstop = r; rec.stop(); });
+    const buf = new Uint8Array(await new Blob(chunks, { type: 'video/webm' }).arrayBuffer());
+    let s = '';
+    for (let i = 0; i < buf.length; i++) s += String.fromCharCode(buf[i]);
+    return btoa(s);
+  });
+  const videoPath = resolve(DATA_DIR, 'bg.webm');
+  writeFileSync(videoPath, Buffer.from(b64, 'base64'));
+  ok('现场生成测试视频（webm）', b64.length > 500, 'bytes=' + Buffer.from(b64, 'base64').length);
+
   await win.locator('.eh-tab', { hasText: '视频' }).click();
   await sleep(300);
-  await win.locator('.eh-panel .eh-input').first().fill('C:/definitely/not/exist/bg.mp4');
-  await sleep(400);
+  await win.locator('.eh-panel .eh-input').first().fill(videoPath);
+  await sleep(1500);
   const vidState = await win.evaluate(() => ({
     saved: JSON.parse(localStorage.getItem('bc-empty-home-bg') || 'null'),
-    video: document.querySelectorAll('.empty-home video.eh-video').length
+    video: document.querySelectorAll('.empty-home video.eh-video').length,
+    readyState: document.querySelector('.empty-home video.eh-video')?.readyState ?? -1
   }));
   ok('填视频路径 → 立刻切到视频背景并渲染 video 层',
-    vidState.saved?.kind === 'video' && vidState.video === 1, JSON.stringify(vidState));
+    vidState.saved?.kind === 'video' && vidState.video === 1 && vidState.readyState >= 1,
+    JSON.stringify(vidState));
+
+  // 坏路径 → 按 A9 设计回退默认背景 + 记黑名单（不再反复报原生解码错误）
+  await win.evaluate(() => localStorage.removeItem('bc-empty-home-bad-videos'));
+  await win.locator('.eh-panel .eh-input').first().fill('C:/definitely/not/exist/bg.mp4');
+  await sleep(1200);
+  const badState = await win.evaluate(() => ({
+    saved: JSON.parse(localStorage.getItem('bc-empty-home-bg') || 'null'),
+    bad: JSON.parse(localStorage.getItem('bc-empty-home-bad-videos') || '[]')
+  }));
+  ok('坏视频路径 → 回退默认背景并记进黑名单（A9：以后不再挂载它）',
+    badState.saved?.kind === 'preset' && badState.bad.some((p) => /bg\.mp4$/.test(p)),
+    JSON.stringify(badState));
 
   // 5. 搜索：文档结果
   await win.keyboard.press('Escape');
@@ -208,10 +248,18 @@ async function main() {
     const h = document.querySelector('.empty-home');
     if (!h) return null;
     const cs = getComputedStyle(h);
-    return { opacity: cs.opacity, bg: cs.backgroundColor, cls: h.className };
+    return {
+      opacity: cs.opacity,
+      bg: cs.backgroundColor,
+      bgImage: cs.backgroundImage,
+      cls: h.className
+    };
   });
+  // 注意：背景可能来自 background-color（纯色）也可能是 background-image（渐变），
+  // 所以"有底"要两者一起看 —— 只判 backgroundColor 会在渐变背景时误报透明。
+  const hasPaint = !!leaving && (leaving.bg !== 'rgba(0, 0, 0, 0)' || (leaving.bgImage && leaving.bgImage !== 'none'));
   ok('打开工程（对话框等待中）首页背景保持不透明，不会整窗变白',
-    !!leaving && leaving.opacity === '1' && leaving.bg !== 'rgba(0, 0, 0, 0)', JSON.stringify(leaving));
+    !!leaving && leaving.opacity === '1' && hasPaint, JSON.stringify(leaving));
 
   // 图片 / 视频这两步故意指向不存在的文件 → 浏览器会打 404，属于预期，不计入错误
   const realErrs = errs.filter((t) => !/Failed to load resource/.test(t));

@@ -226,6 +226,99 @@ function normalizeManifest(src: Partial<ProjectManifest> & Record<string, unknow
 // ---------------------------------------------------------------------------
 
 /** 完整读取工程（zip 或 v1 JSON 都能读）。 */
+// ---------------------------------------------------------------------------
+// v0.4.5：抢救损坏的工程文件
+// ---------------------------------------------------------------------------
+
+export interface SalvageResult {
+  ok: boolean;
+  scene?: unknown;
+  name?: string;
+  /** 抢救过程记录（给用户看，说明"从哪儿捞出来的"） */
+  notes: string[];
+  error?: string;
+}
+
+function tryParseJson(text: string): unknown | null {
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+/**
+ * 尽最大努力从打不开的工程文件里把场景数据抢救出来（**只读，不改原文件**）。
+ *
+ * 依次尝试：
+ *   1. 正常读取（结构与版本都对）
+ *   2. 纯 JSON（v1）直接解析，取 .scene / .root
+ *   3. ZIP 容器：逐个 .json 条目解析，找带 scene 的；或 scene.json 本身就是场景
+ *
+ * 返回的 scene 交给渲染层开成一个"未保存的新标签"，用户确认没问题再另存，
+ * 这样即使抢救出来的东西不完整，也不会覆盖原文件。
+ */
+export function salvageProject(path: string): SalvageResult {
+  const notes: string[] = [];
+  if (!existsSync(path)) return { ok: false, notes, error: '文件不存在' };
+
+  // 1) 常规读取
+  const normal = readProject(path);
+  if (normal.ok && normal.payload?.scene) {
+    return { ok: true, scene: normal.payload.scene, name: normal.payload.name, notes: ['文件结构正常，无需修复'] };
+  }
+  if (normal.error) notes.push('常规读取失败：' + normal.error);
+
+  let buf: Buffer;
+  try { buf = readFileSync(path); } catch (e) {
+    return { ok: false, notes, error: '文件读不出来：' + (e as Error).message };
+  }
+
+  // 2) 纯 JSON（旧版工程）
+  const text = buf.toString('utf8');
+  const asJson = tryParseJson(text) as Record<string, unknown> | null;
+  if (asJson) {
+    const scene = (asJson.scene as unknown) ?? (asJson.root ? asJson : null);
+    if (scene) {
+      notes.push('按旧版 JSON 工程恢复');
+      return { ok: true, scene, name: String(asJson.name ?? ''), notes };
+    }
+    notes.push('JSON 能解析，但里面没有 scene 字段');
+  }
+
+  // 3) ZIP 容器：逐个 json 条目找
+  if (looksLikeZip(buf)) {
+    let names: string[] = [];
+    try { names = zipNames(buf); } catch (e) {
+      notes.push('容器目录读不出来：' + (e as Error).message);
+    }
+    if (names.length) {
+      notes.push(`容器条目 ${names.length} 个：${names.slice(0, 8).join(', ')}`);
+      for (const n of names) {
+        if (!/\.json$/i.test(n)) continue;
+        let inner: Buffer | null = null;
+        try { inner = zipReadEntry(buf, n); } catch { inner = null; }
+        if (!inner) { notes.push(`${n} 解压失败`); continue; }
+        const j = tryParseJson(inner.toString('utf8')) as Record<string, unknown> | null;
+        if (!j) { notes.push(`${n} 不是合法 JSON`); continue; }
+        const scene = (j.scene as unknown) ?? (j.root ? j : null);
+        if (scene) {
+          notes.push(`从 ${n} 里恢复了场景`);
+          return { ok: true, scene, name: String(j.name ?? ''), notes };
+        }
+      }
+    }
+    // 4) 兜底：manifest 还在的话，至少把工程名捞回来
+    try {
+      const mBuf = zipReadEntry(buf, MANIFEST);
+      if (mBuf) {
+        const m = tryParseJson(mBuf.toString('utf8')) as { name?: string } | null;
+        if (m?.name) notes.push(`manifest 里的工程名是「${m.name}」，但场景数据没找到`);
+      }
+    } catch { /* 忽略 */ }
+  } else {
+    notes.push('文件不是 ZIP 容器（可能被截断或不是工程文件）');
+  }
+
+  return { ok: false, notes, error: '没能从文件里恢复出可用的场景数据' };
+}
+
 export function readProject(path: string): ReadResult {
   try {
     if (!existsSync(path)) return { ok: false, error: '文件不存在' };

@@ -1,13 +1,15 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu, protocol, net, shell, nativeTheme, session, type MenuItemConstructorOptions } from 'electron';
 import { join, basename, dirname, relative } from 'node:path';
-import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync, renameSync, openSync, readSync, closeSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readdirSync, readFileSync, existsSync, cpSync, unlinkSync, statSync, renameSync, openSync, readSync, closeSync, copyFileSync } from 'node:fs';
+import { relative as relativePath, isAbsolute as isAbsolutePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isAbsolutePathAny, resolveInside, toWebPath, previewDir, runtimeTempDir } from './paths';
 import * as pathUtils from './paths';
 import { zipCreate, zipList } from './zip';
 import {
   dataRoot, initDataDirectories, readAppConfig, writeAppConfig, listProjects,
-  listProjectBackups, saveProjectSnapshotFile, deleteProjectBackupFolder
+  listProjectBackups, saveProjectSnapshotFile, deleteProjectBackupFolder,
+  registerExternalProject, forgetExternalProject
 } from './userData';
 import { readSession, writeSession } from './session';
 import {
@@ -18,17 +20,35 @@ import {
   readProject, writeProject, readManifestOnly, migrateAllProjectFilesAsync
 } from './projectFile';
 import * as projectFileApi from './projectFile';
+// v0.4.5：工程素材（保存时收集本地图片/视频进容器，打开时解包到缓存）
+import {
+  collectSceneAssets, extractProjectAssets, resolveCachedAsset, listAssetCache, importAssetToCache,
+  resolveThumbPath
+} from './assets';
 import {
   getLocalVersion, getAppStage, fetchReleases, buildUpdateList, getMirrorInfo,
-  resolveInstallDir
+  resolveInstallDir, updateLogPath, ulog
 } from './updater';
 import {
   listTasks, startTask, pauseTask, resumeTask, cancelTask, dismissTask, revealTask,
-  flushTasksOnQuit
+  flushTasksOnQuit, startManualTask, updateManualTask, finishManualTask
 } from './tasks';
 
 // 启动最优先：初始化纯便携数据区 data/，隔离系统盘
 initDataDirectories();
+
+/**
+ * v0.4.5 第 12 批：**自动化模式下"窗口在屏幕外也要继续渲染"**。
+ *
+ * 窗口被移到屏幕外（或最小化、或被别的窗口完全遮住）时，Chromium 默认会认为
+ * "用户看不到"，于是停掉合成器与 rAF —— 后果是截图空白、动画冻住、加载页收不了尾。
+ * 这三个开关正是关掉那套省电逻辑。只在安静模式加，正常启动完全不受影响。
+ */
+if (process.env['BC_NO_FOCUS'] === '1') {
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+  app.commandLine.appendSwitch('disable-renderer-backgrounding');
+  app.commandLine.appendSwitch('disable-background-timer-throttling');
+}
 
 // 把运行时临时目录也收进程序目录（便携化）：Chromium 内核/下载暂存等一律写 <data>/tmp/system。
 // 必须在 app ready **之前**设置才生效；不可写时自动退回系统 Temp（resolveWritableDir 已兜底）。
@@ -50,10 +70,126 @@ if (!app.isPackaged) {
 // electron-vite 在 dev 模式下注入 ELECTRON_RENDERER_URL；
 const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
 
+/**
+ * 是否处于"安静启动"模式（自动化脚本/探针/截图用）。
+ *
+ * v0.4.5 第 12 批：窗口**从创建起就不可激活**（见 createWindow 里的 focusable:false），
+ * 这样 Windows 的"空闲时把后台窗口顶到前台"也不会发生。
+ * 主进程里所有会抢前台的动作（focus / restore / show）都要先问这个开关。
+ */
+function isQuietLaunch(): boolean {
+  return process.env['BC_NO_FOCUS'] === '1';
+}
+
+// ============ 应用图标（窗口 / 任务栏 / 原生弹窗 / 子窗口统一用三色 Logo） ============
+// v0.4.5 修复：以前只有主窗口传了 icon，原生文件对话框、开发者工具这类"单独弹出的窗口"
+// 会回落到 Electron 默认原子图标（用户看到的任务栏里两个图标不一致）。
+// 现在：① 应用级 AppUserModelID 提前到 ready 之前设置；② 任何新建窗口（含 DevTools）在
+// browser-window-created 里统一补图标；③ 所有 dialog 都挂到主窗口上（模态 + 继承窗口图标）。
+function appIconPath(): string | null {
+  const p = app.isPackaged
+    ? join(process.resourcesPath, 'icon.png')
+    : join(app.getAppPath(), 'build', 'icon.png');
+  return existsSync(p) ? p : null;
+}
+
+/** 原生弹窗的父窗口：优先当前聚焦窗口，退而求其次取第一个窗口（保证弹窗带主窗口图标、且模态） */
+function dialogParent(): BrowserWindow | undefined {
+  return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? undefined;
+}
+
+/** 统一入口：所有原生「保存」对话框都挂到主窗口上（模态 + 继承 BlockCanvas 图标） */
+function showSaveDialog(opts: Electron.SaveDialogOptions) {
+  const w = dialogParent();
+  return w ? dialog.showSaveDialog(w, opts) : dialog.showSaveDialog(opts);
+}
+
+/** 统一入口：所有原生「打开」对话框都挂到主窗口上 */
+function showOpenDialog(opts: Electron.OpenDialogOptions) {
+  const w = dialogParent();
+  return w ? dialog.showOpenDialog(w, opts) : dialog.showOpenDialog(opts);
+}
+
 // ============ 本地图片协议 ============
 protocol.registerSchemesAsPrivileged([
   { scheme: 'bc-img', privileges: { standard: true, secure: true } }
 ]);
+
+// ============ 「双击 .bcproj 直接用 BlockCanvas 打开」 ============
+//
+// 用户反馈：「直接打开 .bcproj 后缀的项目现在完全不会」。查下来是两段都缺：
+//   ① 打包配置里已经登记了文件关联（electron-builder fileAssociations），
+//      但主进程**从来没有读过命令行参数** —— 双击时 Windows 会把文件路径塞进 argv[1]，
+//      程序照常启动、照常恢复会话，那个路径被直接丢掉了；
+//   ② 没有单实例锁：文件已经被打开着时再双击一个工程，会**再起一个进程**
+//      （两个进程同时写 data/ 目录，风险很大）。
+//
+// 现在：单实例锁 + 三种入口（首次启动的 argv / 第二个实例的 argv / macOS 的 open-file）
+// 统一走 openProjectFromOs()，最终给渲染进程发 `bc:open-project-path`。
+let pendingOsOpenPath: string | null = null;
+
+/** 从命令行里挑出 .bcproj 路径（跳过 - 开头的开关；不认其它扩展名，避免误开无关文件） */
+function extractProjectPathFromArgv(argv: string[]): string | null {
+  for (const a of argv.slice(1)) {
+    if (!a || a.startsWith('-')) continue;
+    const p = a.replace(/^"|"$/g, '');
+    if (!/\.bcproj$/i.test(p)) continue;
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/** 把"要打开哪个工程"这件事交给渲染进程；窗口还没建好就先记下来，等它加载完再发 */
+function openProjectFromOs(p: string | null) {
+  if (!p) return;
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win || win.webContents.isLoading()) {
+    pendingOsOpenPath = p;
+    return;
+  }
+  // v0.4.5：自动化模式下**不要** restore/focus —— 那两步正是"突然弹到最前面"的来源
+  if (!isQuietLaunch()) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  }
+  win.webContents.send('bc:open-project-path', p);
+}
+
+/** 窗口加载完成时把"启动时攒下的待打开工程"发出去 */
+function flushPendingOsOpen() {
+  if (!pendingOsOpenPath) return;
+  const p = pendingOsOpenPath;
+  pendingOsOpenPath = null;
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win && !win.isDestroyed()) win.webContents.send('bc:open-project-path', p);
+}
+
+// 单实例：拿不到锁说明已经有一个在跑 → 把参数交给那个实例，自己退出
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', (_e, argv) => {
+    openProjectFromOs(extractProjectPathFromArgv(argv));
+  });
+  // macOS：Finder 里双击文档走的是 open-file 事件（不是 argv）
+  app.on('open-file', (e, p) => {
+    e.preventDefault();
+    openProjectFromOs(p);
+  });
+}
+
+// ============ 启动加载页的**真实**进度通道 ============
+// 用户要求：「做一个加载的页面，可以包含 BlockCanvas 的 Logo，显示真实的加载进度，
+//           与主界面要过渡丝滑。」
+// 这里只负责"报数"：每一步真的有进展才发一条，绝不用定时器凑进度。
+function emitLoad(id: string, label: string, percent: number) {
+  try {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('bc:load-progress', { id, label, percent: Math.max(0, Math.min(100, Math.round(percent))) });
+    }
+  } catch { /* 窗口没了就算了 */ }
+}
 
 // ============ 自定义中文菜单 ============
 function buildMenu(win: BrowserWindow): Menu {
@@ -165,26 +301,47 @@ async function createWindow() {
     callback((permission as string) === 'local-fonts');
   });
 
-  // 窗口/任务栏图标：统一用三色 Logo。
-  // · 开发态：build/icon.png（仓库里就是三色 Logo）
-  // · 打包态：electron-builder 通过 extraResources 把它复制到 resources/icon.png ——
-  //   因为 build/** 不进 asar，以前打包后这里找不到文件，任务栏就回落到 exe 的旧图标。
-  const iconPath = app.isPackaged
-    ? join(process.resourcesPath, 'icon.png')
-    : join(app.getAppPath(), 'build', 'icon.png');
+  // 窗口/任务栏图标：统一用三色 Logo（路径见 appIconPath，开发态 build/icon.png，
+  // 打包态 resources/icon.png —— build/** 不进 asar，以前打包后这里找不到文件，
+  // 任务栏就回落到 exe 的旧图标）。
+  const iconPath = appIconPath();
+
+  /**
+   * v0.4.5 第 12 批（第 4 次修复）：**移到屏幕外 + 显示但不激活**。
+   *
+   * 用户三次反馈的演进：
+   *   1. `showInactive()`：不抢焦点，但窗口**仍盖在屏幕上**（z 序在最前）→ "每次打开都要在最上面"。
+   *   2. `focusable:false`（WS_EX_NOACTIVATE）：真不抢前台了，但**最小化按钮失效**（用户报的）。
+   *   3. `minimize()` 最小化启动：不打扰了，但 Chromium 会**暂停渲染** →
+   *      截图空白 / rAF 停摆 / 加载页收不了尾（探针直接红了，这是真 BUG 不是测试问题）。
+   *
+   * 所以现在：**窗口正常显示（可最小化、可还原、按钮全好）+ 移到屏幕外 + 不激活**。
+   *   · `showInactive()`  → 不夺焦点，系统也不会把它顶到你面前；
+   *   · `setPosition(-32000, -32000)` → 屏幕上什么都看不到，不挡任何东西；
+   *   · 配合下面三条 Chromium 开关 → 即使"在屏幕外/被判遮挡"也**照常渲染**，
+   *     所以截图、动画、加载页全都正常；
+   *   · 任务栏图标保留（用户点它就能把窗口叫回来，位置也在屏幕内）。
+   *
+   * 正常双击启动（没有 BC_NO_FOCUS）行为完全不变。
+   */
+  const noFocus = process.env['BC_NO_FOCUS'] === '1';
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 960,
     minHeight: 640,
     title: 'BlockCanvas 积木画布',
-    ...(existsSync(iconPath) ? { icon: iconPath } : {}),
+    ...(iconPath ? { icon: iconPath } : {}),
     backgroundColor: '#f3f3f3',
+    // 自动化模式：先不显示（首帧就绪后再"不激活地显示 + 移到屏幕外"）
+    ...(noFocus ? { show: false, skipTaskbar: false } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      // 窗口在屏幕外/被遮挡时也不要让 Chromium 停掉渲染（否则截图空白、rAF 停摆）
+      ...(noFocus ? { backgroundThrottling: false } : {})
     }
   });
   // Windows 任务栏分组/图标缓存按 AppUserModelID 走，显式设成和 electron-builder 一致的 appId
@@ -210,6 +367,30 @@ async function createWindow() {
   ipcMain.on('theme:set-source', (_evt, source: unknown) => {
     nativeTheme.themeSource = source === 'dark' || source === 'light' ? source : 'system';
   });
+
+  // v0.4.5：加载完成后把"启动时攒下的待打开工程"（双击 .bcproj 启动的那条路径）发给渲染进程。
+  // 放在 did-finish-load 而不是 loadURL 之后立刻发：渲染进程的监听器要等 React 挂载才有。
+  win.webContents.on('did-finish-load', () => { flushPendingOsOpen(); });
+
+  // 自动化模式：**不激活地显示，并移到屏幕外**（屏幕上什么都不出现，但渲染照常）。
+  //
+  // 顺序很关键：先 showInactive（此时窗口还在屏幕内、不抢焦点），再移到屏幕外 ——
+  // 反过来（先移出去再 show）在某些 Windows 版本上会让窗口"从未映射"，截图拿不到画面。
+  if (noFocus) {
+    const park = () => {
+      if (win.isDestroyed()) return;
+      try {
+        if (!win.isVisible()) win.showInactive();
+        win.setPosition(-32000, -32000, false);
+        win.setSkipTaskbar(false);   // 保住任务栏图标
+      } catch { /* 忽略 */ }
+    };
+    win.once('ready-to-show', park);
+    win.webContents.once('did-finish-load', () => {
+      setTimeout(park, 0);
+      setTimeout(park, 500);
+    });
+  }
 
   if (devServerUrl) {
     await win.loadURL(devServerUrl);
@@ -240,6 +421,28 @@ ipcMain.handle('data:enforce-budgets', () => enforceStorageBudgets());
 
 // ============ 自动更新 IPC ============
 ipcMain.handle('update:get-version', () => getLocalVersion());
+
+// v0.4.5：更新日志路径（界面可以给一个"打开日志"入口）
+ipcMain.handle('update:log-path', () => {
+  try {
+    ulog(`查询日志路径（当前版本 ${getLocalVersion()}）`);
+    return updateLogPath();
+  } catch {
+    return '';
+  }
+});
+
+// v0.4.5：读最近若干行更新日志（只读尾部）
+ipcMain.handle('update:log-tail', (_evt, maxLines = 200) => {
+  try {
+    const p = updateLogPath();
+    if (!existsSync(p)) return '';
+    const lines = readFileSync(p, 'utf8').split(/\r?\n/);
+    return lines.slice(Math.max(0, lines.length - Math.max(1, Number(maxLines) || 200))).join('\n');
+  } catch {
+    return '';
+  }
+});
 // 「关于」页的阶段文案（来源 version.json → tools/sync-version.mjs → package.json.bcStage）
 ipcMain.handle('app:get-stage', () => getAppStage());
 
@@ -387,6 +590,29 @@ ipcMain.handle('cfg:set', (_evt, patch: Record<string, any>) => writeAppConfig(p
 // ============ 项目工程管理 (.bcproj) ============
 ipcMain.handle('project:list', () => listProjects());
 
+// v0.4.5：把某个外部工程从列表里移除（不动磁盘文件）
+ipcMain.handle('project:forget-external', (_evt, filePath: string) => forgetExternalProject(filePath));
+
+// v0.4.5：素材库（图库面板）—— 列出缓存里的素材 / 导入新素材
+ipcMain.handle('assets:list', () => listAssetCache());
+ipcMain.handle('assets:import', async () => {
+  const res = await showOpenDialog({
+    title: '导入素材',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] },
+      { name: '视频', extensions: ['mp4', 'webm', 'ogv', 'ogg', 'mov', 'm4v'] },
+      { name: '音频', extensions: ['mp3', 'wav', 'flac', 'm4a', 'aac', 'opus'] }
+    ]
+  });
+  if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
+  const items = res.filePaths.map((p) => importAssetToCache(p)).filter(Boolean);
+  return { ok: true, items };
+});
+
+// v0.4.5：抢救损坏的工程（只读，不改原文件）
+ipcMain.handle('project:salvage', (_evt, filePath: string) => projectFileApi.salvageProject(filePath));
+
 /**
  * 工程名 → 安全文件名：**保留中文等 Unicode 字符**，只剔除 Windows 文件名的非法字符。
  * （修复：以前用 sanitizeId 只留 a-z0-9，中文名整个被清空 → 首次保存弹出的默认文件名
@@ -428,7 +654,7 @@ ipcMain.handle('project:save', async (_evt, projectData: { name?: string; scene:
     if (!targetPath) {
       if (saveAs) {
         // 关键修复：默认路径传入完整绝对路径，文件选择器自动跳转定位至 BlockCanvas\data\projects\
-        const res = await dialog.showSaveDialog({
+        const res = await showSaveDialog({
           title: '保存项目工程文件 (.bcproj)',
           defaultPath: join(defaultFullDir, `${cleanName}.bcproj`),
           filters: [{ name: 'BlockCanvas 工程文件', extensions: ['bcproj', 'json'] }]
@@ -458,28 +684,49 @@ ipcMain.handle('project:save', async (_evt, projectData: { name?: string; scene:
       }
     } catch { /* 历史保存失败不影响工程保存 */ }
 
-    // v2：写 ZIP 容器（manifest.json + scene.json），原子替换、自动继承 createdAt
+    // v0.4.5：素材打包 —— 把场景里 bc-img://file/<本地路径> 引用的文件读进容器
+    // （assets/<sha1>.<ext>），并把引用改写成 bc-img://asset/<hash>.<ext>。
+    // 这样工程换机器/换目录打开也不会丢图。
+    let sceneToSave = projectData.scene;
+    let collectedAssets: { name: string; data: Buffer; mime?: string }[] = [];
+    let missingAssets: string[] = [];
+    try {
+      const collected = collectSceneAssets(projectData.scene);
+      sceneToSave = collected.scene;
+      collectedAssets = collected.assets;
+      missingAssets = collected.missing;
+    } catch { /* 收集失败就按原样保存，至少不丢工程 */ }
+
+    // v2：写 ZIP 容器（manifest.json + scene.json + assets/），原子替换、自动继承 createdAt
     const w = writeProject(targetPath, {
       name: pName,
-      scene: projectData.scene,
+      scene: sceneToSave,
       meta: {
         ...(projectData.meta || {}),
         elementCount: countNodes(projectData.scene?.root)
       },
+      assets: collectedAssets,
       sections
     });
     if (!w.ok) return { ok: false, error: w.error || '写入工程文件失败' };
-    return { ok: true, path: targetPath, name: pName };
+    return {
+      ok: true,
+      path: targetPath,
+      name: pName,
+      assets: collectedAssets.length,
+      missingAssets
+    };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
 });
 
 ipcMain.handle('project:open-file', async (_evt, customPath?: string) => {
+  const loadId = 'open-' + Date.now().toString(36);
   try {
     let targetPath = customPath;
     if (!targetPath) {
-      const res = await dialog.showOpenDialog({
+      const res = await showOpenDialog({
         title: '打开项目工程文件',
         defaultPath: join(dataRoot(), 'projects'),
         properties: ['openFile'],
@@ -489,11 +736,30 @@ ipcMain.handle('project:open-file', async (_evt, customPath?: string) => {
       targetPath = res.filePaths[0];
     }
     if (!existsSync(targetPath)) return { ok: false, error: '文件不存在' };
+    // —— 真实进度播报（启动加载页用；每一步都是真的做完了才报）——
+    emitLoad(loadId, '正在读取工程文件…', 8);
     // v1（纯 JSON）与 v2（ZIP 容器）都能读
     const r = readProject(targetPath);
     if (!r.ok || !r.payload) return { ok: false, error: r.error || '文件不是有效的 BlockCanvas 工程文件' };
+    emitLoad(loadId, '正在解析场景…', 34);
+    // v0.4.5：把容器里的 assets/ 解到缓存目录，`bc-img://asset/...` 才有东西可服务
+    let extracted = 0;
+    try {
+      const assetCount = (r.payload as unknown as { assets?: unknown[] }).assets?.length ?? 0;
+      extracted = extractProjectAssets(targetPath, r.payload, (done, total) => {
+        // 素材解包占 34% → 92% 这一段
+        const span = total > 0 ? done / total : 1;
+        emitLoad(loadId, `正在准备素材 ${done}/${total || assetCount}…`, 34 + span * 58);
+      });
+    } catch { /* 解包失败不阻断打开 */ }
+    emitLoad(loadId, '正在登记到项目列表…', 95);
+    // v0.4.5：从 data/projects 以外打开的工程登记进项目列表（否则用户在列表里找不到它）
+    try { registerExternalProject(targetPath, r.payload.name); } catch { /* 登记失败不影响打开 */ }
+    emitLoad(loadId, '即将进入编辑界面…', 100);
     return {
       ok: true, project: r.payload, path: targetPath, container: r.container,
+      extractedAssets: extracted,
+      loadId,
       // 随工程保存的撤销历史（老工程没有这一节 → undefined）
       history: (r.payload as any)?.extraSections?.history
     };
@@ -587,7 +853,7 @@ ipcMain.handle('export:html', async (_evt, html: string, defaultName = 'index.ht
     }
   }
   const defaultDir = app.getPath('downloads') || join(dataRoot(), 'projects');
-  const res = await dialog.showSaveDialog({
+  const res = await showSaveDialog({
     title: '导出 HTML 网页文件',
     defaultPath: join(defaultDir, defaultName),
     filters: [{ name: 'HTML 网页文件', extensions: ['html', 'htm'] }]
@@ -606,7 +872,7 @@ ipcMain.handle('export:html', async (_evt, html: string, defaultName = 'index.ht
 // 导出 HTML 的同时自动保存同名 .bcproj 项目文件（HTML 逆向成本高，双写防丢）
 ipcMain.handle('export:html-with-project', async (_evt, html: string, scene: any, defaultName = 'index.html', projectName = '我的网页') => {
   try {
-    const res = await dialog.showSaveDialog({
+    const res = await showSaveDialog({
       title: '导出 HTML 与项目文件',
       defaultPath: defaultName,
       filters: [{ name: 'HTML 网页文件', extensions: ['html'] }]
@@ -615,20 +881,266 @@ ipcMain.handle('export:html-with-project', async (_evt, html: string, scene: any
     const htmlPath = res.filePath;
     const projectPath = htmlPath.replace(/\.html?$/i, '') + '.bcproj';
 
-    writeFileSync(htmlPath, html, 'utf-8');
+    // v0.4.5：把 HTML 里的 bc-img:// 引用内联成 data URI —— 否则导出的网页只有在本软件里
+    // 才能显示图片（协议是我们自己注册的），发给别人就是一堆破图。
+    // 资源来源有两种：容器素材（asset/，已解包到缓存）与本地文件（file/，绝对路径）。
+    let outHtml = html;
+    try {
+      const refs = new Set<string>();
+      for (const m of html.matchAll(/bc-img:\/\/(asset|file)\/([^"'\\\s)]+)/g)) refs.add(`${m[1]}/${m[2]}`);
+      for (const ref of refs) {
+        const [kind, ...rest] = ref.split('/');
+        const enc = rest.join('/');
+        let filePath = '';
+        try {
+          filePath = kind === 'asset'
+            ? (resolveCachedAsset(decodeURIComponent(enc)) || '')
+            : decodeURIComponent(enc);
+        } catch { filePath = ''; }
+        if (!filePath || !existsSync(filePath)) continue;
+        const buf = readFileSync(filePath);
+        const dataUrl = `data:${mediaMimeOf(filePath)};base64,${buf.toString('base64')}`;
+        outHtml = outHtml.split(`bc-img://${ref}`).join(dataUrl);
+      }
+    } catch { outHtml = html; }
+
+    writeFileSync(htmlPath, outHtml, 'utf-8');
+
+    // 同目录再存一份工程文件时，也要把素材一起打包（保持"换机器不丢图"）
+    let exportAssets: { name: string; data: Buffer; mime?: string }[] = [];
+    let exportScene = scene;
+    try {
+      const c = collectSceneAssets(scene);
+      exportAssets = c.assets;
+      exportScene = c.scene;
+    } catch { /* 收集失败按原样保存 */ }
 
     const w = writeProject(projectPath, {
       name: projectName,
-      scene,
+      scene: exportScene,
+      assets: exportAssets,
       meta: { elementCount: countNodes(scene?.root) }
     });
     if (!w.ok) return { ok: false, error: w.error || '写入工程文件失败' };
 
-    return { ok: true, htmlPath, projectPath };
+    return { ok: true, htmlPath, projectPath, inlinedAssets: exportAssets.length };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
 });
+
+// ============ 导出网站（v0.4.5 第 15 批） ============
+//
+// 用户要求（原话）：
+//   「默认相对路径……导出的时候根据记录的权威绝对路径和导出的位置自动匹配相对路径。
+//     这个要注意，所以最后导出文件夹的位置要让程序拿到，然后调整。
+//     导出的时候这个过程也加入『任务』（工具栏）当中。
+//     并且程序在主动记录一下每个项目之前选择导出的文件夹，下次自动匹配。」
+//
+// 所以这里做三件以前没有的事：
+//   ① **选目录**（不是选单个 html 文件）—— 只有这样程序才拿得到"导出位置"，
+//      才能算出每个媒体相对导出目录的写法；
+//   ② **把媒体文件真的拷进去**（assets/ 子目录），并重写 HTML 里的引用；
+//      跨盘符无法相对的，退回绝对路径并在结果里如实报告；
+//   ③ 整个过程是一条**任务**（工具栏「任务」里能看到进度、完成/失败）。
+//
+// 记住"这个项目上次导到哪儿"：data/export-dirs.json（按工程路径索引，工程没保存就用名字）。
+
+function exportDirsPath(): string {
+  return join(dataRoot(), 'export-dirs.json');
+}
+
+/** 文件 → 相对 baseDir 的写法（跨盘符时 crossDrive=true） */
+function toRelFromPath(file: string, baseDir: string): { rel: string; crossDrive: boolean } {
+  try {
+    const r = relativePath(baseDir, file).replace(/\\/g, '/');
+    if (r.startsWith('..') && isAbsolutePath(r)) return { rel: file, crossDrive: true };
+    return { rel: r, crossDrive: false };
+  } catch {
+    return { rel: file, crossDrive: true };
+  }
+}
+
+/** 在目标目录里取一个不冲突的文件名（a.png → a-2.png） */
+function uniqueFileName(dir: string, name: string): string {
+  const base = basename(name);
+  const dot = base.lastIndexOf('.');
+  const stem = dot > 0 ? base.slice(0, dot) : base;
+  const ext = dot > 0 ? base.slice(dot) : '';
+  let candidate = base;
+  let i = 2;
+  while (existsSync(join(dir, candidate))) {
+    candidate = `${stem}-${i}${ext}`;
+    i += 1;
+    if (i > 999) break;
+  }
+  return candidate;
+}
+
+function readExportDirs(): Record<string, string> {
+  try {
+    const raw = JSON.parse(readFileSync(exportDirsPath(), 'utf-8'));
+    return raw && typeof raw === 'object' ? raw as Record<string, string> : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberExportDir(key: string, dir: string): void {
+  if (!key || !dir) return;
+  try {
+    const all = readExportDirs();
+    all[key] = dir;
+    writeFileSync(exportDirsPath(), JSON.stringify(all, null, 2), 'utf-8');
+  } catch { /* 记不住不影响导出 */ }
+}
+
+/** 取上次导出目录（没有就退到下载目录 / 桌面） */function lastExportDir(key: string): string {
+  const saved = key ? readExportDirs()[key] : '';
+  if (saved && existsSync(saved)) return saved;
+  try {
+    const d = app.getPath('downloads');
+    if (d && existsSync(d)) return d;
+  } catch { /* 忽略 */ }
+  return dataRoot();
+}
+
+/** 把一个媒体引用解析成"本机真实文件路径"（bc-img:// 或绝对/相对路径都吃） */
+function resolveMediaFile(raw: string, projectDir: string): string {
+  const s = String(raw ?? '').trim();
+  if (!s) return '';
+  if (/^bc-img:\/\//i.test(s)) {
+    const kind = (s.match(/^bc-img:\/\/(asset|file)\//i) || [])[1] || 'file';
+    const enc = s.replace(/^bc-img:\/\/(asset|file)\//i, '');
+    try {
+      const dec = decodeURIComponent(enc);
+      if (kind === 'asset') return resolveCachedAsset(dec) || '';
+      return dec;
+    } catch { return ''; }
+  }
+  if (/^[a-zA-Z]:[\\/]/.test(s) || s.startsWith('\\\\') || s.startsWith('/')) return s.replace(/\//g, '\\').replace(/\\\\/g, '\\');
+  // 相对：按工程目录解析
+  if (projectDir) return join(projectDir, s);
+  return '';
+}
+
+ipcMain.handle('export:site', async (_evt, payload: {
+  html: string;
+  scene: any;
+  projectName?: string;
+  projectPath?: string;
+}) => {
+  const { html, scene, projectName = '我的网页', projectPath = '' } = payload || ({} as never);
+  const key = String(projectPath || projectName || '').trim();
+
+  // ① 先选导出目录（用上次的作为默认位置）
+  let outDir = '';
+  // 自动化探针用：BC_AUTO_EXPORT_DIR 直接给目录；BC_AUTO_EXPORT_PATH 给的是"文件路径"，
+  // 取它的目录 + 文件名（老探针 probe-table 还在用这个，保持兼容）。
+  const autoFile = process.env['BC_AUTO_EXPORT_PATH'];
+  let htmlFileName = 'index.html';
+  const autoDir = process.env['BC_AUTO_EXPORT_DIR'];
+  if (autoFile) {
+    outDir = dirname(autoFile);
+    htmlFileName = basename(autoFile);
+  } else if (autoDir) {
+    outDir = autoDir;
+  } else {
+    const res = await showOpenDialog({
+      title: '选择导出位置（会在这个文件夹里生成 index.html 与 assets/）',
+      defaultPath: lastExportDir(key),
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (res.canceled || !res.filePaths?.[0]) return { ok: false, canceled: true };
+    outDir = res.filePaths[0];
+  }
+
+  const task = startManualTask({
+    kind: 'export',
+    title: `导出网站「${projectName}」`,
+    detail: '准备导出…',
+    dest: outDir
+  });
+
+  try {
+    mkdirSync(outDir, { recursive: true });
+    const assetsDir = join(outDir, 'assets');
+    const projectDir = projectPath ? join(projectPath, '..') : '';
+
+    // ② 收集 HTML 里所有本地媒体引用
+    const refs = new Set<string>();
+    for (const m of html.matchAll(/(?:bc-img:\/\/(?:asset|file)\/[^"'\\\s)]+)/g)) refs.add(m[0]);
+    const total = refs.size;
+    updateManualTask(task.id, { detail: total > 0 ? `正在处理 ${total} 个媒体文件…` : '正在写入 HTML…', pct: 5, total });
+
+    let outHtml = html;
+    let copied = 0;
+    let crossDrive = 0;
+    let idx = 0;
+    for (const ref of refs) {
+      idx += 1;
+      updateManualTask(task.id, {
+        detail: `正在处理媒体 ${idx}/${total}…`,
+        pct: 5 + Math.round((idx / Math.max(1, total)) * 80)
+      });
+      const file = resolveMediaFile(ref, projectDir);
+      if (!file || !existsSync(file)) continue;
+      const rel = toRelFromPath(file, outDir);
+      // 跨盘符：没法相对，保留绝对路径（导出后本机可用，拷走会坏）——如实计数
+      const useRel = !!rel.rel && rel.rel !== file && !rel.crossDrive;
+      if (rel.crossDrive) crossDrive += 1;
+      // 拷进 assets/（同名冲突时加序号）
+      let destName = '';
+      try {
+        mkdirSync(assetsDir, { recursive: true });
+        destName = uniqueFileName(assetsDir, basename(file));
+        copyFileSync(file, join(assetsDir, destName));
+        copied += 1;
+      } catch {
+        // 拷不过去就退回内联 data URI（宁可文件大，也不要破图）
+        try {
+          const buf = readFileSync(file);
+          outHtml = outHtml.split(ref).join(`data:${mediaMimeOf(file)};base64,${buf.toString('base64')}`);
+        } catch { /* 彻底读不到就保持原样 */ }
+        continue;
+      }
+      const replacement = useRel ? `assets/${destName}` : `assets/${destName}`;
+      outHtml = outHtml.split(ref).join(replacement);
+    }
+
+    updateManualTask(task.id, { detail: '正在写入 HTML 文件…', pct: 88 });
+    const htmlPath = join(outDir, htmlFileName);
+    writeFileSync(htmlPath, outHtml, 'utf-8');
+
+    // ③ 顺手存一份工程副本（和以前一致：HTML + bcproj 双写）
+    updateManualTask(task.id, { detail: '正在保存工程副本…', pct: 94 });
+    let savedProject = '';
+    try {
+      const c = collectSceneAssets(scene);
+      const projectPath2 = join(outDir, `${projectName}.bcproj`);
+      const w = writeProject(projectPath2, {
+        name: projectName,
+        scene: c.scene,
+        assets: c.assets,
+        meta: { elementCount: countNodes(scene?.root) }
+      });
+      if (w.ok) savedProject = projectPath2;
+    } catch { /* 工程副本失败不影响网页导出 */ }
+
+    rememberExportDir(key, outDir);
+    finishManualTask(task.id, {
+      ok: true,
+      detail: `已导出到 ${outDir}（复制 ${copied} 个媒体文件${crossDrive > 0 ? `，${crossDrive} 个跨盘符保留绝对路径` : ''}）`
+    });
+    return { ok: true, outDir, htmlPath, copied, crossDrive, projectPath: savedProject };
+  } catch (e) {
+    finishManualTask(task.id, { ok: false, error: (e as Error).message });
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+/** 拿上次的导出目录（渲染层用来在按钮上显示"上次导到 D:/site"） */
+ipcMain.handle('export:last-dir', (_evt, key: string) => lastExportDir(String(key || '')));
 
 // ============ 扩展系统（extensions/ 迁移至 data/extensions/） ============
 function extRoot(): string {
@@ -793,7 +1305,7 @@ ipcMain.handle('ext:delete', async (_evt, kind: 'plugins' | 'resources', id: str
 
 ipcMain.handle('ext:import-folder', async (_evt, kind: 'plugins' | 'resources') => {
   try {
-    const res = await dialog.showOpenDialog({ title: '选择要导入的资源包文件夹', properties: ['openDirectory'] });
+    const res = await showOpenDialog({ title: '选择要导入的资源包文件夹', properties: ['openDirectory'] });
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
     const src = res.filePaths[0];
     const mf = JSON.parse(readFileSync(join(src, 'manifest.json'), 'utf-8'));
@@ -825,7 +1337,7 @@ function ensureImportedPackage() {
 
 ipcMain.handle('ext:import-json', async () => {
   try {
-    const res = await dialog.showOpenDialog({
+    const res = await showOpenDialog({
       title: '选择要导入的模板 JSON',
       properties: ['openFile'],
       filters: [{ name: 'JSON', extensions: ['json'] }]
@@ -850,7 +1362,7 @@ ipcMain.handle('ext:import-json', async () => {
 
 ipcMain.handle('ext:import-zip', async (_evt, kind: 'plugins' | 'resources') => {
   try {
-    const res = await dialog.showOpenDialog({
+    const res = await showOpenDialog({
       title: '选择要导入的 zip 资源包',
       properties: ['openFile'],
       filters: [{ name: 'Zip 资源包', extensions: ['zip'] }]
@@ -888,12 +1400,12 @@ ipcMain.handle('ext:export-resource', async (_evt, id: string, format: 'folder' 
     const files = collectFiles(srcDir, '').map((f) => ({ name: f.rel, data: readFileSync(f.abspath) }));
     const fileName = sanitizeId(mf.name || id);
     if (format === 'zip') {
-      const res = await dialog.showSaveDialog({ defaultPath: `${fileName}.zip`, filters: [{ name: 'Zip 资源包', extensions: ['zip'] }] });
+      const res = await showSaveDialog({ defaultPath: `${fileName}.zip`, filters: [{ name: 'Zip 资源包', extensions: ['zip'] }] });
       if (res.canceled || !res.filePath) return { ok: false, canceled: true };
       writeFileSync(res.filePath, zipCreate(files));
       return { ok: true, path: res.filePath };
     }
-    const res = await dialog.showOpenDialog({ title: '选择导出目标目录', properties: ['openDirectory', 'createDirectory'] });
+    const res = await showOpenDialog({ title: '选择导出目标目录', properties: ['openDirectory', 'createDirectory'] });
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
     const target = join(res.filePaths[0], id);
     if (existsSync(target)) return { ok: false, error: '目标目录已存在同名文件夹' };
@@ -906,7 +1418,7 @@ ipcMain.handle('ext:export-resource', async (_evt, id: string, format: 'folder' 
 
 ipcMain.handle('tpl:export-single', async (_evt, tree: unknown, defaultName?: string) => {
   try {
-    const res = await dialog.showSaveDialog({ defaultPath: defaultName || 'template.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+    const res = await showSaveDialog({ defaultPath: defaultName || 'template.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
     if (res.canceled || !res.filePath) return { ok: false, canceled: true };
     writeFileSync(res.filePath, JSON.stringify(tree, null, 2), 'utf-8');
     return { ok: true, path: res.filePath };
@@ -931,12 +1443,12 @@ ipcMain.handle('tpl:export-package', async (_evt, tree: unknown, meta: { id?: st
       { name: `templates/${id}.json`, data: Buffer.from(JSON.stringify(tree, null, 2), 'utf-8') }
     ];
     if (format === 'zip') {
-      const res = await dialog.showSaveDialog({ defaultPath: `${name}.zip`, filters: [{ name: 'Zip 资源包', extensions: ['zip'] }] });
+      const res = await showSaveDialog({ defaultPath: `${name}.zip`, filters: [{ name: 'Zip 资源包', extensions: ['zip'] }] });
       if (res.canceled || !res.filePath) return { ok: false, canceled: true };
       writeFileSync(res.filePath, zipCreate(files));
       return { ok: true, path: res.filePath };
     }
-    const res = await dialog.showOpenDialog({ title: '选择导出目标目录', properties: ['openDirectory', 'createDirectory'] });
+    const res = await showOpenDialog({ title: '选择导出目标目录', properties: ['openDirectory', 'createDirectory'] });
     if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
     const target = join(res.filePaths[0], id);
     if (existsSync(target)) return { ok: false, error: '目标目录已存在同名文件夹' };
@@ -1012,7 +1524,7 @@ function pruneOldPreviews(dir: string, keep: number): number {
 }
 
 ipcMain.handle('img:pick-src', async (_evt, mode: 'abs' | 'rel' = 'rel') => {
-  const res = await dialog.showOpenDialog({
+  const res = await showOpenDialog({
     title: '选择本地图片',
     properties: ['openFile'],
     filters: [
@@ -1031,14 +1543,17 @@ ipcMain.handle('img:pick-src', async (_evt, mode: 'abs' | 'rel' = 'rel') => {
 });
 
 // 首页背景：选择图片 / 视频文件（只返回路径，不复制；渲染层用 bc-img:// 预览）
-ipcMain.handle('media:pick-src', async (_evt, kind: 'image' | 'video' = 'image') => {
+ipcMain.handle('media:pick-src', async (_evt, kind: 'image' | 'video' | 'audio' = 'image') => {
   const isVideo = kind === 'video';
-  const res = await dialog.showOpenDialog({
-    title: isVideo ? '选择本地视频' : '选择本地图片',
+  const isAudio = kind === 'audio';
+  const res = await showOpenDialog({
+    title: isVideo ? '选择本地视频' : isAudio ? '选择本地音频' : '选择本地图片',
     properties: ['openFile'],
     filters: isVideo
       ? [{ name: '视频文件', extensions: ['mp4', 'webm', 'ogv', 'ogg', 'mov', 'm4v'] }]
-      : [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] }]
+      : isAudio
+        ? [{ name: '音频文件', extensions: ['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg', 'opus'] }]
+        : [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'] }]
   });
   if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
   return { ok: true, path: res.filePaths[0], absPath: res.filePaths[0] };
@@ -1065,9 +1580,61 @@ function mediaMimeOf(p: string): string {
 }
 
 app.whenReady().then(() => {
+  // 启动就记一条：出问题时至少能确认"是不是这个版本、这个时间开的"
+  ulog(`应用启动 v${getLocalVersion()}（${getAppStage()}）`);
+  // 应用级身份：必须在任何窗口/弹窗出现之前设置，任务栏才会把主窗口、原生对话框、
+  // 开发者工具都归到同一个 BlockCanvas 图标下（而不是其中一个变成 Electron 原子）。
+  if (process.platform === 'win32') app.setAppUserModelId('com.blockcanvas.app');
+
+  // 兜底：任何后建的窗口（DevTools、预览子窗、将来的多窗口）没显式给 icon 时补上三色 Logo。
+  // 用 'once' 不行——每建一个窗口都要生效，所以是常驻监听；已设过 icon 的窗口不覆盖。
+  app.on('browser-window-created', (_e, w) => {
+    const icon = appIconPath();
+    if (!icon) return;
+    try {
+      if (!w.isDestroyed()) w.setIcon(icon);
+    } catch { /* 某些窗口类型不支持 setIcon，忽略 */ }
+  });
+
   protocol.handle('bc-img', async (request) => {
     try {
       const url = new URL(request.url);
+      // v0.4.5：bc-img://asset/<hash>.<ext> —— 工程容器里的素材（开机解包到缓存目录）。
+      // 这是"换机器不丢图"的关键：引用不再指向某台电脑上的绝对路径。
+      if (url.host === 'asset') {
+        // v0.4.5 第 10 批：`?thumb=256` → 返回磁盘上的缩略图。
+        // 素材库网格每格只显示 62px 高，没必要为它解码 4K 原图（每张约 33MB RGBA）。
+        // 缩略图生成失败（损坏/不支持格式）就往下走原图，绝不让素材"消失"。
+        if (url.searchParams.has('thumb')) {
+          const thumbPath = resolveThumbPath(decodeURIComponent(url.pathname));
+          if (thumbPath && existsSync(thumbPath)) {
+            const buf = readFileSync(thumbPath);
+            return new Response(buf, {
+              status: 200,
+              headers: {
+                'Content-Type': 'image/jpeg',
+                'Content-Length': String(buf.length),
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'public, max-age=31536000, immutable'
+              }
+            });
+          }
+        }
+        const cached = resolveCachedAsset(decodeURIComponent(url.pathname));
+        if (!cached) return new Response(null, { status: 404 });
+        const buf = readFileSync(cached);
+        return new Response(buf, {
+          status: 200,
+          headers: {
+            'Content-Type': mediaMimeOf(cached),
+            'Content-Length': String(buf.length),
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges',
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'public, max-age=31536000, immutable'
+          }
+        });
+      }
       let rawPath = decodeURIComponent(url.pathname.replace(/^\/file\//i, '').replace(/^\//, ''));
       if (!rawPath) return new Response(null, { status: 400 });
 
@@ -1139,6 +1706,16 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  // 首次启动时若命令行里带了 .bcproj（双击文件启动），窗口还没加载完 → 先记下，
+  // did-finish-load 时再发给渲染进程。
+  {
+    const fromArgv = extractProjectPathFromArgv(process.argv);
+    if (fromArgv) {
+      pendingOsOpenPath = fromArgv;
+      ulog(`启动参数里带工程文件：${fromArgv}`);
+    }
+  }
 
   // 启动自愈：清我们自己在系统 Temp 里留下的文件（默认开）/ Chromium 缓存 / 孤立快照。
   // 必须在这里（app ready 之后）：storage 里要用到 session，且 userData 已重定向到 data/user-data。

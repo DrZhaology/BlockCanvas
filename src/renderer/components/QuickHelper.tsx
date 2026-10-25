@@ -6,7 +6,7 @@ import { HelpButton } from './HelpButton';
 import { GradientEditor } from './GradientEditor';
 import { Collapse } from './Collapse';
 import { Icon } from './Icon';
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePersistedBool } from '@lib/usePersisted';
 import {
   isGradient,
@@ -25,6 +25,9 @@ import {
 //   快捷助手生成的属性默认会同步显示在下方「CSS 样式属性」列表里（方便查看/微调）；
 //   关掉后下方列表就隐藏这些属性（样式依然生效），让面板更清爽。
 //   开关状态按「选择器」共用记忆（同类名 / 同关系选择器的元素共享一份）。
+
+/** 定位方式（与 CSS position 的取值一致） */
+type PosKind = 'static' | 'relative' | 'absolute' | 'fixed' | 'sticky';
 
 /** 快捷助手代管的属性 key：开关关闭时，下方「CSS 样式属性」隐藏这些属性 */
 export const HELPER_MANAGED_KEYS = new Set<string>([
@@ -93,6 +96,8 @@ export function QuickHelper(props: Props) {
 
   // 折叠状态全部记住：下次打开还是用户熟悉的样子
   const [layoutOpen, setLayoutOpen] = usePersistedBool('qh-layout-open', true);
+  const [posOpen, setPosOpen] = usePersistedBool('qh-position-open', false);
+  const [marginConfirm, setMarginConfirm] = useState<'x' | 'y' | null>(null);
   const [gradOpen, setGradOpen] = usePersistedBool('qh-textgrad-open', true);
   const gradDraftRef = useRef('');
 
@@ -100,6 +105,150 @@ export function QuickHelper(props: Props) {
   if (!node) return null;
 
   const eff = getEffectiveStyle(node, activeBreakpoint) as Record<string, string | undefined>;
+
+  // —— 定位助手：居中前先看原有 margin，避免和 margin:auto 打架（v0.4.5）——
+  const marginSides = ['marginTop', 'marginRight', 'marginBottom', 'marginLeft'] as const;
+  const marginVals = marginSides.map((k) => eff[k] ?? '');
+  const marginSummary = marginVals
+    .map((v, i) => `${['上', '右', '下', '左'][i]} ${v || '0'}`)
+    .join(' · ');
+  const marginDirty = marginVals.some((v) => !!v && v !== '0' && v !== '0px' && v !== 'auto');
+  const marginIrregular = new Set(marginVals.map((v) => v || '0px')).size > 1;
+
+  // —— 定位：锚定哪两边 + 切换定位时的 margin 提示（v0.4.5 第十六批）——
+  const posNow = (eff.position ?? 'static') as PosKind;
+  const relLike = posNow === 'relative' || posNow === 'sticky';
+  /** 横向/纵向锚定边。relative/sticky 固定 left+top（偏移是相对自身原位的位移） */
+  const [anchorX, setAnchorX] = useState<'left' | 'right'>('left');
+  const [anchorY, setAnchorY] = useState<'top' | 'bottom'>('top');
+  /** 切换定位方式时，若原 margin 不干净 → 先问一句要不要清掉（用户反复要求） */
+  const [posSwitchAsk, setPosSwitchAsk] = useState<{ next: PosKind } | null>(null);
+
+  useEffect(() => {
+    if (relLike) return;
+    // 跟随元素当前实际写法（用户手改过 left/right 时界面要跟着走）
+    const hasL = !!eff.left && eff.left !== 'auto';
+    const hasR = !!eff.right && eff.right !== 'auto';
+    if (hasR && !hasL) setAnchorX('right');
+    else if (hasL && !hasR) setAnchorX('left');
+    const hasT = !!eff.top && eff.top !== 'auto';
+    const hasB = !!eff.bottom && eff.bottom !== 'auto';
+    if (hasB && !hasT) setAnchorY('bottom');
+    else if (hasT && !hasB) setAnchorY('top');
+  }, [relLike, eff.left, eff.right, eff.top, eff.bottom]);
+
+  /**
+   * 真正写定位方式。
+   *
+   * 两条用户反复提的规则：
+   *  ① **同一根轴只留一边**：写 left 就把 right 置成 auto（反之亦然）；
+   *     用户原话「不要同时给 top right bottom left 同时给数值，画布上就用两个」。
+   *  ② **切换定位时问一句要不要清 margin**：老 margin 会把元素"顶住"，
+   *     表现是"改了定位却拖不动/位置不对"。
+   */
+  const applyPosition = (next: PosKind, clearMargin: boolean) => {
+    const patch: Record<string, string | undefined> = { position: next };
+    if (next === 'static') {
+      patch.left = 'auto'; patch.right = 'auto'; patch.top = 'auto'; patch.bottom = 'auto';
+    } else if (next === 'relative' || next === 'sticky') {
+      // 相对定位只用 left/top（另一侧清成 auto，避免 over-constrained 后失效）
+      patch.right = 'auto';
+      patch.bottom = 'auto';
+      if (eff.left === undefined || eff.left === 'auto') patch.left = '0px';
+      if (eff.top === undefined || eff.top === 'auto') patch.top = '0px';
+    } else {
+      // absolute / fixed：按当前锚定只留两边
+      const xs = anchorX;
+      const ys = anchorY;
+      patch[xs === 'left' ? 'right' : 'left'] = 'auto';
+      patch[ys === 'top' ? 'bottom' : 'top'] = 'auto';
+      if (eff[xs] === undefined || eff[xs] === 'auto') patch[xs] = '0px';
+      if (eff[ys] === undefined || eff[ys] === 'auto') patch[ys] = '0px';
+    }
+    if (clearMargin) {
+      patch.marginTop = '0px'; patch.marginRight = '0px';
+      patch.marginBottom = '0px'; patch.marginLeft = '0px';
+    }
+    beginStyleEdit();
+    updateStyle(elementId, patch as never);
+    endStyleEdit();
+    setMarginConfirm(null);
+    setPosSwitchAsk(null);
+  };
+
+  /** 切换定位方式：margin 不干净就先确认 */
+  const changePosition = (next: PosKind) => {
+    if (next === posNow) return;
+    if ((marginDirty || marginIrregular) && next !== 'static') {
+      setPosSwitchAsk({ next });
+      return;
+    }
+    applyPosition(next, false);
+  };
+
+  /**
+   * 居中。
+   *
+   * v0.4.5 第 8 批（用户反馈）：
+   * 「整个 fixed 的定位和 relative 非常糟糕，说了 fixed 要自动适配，**不要 4 边的都调整**，
+   *   因为我浏览器视口和画布完全不一样！」
+   *
+   * 以前 fixed 也走 `left:0; right:0; margin:auto` —— 那是**四个边一起被改**，
+   * 而且在浏览器里居中的是"真实视口"，画布上看到的完全是另一回事（画布宽度 ≠ 视口宽度）。
+   * 现在 fixed 改用**单边 + 百分比**：
+   *   left: calc(50% - 元素宽一半)  →  只改 left 一边，且自动适配任何视口宽度。
+   * 这样画布里看着居中，导出后在浏览器里同样居中（百分比跟着视口走）。
+   */
+  const applyCenter = (axis: 'x' | 'y', clearFirst: boolean) => {
+    beginStyleEdit();
+    const pos = eff.position ?? '';
+    const positioned = pos === 'absolute' || pos === 'fixed';
+    const isFixed = pos === 'fixed';
+
+    if (isFixed) {
+      // 量元素自身的布局尺寸（offsetWidth/Height 是 CSS 像素，不受画布 scale(zoom) 影响）
+      const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(elementId)}"]`) as HTMLElement | null;
+      const w = el?.offsetWidth ?? 0;
+      const h = el?.offsetHeight ?? 0;
+      const patch = axis === 'x'
+        ? { left: `calc(50% - ${Math.round(w / 2)}px)`, right: undefined, marginLeft: '0', marginRight: '0' }
+        : { top: `calc(50% - ${Math.round(h / 2)}px)`, bottom: undefined, marginTop: '0', marginBottom: '0' };
+      updateStyle(elementId, patch as never);
+      endStyleEdit();
+      setMarginConfirm(null);
+      return;
+    }
+
+    const clear = clearFirst
+      ? (axis === 'x'
+        ? { marginLeft: '0px', marginRight: '0px' }
+        : { marginTop: '0px', marginBottom: '0px' })
+      : {};
+    const center = axis === 'x'
+      ? (positioned
+        ? { left: '0px', right: '0px', marginLeft: 'auto', marginRight: 'auto' }
+        : { marginLeft: 'auto', marginRight: 'auto' })
+      : (positioned
+        ? { top: '0px', bottom: '0px', marginTop: 'auto', marginBottom: 'auto' }
+        : { marginTop: 'auto', marginBottom: 'auto' });
+    updateStyle(elementId, { ...clear, ...center });
+    endStyleEdit();
+    setMarginConfirm(null);
+  };
+
+  const requestCenter = (axis: 'x' | 'y') => {
+    // fixed 走"单边百分比"方案，不改 margin、不需要确认
+    if ((eff.position ?? '') === 'fixed') {
+      applyCenter(axis, true);
+      return;
+    }
+    if (marginDirty || marginIrregular) {
+      setMarginConfirm(axis);
+      return;
+    }
+    applyCenter(axis, false);
+  };
+
   const isContainer = CONTAINER_TAGS.has(elementType);
   const isText = TEXT_TAGS.has(elementType) || node.text !== undefined;
 
@@ -348,6 +497,198 @@ export function QuickHelper(props: Props) {
           </div>
         </div>
       )}
+
+      {/* ——— ①.5 定位助手（v0.4.5）——— */}
+      <div className="qh-block">
+        <div className="qh-block-head">
+          <button className="qh-block-toggle" onClick={() => setPosOpen((v) => !v)}>
+            <span className={'page-advanced-caret' + (posOpen ? ' open' : '')}><Icon name="chevronRight" size={11} /></span>
+            定位助手
+          </button>
+          <span className="qh-block-sub">贴边 / 居中 / 悬浮</span>
+          <HelpButton
+            title="定位助手"
+            content={
+              '【它是干什么的】\n' +
+              '把「position + left/top/right/bottom + margin:auto」这套要配合起来才生效的定位属性，做成几个按钮。\n\n' +
+              '【三种常用姿势】\n' +
+              '· 相对定位 relative：元素还在原来的位置，只做偏移（不影响其他元素）。\n' +
+              '· 绝对定位 absolute：脱离文档流，相对最近的定位父容器摆放。\n' +
+              '· 固定定位 fixed：相对浏览器窗口固定，滚动页面也不动（悬浮按钮 / 回到顶部）。\n\n' +
+              '【居中为什么要用 margin:auto】\n' +
+              '绝对定位元素写 left:0; right:0; margin-left:auto; margin-right:auto 才会真正水平居中；\n' +
+              '只写 left:50% 会以元素左上角对齐中线，看起来偏右。垂直居中同理，且元素需要有明确高度。'
+            }
+          />
+        </div>
+        {posOpen && (
+          <div className="pos-helper">
+            <div className="flex-helper-row">
+              <label>定位方式 (position)</label>
+              <select
+                value={eff.position ?? 'static'}
+                onChange={(e) => changePosition(e.target.value as PosKind)}
+              >
+                <option value="static">默认流式 (static)</option>
+                <option value="relative">相对定位 (relative)</option>
+                <option value="absolute">绝对定位 (absolute)</option>
+                <option value="fixed">固定定位 (fixed · 悬浮在窗口)</option>
+                <option value="sticky">粘性定位 (sticky)</option>
+              </select>
+            </div>
+
+            {/*
+              锚定两边（v0.4.5 第十六批 · 用户反复要求）
+              ------------------------------------------------------------------
+              用户原话：「不要同时给 top right bottom left 同时给数值，画布上就用两个，
+                        比如左上角区域就用 left top，不要 4 个都给。」
+              CSS 里一个元素在**同一根轴**上同时写 left 与 right（又没写 width）时，
+              两边会一起参与计算：元素被"撑满"，或者 one-side 被忽略 —— 表现就是
+              "我明明只调了一个数，它却整体变形/不动"。
+              所以界面上**只暴露两根轴各一边**，另一边自动写 `auto`（而不是留个空框让人误会）。
+              relative / sticky 的偏移是"相对自身原位"的位移，两边同写没有意义，固定用 left/top。
+            */}
+            <div className={'pos-edges' + (['absolute', 'fixed', 'relative', 'sticky'].includes(eff.position ?? '') ? '' : ' is-disabled')}>
+              <div className="pos-axis">
+                <span className="pos-axis-label">横向锚定</span>
+                <div className="pos-axis-seg">
+                  {([['left', '左 left'], ['right', '右 right']] as const).map(([k, label]) => (
+                    <button
+                      key={k}
+                      className={'pos-axis-btn' + (anchorX === k ? ' is-on' : '')}
+                      disabled={relLike}
+                      title={relLike
+                        ? '相对定位的偏移是相对自身原位的位移，横向固定用 left'
+                        : `横向以 ${k} 为基准（另一边自动置为 auto）`}
+                      onClick={() => setAnchorX(k)}
+                    >{label}</button>
+                  ))}
+                </div>
+                <NumberUnitInput elementId={elementId} schemaKey={anchorX} unit="px" />
+              </div>
+              <div className="pos-axis">
+                <span className="pos-axis-label">纵向锚定</span>
+                <div className="pos-axis-seg">
+                  {([['top', '上 top'], ['bottom', '下 bottom']] as const).map(([k, label]) => (
+                    <button
+                      key={k}
+                      className={'pos-axis-btn' + (anchorY === k ? ' is-on' : '')}
+                      disabled={relLike}
+                      title={relLike
+                        ? '相对定位的偏移是相对自身原位的位移，纵向固定用 top'
+                        : `纵向以 ${k} 为基准（另一边自动置为 auto）`}
+                      onClick={() => setAnchorY(k)}
+                    >{label}</button>
+                  ))}
+                </div>
+                <NumberUnitInput elementId={elementId} schemaKey={anchorY} unit="px" />
+              </div>
+            </div>
+            {/* relative / sticky：把"原文档流位置"写清楚（用户反馈这行字跑到框外面了） */}
+            {relLike && (
+              <div className="pos-rel-note">
+                <Icon name="info" size={12} />
+                <span>
+                  相对定位：元素<strong>原文档流位置</strong>不动，只按 left / top 做偏移。
+                  所以这里的数值是"位移量"，可以填负数。
+                </span>
+              </div>
+            )}
+            {!['absolute', 'fixed', 'relative', 'sticky'].includes(eff.position ?? '') && (
+              <div className="pos-static-note">当前是默认流式布局：先在上面选一种定位方式，偏移才会生效。</div>
+            )}
+            {/* 绝对/固定定位：偏移不允许为负（用户反馈"甚至能达到负数，不对"）*/}
+            {['absolute', 'fixed'].includes(eff.position ?? '') && (
+              <div className="pos-clamp-note">
+                绝对 / 固定定位只能往容器<strong>内部</strong>排：偏移小于 0 会自动当成 0。
+                想让它贴左就用 left、贴右就用 right（不要两边都给）。
+              </div>
+            )}
+
+            <div className="pos-actions">
+              <button
+                className="pos-btn"
+                onClick={() => requestCenter('x')}
+                title={(eff.position ?? '') === 'fixed'
+                  ? '写 left: calc(50% - 宽÷2) —— 只改左边一条，自动适配任何视口宽度（不动四边）'
+                  : ['absolute'].includes(eff.position ?? '')
+                    ? '左右都设 0 + 外边距自动 → 水平居中（需要元素有明确宽度）'
+                    : '左右外边距自动 → 块级元素水平居中（需要元素有明确宽度）'}
+              ><Icon name="columns" size={13} /> 水平居中</button>
+              <button
+                className="pos-btn"
+                onClick={() => requestCenter('y')}
+                title={(eff.position ?? '') === 'fixed'
+                  ? '写 top: calc(50% - 高÷2) —— 只改上边一条，自动适配任何视口高度（不动四边）'
+                  : '上下都设 0 + 外边距自动 → 垂直居中（需要元素有明确高度；流式元素需要父级是 Flex 才生效）'}
+              ><Icon name="rows" size={13} /> 垂直居中</button>
+              <button
+                className="pos-btn is-ghost"
+                onClick={() => {
+                  beginStyleEdit();
+                  updateStyle(elementId, {
+                    position: 'static', left: 'auto', right: 'auto', top: 'auto', bottom: 'auto',
+                    marginLeft: 'auto', marginRight: 'auto', marginTop: 'auto', marginBottom: 'auto'
+                  });
+                  endStyleEdit();
+                  setMarginConfirm(null);
+                }}
+                title="清掉定位与偏移，回到普通文档流"
+              ><Icon name="undo" size={13} /> 清除定位</button>
+            </div>
+
+            {/* 切换定位方式时的 margin 确认（用户反复要求："切换定位后要提示选择要不要清除 margin"） */}
+            {posSwitchAsk && (
+              <div className="pos-confirm">
+                <div className="pos-confirm-text">
+                  这个元素已有<strong>非零或不对称</strong>的外边距（{marginSummary}）。
+                  定位元素靠 left/top 之类的偏移排位置，原来的 margin 会把它「顶住」——
+                  常见表现是"改了定位却拖不动 / 位置差一截"。
+                </div>
+                <div className="pos-confirm-actions">
+                  <button className="pos-confirm-btn is-primary" onClick={() => applyPosition(posSwitchAsk.next, true)}>
+                    清掉 margin 再切换
+                  </button>
+                  <button className="pos-confirm-btn" onClick={() => applyPosition(posSwitchAsk.next, false)}>
+                    保留原 margin
+                  </button>
+                  <button className="pos-confirm-btn is-ghost" onClick={() => setPosSwitchAsk(null)}>
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 内联确认条（不是全屏弹窗）：原 margin 不对称/非零时，先问一句再清零 */}
+            {marginConfirm && (
+              <div className="pos-confirm">
+                <div className="pos-confirm-text">
+                  这个元素已有<strong>非零或不对称</strong>的外边距（{marginSummary}）。
+                  居中要用 <code>margin:auto</code>，会和它冲突。
+                </div>
+                <div className="pos-confirm-actions">
+                  <button className="pos-confirm-btn is-primary" onClick={() => applyCenter(marginConfirm, true)}>
+                    先清零再居中
+                  </button>
+                  <button className="pos-confirm-btn" onClick={() => applyCenter(marginConfirm, false)}>
+                    保留原 margin
+                  </button>
+                  <button className="pos-confirm-btn is-ghost" onClick={() => setMarginConfirm(null)}>
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="pos-hint">
+              居中生效需要元素有<strong>明确宽/高</strong>（或由内容撑开）。
+              <strong>fixed</strong> 定位在导出后相对<strong>浏览器视口</strong>，所以这里的居中是
+              百分比（<code>calc(50% - 一半)</code>）—— 只动一条边，换任何屏幕宽度都居中；
+              画布上的位置只是预览，实际以浏览器视口为准。
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ——— ② 文字渐变（仅文本元素可用） ——— */}
       {isText && (

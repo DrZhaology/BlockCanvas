@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
-import { CSS_UNITS, UNIT_LABELS } from '@lib/propertySchema';
+import { CSS_UNITS, UNIT_LABELS, getSchemaItem } from '@lib/propertySchema';
 import { useWheelAdjust } from '@lib/wheelAdjust';
+import { isTokenRef, tokenRef, kindsForInput } from '@lib/designTokens';
+import { VarMenu } from './VarMenu';
 
 // BlockCanvas · 数值输入（数字框 + 单位下拉）
 //
@@ -35,8 +37,12 @@ export function NumberUnitInput(props: Props) {
   const updatePseudoStyle = useScene((s) => s.updatePseudoStyle);
   const activeBreakpoint = useScene((s) => s.activeBreakpoint);
   const { elementId, schemaKey, unit: defaultUnit, allowAuto, pseudo } = props;
-  // 设计变量菜单（v0.4.5）：边距 / 尺寸等数值项可直接引用 var(--bc-xxx)
+  // 设计变量菜单（v0.4.5）：边距 / 尺寸等数值项可直接引用 var(--xxx)。
+  // v0.4.5 修正：**只列出类型匹配的变量**（数值项 → 只给尺寸类）。
+  // 以前这里不区分类型，宽度里能选到颜色变量 —— 用户反馈"变量乱用了"。
   const [varOpen, setVarOpen] = useState(false);
+  const varBtnRef = useRef<HTMLButtonElement | null>(null);
+  const varKinds = kindsForInput(getSchemaItem(schemaKey)?.input ?? 'number');
 
   const isPseudo = Boolean(pseudo);
   const node = findNode(scene.root, elementId);
@@ -101,11 +107,11 @@ export function NumberUnitInput(props: Props) {
 
   const isAuto = u === 'auto';
   const dragDisabled = isAuto || u === 'custom';
-  const isVarRef = /^\s*var\(\s*--bc-[^)]+\)\s*$/.test(value);
+  const isVarRef = isTokenRef(value);
 
-  /** 选用设计变量：值直接写成 var(--bc-xxx)（一条撤销） */
+  /** 选用设计变量：值直接写成 var(--xxx)（一条撤销）。旧工程里的 var(--bc-xxx) 依然认 */
   const applyVar = (name: string) => {
-    const v = `var(--bc-${name})`;
+    const v = tokenRef(name);
     setNum(v);
     setU('custom');
     commit(v);
@@ -181,37 +187,23 @@ export function NumberUnitInput(props: Props) {
       </select>
       <div className="num-unit-var-wrap">
         <button
+          ref={varBtnRef}
           className={'num-unit-var-btn' + (isVarRef || varOpen ? ' active' : '')}
           onClick={() => setVarOpen((v) => !v)}
-          title={tokens && tokens.length > 0
-            ? '使用设计变量：写入 var(--bc-xxx)，改变量值全站一起变'
-            : '还没有定义变量 —— 到右侧「变量」页签点「＋ 新建变量」'}
+          title={varKinds.length === 0
+            ? '这一项不支持引用设计变量'
+            : (tokens ?? []).some((t) => varKinds.includes(t.kind))
+              ? '使用设计变量：写入 var(--xxx)，改变量值全站一起变（只列出类型匹配的变量）'
+              : '还没有匹配类型的变量 —— 到右侧「变量」页签新建一个'}
           tabIndex={-1}
         >var</button>
-        {varOpen && (
-          <>
-            <div className="num-unit-var-backdrop" onClick={() => setVarOpen(false)} />
-            <div className="num-unit-var-menu">
-              {(!tokens || tokens.length === 0) && (
-                <div className="num-unit-var-empty">
-                  还没有变量。到右侧「变量」页签点「＋ 新建变量」后，这里就能直接选用。
-                </div>
-              )}
-              {(tokens ?? []).map((t) => (
-                <button
-                  key={t.name}
-                  className="num-unit-var-item"
-                  onClick={() => applyVar(t.name)}
-                  title={`var(--bc-${t.name}) = ${t.value}`}
-                >
-                  {t.kind === 'color' && <span className="num-unit-var-swatch" style={{ background: t.value }} />}
-                  <span className="num-unit-var-name">--bc-{t.name}</span>
-                  <span className="num-unit-var-val">{t.value}</span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+        <VarMenu
+          open={varOpen}
+          anchorRef={varBtnRef}
+          kinds={varKinds}
+          onClose={() => setVarOpen(false)}
+          onPick={applyVar}
+        />
       </div>
     </div>
   );

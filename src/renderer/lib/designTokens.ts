@@ -44,56 +44,141 @@ export const DEFAULT_TOKENS: TokenEntry[] = [
   { name: 'shadow-card', value: '0 4px 16px rgba(0, 0, 0, 0.08)', group: '阴影', kind: 'shadow' }
 ];
 
-/** 完整 CSS 变量名（--bc-primary） */
+/** 完整 CSS 变量名。v0.4.5 起**不再强制加 bc- 前缀**，用户起什么名就是什么名 */
 export function cssVarName(name: string): string {
-  return `--bc-${name}`;
+  const n = String(name ?? '').trim().replace(/^--/, '');
+  return `--${n}`;
 }
 
-/** 可供写进样式的引用（var(--bc-primary)） */
+/** 旧版变量名（--bc-xxx）。只为兼容已存工程，新代码不要再用 */
+export function legacyVarName(name: string): string {
+  const n = String(name ?? '').trim().replace(/^--/, '');
+  return `--bc-${n}`;
+}
+
+/** 可供写进样式的引用（var(--primary)） */
 export function tokenRef(name: string): string {
   return `var(${cssVarName(name)})`;
 }
 
-/** 是否是一个变量引用（如 var(--bc-primary)） */
+/** 变量引用匹配：新名 var(--x) 与旧名 var(--bc-x) 都算 */
+const VAR_REF_RE = /^\s*var\(\s*--(?:bc-)?([^)\s]+)\s*\)\s*$/;
+
+/** 是否是一个变量引用（如 var(--primary) / var(--bc-primary)） */
 export function isTokenRef(value: string | undefined | null): boolean {
-  return !!value && /^\s*var\(\s*--bc-[^)]+\)\s*$/.test(value);
+  return !!value && VAR_REF_RE.test(value);
 }
 
-/** 从 var(--bc-primary) 里取出变量名 primary；不是变量引用则返回 null */
+/** 从 var(--primary) / var(--bc-primary) 里取出变量名 primary；不是变量引用则返回 null */
 export function tokenNameFromRef(value: string | undefined | null): string | null {
   if (!value) return null;
-  const m = /^\s*var\(\s*--bc-([^)\s]+)\s*\)\s*$/.exec(value);
+  const m = VAR_REF_RE.exec(value);
   return m ? m[1] : null;
 }
 
-/** 生成 :root 定义块 */
+/**
+ * 生成 :root 定义块。
+ *
+ * v0.4.5 无感迁移的关键：每个变量**同时输出新名与旧名**。
+ * 老工程里写的是 var(--bc-primary)，新代码写 var(--primary)，
+ * 两者在导出后都能解析 —— 不需要改写任何已存工程，也不会出现"打开就变样"。
+ */
 export function tokensToCss(tokens: TokenEntry[]): string {
   if (!tokens || tokens.length === 0) return '';
-  const lines = tokens.map((t) => `  ${cssVarName(t.name)}: ${t.value};`).join('\n');
+  const lines = tokens
+    .map((t) => `  ${cssVarName(t.name)}: ${t.value};\n  ${legacyVarName(t.name)}: ${t.value};`)
+    .join('\n');
   return `:root {\n${lines}\n}`;
 }
 
 /** 生成可直接注入编辑器的 CSS 文本（用于让画布实时预览） */
 export function tokensToRootCss(tokens: TokenEntry[]): string {
   if (!tokens || tokens.length === 0) return '';
-  const lines = tokens.map((t) => `${cssVarName(t.name)}: ${t.value};`).join(' ');
+  const lines = tokens
+    .map((t) => `${cssVarName(t.name)}: ${t.value}; ${legacyVarName(t.name)}: ${t.value};`)
+    .join(' ');
   return `:root { ${lines} }`;
 }
 
-/** 变量名合法性：小写字母开头，只允许小写字母 / 数字 / 连字符（CSS 自定义属性允许更宽，但保持一致更好读） */
+/**
+ * 变量名合法性：**自由度放宽**。
+ * 允许大小写字母、数字、连字符、下划线；首字符不能是连字符（避免 -- 开头）。
+ * 不再强制小写，也不再要求必须以字母开头。
+ */
 export function isValidTokenName(name: string): boolean {
-  return /^[a-z][a-z0-9-]*$/.test(name);
+  const n = String(name ?? '').trim();
+  if (!n || n.length > 48) return false;
+  return /^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(n);
 }
 
-/** 在给定集合里生成不重复的变量名 */
+/** 在给定集合里生成不重复的变量名（保留用户输入的大小写） */
 export function uniqueTokenName(base: string, tokens: TokenEntry[]): string {
   const used = new Set(tokens.map((t) => t.name));
-  const safe = base.trim().replace(/[^a-zA-Z0-9-]/g, '-').replace(/^-+/, '').toLowerCase() || 'token';
-  const start = isValidTokenName(safe) ? safe : 'token-' + safe.replace(/[^a-z0-9-]/g, '');
+  const cleaned = String(base ?? '')
+    .trim()
+    .replace(/^--/, '')
+    .replace(/[^A-Za-z0-9_-]/g, '-')
+    .replace(/^-+/, '');
+  const start = isValidTokenName(cleaned) ? cleaned : 'token';
   if (!used.has(start)) return start;
   let i = 2;
   while (used.has(`${start}-${i}`)) i += 1;
   return `${start}-${i}`;
+}
+
+// ============================================================================
+// 变量类型 ↔ 属性类型的对应关系（v0.4.5）
+// ----------------------------------------------------------------------------
+// 用户反馈：「变量里面的属性怎么可以乱用了，应该颜色只能对应颜色的使用，宽度就宽度，现在乱了。」
+//
+// 原因：变量面板只区分了 color / size / shadow 三种类型，但引用变量的三个入口
+// （调色盘、数值输入、四值输入）里，只有调色盘做了过滤 ——
+// 数值框的 var 菜单把**所有**变量都列了出来，于是可以把 `--primary`（颜色）
+// 引用到一个 `width` 上，导出的 CSS 直接失效。
+//
+// 现在统一由这里裁决：**输入控件类型 → 允许的变量类型**，不符合的变量不出现在菜单里。
+// ============================================================================
+
+export type TokenKind = TokenEntry['kind'];
+
+export const TOKEN_KIND_LABELS: Record<TokenKind, string> = {
+  color: '颜色',
+  size: '尺寸',
+  shadow: '阴影'
+};
+
+/** 各类输入控件允许引用的变量类型；返回空数组 = 这一项不该出现 var 按钮 */
+export function kindsForInput(input: string): TokenKind[] {
+  switch (input) {
+    case 'color':
+      return ['color'];
+    case 'number':
+    case 'trbl':
+    case 'box4':
+    case 'opacity':
+    case 'lineHeight':
+      return ['size'];
+    case 'shadow':
+    case 'textShadow':
+      return ['shadow'];
+    default:
+      return [];
+  }
+}
+
+/** 按允许的类型过滤变量（保持原有顺序） */
+export function filterTokensByKind(tokens: TokenEntry[] | undefined | null, allow: TokenKind[]): TokenEntry[] {
+  const all = tokens ?? [];
+  if (allow.length === 0) return [];
+  const set = new Set<TokenKind>(allow);
+  return all.filter((t) => set.has(t.kind));
+}
+
+/** 给 UI 用的一句话说明："这里只能引用颜色类变量" */
+export function kindsHint(allow: TokenKind[]): string {
+  if (allow.length === 0) return '这一项不支持引用设计变量';
+  const names = allow.map((k) => TOKEN_KIND_LABELS[k]).join(' / ');
+  return `这里只能引用「${names}」类变量`;
 }
 
 /** 按分组归类，UI 分块渲染 */

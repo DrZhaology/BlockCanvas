@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { existsSync, readdirSync, statSync, unlinkSync, rmSync } from 'node:fs';
 import { dataRoot, listProjects, sanitizeProjectFolder, readAppConfig } from './userData';
 import { sessionDraftBytes } from './session';
+import { thumbCacheBytes, clearThumbCache } from './assets';
 import { systemTempDir } from './paths';
 
 // ============================================================================
@@ -62,7 +63,7 @@ const TEMP_PATTERNS: RegExp[] = [
 ];
 
 export type StorageCategoryId =
-  | 'chromiumCache' | 'temp' | 'downloads'
+  | 'chromiumCache' | 'temp' | 'downloads' | 'thumbs'
   | 'userState' | 'projects' | 'backups' | 'extensions' | 'other';
 
 export interface StorageCategory {
@@ -206,6 +207,8 @@ export function getStorageBreakdown(): StorageBreakdown {
   const backupsBytes = getDirSize(join(dRoot, 'backups'));
   const extensionsBytes = getDirSize(join(dRoot, 'extensions'));
   const downloadsBytes = getDirSize(join(dRoot, 'downloads'));
+  // v0.4.5：素材缩略图缓存（可再生成，随时可清）
+  const thumbsBytes = thumbCacheBytes();
   // 临时文件 = 程序目录里的 data/tmp（预览页 / 更新脚本工作目录）+ 系统 Temp 里遗留的我们的文件
   const localTempBytes = getDirSize(join(dRoot, 'tmp'));
   const systemTempBytes = getTempSize();
@@ -213,12 +216,13 @@ export function getStorageBreakdown(): StorageBreakdown {
 
   const dataTotal = getDirSize(dRoot);
   // —— 其它：data/ 总占用 - 已分类部分（保证**所有 data 类之和 === dataTotal**，账目对得上）——
-  const other = Math.max(0, dataTotal - (userDataTotal + sessionBytes + projectsBytes + backupsBytes + extensionsBytes + downloadsBytes + localTempBytes));
+  const other = Math.max(0, dataTotal - (userDataTotal + sessionBytes + projectsBytes + backupsBytes + extensionsBytes + downloadsBytes + localTempBytes + thumbsBytes));
 
   const categories: StorageCategory[] = [
     { id: 'chromiumCache', label: 'Chromium 运行缓存', bytes: chromiumCache, cleanable: true, hint: '渲染 / 脚本编译 / GPU 的临时文件，清理不影响任何项目数据' },
     { id: 'temp', label: '临时文件（预览 / 更新 / 系统 Temp）', bytes: tempTotal, cleanable: true, hint: '浏览器预览页与更新脚本的工作文件，程序用完就该删掉' },
     { id: 'downloads', label: '更新包下载', bytes: downloadsBytes, cleanable: true, hint: '手动下载的更新 zip，装完就没用了' },
+    { id: 'thumbs', label: '素材缩略图缓存', bytes: thumbsBytes, cleanable: true, hint: '素材库里那些小预览图（可再生成）；清掉后第一次打开素材页会重新生成' },
     { id: 'userState', label: '界面偏好与未保存草稿', bytes: userState, cleanable: false, hint: '窗口布局 / 面板宽度 / 各标签的未保存编辑内容 —— 清掉会"设置被重置 + 草稿丢失"' },
     { id: 'projects', label: '项目工程文件 (.bcproj)', bytes: projectsBytes, cleanable: false, hint: '你的作品本体，只能自己删' },
     { id: 'backups', label: '历史快照与备份', bytes: backupsBytes, cleanable: false, hint: '自动备份，可用"清理孤立快照"回收已删项目的部分' },
@@ -453,6 +457,7 @@ function budgetLimit(key: string, fallback: number): number {
     }
     case 'temp': return getTempSize();
     case 'downloads': return getDirSize(join(dataRoot(), 'downloads'));
+    case 'thumbs': return thumbCacheBytes();
     default: return 0;
   }
 }
@@ -471,6 +476,7 @@ export async function clearStorageCategory(id: StorageCategoryId): Promise<{ ok:
       case 'chromiumCache': await clearChromiumCache(); break;
       case 'temp': clearOurTempFiles(); break;
       case 'downloads': clearDownloads(1); break;
+      case 'thumbs': clearThumbCache(); break;
       default:
         return { ok: false, freedBytes: 0, error: '这一类是你的数据，不能自动清理（请到对应页面手动删除）。' };
     }
@@ -484,7 +490,7 @@ export async function clearStorageCategory(id: StorageCategoryId): Promise<{ ok:
 /** 一键清理全部"可清"分类 */
 export async function clearAllCleanable(): Promise<{ ok: boolean; freedBytes: number }> {
   let freed = 0;
-  for (const id of ['chromiumCache', 'temp', 'downloads'] as StorageCategoryId[]) {
+  for (const id of ['chromiumCache', 'temp', 'downloads', 'thumbs'] as StorageCategoryId[]) {
     const r = await clearStorageCategory(id);
     freed += r.freedBytes;
   }

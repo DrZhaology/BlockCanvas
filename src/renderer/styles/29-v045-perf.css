@@ -1,0 +1,644 @@
+/* ============================================================================
+   BlockCanvas · 29-v045-perf.css
+   ----------------------------------------------------------------------------
+   v0.4.5 第九批：**动画性能**。CSS 侧只做"开关"，判断交给 JS
+   （见 src/renderer/lib/animGovernor.ts，它往 <html> 上写两个属性）：
+
+     data-bc-anim="full"    正常（默认，什么都不做）
+     data-bc-anim="lite"    精简档：装饰性过渡/动画时长压到 0.01ms（状态视觉不变，只是瞬间到位）
+     data-bc-anim="off"     关闭档：连"表示正在忙"的旋转也停
+     data-bc-anim-paused=1  窗口不可见/失焦：装饰动画暂停不跑（省 GPU / 电量）
+
+   为什么这是"另一条路"而不是继续抠 CSS：动画是否卡顿取决于**当时机器在干什么**
+   （一个 4K 场景 + 一堆大图解码时，任何过渡都会掉帧）。与其二选一（要么全有要么全无），
+   不如让程序在掉帧时自动收、在顺滑时自动放 —— 用户完全无感。
+
+   ⚠ 精简档**不清除**任何状态类（.is-active / .is-open / 伪类颜色…），
+     只压缩时长，所以"视觉正确性"不受影响；旋转指示单独保留，否则用户会以为程序卡死。
+   ========================================================================== */
+
+/* ============================================================================
+   1. 手动/自动"精简档" & "关闭档"
+   ========================================================================== */
+html[data-bc-anim='lite'] *,
+html[data-bc-anim='lite'] *::before,
+html[data-bc-anim='lite'] *::after {
+  transition-duration: 0.01ms !important;
+  transition-delay: 0ms !important;
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
+}
+/* 精简档仍保留"正在忙"的旋转：它是状态指示，不是装饰 */
+html[data-bc-anim='lite'] .tb-spin,
+html[data-bc-anim='lite'] .tb-spin::before,
+html[data-bc-anim='lite'] .tb-spin::after {
+  animation-duration: inherit !important;
+}
+
+/* 关闭档：装饰动画一律不跑（旋转除外，留一个"在做事"的反馈） */
+html[data-bc-anim='off'] *,
+html[data-bc-anim='off'] *::before,
+html[data-bc-anim='off'] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+html[data-bc-anim='off'] .tb-spin { animation: bcSpin 0.9s linear infinite !important; }
+
+/* ============================================================================
+   2. 窗口不可见 / 失焦 → 装饰动画暂停（不是"删掉"，切回来立刻继续）
+   ---------------------------------------------------------------------------
+   只暂停**纯装饰**的那几个（旋转、脉冲、呼吸、进场），其它一律不动 ——
+   暂停所有动画会把"正在下载""正在应用更新"这类进度反馈也冻住，那是错的。
+   ========================================================================== */
+html[data-bc-anim-paused='1'] .tb-spin,
+html[data-bc-anim-paused='1'] .bc-drop-preview,
+html[data-bc-anim-paused='1'] .bc-loading-logo,
+html[data-bc-anim-paused='1'] .bc-tips-roll,
+html[data-bc-anim-paused='1'] .eh-panel,
+html[data-bc-anim-paused='1'] .app-toast {
+  animation-play-state: paused !important;
+}
+
+/* ============================================================================
+   2b. 窗口彻底不可见（最小化 / 切到别的应用）→ 把**所有**无限循环动画停下来
+   ---------------------------------------------------------------------------
+   用户反馈（原话）：「有时候我可能加载了一些图片，导致 CPU 利用率上升，
+   但是我都最小化或者都静默到后台了，这个 CPU 利用率下不来。后续把优化性能列入任务列表。」
+   —— 已经进任务列表；这里先做**当下就能见效**的那一半：
+
+   上面 2 只暂停了我们自己声明的几个装饰动画，但页面里还有
+   插件/扩展/用户自定义的无限循环动画，以及各种 `animation` 简写带来的循环。
+   窗口已经最小化（document.hidden = true）时，把它们统统停下：
+     · 用 `[data-bc-window-hidden='1']`（由 animGovernor 在"真正不可见"时挂上），
+       而不是 `[data-bc-anim-paused]`（那个还包含"只是失焦"，失焦时动画该继续）；
+     · 只停 `animation-play-state` 与 `transition`，**不删**动画，
+       所以窗口一恢复就接着跑，不会出现"动画从头再来"的突兀感。
+   ========================================================================== */
+html[data-bc-window-hidden='1'] *,
+html[data-bc-window-hidden='1'] *::before,
+html[data-bc-window-hidden='1'] *::after {
+  animation-play-state: paused !important;
+  transition-property: none !important;
+}
+/* 例外：正在跑的任务要先保住（用户切走也要继续下载/应用更新），
+   这几条只是视觉反馈，恢复窗口后也不会错位。 */
+html[data-bc-window-hidden='1'] .tb-spin { animation-play-state: running !important; }
+
+/* ============================================================================
+   3. 顺带修掉几处"动画属性选得不划算"的地方
+   ---------------------------------------------------------------------------
+   · 画布宽度切换的过渡里原来还带着 box-shadow 与 border-radius：
+     这两个都是**重绘**属性，而 .canvas 底下是一整棵场景树 —— 每次过渡都要重绘整张画布。
+     宽度/最小高度本来就要重排，重绘就省了。
+   · 卡片悬浮的阴影过渡同理：只保留 transform（合成层，不进主线程布局/重绘）。
+   ========================================================================== */
+.canvas {
+  transition:
+    width 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    min-height 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* 悬浮只动 transform（合成），不动 box-shadow（重绘） */
+.asset-item,
+.pc-card,
+.token-row,
+.eh-saved-item {
+  transition: transform 0.16s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.16s ease;
+}
+/* 拖拽中的覆盖层：提前告诉合成器"这个层会动"，避免每帧临时提升 */
+.marquee-box,
+.bc-alt-box,
+.bc-boxm,
+.bc-alt-badge {
+  will-change: transform, left, top;
+}
+
+/* ============================================================================
+   6. 只读快照：**单一右侧面板**（v0.4.5 第 10 批 · 用户反馈 J）
+   ---------------------------------------------------------------------------
+   用户原话：「只读快照面板：只保留右侧那一个面板，把所有文字都并进去，
+   去掉下面那条栏，面板宽度不要记忆。」
+   于是顶部快照条与左侧提示块都不再渲染，右侧这一张卡片承担全部信息 + 动作。
+   ========================================================================== */
+.snapshot-info-solo {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 14px 18px;
+  overflow-y: auto;
+  background: linear-gradient(180deg, #faf8ff 0%, var(--bg-panel) 140px);
+}
+html[data-bc-dark] .snapshot-info-solo {
+  background: linear-gradient(180deg, #1a1626 0%, var(--bg-panel) 140px);
+}
+.snap-solo-head { display: flex; align-items: center; gap: 8px; }
+.snap-solo-title {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-1, var(--text));
+  overflow-wrap: anywhere;
+}
+.snap-solo-sub { font-size: 11.5px; color: var(--text-3, var(--text-muted)); }
+.snap-solo-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+.snap-solo-stats > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  border: 1px solid var(--line, var(--border));
+  border-radius: 8px;
+  background: var(--surface-1, var(--panel-soft));
+}
+.snap-solo-stats b { font-size: 15px; font-weight: 700; color: var(--text-1, var(--text)); }
+.snap-solo-stats span { font-size: 10.5px; color: var(--text-3, var(--text-muted)); }
+.snap-solo-actions { display: flex; flex-direction: column; gap: 6px; }
+.snap-solo-actions .snap-btn { width: 100%; justify-content: center; height: 30px; }
+.snap-solo-note {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 2px;
+  padding: 10px 11px;
+  border-radius: 8px;
+  background: var(--surface-sunken, var(--panel-soft));
+  border: 1px solid var(--line, var(--border));
+}
+.snap-solo-note p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text-2, var(--text-muted));
+}
+.snap-solo-note b { color: var(--text-1, var(--text)); }
+.snap-solo-more { font-size: 11.5px; color: var(--text-3, var(--text-muted)); }
+.snap-solo-more > summary {
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+  list-style: none;
+}
+.snap-solo-more > summary::marker,
+.snap-solo-more > summary::-webkit-details-marker { display: none; }
+.snap-solo-more > summary::before { content: '▸ '; }
+.snap-solo-more[open] > summary::before { content: '▾ '; }
+/* 只读布局下画布占满：左侧面板不渲染时 grid 里不能留空列 */
+.workspace.is-readonly { grid-template-areas: 'canvas right'; }
+.workspace.is-readonly[data-layout='bottom'] { grid-template-areas: 'canvas right'; }
+.workspace.is-readonly:not([data-layout='bottom']) {
+  grid-template-columns: minmax(100px, 1fr) var(--bc-right-width, 372px);
+}
+
+/* ============================================================================
+   8. 定位「幽灵卡片」（v0.4.5 第十六批 · 用户澄清后的真实需求）
+   ---------------------------------------------------------------------------
+   用户原话：「中间选中元素输入 position，Enter 就可以直接定位到这个元素右侧的
+              position 的幽灵卡片，只是用来临时数据修改，避免去快捷助手里面改。」
+   它是一张**临时**的定位编辑卡（蓝色左边框 = "临时/悬浮工具"），
+   与"快捷助手 → 定位助手"不冲突：后者是长期面板，这张是改完就走。
+   （上一轮那张"快捷助手隐藏属性占位说明"按用户要求已删除。）
+   ========================================================================== */
+.pos-ghost {
+  margin: 6px 0 10px;
+  border: 1px solid var(--line, var(--border));
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
+  animation: bcSwapIn var(--dur-pop) var(--ease-standard);
+}
+.pos-ghost-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line, var(--border));
+  background: var(--panel-soft);
+  border-radius: 7px 7px 0 0;
+}
+.pos-ghost-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-1, var(--text));
+}
+.pos-ghost-title svg { color: var(--accent); }
+.pos-ghost-x {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3, var(--text-muted));
+  cursor: pointer;
+  padding: 0;
+}
+.pos-ghost-x:hover { background: var(--hover); color: var(--text-1, var(--text)); }
+.pos-ghost-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px 10px 10px;
+}
+.pos-ghost-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.pos-ghost-mode {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--line, var(--border));
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-2, var(--text-muted));
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.pos-ghost-mode:hover { border-color: var(--accent); color: var(--accent); }
+.pos-ghost-mode.is-on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.pos-ghost-hint {
+  font-size: 10.5px;
+  line-height: 1.65;
+  color: var(--text-3, var(--text-muted));
+  word-break: break-word;
+}
+
+/* ============================================================================
+   15. 页面 / 变量里的字体字段（v0.4.5 第十六批 · 用户反馈）
+   ---------------------------------------------------------------------------
+   用户原话：「页面和变量里面的字体还是原始的，没有类似单个元素的
+              font family 的设置方式（是有一个弹窗）。」
+   现在这一行 = 可以手填的文本框 + 「字体库…」按钮（打开与元素完全同一个弹窗：
+   可搜索本机字体、看预览、看商用许可证徽章）。
+   ========================================================================== */
+.page-font-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.page-font-field .page-font-input { flex: 1 1 auto; min-width: 0; }
+.page-font-field .page-font-pick { flex: none; white-space: nowrap; }
+
+/* ============================================================================
+   9. 深色模式：把剩下这批"硬编码浅色"换成语义变量（v0.4.5 第 11 批）
+   ---------------------------------------------------------------------------
+   目标文件里原本有 ~35 条 html[data-bc-dark] 覆盖。这里按"同一块表面/同一组文字"
+   收敛成几条，用的都是 00-theme-tokens.css 里的语义变量 —— 以后加主题不用再逐条改。
+   保留 data-bc-dark 分支的只剩两类（见 00-theme-tokens.css 的说明）：
+     · 需要"仅深色"的特殊效果（发光、特殊阴影、半透明遮罩）
+     · 品牌色/许可证徽章这种本身就带强语义色的
+   ========================================================================== */
+/* 弹层遮罩：深色下要更暗，浅色下保持原来的柔和 —— 这属于"仅深色的特殊效果" */
+html[data-bc-dark] .cp-backdrop { background: rgba(0, 0, 0, 0.72); }
+html[data-bc-dark] .hc-backdrop { background: rgba(0, 0, 0, 0.62); }
+
+/* 警示条：底色/文字全部走语义变量，深色自动切换 */
+.cls-warn-flash {
+  background: var(--danger-tint);
+  border-color: var(--danger);
+}
+.cls-warn-flash .cls-warn-title,
+.cls-warn-flash .cls-warn-ico { color: var(--danger); }
+.cls-warn-flash .cls-warn-ico { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+
+/* 首页玻璃控件：深色用半透明白，浅色用半透明白底 —— 用语义表面色统一 */
+html[data-bc-dark] .eh-gear,
+html[data-bc-dark] .eh-btn,
+html[data-bc-dark] .eh-card { background: var(--surface-2); }
+html[data-bc-dark] .eh-search input { background: var(--surface-sunken); }
+html[data-bc-dark] .eh-tabs { background: color-mix(in srgb, #fff 5%, transparent); }
+html[data-bc-dark] .eh-tab.is-active { background: var(--bg-panel); }
+
+/* 存储面板 / 项目中心 / 设置页：原来各自写死 #475569 / rgba(255,255,255,.06) 之类 */
+html[data-bc-dark] .fluent-card:hover { background: var(--surface-2); }
+html[data-bc-dark] .fluent-slider { background-color: var(--line-strong); }
+html[data-bc-dark] .pc-cover-badge { background: var(--surface-2); color: var(--text-2); }
+html[data-bc-dark] .dd-modal-header { background: var(--surface-1); border-bottom-color: var(--line); }
+html[data-bc-dark] .bc-storage-keep { background: color-mix(in srgb, #fff 6%, transparent); }
+
+/* 画布内文字输入 / 换行标记 / 恢复提示 / 断点提示条 */
+html[data-bc-dark] .canvas-inline-text-input { background: var(--surface-2); color: var(--text-1); }
+html[data-bc-dark] .bc-br-mark { color: var(--text-3); }
+html[data-bc-dark] .recovery-banner { background: var(--surface-2); border-color: var(--line-strong); }
+html[data-bc-dark] .inspector-bp-banner { background: var(--surface-2); border-color: var(--line-strong); }
+html[data-bc-dark] .inspector-bp-banner-head { color: var(--text-2); }
+html[data-bc-dark] .canvas-tips,
+html[data-bc-dark] .device-bar { background: var(--surface-2); border-color: var(--line); }
+html[data-bc-dark] .update-mirror-tip { color: var(--text-3); }
+
+/* 字体许可证徽章：这些颜色本身就是"语义色"（免费绿 / 受限黄 / 通用灰），保留 */
+html[data-bc-dark] .fp-badge.lic-free { color: #4ade80; border-color: #166534; background: #052e16; }
+html[data-bc-dark] .fp-badge.lic-restricted { color: #fbbf24; border-color: #92400e; background: #451a03; }
+html[data-bc-dark] .fp-badge.lic-generic { color: var(--text-2); border-color: var(--line-strong); background: var(--surface-2); }
+html[data-bc-dark] .fp-badge.lic-unknown { color: var(--text-3); border-color: var(--line-strong); background: transparent; }
+
+/* ============================================================================
+   10. 项目中心：表头「小问号」+ 项目类型标注（v0.4.5 第 14 批 · 用户反馈）
+   ---------------------------------------------------------------------------
+   用户原话：「项目管理里面界面上方做的优美一点。上方的『外部是什么』按钮点了没用。
+   我觉得你可以用小问号代替，然后不同的项目类型要单独标注……所有的解释都在上方的小问号。」
+   所以：表头只留一个圆形小问号；点开是一张说明卡；每种类型都有自己的颜色徽章。
+   ========================================================================== */
+.pc-kindhelp { position: relative; display: inline-flex; }
+.pc-kindhelp-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line, var(--border));
+  border-radius: 50%;
+  background: var(--bg-panel);
+  color: var(--text-3, var(--text-muted));
+  cursor: pointer;
+  padding: 0;
+}
+.pc-kindhelp-btn:hover,
+.pc-kindhelp-btn.is-open {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--hover-accent, #eff6ff);
+}
+.pc-kindhelp-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: var(--z-popover);
+  width: 380px;
+  max-width: calc(100vw - 48px);
+  padding: 12px 14px 10px;
+  border: 1px solid var(--line, var(--border));
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-2, 0 8px 28px rgba(15, 23, 42, 0.18));
+  animation: bcPopIn 0.16s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/*
+ * v0.4.5 第十六批（用户反馈「全部项目上方的信息按钮没有关闭动画」）：
+ * 进场动画带 `both` 填充，播完后会一直占着 opacity/transform —— 动画的优先级高于
+ * 普通声明与 transition，所以只写 `opacity: 0` 是无效的（和快照抽屉是同一个坑）。
+ * 退场必须**显式关掉动画**（animation: none），transition 才真正生效。
+ */
+.pc-kindhelp-pop.is-closing {
+  animation: none;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.985);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  pointer-events: none;
+}
+.pc-kindhelp-head {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-1, var(--text));
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line, var(--border));
+}
+.pc-kindhelp-row {
+  display: grid;
+  grid-template-columns: auto 22px 1fr;
+  gap: 8px;
+  align-items: start;
+  padding: 7px 0;
+  border-bottom: 1px dashed var(--line, var(--border));
+}
+.pc-kindhelp-row:last-of-type { border-bottom: none; }
+.pc-kindhelp-count {
+  font-size: 11px;
+  font-family: Consolas, monospace;
+  color: var(--text-3, var(--text-muted));
+  text-align: center;
+  line-height: 18px;
+}
+.pc-kindhelp-desc {
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--text-2, var(--text-muted));
+  white-space: pre-line;
+}
+.pc-kindhelp-foot {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line, var(--border));
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--text-3, var(--text-muted));
+}
+
+/* 项目类型徽章：每种一个颜色（网页=蓝 / 网站=紫 / 外部=橙 / 已丢失=红） */
+.pc-badge.is-page {
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+.pc-badge.is-site {
+  color: #6d28d9;
+  border-color: #ddd6fe;
+  background: #f5f3ff;
+}
+.pc-badge.is-external {
+  color: #b45309;
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+.pc-badge.is-missing {
+  color: var(--danger, #dc2626);
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 40%, transparent);
+  background: var(--danger-tint, #fef2f2);
+}
+html[data-bc-dark] .pc-badge.is-page { color: #93c5fd; border-color: #1e3a8a; background: #0f1c33; }
+html[data-bc-dark] .pc-badge.is-site { color: #c4b5fd; border-color: #4c1d95; background: #1d1533; }
+html[data-bc-dark] .pc-badge.is-external { color: #fcd34d; border-color: #78350f; background: #2a1f0a; }
+
+/* ============================================================================
+   11. 删除项目：第 3 关的"会话还开着"提示（v0.4.5 第 14 批）
+   ========================================================================== */
+.dd-session-warn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #fcd34d;
+  border-left: 3px solid #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+}
+.dd-session-warn-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #92400e;
+}
+.dd-session-warn-body {
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: #78350f;
+}
+.dd-session-warn-body b { color: #451a03; }
+.dd-session-warn-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  background: #fff;
+  color: #92400e;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.dd-session-warn-btn:hover { background: #fef3c7; border-color: #d97706; }
+html[data-bc-dark] .dd-session-warn {
+  border-color: #78350f;
+  border-left-color: #b45309;
+  background: #2a1f0a;
+}
+html[data-bc-dark] .dd-session-warn-head { color: #fcd34d; }
+html[data-bc-dark] .dd-session-warn-body { color: #d6c9a8; }
+html[data-bc-dark] .dd-session-warn-body b { color: #fde68a; }
+html[data-bc-dark] .dd-session-warn-btn {
+  background: #1b2231;
+  border-color: #b45309;
+  color: #fcd34d;
+}
+html[data-bc-dark] .dd-session-warn-btn:hover { background: #2a1f0a; }
+
+/* ============================================================================
+   12. 属性卡片删除后不该出现横向滚动条（v0.4.5 第 14 批 · 用户反馈）
+   ---------------------------------------------------------------------------
+   用户原话：「css 样式属性里面的属性卡片删除后，下方会短暂出现可以左右滑动的条，
+   修一下，不出现也滑动不了。」
+   原因：卡片退场动画是 `translateX(calc(100% + 40px))` —— 它会真的把卡片推到容器右侧外面，
+   于是容器在动画期间短暂出现横向溢出。这里给容器**永久**裁掉横向溢出并禁止横向滚动。
+   ========================================================================== */
+.props-list,
+.inspector-sec-body,
+.tab-body .panel {
+  overflow-x: clip;          /* clip 不会创建滚动容器，比 hidden 更彻底 */
+  overscroll-behavior-x: none;
+}
+/* 兼容不支持 overflow: clip 的内核 */
+@supports not (overflow: clip) {
+  .props-list,
+  .inspector-sec-body,
+  .tab-body .panel { overflow-x: hidden; }
+}
+/* ============================================================================
+   4. 加载页的底色 —— **固定白**（v0.4.5 第 14 批修正）
+   ---------------------------------------------------------------------------
+   以前这里有一套 `.bc-loading.is-dark`（跟着"记住的首页深色模式"铺深底），
+   结果用户首页是深色背景时，启动加载页整片黑 —— 用户反馈「始终黑色了」。
+   现在程序内固定白底；深色适配交给插件（插件可以覆盖 `html[data-bc-dark] .bc-loading`）。
+   ========================================================================== */
+
+/* ============================================================================
+   5. 文档搜索落点：**黄色荧光笔**（v0.4.5 第 10 批）
+   ---------------------------------------------------------------------------
+   用户反馈（A5）：「文档搜索关键词要黄色标记背景，现在只有一个淡入」。
+   原因很直接：以前只往标题上加了 `.bc-doc-hit` 类，但**这个类从来没有写样式** ——
+   全仓库只有 `.hc-hit` 有黄底。所以"看起来只有一个淡入"。
+
+   现在两层都有：
+     · `.help-doc .bc-doc-hit`    → 命中的标题整行铺一层荧光笔黄，右侧一条竖色条
+     · `.help-doc mark.hc-hit`    → 小节正文里的**关键词**逐处标黄（与搜索框内高亮同款）
+     · `mark.hc-hit.is-focus`     → 第一个命中再"跳"一下，视线立刻锁定
+   ========================================================================== */
+.help-doc .bc-doc-hit {
+  position: relative;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(255, 226, 128, 0.85), rgba(255, 226, 128, 0.25) 82%, transparent);
+  box-shadow: -10px 0 0 0 rgba(255, 226, 128, 0.85);
+  padding-left: 10px;
+  margin-left: -10px;
+  animation: bcDocHit 3.2s ease-out forwards;
+}
+@keyframes bcDocHit {
+  0%   { background-size: 0% 100%; }
+  12%  { background-size: 100% 100%; }
+  70%  { background-size: 100% 100%; }
+  100% { background-size: 100% 100%; background-position: 0 0; }
+}
+html[data-bc-dark] .help-doc .bc-doc-hit {
+  background: linear-gradient(90deg, rgba(255, 213, 79, 0.28), rgba(255, 213, 79, 0.08) 82%, transparent);
+  box-shadow: -10px 0 0 0 rgba(255, 213, 79, 0.28);
+}
+/* 关键词荧光笔：比"命中词淡入"更明确 —— 底色是实打实的黄 */
+.help-doc mark.hc-hit {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: #ffe58a;
+  color: #4a3300;
+  box-shadow: 0 0 0 1px rgba(240, 180, 0, 0.45);
+}
+html[data-bc-dark] .help-doc mark.hc-hit {
+  background: #7a5c00;
+  color: #ffe9a8;
+  box-shadow: 0 0 0 1px rgba(255, 213, 79, 0.4);
+}
+.help-doc mark.hc-hit.is-focus { animation: bcMarkPulse 0.9s ease-out 2; }
+@keyframes bcMarkPulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(240, 180, 0, 0.45); }
+  50%      { box-shadow: 0 0 0 4px rgba(240, 180, 0, 0.35); }
+}
+
+/* ============================================================================
+   13. 「切换板块没有动画」的两处补齐（v0.4.5 第十六批 · 用户反馈）
+   ---------------------------------------------------------------------------
+   用户原话：「注意右上角的页面设置，多个板块切换的时候没有动画。」
+            「下方元素插入栏没有切换板块的动画。」
+   原因相同：内容用 `{tab === 'x' && …}` 条件渲染，切换时 DOM 直接替换 —— 硬切。
+   做法：外层容器 + `key={当前板块}` 强制重建 → 每次切换播一次 bcSwapIn
+   （与右侧属性面板的 `.insp-tab-anim` 同一套 token，节奏一致）。
+
+   ⚠ 布局陷阱（第一版踩过，整块面板挤到左边）：
+   `.element-panel` 在底部布局下是 **flex-direction: row**（页签竖排在左、内容在右），
+   而 `.elem-main-wrap` / `.tpl-body` 都是靠 `flex: 1 1 0` 撑满剩余宽度的。
+   中间插一层包装 div 后，包装层默认是 `flex: 0 1 auto` —— 它只按内容宽度收缩，
+   于是"所有东西挤到左边"。所以包装层必须自己变成 `flex: 1 1 0` 的
+   纵向 flex 容器，把"撑满"这件事继续传给里面的内容。
+   ========================================================================== */
+.element-panel > .elem-tab-anim {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: bcSwapIn var(--dur-pop) var(--ease-standard);
+  /* 两个板块高度不同时会出现滚动条槽位抖动，稳定住 */
+  scrollbar-gutter: stable;
+}
+/* 素材库根节点自己也要能撑满（它不在 .elem-main-wrap 里） */
+.element-panel > .elem-tab-anim > .asset-gallery {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* 首页「页面设置」四个板块（预设/渐变/图片/视频）—— 同样是条件渲染 */
+.eh-panel-tabbody {
+  animation: bcSwapIn var(--dur-pop) var(--ease-standard);
+  min-width: 0;
+}

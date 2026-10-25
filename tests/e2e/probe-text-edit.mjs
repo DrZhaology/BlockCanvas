@@ -27,10 +27,10 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-textedit-probe');
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
-  for (const rel of [resolve(ROOT, 'extensions'), resolve(ROOT, 'data', 'extensions')]) {
+  for (const rel of [resolve(ROOT, 'builtin-extensions'), resolve(ROOT, 'data', 'extensions')]) {
     if (existsSync(rel)) cpSync(rel, resolve(DATA_DIR, 'extensions'), { recursive: true });
   }
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -77,10 +77,14 @@ async function main() {
   ok('右键文字弹出菜单', (await win.locator('.bc-text-menu').count()) === 1);
   await win.click('.bc-text-menu .bc-weight-btn:has-text("加粗")');
   await sleep(300);
-  const fw = await win.evaluate((eid) => {
-    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
-    return n && n.style ? n.style.fontWeight : null;
-  }, id);
+  // v0.4.5：断点感知读值（非 desktop 断点时属性写在 responsive[bp] 那一层）
+  const readProp = (eid, key) => win.evaluate(({ id: x, k }) => {
+    const st = window.__sceneStore.getState();
+    const n = st.scene.root.children.find((c) => c.id === x);
+    const bp = st.activeBreakpoint;
+    return (n?.responsive?.[bp]?.[k]) ?? (n?.style ? n.style[k] : null);
+  }, { id: eid, k: key });
+  const fw = await readProp(id, 'fontWeight');
   ok('字重写进 node.style（互通，不是另一套数据）', fw === '700', String(fw));
   // 右侧属性面板里应该出现「字重」这一行（先展开「CSS 样式属性」板块）
   await win.locator('[title="点击展开或收起 CSS 样式属性"]').click().catch(() => {});
@@ -178,18 +182,17 @@ async function main() {
   await win.click('.bc-text-menu .bc-weight-btn:has-text("加粗")');
   await sleep(300);
   const whole = await win.evaluate((eid) => {
-    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
-    return { runs: n.runs, fw: n.style.fontWeight };
+    const st = window.__sceneStore.getState();
+    const n = st.scene.root.children.find((c) => c.id === eid);
+    const bp = st.activeBreakpoint;
+    return { runs: n.runs, fw: (n.responsive?.[bp]?.fontWeight) ?? n.style.fontWeight };
   }, id2);
   ok('选中整段 → 走整段 CSS（不生成 runs）', (!whole.runs || whole.runs.length === 0) && whole.fw === '700', JSON.stringify(whole));
 
   // 下划线 / 删除线 / 斜体
   await win.click('.bc-text-menu .bc-style-btn[title="下划线"]');
   await sleep(200);
-  const deco = await win.evaluate((eid) => {
-    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
-    return n.style.textDecoration;
-  }, id2);
+  const deco = await readProp(id2, 'textDecoration');
   ok('下划线写进 textDecoration', /underline/.test(String(deco)), String(deco));
 
   ok('无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));

@@ -23,9 +23,9 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-help-probe');
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC = resolve(ROOT, 'extensions');
+  const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
 
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
@@ -124,12 +124,31 @@ async function main() {
   ok('左侧目录自动从标题生成（≥ 8 节）', tocCount >= 8, String(tocCount));
   const tocFirst = ((await win.locator('.help-toc-item').first().innerText().catch(() => '')) || '');
   ok('目录首项是第一章标题', tocFirst.includes('项目简介') || tocFirst.includes('BlockCanvas'), tocFirst.slice(0, 40));
-  // 点目录 → 正文滚动
+  // 点目录 → 正文滚动。
+  // v0.4.5 第 12 批：这条断言以前有两个毛病，导致它"单跑过、串跑红"：
+  //   ① 只 `sleep(700)` 后读一次 scrollTop —— 平滑滚动还没走完就断言；
+  //   ② 点的是「技术栈 / 目录结构」这种**靠前的章节** —— 目标本来就在视口顶部附近，
+  //      滚动量很小甚至为 0，"scrollTop 必须变大"自然不成立（是断言选错了目标，不是功能坏）。
+  // 现在：点目录里**最后一节**，并等滚动真的发生（位移要求 ≥200px，属于肉眼可见的量级）。
+  // 实测这份 README 的最后一节是「AI 使用说明」，从顶部跳过去位移约 200px —— 足够证明"跳转生效"。
   const before = await win.evaluate(() => document.querySelector('.help-scroll').scrollTop);
-  await win.locator('.help-toc-item', { hasText: '技术栈' }).first().click();
-  await sleep(700);
+  const targetText = await win.evaluate(() => {
+    const items = [...document.querySelectorAll('.help-toc-item')];
+    const pick = items[items.length - 1];
+    if (pick) pick.click();
+    return (pick?.textContent || '').trim();
+  });
+  const jumped = await win.waitForFunction(
+    (prev) => {
+      const sc = document.querySelector('.help-scroll');
+      return !!sc && sc.scrollTop > prev + 200;   // 跳到最后一章，位移必须是"肉眼可见"的量级
+    },
+    before,
+    { timeout: 8000 }
+  ).then(() => true).catch(() => false);
   const after = await win.evaluate(() => document.querySelector('.help-scroll').scrollTop);
-  ok('点目录能跳到对应章节', after > before, `${before} → ${after}`);
+  ok('点目录能跳到对应章节', jumped,
+    `点击「${targetText}」 ${Math.round(before)} → ${Math.round(after)}`);
 
   // ============ 7. 搜索：命中高亮 ============
   await win.locator('.help-search-input').fill('表格');
@@ -193,15 +212,19 @@ async function main() {
   ok('按 Esc 先播退场动画（is-closing + bcViewOut）',
     !!closing && closing.cls.includes('is-closing') && String(closing.name).includes('bcViewOut'),
     JSON.stringify(closing));
-  await sleep(600);
+  // 退场动画是 0.3s 左右；串跑时机器忙会晚一点 —— 等条件成立而不是死等 600ms
+  await win.waitForFunction(
+    () => !document.querySelector('.help-page') && !!document.querySelector('.toolbar'),
+    { timeout: 8000 }
+  ).catch(() => {});
   ok('退场后回到编辑器', (await win.locator('.help-page').count()) === 0 && (await win.locator('.toolbar').count()) === 1);
 
   // ============ 9. 另一条入口：菜单事件（帮助菜单 → F1 走同一条路） ============
   await win.evaluate(() => window.dispatchEvent(new CustomEvent('bc:open-help')));
-  await sleep(600);
+  await win.waitForFunction(() => !!document.querySelector('.help-page'), { timeout: 8000 }).catch(() => {});
   ok('「帮助」菜单事件也能打开手册', (await win.locator('.help-page').count()) === 1);
   await win.locator('.help-topbar .fluent-back-btn').click();
-  await sleep(600);
+  await win.waitForFunction(() => !document.querySelector('.help-page'), { timeout: 8000 }).catch(() => {});
   ok('点「返回编辑器」正常退出', (await win.locator('.help-page').count()) === 0);
 
   ok('无 console 错误', errs.length === 0, errs.slice(0, 3).join(' | '));

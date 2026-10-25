@@ -1,7 +1,7 @@
 {
   "name": "blockcanvas",
-  "version": "0.4.4",
-  "bcStage": "阶段 4 · 收尾与跨平台适配（测试版）",
+  "version": "0.4.5",
+  "bcStage": "阶段 5 · 界面与交互全面打磨（测试版）",
   "description": "BlockCanvas 积木画布 - 可视化静态网页构建工具",
   "main": "out/main/main.js",
   "author": "Dr.Zhaology",
@@ -18,7 +18,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:e2e": "pnpm build && node tests/e2e/gui.mjs",
     "test:e2e:fast": "node tests/e2e/gui.mjs --no-shots",
-    "test:probe": "node tests/e2e/probe-home.mjs && node tests/e2e/probe-home-media.mjs && node tests/e2e/probe-inspector.mjs && node tests/e2e/probe-css-cards.mjs && node tests/e2e/probe-table.mjs && node tests/e2e/probe-table-settings.mjs && node tests/e2e/probe-help.mjs && node tests/e2e/probe-v042.mjs && node tests/e2e/probe-template-style.mjs && node tests/e2e/probe-text-edit.mjs && node tests/e2e/probe-alt-interact.mjs && node tests/e2e/probe-prop-search.mjs && node tests/e2e/probe-undo-granular.mjs && node tests/e2e/probe-delete-guard.mjs && node tests/e2e/probe-paths.mjs && node tests/e2e/probe-storage.mjs && node tests/e2e/probe-projectfile.mjs && node tests/e2e/probe-update.mjs"
+    "test:probe": "node tests/e2e/run-probes.mjs",
+    "test:probe:once": "node tests/e2e/run-probes.mjs --no-retry",
+    "dev:quiet": "node tools/run-quiet.mjs dev",
+    "build:quiet": "node tools/run-quiet.mjs build"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

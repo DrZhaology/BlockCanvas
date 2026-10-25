@@ -53,8 +53,16 @@ export function OutlineInput(props: Props) {
 
   return (
     <div className="outline-editor">
-      <div className="outline-preview" style={{ outline: compose(width, style, color), outlineOffset: 2 }}>
-        <span>外轮廓预览</span>
+      {/* v0.4.5：外轮廓以前直接画在预览框上 —— outline 是画在盒子**外面**的，
+          12px 粗的线会溢出卡片、盖住上面的标题（用户截图里"显示到外面了"）。
+          现在改成"外层留 16px 内边距 + 内层小盒子画轮廓"，线永远待在卡片里。 */}
+      <div className="outline-preview">
+        <div
+          className="outline-preview-box"
+          style={{ outline: compose(width, style, color), outlineOffset: 0 }}
+        >
+          <span>外轮廓预览</span>
+        </div>
       </div>
 
       <div className="outline-row">
@@ -73,7 +81,7 @@ export function OutlineInput(props: Props) {
         <span className="outline-val">{width}px</span>
       </div>
 
-      <div className="outline-row">
+      <div className="outline-row is-wrap">
         <span className="outline-label">线型</span>
         <div className="outline-styles">
           {STYLES.map((s) => (

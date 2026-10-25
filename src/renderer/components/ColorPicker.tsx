@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useScene, getEffectiveStyle } from '@store/sceneStore';
 import { tokenRef, cssVarName, tokenNameFromRef, isValidTokenName, uniqueTokenName } from '@lib/designTokens';
+import { VarMenu } from './VarMenu';
 import { appAlert } from '@lib/appConfirm';
 
 // BlockCanvas · ColorField 富颜色选择器（通用内核）
@@ -81,16 +82,10 @@ export function ColorField(props: ColorFieldProps) {
     () => (props.noTokens ? [] : (allTokens ?? []).filter((t) => t.kind === 'color')),
     [allTokens, props.noTokens]
   );
-  // v0.4.5：「var」快捷引用菜单 —— 不打开调色盘也能一键写入变量引用
-  const [varMenu, setVarMenu] = useState<{ x: number; y: number } | null>(null);
+  // v0.4.5：「var」快捷引用菜单 —— 不打开调色盘也能一键写入变量引用。
+  // 定位交给 VarMenu（Portal + 统一避让），这里只需要一个开/关状态。
+  const [varMenu, setVarMenu] = useState(false);
   const varBtnRef = useRef<HTMLButtonElement | null>(null);
-  const openVarMenu = () => {
-    const r = varBtnRef.current?.getBoundingClientRect();
-    if (!r) return;
-    const menuH = Math.min(320, 44 * colorTokens.length + 12);
-    const y = Math.min(r.bottom + 4, window.innerHeight - menuH - 8);
-    setVarMenu({ x: Math.min(r.left, window.innerWidth - 244), y: Math.max(8, y) });
-  };
 
   const [modalOpen, setModalOpen] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -376,44 +371,34 @@ export function ColorField(props: ColorFieldProps) {
         onClick={(e) => { e.stopPropagation(); openModal(); }}
         title={value === 'transparent' ? '当前颜色：透明 (transparent)' : '打开调色盘'}
       />
-      {/* v0.4.5：「var」快捷引用 —— 有颜色变量时显示，一键写入 var(--bc-*) */}
-      {colorTokens.length > 0 && (
+      {/* v0.4.5：「var」快捷引用 —— 与数值字段走**同一个** VarMenu（Portal + 统一避让定位）。
+          以前这里是自己一套绝对定位菜单，面板靠边时会跑出窗口 / 被底部面板挡住。 */}
+      {!props.noTokens && (
         <button
           ref={varBtnRef}
-          className="color-var-btn"
+          className={'color-var-btn' + (colorTokens.length === 0 ? ' is-empty' : '')}
           onClick={(e) => {
             e.stopPropagation();
-            if (varMenu) { setVarMenu(null); return; }
-            openVarMenu();
+            setVarMenu((v) => !v);
           }}
-          title="引用设计变量：选一个变量写入 var() 引用（改变量全站一起变）"
+          title={colorTokens.length > 0
+            ? '引用设计变量：选一个变量写入 var() 引用（改变量全站一起变）'
+            : '还没有颜色变量：点开可以看到新建指引'}
         >var</button>
       )}
-      {varMenu && createPortal(
-        <>
-          <div className="cp-varmenu-mask" onMouseDown={() => setVarMenu(null)} />
-          <div className="cp-varmenu" style={{ left: varMenu.x, top: varMenu.y }}>
-            <div className="cp-varmenu-title">引用设计变量</div>
-            {colorTokens.map((t) => (
-              <button
-                key={t.name}
-                className={'cp-varmenu-item' + (value === tokenRef(t.name) ? ' active' : '')}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  applyToken(t.name, t.value);
-                  setVarMenu(null);
-                }}
-                title={`${cssVarName(t.name)}: ${t.value}`}
-              >
-                <span className="cp-varmenu-swatch" style={{ background: t.value }} />
-                <span className="cp-varmenu-name">{t.name}</span>
-                <span className="cp-varmenu-val">{t.value}</span>
-              </button>
-            ))}
-            <div className="cp-varmenu-foot">管理变量 → 右侧面板「变量」页签</div>
-          </div>
-        </>,
-        document.body
+      {!props.noTokens && (
+        <VarMenu
+          open={varMenu}
+          anchorRef={varBtnRef}
+          kinds={['color']}
+          title="引用设计变量"
+          onClose={() => setVarMenu(false)}
+          onPick={(name) => {
+            const t = colorTokens.find((x) => x.name === name);
+            applyToken(name, t?.value ?? '');
+            setVarMenu(false);
+          }}
+        />
       )}
       {/* 调色盘用 Portal 挂到 body：既不会被属性面板的 overflow 裁切，
           也不会被父级 transform（如折叠动画）变成包含块导致遮罩错位 */}

@@ -4,17 +4,44 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 // 向渲染进程安全注入原生能力与便携数据区中枢
 
 contextBridge.exposeInMainWorld('bc', {
+  /**
+   * v0.4.5 第 12 批：是否"安静启动"（自动化脚本/探针/截图）。
+   *
+   * 安静模式下窗口是**不可激活**的（Windows: WS_EX_NOACTIVATE），所以
+   * `document.hasFocus()` 永远是 false。渲染层里凡是拿"有没有焦点"当信号的地方
+   * （目前只有动画总督的"窗口不可见就暂停"）都必须先看这个开关，
+   * 否则会误判成"用户切走了"，把装饰动画一直冻住。
+   */
+  quietLaunch: process.env['BC_NO_FOCUS'] === '1',
+
   // 导出与网页管理
   exportHTML: (html: string, defaultName?: string) =>
     ipcRenderer.invoke('export:html', html, defaultName),
   exportHTMLWithProject: (html: string, scene: unknown, defaultName?: string, projectName?: string) =>
     ipcRenderer.invoke('export:html-with-project', html, scene, defaultName, projectName),
+  /** v0.4.5：导出为网站文件夹（index.html + assets/，按导出位置重算相对路径；是一条任务） */
+  exportSite: (payload: { html: string; scene: unknown; projectName?: string; projectPath?: string }) =>
+    ipcRenderer.invoke('export:site', payload),
+  /** v0.4.5：这个工程上次导出到哪（按钮/提示上显示用） */
+  exportLastDir: (key: string) => ipcRenderer.invoke('export:last-dir', key),
   previewOpen: (html: string) =>
     ipcRenderer.invoke('preview:open', html),
 
   // 项目工程管理 (.bcproj)
   listProjects: () =>
     ipcRenderer.invoke('project:list'),
+  /** v0.4.5：把外部工程从列表里移除（不动磁盘文件） */
+  forgetExternalProject: (filePath: string) =>
+    ipcRenderer.invoke('project:forget-external', filePath),
+  /** v0.4.5：抢救损坏的工程文件（只读） */
+  salvageProject: (filePath: string) =>
+    ipcRenderer.invoke('project:salvage', filePath),
+  /** v0.4.5：更新日志（路径 + 尾部内容），用于排障 */
+  updateLogPath: () => ipcRenderer.invoke('update:log-path'),
+  updateLogTail: (maxLines = 200) => ipcRenderer.invoke('update:log-tail', maxLines),
+  /** v0.4.5：素材库 */
+  listAssets: () => ipcRenderer.invoke('assets:list'),
+  importAssets: () => ipcRenderer.invoke('assets:import'),
   saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown; history?: unknown }, saveAs = false, customPath?: string) =>
     ipcRenderer.invoke('project:save', projectData, saveAs, customPath),
   openProjectFile: (customPath?: string) =>
@@ -155,11 +182,26 @@ contextBridge.exposeInMainWorld('bc', {
     ipcRenderer.on(channel, listener);
     return () => ipcRenderer.removeListener(channel, listener);
   },
+  /**
+   * v0.4.5：系统层要求打开某个 .bcproj（双击文件 / 第二个实例 / macOS open-file）。
+   * 主进程会把绝对路径发过来，渲染进程负责真正打开它。
+   */
+  onOpenProjectPath: (cb: (path: string) => void) => {
+    const listener = (_e: IpcRendererEvent, p: string) => cb(String(p || ''));
+    ipcRenderer.on('bc:open-project-path', listener);
+    return () => ipcRenderer.removeListener('bc:open-project-path', listener);
+  },
+  /** v0.4.5：启动加载页的真实进度（主进程在解包素材等步骤里逐条播报） */
+  onLoadProgress: (cb: (p: { id: string; label: string; percent: number }) => void) => {
+    const listener = (_e: IpcRendererEvent, p: { id: string; label: string; percent: number }) => cb(p);
+    ipcRenderer.on('bc:load-progress', listener);
+    return () => ipcRenderer.removeListener('bc:load-progress', listener);
+  },
   setNativeTheme: (source: 'dark' | 'light' | 'system') =>
     ipcRenderer.send('theme:set-source', source),
   pickImageSrc: (mode?: 'abs' | 'rel') =>
     ipcRenderer.invoke('img:pick-src', mode),
   /** 首页背景：选择图片 / 视频文件（返回绝对路径） */
-  pickMediaSrc: (kind: 'image' | 'video') =>
+  pickMediaSrc: (kind: 'image' | 'video' | 'audio') =>
     ipcRenderer.invoke('media:pick-src', kind)
 });

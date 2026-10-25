@@ -23,10 +23,10 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-propsearch-probe');
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
-  for (const rel of [resolve(ROOT, 'extensions'), resolve(ROOT, 'data', 'extensions')]) {
+  for (const rel of [resolve(ROOT, 'builtin-extensions'), resolve(ROOT, 'data', 'extensions')]) {
     if (existsSync(rel)) cpSync(rel, resolve(DATA_DIR, 'extensions'), { recursive: true });
   }
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -65,13 +65,13 @@ async function main() {
   // 输入"字号"（应命中 fontSize）
   await win.locator('.bc-prop-search-input').fill('字号');
   await sleep(300);
-  const best = await win.locator('.bc-prop-search-item.is-best .bc-prop-search-key').innerText().catch(() => '');
+  const best = await win.locator('.bc-prop-search-item[data-best="1"] .bc-prop-search-key').innerText().catch(() => '');
   ok('权重最高结果是 fontSize', best === 'fontSize', best);
 
   // 容错：拼错也能命中（fontsize → fontsizee）
   await win.locator('.bc-prop-search-input').fill('fontsizee');
   await sleep(300);
-  const best2 = await win.locator('.bc-prop-search-item.is-best .bc-prop-search-key').innerText().catch(() => '');
+  const best2 = await win.locator('.bc-prop-search-item[data-best="1"] .bc-prop-search-key').innerText().catch(() => '');
   ok('拼错也能命中 fontSize', best2 === 'fontSize', best2);
 
   // Ctrl+Enter → 添加并定位到右侧属性行并高亮
@@ -91,24 +91,17 @@ async function main() {
   ok('回车（Ctrl+Enter）后定位到 fontSize 属性行', located.exists === true, JSON.stringify(located));
   ok('该行带橙色高亮（flash）', located.flash === true, JSON.stringify(located));
 
-  // ============ 2. 「+ 添加属性」按值搜索 ============
+  // ============ 2. 「+ 添加属性」只按属性名搜索（v0.4.5 第 8 批：值搜索已按用户要求删除）============
   await win.locator('.add-prop-trigger').click();
   await sleep(300);
   await win.locator('.add-prop-search input').fill('flex');
   await sleep(400);
-  const blueCount = await win.locator('.add-prop-value-item').count();
-  ok('按属性值搜索出现蓝色插入条目', blueCount > 0, String(blueCount));
-  const blueTxt = await win.locator('.add-prop-value-item').first().innerText().catch(() => '');
-  ok('蓝色条目显示「属性名 = 属性值」', /=/.test(blueTxt) && /flex/i.test(blueTxt), blueTxt.replace(/\n/g, ' '));
-
-  // 点蓝色条目 → 直接插入属性名 + 属性值
-  await win.locator('.add-prop-value-item').first().click();
-  await sleep(500);
-  const disp = await win.evaluate((eid) => {
-    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
-    return { display: n.style.display, flexDirection: n.style.flexDirection, justifyContent: n.style.justifyContent, alignItems: n.style.alignItems };
-  }, id);
-  ok('点蓝色条目后「属性名 + 属性值」一起写入', Object.values(disp).some((v) => v === 'flex'), JSON.stringify(disp));
+  const valueItemCount = await win.locator('.add-prop-value-item').count();
+  ok('右侧「添加属性」不再出现"按属性值插入"的蓝色条目', valueItemCount === 0, String(valueItemCount));
+  const flexNameCount = await win.locator('.add-prop-item').count();
+  ok('右侧「添加属性」仍能按属性名搜到结果', flexNameCount > 0, String(flexNameCount));
+  await win.keyboard.press('Escape');
+  await sleep(300);
 
   // ============ 3. 搜不到 → 明确"没有匹配" ============
   await win.locator('.add-prop-trigger').click();
@@ -130,21 +123,45 @@ async function main() {
   // backgroundColor 已设置过 → 应显示"已添加"（蓝色）
   await win.locator('.bc-prop-search-input').fill('backgroundcolor');
   await sleep(300);
+  // v0.4.5 第 8 批：**蓝色底只有一个来源 —— 当前激活项**；
+  // "已添加 / 未添加"降级成右侧徽章（文案里带上了操作提示）。
   const bgItem = await win.evaluate(() => {
-    const el = document.querySelector('.bc-prop-search-item.is-best');
+    const el = document.querySelector('.bc-prop-search-item[data-best="1"]');
     return el ? { cls: el.className, badge: el.querySelector('.bc-prop-search-badge')?.textContent || '' } : null;
   });
-  ok('已添加的属性显示为蓝色 + 「已添加」', !!bgItem && /is-added/.test(bgItem.cls) && bgItem.badge === '已添加', JSON.stringify(bgItem));
+  ok('已添加的属性带 is-added 标记 + 「已添加」徽章', !!bgItem && /is-added/.test(bgItem.cls) && /已添加/.test(bgItem.badge), JSON.stringify(bgItem));
 
-  // lineHeight（文本行高）没设置过 → 白色 + 「未添加」 + 小字 Ctrl 提示
+  // lineHeight（文本行高）没设置过 → is-missing + 「未添加」 + 小字 Ctrl 提示
   await win.locator('.bc-prop-search-input').fill('行高');
   await sleep(300);
   const fsItem = await win.evaluate(() => {
-    const el = document.querySelector('.bc-prop-search-item.is-best');
+    const el = document.querySelector('.bc-prop-search-item[data-best="1"]');
     return el ? { cls: el.className, badge: el.querySelector('.bc-prop-search-badge')?.textContent || '', key: el.querySelector('.bc-prop-search-key')?.textContent || '' } : null;
   });
-  ok('未添加的属性显示为白色 + 「未添加」', !!fsItem && /is-missing/.test(fsItem.cls) && fsItem.badge === '未添加', JSON.stringify(fsItem));
+  ok('未添加的属性带 is-missing 标记 + 「未添加」徽章', !!fsItem && /is-missing/.test(fsItem.cls) && /未添加/.test(fsItem.badge), JSON.stringify(fsItem));
   ok('权重第一项未添加时显示 Ctrl+Enter 小字提示', (await win.locator('.bc-prop-search-hint-ctr').count()) === 1);
+
+  // 蓝色底的唯一来源：当前激活项（.is-active）。验证"除激活项外没有别的蓝色条目"。
+  const blueAudit = await win.evaluate(() => {
+    const items = [...document.querySelectorAll('.bc-prop-search-item')];
+    const isBlue = (el) => {
+      const bg = getComputedStyle(el).backgroundColor || '';
+      const m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(bg);
+      if (!m) return false;
+      const [r, g, b] = [Number(m[1]), Number(m[2]), Number(m[3])];
+      // 蓝底特征：蓝通道明显高于红/绿（--hover-accent #eff6ff / #dbeafe 一类）
+      return b > r + 8 && b > g + 6;
+    };
+    return {
+      total: items.length,
+      blue: items.filter(isBlue).length,
+      activeBlue: items.filter((el) => el.classList.contains('is-active') && isBlue(el)).length,
+      activeCount: items.filter((el) => el.classList.contains('is-active')).length
+    };
+  });
+  ok('蓝色底只出现在当前激活项（不再"第一个蓝、最后一个也蓝"）',
+    blueAudit.activeCount <= 1 && blueAudit.blue === blueAudit.activeBlue,
+    JSON.stringify(blueAudit));
 
   // 直接 Enter → 只提示"没有添加"，不写样式
   await win.locator('.bc-prop-search-input').press('Enter');

@@ -507,7 +507,7 @@ async function autoExport(app, dest) {
 
 async function main() {
   log('=== 搭建 Minecraft 宣传页 ===');
-  const app = await electron.launch({ args: ['.'], cwd: ROOT, executablePath: electronPath, env: { ...process.env, BC_EXPORT_PATH: EXPORT_PATH } });
+  const app = await electron.launch({ args: ['.'], cwd: ROOT, executablePath: electronPath, env: { ...process.env, BC_NO_FOCUS: '1', BC_EXPORT_PATH: EXPORT_PATH } });
   const win = await app.firstWindow();
   win.on('pageerror', (e) => log(`[pageerror] ${e.message}`));
   try {

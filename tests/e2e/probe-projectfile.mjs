@@ -63,7 +63,7 @@ async function main() {
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(PROJECTS, { recursive: true });
   mkdirSync(join(BACKUPS, LEGACY_NAME), { recursive: true });
-  for (const rel of [resolve(ROOT, 'extensions'), resolve(ROOT, 'data', 'extensions')]) {
+  for (const rel of [resolve(ROOT, 'builtin-extensions'), resolve(ROOT, 'data', 'extensions')]) {
     if (existsSync(rel)) cpSync(rel, resolve(DATA_DIR, 'extensions'), { recursive: true });
   }
 
@@ -83,7 +83,7 @@ async function main() {
   const legacySizeBefore = sizeOf(join(PROJECTS, LEGACY_FILE));
   ok('准备：老格式工程是纯 JSON（不是 zip）', isZip(join(PROJECTS, LEGACY_FILE)) === false, String(legacySizeBefore) + 'B');
 
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();

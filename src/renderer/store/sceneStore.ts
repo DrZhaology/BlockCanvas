@@ -253,6 +253,22 @@ function defaultTextFor(type: ElementType): string | undefined {
     case 'ul': return undefined;
     case 'ol': return undefined;
     case 'form': return undefined;
+    // v0.4.5（用户反馈 C补12）：这些也都是"有内容才有意义"的元素。
+    // 以前插入后是空的，在画布上是一个 0 尺寸的空盒子 —— 既看不见、也点不中，
+    // 用户以为"插进去了但选不上"。统一给一段可立即编辑的默认文案。
+    case 'h5': return '五级标题';
+    case 'h6': return '六级标题';
+    case 'strong': return '重点加粗';
+    case 'em': return '斜体强调';
+    case 'mark': return '高亮文字';
+    case 'small': return '小字说明';
+    case 'code': return 'code';
+    case 'del': return '删除线';
+    case 'sup': return '上标';
+    case 'sub': return '下标';
+    case 'blockquote': return '这里是一段引用内容。';
+    case 'figcaption': return '图片说明文字';
+    case 'pre': return '预格式化文本';
     default: return undefined;
   }
 }
@@ -877,11 +893,40 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
+      /**
+       * v0.4.5 第十六批（用户反馈）：「为什么 left right top bottom 甚至能达到负数，不对。」
+       *
+       * 绝对 / 固定定位的元素是"相对包含块排位置"的：偏移出现负数就意味着它跑到容器外面
+       * —— 在设计工具里这几乎总是误操作（拖过头、粘贴来的脏数据），而且会让元素"消失"，
+       * 用户完全找不到它去哪了。
+       *
+       * 所以这里统一钳到 >= 0。注意**只钳这两种定位**：
+       *   · relative / sticky 的偏移是"相对自身原位的位移"，负数完全合法（往上/往左挪）；
+       *   · margin 允许负数（负外边距是常见技巧）。
+       */
+      const posAfter = (partial as Record<string, string | undefined>).position
+        ?? (node.style as Record<string, string | undefined>).position
+        ?? 'static';
+      const clampOffsets = posAfter === 'absolute' || posAfter === 'fixed';
+      const OFFSET_KEYS = new Set(['left', 'right', 'top', 'bottom']);
+      const clamped: Record<string, string | undefined> = { ...(partial as Record<string, string | undefined>) };
+      if (clampOffsets) {
+        for (const k of Object.keys(clamped)) {
+          if (!OFFSET_KEYS.has(k)) continue;
+          const v = clamped[k];
+          if (v === undefined || v === '' || v === 'auto') continue;
+          const n = parseFloat(v);
+          // 只管纯 px 数值（calc()/百分比/var() 原样放过）
+          if (Number.isFinite(n) && /^-?\d*\.?\d+(px)?$/.test(String(v).trim()) && n < 0) {
+            clamped[k] = '0' + (String(v).trim().endsWith('px') ? 'px' : '');
+          }
+        }
+      }
       // 先消解祖先 childStyles 的压制 —— 否则模板子元素"改了没反应"（特异性被盖住）
       stripAncestorChildStyles(scene.root, node, Object.keys(partial).filter((k) => k !== 'src' && k !== 'alt'));
       const bp = breakpointOverride ?? st.activeBreakpoint;
       if (bp === 'desktop') {
-        for (const [k, v] of Object.entries(partial)) {
+        for (const [k, v] of Object.entries(clamped)) {
           if (v === undefined) {
             delete (node.style as Record<string, string | undefined>)[k];
           } else {
@@ -892,7 +937,7 @@ export const useScene = create<SceneStore>((set) => ({
         if (!node.responsive) node.responsive = {};
         if (!node.responsive[bp]) node.responsive[bp] = {};
         const curBpStyle = node.responsive[bp]!;
-        for (const [k, v] of Object.entries(partial)) {
+        for (const [k, v] of Object.entries(clamped)) {
           if (v === undefined || v === '') {
             delete (curBpStyle as Record<string, string | undefined>)[k];
           } else {

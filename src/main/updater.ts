@@ -4,6 +4,74 @@ import {
   existsSync, mkdirSync, readdirSync, rmSync, writeFileSync, chmodSync, readFileSync
 } from 'node:fs';
 import { installUnitDir } from './paths';
+import { dataRoot } from './userData';
+
+// ============================================================================
+// 更新日志（v0.4.5）
+// ----------------------------------------------------------------------------
+// 更新出问题时用户只能说"更新失败了"，我们连哪一步、哪个镜像、什么错误都看不到。
+// 这里把关键事件按天写进 data/logs/update-YYYYMMDD.log：
+//   · 应用启动（版本号）
+//   · 拉取发行版信息（哪个镜像成功/失败）
+//   · 开始下载 / 下载完成 / 校验失败 / 安装开始与结束
+// 原则：**日志失败绝不影响更新本身**（全部 try-catch 吞掉）。
+// ============================================================================
+let _logPath = '';
+export function updateLogPath(): string {
+  if (_logPath) return _logPath;
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  const dir = join(dataRoot(), 'logs');
+  try { if (!existsSync(dir)) mkdirSync(dir, { recursive: true }); } catch { /* 忽略 */ }
+  _logPath = join(dir, `update-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}.log`);
+  return _logPath;
+}
+
+/** 写一条更新日志（永不抛错） */
+export function ulog(msg: string): void {
+  try {
+    writeFileSync(updateLogPath(), `[${new Date().toISOString()}] ${msg}\n`, { flag: 'a' });
+  } catch { /* 日志写不进去也不该影响更新 */ }
+}
+
+/**
+ * 可靠的递归删除（v0.4.5 第十六批）。
+ *
+ * 为什么需要它：Windows 上刚被别的进程读写过的目录，即使内容已经空了，
+ * `rmSync` 也可能抛 `ENOTEMPTY: directory not empty` / `EBUSY` / `EPERM` ——
+ * 用户实测到的报错就是这一条：
+ *   `更新失败：ENOTEMPTY: directory not empty, rmdir '...\.update\staging\resources'`
+ *
+ * Node 的 `rmSync` 本身就是支持 `maxRetries`/`retryDelay` 的（内部对
+ * EBUSY / EMFILE / ENFILE / ENOTEMPTY / EPERM 自动重试），只是**必须显式传**。
+ * 这里另外再套一层自己的重试，并把"逐层清空"作为最后手段 —— 双保险。
+ */
+export function safeRmSync(p: string, tries = 4): boolean {
+  if (!p) return true;
+  for (let i = 0; i < tries; i += 1) {
+    if (!existsSync(p)) return true;
+    try {
+      rmSync(p, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
+      return true;
+    } catch {
+      // 最后手段：先把子项逐个删掉，再删自己（能绕开"目录非空但删不动"的怪状态）
+      try {
+        for (const e of readdirSync(p, { withFileTypes: true })) {
+          const child = join(p, e.name);
+          try {
+            rmSync(child, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+          } catch { /* 下一轮再来 */ }
+        }
+      } catch { /* 读不了目录也继续重试 */ }
+      // 小小的退避：给操作系统时间释放句柄
+      const until = Date.now() + 300 * (i + 1);
+      while (Date.now() < until) { /* 同步等待，更新流程本来就在退出前 */ }
+    }
+  }
+  const ok = !existsSync(p);
+  if (!ok) ulog(`警告：目录删不掉（已重试 ${tries} 次）：${p}`);
+  return ok;
+}
 
 // ============================================================================
 // BlockCanvas · 自动更新中枢（v0.4.3 重写）
@@ -151,14 +219,22 @@ async function fetchJsonWithTimeout(url: string, ms: number): Promise<any> {
  */
 export async function fetchReleases(perPage = 100): Promise<ReleaseFetchResult | null> {
   const raw = `https://api.github.com/repos/${REPO}/releases?per_page=${perPage}`;
+  ulog(`拉取发行版列表（per_page=${perPage}）`);
   for (const id of READ_ORDER) {
     const m = mirrorById(id);
     try {
       const data = await fetchJsonWithTimeout(wrap(m.prefix, raw), 12000);
-      if (!Array.isArray(data) || data.length === 0) continue;
+      if (!Array.isArray(data) || data.length === 0) {
+        ulog(`  ${m.name}：返回空列表，换下一个源`);
+        continue;
+      }
+      ulog(`  ${m.name}：成功，${data.length} 条发行版`);
       return { list: data.map(mapRawRelease), source: m.name };
-    } catch { /* 换下一个源 */ }
+    } catch (e) {
+      ulog(`  ${m.name}：失败（${(e as Error).message}），换下一个源`);
+    }
   }
+  ulog('所有镜像都失败了：拿不到发行版信息');
   return null;
 }
 
@@ -360,10 +436,44 @@ export function resolveInstallDir(): string {
  *   `BlockCanvas-v0.4.3`     → `BlockCanvas-v0.4.4`
  *   `BlockCanvas-portable`   → `BlockCanvas-portable-v0.4.4`
  * 这样用户一眼就知道手上这包是哪个版本，多版本共存时也不会互相覆盖。
+ *
+ * ⚠ v0.4.5 第十六批：**更新时不再用这个**（见 canonicalFolderName）。
+ * 它只保留给"发版产物命名"这类场景，别在更新流程里再调用。
  */
 export function versionedFolderName(current: string, version: string): string {
   const base = String(current || '').replace(/[-_ ]?v?\d+(?:\.\d+)*$/i, '').trim() || 'BlockCanvas';
   return version ? `${base}-v${version}` : base;
+}
+
+/**
+ * 更新后程序文件夹应该叫的名字（v0.4.5 第十六批 · 用户要求）。
+ *
+ * 用户原话：「更新做的就是把 exe 的上级的文件夹（用户没手动改，就是
+ *            BlockCanvas-0.4.5-...）改名成 BlockCanvas。」
+ *
+ * 以前是改成 `<原名>-v<新版本>` —— 结果是每更新一次目录名就变一次，
+ * 用户桌面快捷方式、脚本里的路径全部失效。现在统一收敛成一个固定名字。
+ *
+ * `keep` 用来保留用户自己起的后缀（例如 `BlockCanvas-portable`、`BlockCanvas-测试`）：
+ * 只剥掉"版本号 + 时间戳 + win64/linux/mac 平台后缀"这些**发版自动加的**部分。
+ */
+export function canonicalFolderName(current: string): string {
+  let s = String(current || '').trim();
+  if (!s) return 'BlockCanvas';
+  // 依次剥掉发版自动加的尾巴（可能同时存在多种）
+  s = s
+    .replace(/-win(?:32|64)$/i, '')
+    .replace(/-(?:linux|mac|darwin)(?:-(?:x64|arm64))?$/i, '')
+    // 时间戳：2026年10月25日15点36分 / 2026-10-25T15-36 / 20261025-1536
+    .replace(/[-_]?\d{4}年\d{1,2}月\d{1,2}日\d{1,2}点\d{1,2}分$/u, '')
+    .replace(/[-_]\d{8}[-_]\d{4,6}$/, '')
+    .replace(/[-_]\d{4}-\d{2}-\d{2}T\d{2}[-:]\d{2}(?:[-:]\d{2})?$/, '')
+    // 版本号：-0.4.5 / -v0.4.5 / -Alpha / -Beta
+    .replace(/[-_ ]?v?\d+(?:\.\d+)+$/i, '')
+    .replace(/[-_ ](?:alpha|beta|rc\d*)$/i, '');
+  s = s.replace(/[-_\s]+$/g, '').trim();
+  // 剥完什么都不剩（例如原本就叫 "0.4.5"）→ 回落成产品名
+  return s || 'BlockCanvas';
 }
 
 /**
@@ -374,7 +484,9 @@ export function versionedFolderName(current: string, version: string): string {
  *   · 下载不再在这里做（挪到了 tasks.ts，可暂停/续传/看进度）；
  *   · **替换脚本挪到系统临时目录执行** —— 因为收尾还要把程序文件夹改名，
  *     脚本若待在被改名的目录里，`%~f0`/`$0` 这些自我引用会立刻失效；
- *   · 替换完成后自动把程序文件夹改成 `<原名>-v<新版本>`（权限不够时请求一次 UAC）。
+ *   · 替换完成后把程序文件夹改成固定的 `BlockCanvas`（见 canonicalFolderName）。
+ *   · v0.4.5 第十六批：`version` 参数保留但**不再用于目录命名**（改成固定名），
+ *     只写进日志，方便排查"这次更新到的是哪个版本"。
  */
 export async function finishUpdateFromZip(
   zipPath: string,
@@ -384,6 +496,7 @@ export async function finishUpdateFromZip(
   if (!app.isPackaged) {
     return { ok: false, error: '当前处于源码开发模式（pnpm dev / pnpm build 直接运行），没有可替换的安装目录。自动更新仅对打包后的便携版生效。' };
   }
+  ulog(`开始应用更新包：${zipPath}（目标版本 ${version || '未知'}）`);
   const installDir = resolveInstallDir();
   const updateDir = join(installDir, '.update');
   const stagingDir = join(updateDir, 'staging');
@@ -394,14 +507,18 @@ export async function finishUpdateFromZip(
    * 失败路径不清理的话，`.update/` 会一次比一次大（老版本就是这样留残渣的）。
    */
   const fail = (error: string): { ok: false; error: string } => {
-    try { rmSync(stagingDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
-    try { rmSync(workDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
+    safeRmSync(stagingDir);
+    safeRmSync(workDir);
     return { ok: false, error };
   };
 
   try {
     if (!existsSync(zipPath)) return fail('更新包不存在（可能已被清理），请重新下载。');
-    rmSync(stagingDir, { recursive: true, force: true });
+    // ⚠ v0.4.5 第十六批：这里以前用裸 rmSync，Windows 上偶发
+    //   `ENOTEMPTY: directory not empty, rmdir '...\.update\staging\resources'`
+    //   —— 上一个进程的句柄还没完全释放，目录"看起来空但删不掉"。
+    //   现在统一走 safeRmSync（带 maxRetries / retryDelay，逐层兜底）。
+    safeRmSync(stagingDir);
     mkdirSync(stagingDir, { recursive: true });
     mkdirSync(workDir, { recursive: true });
 
@@ -432,13 +549,14 @@ export async function finishUpdateFromZip(
       }
     }
 
-    // 3. 目标文件夹名（带版本号）；已一致就不改名
-    //    macOS 改的是 `.app` 包名（不能去改 /Applications 这个名字），其它平台改程序文件夹名
+    // 3. 目标文件夹名：统一收敛成 `BlockCanvas`（v0.4.5 第十六批 · 用户要求）
+    //    以前改成 `<原名>-v<新版本>`，每更新一次目录名就变一次 —— 快捷方式/脚本全失效。
+    //    macOS 改的是 `.app` 包名（不能去改 /Applications 这个名字）。
     const parent = isMac ? installDir : dirname(installDir);
     const oldName = isMac ? basename(syncDst) : basename(installDir);
     const newName = isMac
-      ? `${versionedFolderName(basename(syncDst, '.app'), version)}.app`
-      : versionedFolderName(oldName, version);
+      ? `${canonicalFolderName(basename(syncDst, '.app'))}.app`
+      : canonicalFolderName(oldName);
 
     // 4. 生成替换脚本（放在临时目录，不随程序文件夹改名而失效）
     onProgress?.('正在准备替换脚本…', 100);
@@ -448,85 +566,180 @@ export async function finishUpdateFromZip(
 
     // 5. 拉起独立进程执行替换；主进程随后退出交出文件锁
     onProgress?.('准备就绪，正在重启以完成更新…', 100);
+    ulog(`准备执行替换脚本：${scriptPath}`);
+    ulog(`  源=${extractRoot}`);
+    ulog(`  目标=${installDir}`);
+    ulog(`  改名=${oldName} → ${newName}（父目录 ${parent}）`);
     const { spawn } = await import('node:child_process');
+    // Windows：用 PowerShell **隐藏窗口**跑（不再用 cmd/bat —— 那一定会闪一个控制台窗口，
+    // 改名失败时还会再弹一个 UAC 框，用户看到的就是"弹出很多个窗口然后关闭了"）。
     const child = process.platform === 'win32'
-      ? spawn('cmd.exe', ['/c', scriptPath], { detached: true, stdio: 'ignore', windowsHide: true })
+      ? spawn('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-WindowStyle', 'Hidden', '-File', scriptPath
+      ], { detached: true, stdio: 'ignore', windowsHide: true })
       : spawn('/bin/sh', [scriptPath], { detached: true, stdio: 'ignore' });
     child.unref();
     return { ok: true };
   } catch (e: any) {
+    ulog(`更新准备阶段异常：${e?.message || e}`);
     return fail(e?.message || '更新失败');
   }
 }
 
 interface RenamePlan { parent: string; oldName: string; newName: string }
 
-/** Windows：robocopy /E /PURGE（排除 data / .update）→ 删掉 .update → 改名 → 启动新程序 */
+/** 读日志尾部（渲染层"更新详情"面板用；按天分文件，这里取当天的） */
+export function tailUpdateLog(maxLines = 200): string[] {
+  try {
+    const p = updateLogPath();
+    if (!existsSync(p)) return [];
+    const all = readFileSync(p, 'utf-8').split(/\r?\n/).filter(Boolean);
+    return all.slice(-maxLines);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Windows 替换脚本（v0.4.5 第十六批重写）。
+ *
+ * 用户原话：「弹出了很多个窗口然后关闭了」「不会重新启动」
+ *          「我希望只弹出一个窗口，然后内部写所有的操作，日志全部输出，输出到 data 里面」
+ *          「更新的时候要把 BlockCanvas 主程序的上一级文件夹改名成 BlockCanvas」
+ *          「完成后 .update 自动删除」
+ *
+ * 老实现为什么"弹很多窗口"：
+ *   ① 用 `.bat` 跑 —— cmd 一定会开一个**控制台窗口**（还带 `title` / `timeout` / `pause`）；
+ *   ② 改名失败时 `Start-Process -Verb RunAs` 再弹一个 UAC 授权框 + 一个 PowerShell 窗口；
+ *   ③ 最后 `start "" exe` 再拉起主程序。
+ *   于是用户看到 3~4 个窗口接连闪现。
+ *
+ * 现在：
+ *   · **只生成一个 .ps1**，由主进程用 `-WindowStyle Hidden` 拉起 —— 全程零可见窗口；
+ *   · 所有步骤都写进 `data/update.log`（成功/失败/耗时/退出码），用户想看就看；
+ *   · `.update` 用**带重试的删除**（文件锁释放需要一点时间，老版本一次删不掉就报 ENOTEMPTY）；
+ *   · 改名目标是固定的 `BlockCanvas`（见 canonicalFolderName）；
+ *   · 无论成功失败都**一定会重新拉起程序**（老版本失败就什么都不做，用户以为程序没了）。
+ */
 function writeWindowsScript(workDir: string, updateDir: string, src: string, dst: string, plan: RenamePlan): string {
-  const batPath = join(workDir, 'apply-update.bat');
-  const psPath = join(workDir, 'rename-folder.ps1');
+  const psPath = join(workDir, 'apply-update.ps1');
   const exeName = basename(process.execPath);
   const needRename = plan.oldName !== plan.newName;
+  const targetNew = join(plan.parent, plan.newName);
+  const logPath = updateLogPath();
+  const dataDir = dataRoot();
 
-  // 改名脚本：先直接改；改不动（例如装在 Program Files / 目录被占）再请求一次 UAC 提权重试。
   const ps = [
-    'param([string]$Parent, [string]$Old, [string]$New, [string]$Elevated = "0")',
-    '$ErrorActionPreference = "SilentlyContinue"',
-    '$src = Join-Path $Parent $Old',
-    '$dst = Join-Path $Parent $New',
-    'if (-not (Test-Path -LiteralPath $src)) { exit 0 }',
-    'if ($Old -eq $New) { exit 0 }',
-    'if (Test-Path -LiteralPath $dst) { exit 0 }   # 目标已存在 → 不动，避免覆盖',
-    'try { Rename-Item -LiteralPath $src -NewName $New -ErrorAction Stop; exit 0 } catch { }',
-    'if ($Elevated -eq "1") { exit 1 }',
-    '# 普通权限改不动 → 请求一次 UAC 授权后重试（用户会在屏幕上看到系统授权框）',
+    'param()',
+    '$ErrorActionPreference = "Continue"',
+    `$Log = ${psStr(logPath)}`,
+    `$DataDir = ${psStr(dataDir)}`,
+    '',
+    'function Log([string]$m) {',
+    '  $ts = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")',
+    '  $line = "[$ts] $m"',
+    '  try { Add-Content -LiteralPath $Log -Value $line -Encoding UTF8 } catch { }',
+    '}',
+    '',
+    'function TryRemove([string]$p, [int]$tries = 8) {',
+    '  for ($i = 0; $i -lt $tries; $i++) {',
+    '    if (-not (Test-Path -LiteralPath $p)) { return $true }',
+    '    try {',
+    '      Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop',
+    '      return $true',
+    '    } catch {',
+    '      Start-Sleep -Milliseconds 400',
+    '    }',
+    '  }',
+    '  Log "警告：清理失败 $p"',
+    '  return $false',
+    '}',
+    '',
+    'Log "=========== 开始应用更新 ==========="',
+    `Log "源目录: ${psStr(src)}"`,
+    `Log "目标目录: ${psStr(dst)}"`,
+    `Log "改名计划: ${psStr(plan.oldName)} -> ${psStr(plan.newName)}（父目录 ${psStr(plan.parent)}）"`,
+    '',
     'try {',
-    '  Start-Process -FilePath "powershell" -Verb RunAs -Wait -ErrorAction Stop -ArgumentList @(',
-    '    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath,',
-    '    "-Parent", $Parent, "-Old", $Old, "-New", $New, "-Elevated", "1"',
-    '  )',
-    '} catch { }',
+    '  # ① 等主进程完全退出、释放文件锁',
+    '  Log "等待主进程退出（3 秒）…"',
+    '  Start-Sleep -Seconds 3',
+    '',
+    '  # ② 覆盖式复制（排除 data / .update —— 用户数据与更新包本身都不能被冲掉）',
+    `  Log "正在复制程序文件…"`,
+    `  $robo = Start-Process -FilePath "robocopy.exe" -ArgumentList @(`,
+    `    ${psStr(src)}, ${psStr(dst)},`,
+    '    "/E", "/PURGE", "/XD", "data", ".update",',
+    '    "/R:3", "/W:2", "/NFL", "/NDL", "/NJH", "/NJS", "/NP"',
+    '  ) -Wait -PassThru -WindowStyle Hidden',
+    '  $code = $robo.ExitCode',
+    '  Log "robocopy 退出码: $code（0-7 为成功）"',
+    '  if ($code -ge 8) {',
+    '    Log "错误：文件替换失败，程序保持原样。"',
+    '  } else {',
+    '    Log "文件替换完成。"',
+    '  }',
+    '',
+    '  # ③ 清掉 .update（用户要求"完成后自动删除"）',
+    '  Log "正在清理 .update …"',
+    `  TryRemove ${psStr(updateDir)} | Out-Null`,
+    '',
+    ...(needRename ? [
+      '  # ④ 把程序文件夹改名成固定名字（用户要求）',
+      '  Log "正在改名程序文件夹…"',
+      `  $srcDir = ${psStr(join(plan.parent, plan.oldName))}`,
+      `  $dstDir = ${psStr(targetNew)}`,
+      '  if (Test-Path -LiteralPath $srcDir) {',
+      '    if (Test-Path -LiteralPath $dstDir) {',
+      '      # 目标已存在（上一次更新已经改过名了）→ 不再改名，避免把两个目录搞混',
+      '      Log "目标文件夹已存在，跳过改名：$dstDir"',
+      '    } else {',
+      '      try {',
+      `        Rename-Item -LiteralPath $srcDir -NewName ${psStr(plan.newName)} -ErrorAction Stop`,
+      '        Log "改名成功 → $dstDir"',
+      '      } catch {',
+      '        Log "改名失败（不影响程序运行）：$($_.Exception.Message)"',
+      '      }',
+      '    }',
+      '  } else {',
+      '    Log "源文件夹不存在，跳过改名。"',
+      '  }',
+      ''
+    ] : ['  Log "目录名已经是目标名字，不需要改名。"', '']),
+    '} catch {',
+    '  Log "异常：$($_.Exception.Message)"',
+    '}',
+    '',
+    'Log "=========== 更新流程结束，准备重新启动 ==========="',
+    'Start-Sleep -Milliseconds 600',
+    '',
+    '  # ⑤ 重新启动（老版本失败时不重启，用户以为程序没了）',
+    '  $target = $null',
+    ...(needRename ? [`  if (Test-Path -LiteralPath (Join-Path ${psStr(targetNew)} ${psStr(exeName)})) { $target = ${psStr(targetNew)} }`] : []),
+    `  if (-not $target -and (Test-Path -LiteralPath (Join-Path ${psStr(dst)} ${psStr(exeName)}))) { $target = ${psStr(dst)} }`,
+    '  if ($target) {',
+    `    Log "重新启动：$target"`,
+    `    Start-Process -FilePath (Join-Path $target ${psStr(exeName)}) -WorkingDirectory $target`,
+    '  } else {',
+    '    Log "错误：找不到主程序，无法自动重启。"',
+    '  }',
+    '',
+    '  # ⑥ 收尾：删掉自己的工作目录（自己删自己 → 起一个独立进程延迟删）',
+    '  $wd = $PSScriptRoot',
+    '  Start-Process -FilePath "powershell" -ArgumentList @("-NoProfile","-WindowStyle","Hidden","-Command",',
+    '    "Start-Sleep -Seconds 3; Remove-Item -LiteralPath \'$wd\' -Recurse -Force -ErrorAction SilentlyContinue") `',
+    '    -WindowStyle Hidden',
+    '',
     'exit 0'
   ].join('\r\n');
   writeFileSync(psPath, ps, 'utf-8');
+  return psPath;
+}
 
-  const targetNew = join(plan.parent, plan.newName);
-  const bat = [
-    '@echo off',
-    'rem BlockCanvas 自动更新脚本（主进程生成，程序退出后由独立进程执行）',
-    'chcp 65001 >nul',
-    'title BlockCanvas Updater',
-    'rem 等主进程完全退出、释放文件锁',
-    'timeout /t 3 /nobreak >nul',
-    `robocopy "${src}" "${dst}" /E /PURGE /XD "data" ".update" /R:3 /W:2 /NFL /NDL /NJH /NJS /NP`,
-    'rem robocopy 退出码 0-7 都算成功，8 以上才是错误',
-    'if errorlevel 8 (',
-    '  echo 更新失败：文件替换出错。程序未受影响，可重开软件重试。',
-    `  rem 清掉解压出来的临时文件（.update\\update.zip 留着，重试不用重新下载）`,
-    `  rmdir /s /q "${join(updateDir, 'staging')}"`,
-    '  pause',
-    '  exit /b 1',
-    ')',
-    `rmdir /s /q "${updateDir}"`,
-    ...(needRename ? [
-      'rem —— 把程序文件夹名换成带版本号的（可能需要一次 UAC 授权）——',
-      `powershell -NoProfile -ExecutionPolicy Bypass -File "${psPath}" -Parent "${plan.parent}" -Old "${plan.oldName}" -New "${plan.newName}"`
-    ] : []),
-    'set "TARGET="',
-    ...(needRename ? [`if exist "${join(targetNew, exeName)}" set "TARGET=${targetNew}"`] : []),
-    `if not defined TARGET set "TARGET=${dst}"`,
-    'start "" "%TARGET%\\' + exeName + '"',
-    'rem —— 收尾：把整个工作目录（apply-update.bat + rename-folder.ps1）删干净 ——',
-    'rem 两个坑（都踩过，别改回去）：',
-    'rem   ① 不能写在 exit 之后 —— 那样永远执行不到（老版本就是这么留了一行死代码）；',
-    'rem   ② 不能在同一个 cmd 里直接删自己 —— 脚本正在被 cmd 读，文件是锁着的，',
-    'rem      所以用 start /b 起一个**独立进程**，等 3 秒后连目录一起删。',
-    'set "BC_WORKDIR=%~dp0."',
-    'start "" /b powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 3; Remove-Item -LiteralPath $env:BC_WORKDIR -Recurse -Force -ErrorAction SilentlyContinue"',
-    'exit /b 0'
-  ].join('\r\n');
-  writeFileSync(batPath, bat, 'utf-8');
-  return batPath;
+/** PowerShell 单引号字符串转义（路径里可能有单引号） */
+function psStr(s: string): string {
+  return `'${String(s ?? '').replace(/'/g, "''")}'`;
 }
 
 /** macOS / Linux：rsync（优先）或 tar 覆盖 → 删掉 .update → 改名 → 启动新程序 */

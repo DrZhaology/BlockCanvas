@@ -15,7 +15,7 @@ import { AboutModal } from '@comp/About';
 import { HelpCenter, type DocKey } from '@comp/HelpCenter';
 import { ShortcutsModal } from '@comp/ShortcutsModal';
 import { useScene, findNode } from '@store/sceneStore';
-import { useTabStore } from '@store/tabStore';
+import { useTabStore, isSnapshotTab } from '@store/tabStore';
 import { useUpdateBusy } from '@store/updateStore';
 import { useTasks, subscribeTasks } from '@store/taskStore';
 import { refreshPlugins } from '@lib/pluginHost';
@@ -23,10 +23,14 @@ import { withViewTransition } from '@lib/viewTransition';
 import { useHorizontalWheel } from '@lib/hScroll';
 import { DEVICE_LIST, widthToBreakpoint, type DeviceId } from '@lib/device';
 import { tokensToRootCss } from '@lib/designTokens';
+import { nextFrame, nextFrames } from '@lib/nextFrame';
 import { applySelHighlightClass } from '@lib/selHighlight';
 import { showToast, type ToastType } from '@lib/toast';
 import { requestPropFocus } from '@lib/propFocus';
 import { EmptyHome } from '@comp/EmptyHome';
+import { SnapshotInfoPanel } from '@comp/SnapshotBar';
+import { LoadingScreen } from '@comp/LoadingScreen';
+import { useLoadScreen } from '@store/loadStore';
 
 // BlockCanvas · 主界面
 // - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
@@ -45,8 +49,10 @@ const LEFT_WIDTH_DEFAULT = 230;
 const LEFT_WIDTH_MIN = 160;
 const BOTTOM_HEIGHT_DEFAULT = 250;
 const BOTTOM_HEIGHT_MIN = 175;
-const RIGHT_WIDTH_DEFAULT = 416;
+const RIGHT_WIDTH_DEFAULT = 456;
 const RIGHT_WIDTH_MIN = 340;
+/** 只读快照预览的右侧面板固定宽度（不写进持久化，退出后编辑器宽度原样恢复） */
+const SNAPSHOT_PANE_WIDTH = 372;
 
 export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 'help';
 
@@ -68,6 +74,9 @@ export default function App() {
   // 否则切到"表格编辑器/设置"等视图时这个 hook 不执行，hooks 数量前后不一致，
   // React 直接抛 #300 把整个视图渲染崩掉（踩过一次，表格编辑器打不开就是它）。
   const tabCount = useTabStore((s) => s.tabs.length);
+  // 当前激活标签 + 是否"只读快照预览"（v0.4.5）
+  const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
+  const readonly = isSnapshotTab(activeTab);
   // 自动保存节流锚点：手动 Ctrl+S / 自动保存成功都会刷新（见下方自动保存循环）
   const autoSaveLastRef = useRef(0);
   // 全局快捷键在一个"依赖里没有 view"的 useEffect 里注册 → 闭包里的 view 永远是首次渲染的值。
@@ -79,7 +88,7 @@ export default function App() {
   // 帮助中心默认打开哪份文档（菜单「使用手册」→ manual；别处要开特定文档可先 setHelpDoc）
   const [helpDoc, setHelpDoc] = useState<DocKey>('manual');
   // 首页搜索点中某节文档时，带一个精确跳转目标（文档 + 段落 id）
-  const [helpTarget, setHelpTarget] = useState<{ doc: DocKey; id: string } | null>(null);
+  const [helpTarget, setHelpTarget] = useState<{ doc: DocKey; id: string; q?: string } | null>(null);
   // 所有「整页切换」都走原生视图过渡：旧页面淡出 + 新页面淡入
   // （不重挂载视图、不丢状态；宿主不支持或系统开了"减少动态效果"时自动降级为直接切换）
   const switchView = useCallback((next: AppView) => {
@@ -107,6 +116,17 @@ export default function App() {
       if (localStorage.getItem('bc-right-width-widened') === '1') return;
       localStorage.setItem('bc-right-width-widened', '1');
       if (rightWidth < 400) setRightWidth(RIGHT_WIDTH_DEFAULT);
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // v0.4.5（用户反馈 C补13）：图层树里长名字被截得太狠，"层叠多的时候看不到后面的元素"。
+  // 再做一次一次性加宽：416 → 456。仍然可以手动拖窄（拖过就不会被覆盖）。
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('bc-right-width-widened-2') === '1') return;
+      localStorage.setItem('bc-right-width-widened-2', '1');
+      if (rightWidth < RIGHT_WIDTH_DEFAULT) setRightWidth(RIGHT_WIDTH_DEFAULT);
     } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -165,17 +185,49 @@ export default function App() {
   const [sessionReady, setSessionReady] = useState(false);
   useEffect(() => {
     (async () => {
+      // v0.4.5：加载页 —— 启动这一步的进度是**真的**（读会话 → 恢复标签 → 准备画布），
+      // 不是定时器凑出来的。会话读回来之前一直盖着，所以不会"首页一闪 → 画布"。
+      useLoadScreen.getState().begin('正在恢复上次的会话…');
+      useLoadScreen.getState().report('正在恢复上次的会话…', 24);
       try {
         const session = await window.bc.getSession();
         if (session && session.tabs && session.tabs.length > 0) {
+          useLoadScreen.getState().report(`正在恢复 ${session.tabs.length} 个标签…`, 62);
           useTabStore.getState().initFromSession(session);
+        } else {
+          useLoadScreen.getState().report('准备空页面…', 62);
         }
       } catch (e) {
         console.warn('恢复会话失败:', e);
       } finally {
-        setSessionReady(true);
+        useLoadScreen.getState().report('正在准备界面…', 92);
+        // 等主界面真正渲染出来（下一帧）再放开闸门并淡出加载页。
+        // ⚠ 用 nextFrames 而不是裸 rAF：窗口最小化时 rAF 会被 Chromium 暂停，
+        //   那样加载页会永远挡在最上层（用户最小化着等启动就会遇到）。
+        nextFrames(() => {
+          setSessionReady(true);
+          nextFrame(() => useLoadScreen.getState().finish());
+        });
       }
     })();
+  }, []);
+
+  // 1b. 主进程在"打开工程"过程中播报的真实进度（解包素材 N/M 等）
+  useEffect(() => {
+    const off = window.bc.onLoadProgress((p) => {
+      if (!p || typeof p.percent !== 'number') return;
+      const st = useLoadScreen.getState();
+      if (!st.visible) st.begin(p.label);
+      st.report(p.label, p.percent);
+      // ⚠ 关键：进度到 100% 必须**自己收尾**。
+      // 有些打开路径（首页「最近打开」卡片、只读快照）是组件自己调 openProjectFile 的，
+      // 不会经过 App 的 openProjectAt → 如果只靠那边调 finish()，
+      // 加载页会永远挂在最上层（z-index 最高档）把整个界面挡死（探针抓到过一次）。
+      if (p.percent >= 100) {
+        window.setTimeout(() => useLoadScreen.getState().finish(), 140);
+      }
+    });
+    return () => off?.();
   }, []);
 
   // 2. 定时自动备份：按用户配置的毫秒数执行，按项目名称分别隔离保存
@@ -261,8 +313,17 @@ export default function App() {
 
       try {
         const result = (await window.bc.checkUpdate()) as unknown as { ok: boolean; hasUpdate: boolean };
-        // v0.4.1：不再弹窗 —— 发现新版本直接切到软件内「更新中心」页面展示详情
-        if (result.ok && result.hasUpdate) switchView('update');
+        /*
+         * v0.4.5 第十六批修正：**不再强行把视图切到「更新中心」**。
+         *
+         * 老行为（v0.4.1 起）：发现新版本就 `switchView('update')`。
+         * 副作用很大 —— 用户刚打开软件 5 秒、正在画东西，界面突然整个换成更新页；
+         * 对自动化测试更致命：任何跑超过 5 秒的探针都会被切走视图，
+         * 画布/右侧面板全部卸载，后续断言全崩（probe-inspector 就是这样超时的）。
+         *
+         * 现在改成：底部飘一条提示（不抢视图、不锁操作），用户想看再点进去。
+         */
+        if (result.ok && result.hasUpdate) showToast('发现新版本 —— 点工具栏右侧的「任务」或「设置 → 更新中心」查看');
       } catch {}
     };
     const timer = window.setTimeout(checkAndNotify, 5000);
@@ -295,7 +356,7 @@ export default function App() {
     };
     const openAbout = () => setShowAbout(true);
     // 「使用手册」入口统一打开《使用手册》文档（不是项目介绍）
-    const openHelp = (doc: DocKey = 'manual', target: { doc: DocKey; id: string } | null = null) => {
+    const openHelp = (doc: DocKey = 'manual', target: { doc: DocKey; id: string; q?: string } | null = null) => {
       if (useUpdateBusy.getState().busy) return;
       setHelpDoc(doc);
       setHelpTarget(target);
@@ -306,11 +367,13 @@ export default function App() {
       const d = (e as CustomEvent).detail as DocKey | undefined;
       openHelp(d === 'intro' || d === 'history' || d === 'manual' ? d : 'manual');
     };
-    // 首页搜索：直达某份文档的某一节
+    // 首页搜索：直达某份文档的某一节。
+    // v0.4.5：把搜索词一起带过去 —— 落地后要把**关键词**用黄色荧光笔标出来，
+    // 而不是只让整段淡一下（用户原话："关键词要黄色标记背景，现在只有一个淡入"）。
     const onOpenHelpDocEvent = (e: Event) => {
-      const d = (e as CustomEvent).detail as { doc?: DocKey; id?: string } | undefined;
+      const d = (e as CustomEvent).detail as { doc?: DocKey; id?: string; q?: string } | undefined;
       if (!d?.doc) return;
-      openHelp(d.doc, d.id ? { doc: d.doc, id: d.id } : null);
+      openHelp(d.doc, d.id ? { doc: d.doc, id: d.id, ...(d.q ? { q: d.q } : {}) } : null);
     };
 
     const onNewTab = () => {
@@ -349,27 +412,52 @@ export default function App() {
       if (res.ok && res.path) { useTabStore.getState().setTabSaved(curTab.id, res.path, res.name); autoSaveLastRef.current = Date.now(); }
     };
 
-    const onOpenProject = async () => {
-      if (blocked()) return;
-      const res = await window.bc.openProjectFile();
-      if (res.ok && res.project?.scene) {
-        // v0.4.4：同一个文件重复打开 → 不再开新标签，切到已打开的那个并轻提示
-        const st = useTabStore.getState();
-        const norm = (p: string) => String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
-        const existing = st.tabs.find((t) => t.filePath && norm(t.filePath) === norm(res.path || ''));
-        if (existing) {
-          st.switchTab(existing.id);
-          showToast(`「${existing.name}」已经打开着，已为你切换到那个标签页`, 'info');
-          switchView('editor');
-        } else {
-          // v0.4.4：从首页打开工程也走视图过渡（旧帧=首页，新帧=编辑器），背景丝滑交叉淡入
-          withViewTransition(() => {
-            st.newTab(res.project.name || '已打开工程', res.project.scene, res.path, res.history);
-            setView('editor');
-          });
+    /**
+     * 打开工程。
+     *
+     * v0.4.5：`path` 由系统层给出（双击 .bcproj / 第二个实例 / macOS open-file），
+     * 这时**一定**要挂加载页 —— 用户双击文件后看到的是一个空白壳子会以为没反应。
+     * 从菜单 / 首页打开时不开加载页（那边本来就有自己的动效，且用户看得见文件选择框）。
+     */
+    const openProjectAt = async (path?: string) => {
+      if (blocked()) { if (path) useLoadScreen.getState().finish(); return; }
+      const withSplash = Boolean(path);
+      if (withSplash) {
+        useLoadScreen.getState().begin('正在打开工程…');
+        useLoadScreen.getState().report('正在打开工程…', 4);
+      }
+      try {
+        const res = await window.bc.openProjectFile(path);
+        if (res.ok && res.project?.scene) {
+          // v0.4.4：同一个文件重复打开 → 不再开新标签，切到已打开的那个并轻提示
+          const st = useTabStore.getState();
+          const norm = (p: string) => String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
+          const existing = st.tabs.find((t) => t.filePath && norm(t.filePath) === norm(res.path || ''));
+          if (existing) {
+            st.switchTab(existing.id);
+            showToast(`「${existing.name}」已经打开着，已为你切换到那个标签页`, 'info');
+            switchView('editor');
+          } else {
+            // v0.4.4：从首页打开工程也走视图过渡（旧帧=首页，新帧=编辑器），背景丝滑交叉淡入
+            withViewTransition(() => {
+              st.newTab(res.project.name || '已打开工程', res.project.scene, res.path, res.history);
+              setView('editor');
+            });
+          }
+        } else if (withSplash && !res.canceled) {
+          showToast('打开失败：' + (res.error || '文件可能已损坏'), 'err');
+        }
+      } finally {
+        if (withSplash) {
+          // 等主界面画完这一帧再淡出（和启动流程同样的处理；同样不能用裸 rAF）
+          nextFrames(() => useLoadScreen.getState().finish());
         }
       }
     };
+
+    const onOpenProject = () => { void openProjectAt(); };
+    // 系统层要求打开某个 .bcproj（双击文件关联 / 第二个实例）
+    const offOpenPath = window.bc.onOpenProjectPath((p) => { if (p) void openProjectAt(p); });
 
     const onExportHtml = () => {
       window.dispatchEvent(new CustomEvent('bc:export-html'));
@@ -412,8 +500,10 @@ export default function App() {
     // 中键属性搜索：先把请求写进缓冲（lib/propFocus），再切页签。
     // 这样无论右侧当前在「图层」还是「页面 / 类名 / 变量」，Inspector 挂载后都能补上定位。
     const onFocusProp = (e: Event) => {
-      const d = (e as CustomEvent).detail as { key?: string; add?: boolean } | undefined;
-      if (d?.key) requestPropFocus({ key: d.key, add: d.add !== false });
+      const d = (e as CustomEvent).detail as { key?: string; add?: boolean; value?: string } | undefined;
+      // ⚠ v0.4.5：`value` 一定要透传 —— 中键搜索的「属性值预测」就是靠它把值一起写进去的。
+      // 这里当初漏掉 value，导致点了预测值只会定位、不会写值（探针抓出来的）。
+      if (d?.key) requestPropFocus({ key: d.key, add: d.add !== false, ...(d.value !== undefined ? { value: d.value } : {}) });
       setRightTab('inspector');
       switchView('editor');
     };
@@ -469,12 +559,19 @@ export default function App() {
       window.removeEventListener('menu:export-html', onExportHtml);
       window.removeEventListener('menu:preview', onPreview);
       offs.forEach((off) => off && off());
+      offOpenPath?.();
     };
   }, [setLayout, switchView, openUpdateCenter]);
 
-  // 会话还没读回来：先只铺一层背景，避免"首页一闪 → 画布"的跳变
+  // 会话还没读回来：先只铺一层背景，避免"首页一闪 → 画布"的跳变。
+  // v0.4.5：现在这里同时挂上带 Logo + 真实进度的加载页（它自己会淡出，不阻塞渲染）。
   if (!sessionReady) {
-    return <div className="app bc-booting" />;
+    return (
+      <>
+        <div className="app bc-booting" />
+        <LoadingScreen />
+      </>
+    );
   }
 
   return (
@@ -512,12 +609,19 @@ export default function App() {
           ) : (
             <>
               <ProjectTabBar />
-              <Toolbar
-            canvasWidth={canvasWidth}
-            onCanvasWidthChange={setCanvasWidth}
-            zoom={zoom}
-            onZoomChange={setZoom}
-          />
+              {/* v0.4.5（J 重构）：只读快照**不再占用顶部一整条工具条**。
+                  以前这里换成 SnapshotBar，把"快照信息 + 三个动作"摊在顶栏，
+                  用户反馈"信息散在上下两处、还占掉一行高度"。
+                  现在所有文字与动作都收进右侧那一张卡片（SnapshotInfoPanel），
+                  顶部只保留标签栏本身。 */}
+              {!(readonly && activeTab) && (
+                <Toolbar
+                  canvasWidth={canvasWidth}
+                  onCanvasWidthChange={setCanvasWidth}
+                  zoom={zoom}
+                  onZoomChange={setZoom}
+                />
+              )}
           {(() => {
             const effectiveBottomHeight = pocketExpanded
               ? Math.max(520, Math.round(window.innerHeight * 0.65))
@@ -525,32 +629,38 @@ export default function App() {
             const effectiveLeftWidth = pocketExpanded
               ? Math.max(580, Math.round(window.innerWidth * 0.45))
               : leftWidth;
+            // 只读快照：**不沿用用户拖过的面板宽度**（那是给编辑器的），
+            // 固定一个够放卡片说明的宽度，退出预览后编辑器宽度原样恢复。
+            const effectiveRightWidth = readonly ? SNAPSHOT_PANE_WIDTH : rightWidth;
 
             return (
               <div
-                className={"workspace" + (pocketExpanded ? " pocket-expanded" : "")}
+                className={"workspace" + (pocketExpanded ? " pocket-expanded" : "") + (readonly ? " is-readonly" : "")}
                 data-layout={layout}
                 style={{
                   '--bc-bottom-height': effectiveBottomHeight + 'px',
-                  '--bc-right-width': rightWidth + 'px',
+                  '--bc-right-width': effectiveRightWidth + 'px',
                   '--bc-left-width': effectiveLeftWidth + 'px'
                 } as React.CSSProperties}
               >
-                <div className="elem-pane-wrap">
-                  <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>
-                  {layout === 'left' && (
-                    <div
-                      className={"panel-resizer panel-resizer-left" + (pocketExpanded ? " is-disabled" : "")}
-                      onMouseDown={(e) => {
-                        if (pocketExpanded) return;
-                        startResize(e, 'left', setLeftWidth, LEFT_WIDTH_MIN, leftWidth);
-                      }}
-                      title={pocketExpanded ? "已撑开口袋，宽度调整已锁定" : undefined}
-                    >
-                      <div className="panel-resizer-handle" />
-                    </div>
-                  )}
-                </div>
+                {/* 只读模式下左侧元素面板整个不出现（快照不能改内容，留一个空面板只会挤占画布） */}
+                {!readonly && (
+                  <div className="elem-pane-wrap" data-bc-avoid="elem-pane">
+                    <ErrorBoundary label="元素面板"><ElementPanel /></ErrorBoundary>
+                    {layout === 'left' && (
+                      <div
+                        className={"panel-resizer panel-resizer-left" + (pocketExpanded ? " is-disabled" : "")}
+                        onMouseDown={(e) => {
+                          if (pocketExpanded) return;
+                          startResize(e, 'left', setLeftWidth, LEFT_WIDTH_MIN, leftWidth);
+                        }}
+                        title={pocketExpanded ? "已撑开口袋，宽度调整已锁定" : undefined}
+                      >
+                        <div className="panel-resizer-handle" />
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="canvas-area">
                   <ErrorBoundary label="画布">
                     <Canvas
@@ -574,29 +684,38 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                <div className="right-pane-wrap">
-                  <div
-                    className="panel-resizer panel-resizer-vertical"
-                    onMouseDown={(e) => startResize(e, 'right', setRightWidth, RIGHT_WIDTH_MIN, rightWidth)}
-                  >
-                    <div className="panel-resizer-handle" />
-                  </div>
+                <div className="right-pane-wrap" data-bc-avoid="right-pane">
+                  {/* 只读快照：右侧面板宽度是**固定**的，所以不给拖手（拖了也不保存，只会让人困惑） */}
+                  {!readonly && (
+                    <div
+                      className="panel-resizer panel-resizer-vertical"
+                      onMouseDown={(e) => startResize(e, 'right', setRightWidth, RIGHT_WIDTH_MIN, rightWidth)}
+                    >
+                      <div className="panel-resizer-handle" />
+                    </div>
+                  )}
                   <div className="right-pane">
-                    <div className="tab-bar">
-                      <button
-                        className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
-                        onClick={() => setRightTab('layers')}
-                      >图层</button>
-                      <button
-                        className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
-                        onClick={() => setRightTab('inspector')}
-                      >属性</button>
-                    </div>
-                    <div className="tab-body" key={rightTab}>
-                      <ErrorBoundary label="右侧面板">
-                        {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
-                      </ErrorBoundary>
-                    </div>
+                    {readonly && activeTab ? (
+                      <SnapshotInfoPanel tab={activeTab} />
+                    ) : (
+                      <>
+                        <div className="tab-bar">
+                          <button
+                            className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
+                            onClick={() => setRightTab('layers')}
+                          >图层</button>
+                          <button
+                            className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
+                            onClick={() => setRightTab('inspector')}
+                          >属性</button>
+                        </div>
+                        <div className="tab-body" key={rightTab}>
+                          <ErrorBoundary label="右侧面板">
+                            {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
+                          </ErrorBoundary>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -610,6 +729,8 @@ export default function App() {
       <ShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
       <UpdateBusyOverlay />
       <AppToasts />
+      {/* v0.4.5：打开工程 / 恢复会话期间的加载页（在主界面之后挂载 → 盖在最上层） */}
+      <LoadingScreen />
     </div>
   );
 }
@@ -642,10 +763,42 @@ function AppToasts() {
 // ============ 更新进行中的全屏遮罩（v0.4.3） ============
 // 更新要替换程序本体，这期间必须锁死编辑器：盖一层 z-index 最高的浮层，
 // 进度条 + 提示常驻，拦截全部鼠标事件；配合 switchView / 快捷键 / 菜单的守卫。
+//
+// v0.4.5 第十六批（用户要求：「只弹出一个窗口，然后内部写所有的操作，日志全部输出，
+// 输出到 data 里面」）：这个遮罩就是那"唯一一个窗口" —— 它把更新过程全部装在里面，
+// 包括**实时日志**（读主进程 data/logs/update-YYYYMMDD.log 的尾部，每秒刷新）。
+// 用户不用去翻文件夹，也不会再看到一堆控制台窗口闪过。
 function UpdateBusyOverlay() {
   const busy = useUpdateBusy((s) => s.busy);
   const message = useUpdateBusy((s) => s.message);
   const pct = useUpdateBusy((s) => s.pct);
+  const [lines, setLines] = useState<string[]>([]);
+  const [showLog, setShowLog] = useState(true);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!busy) { setLines([]); return undefined; }
+    let alive = true;
+    const pull = async () => {
+      try {
+        // IPC 返回的是"整段文本"（历史实现如此，保持兼容）→ 这里拆成行
+        const t = await window.bc.updateLogTail(120);
+        if (alive && typeof t === 'string') setLines(t.split(/\r?\n/).filter(Boolean));
+      } catch { /* 读不到就不显示 */ }
+    };
+    void pull();
+    const timer = window.setInterval(pull, 1000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [busy]);
+
+  // 日志自动滚到底（用户在往上翻时不打扰）
+  useEffect(() => {
+    const el = logRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [lines]);
+
   if (!busy) return null;
   return (
     <div className="bc-update-blocker" role="alertdialog" aria-busy="true">
@@ -656,10 +809,31 @@ function UpdateBusyOverlay() {
         <div className="bc-update-blocker-bar">
           <div className="bc-update-blocker-fill" style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
         </div>
+
+        <div className="bc-update-log-head">
+          <button
+            className="bc-update-log-toggle"
+            onClick={() => setShowLog((v) => !v)}
+            title="展开 / 收起更新日志"
+          >{showLog ? '▾' : '▸'} 更新日志（实时）</button>
+          <button
+            className="bc-update-log-open"
+            onClick={() => void window.bc.openDataPath('logs')}
+            title="在文件管理器里打开日志目录（data/logs/）"
+          >打开日志目录</button>
+        </div>
+        {showLog && (
+          <div className="bc-update-log" ref={logRef}>
+            {lines.length === 0
+              ? <div className="bc-update-log-empty">正在准备…</div>
+              : lines.map((l, i) => <div className="bc-update-log-line" key={i}>{l}</div>)}
+          </div>
+        )}
+
         <div className="bc-update-blocker-hint">
-          正在替换程序本体，这期间锁定编辑器操作。完成后程序会自动重启，
+          正在替换程序本体，这期间锁定编辑器操作。完成后程序会<b>自动重新启动</b>，
           <b>data/ 里的全部工程与快照都会保留</b>；
-          程序文件夹还会自动改名带上新版本号（必要时会弹出一次系统授权框）。
+          程序文件夹会改成固定的 <b>BlockCanvas</b>，临时目录 <b>.update</b> 会自动清掉。
         </div>
       </div>
     </div>
@@ -799,6 +973,8 @@ function useKeyboardShortcuts(
     const onKey = (e: KeyboardEvent) => {
       // 更新进行中：全局快捷键全部失效（连撤销都不允许，避免半途改数据）
       if (useUpdateBusy.getState().busy) return;
+      // 只读快照预览：画布快捷键（保存/导出/删除/微调…）一律不生效
+      if (isSnapshotTab(useTabStore.getState().tabs.find((t) => t.id === useTabStore.getState().activeTabId))) return;
       const t = e.target as HTMLElement;
       const inField = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
       // 多行文本框 / 可编辑区：正在打字时用户要的是"撤销我刚敲的字" → 让原生撤销优先。

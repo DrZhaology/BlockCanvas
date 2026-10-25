@@ -22,9 +22,9 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-home-media');
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC = resolve(ROOT, 'extensions');
+  const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -32,6 +32,8 @@ async function main() {
   win.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
   win.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
   await win.waitForSelector('.empty-home', { timeout: 20000 });
+  // v0.4.5：加载页（最短 520ms + 淡出 300ms）期间会拦住点击，先等它退场
+  await win.waitForSelector('.bc-loading', { state: 'detached', timeout: 15000 }).catch(() => {});
   await sleep(600);
 
   // 1. 现场录一段 1 秒 webm
@@ -123,25 +125,41 @@ async function main() {
     (await win.locator('.empty-home.is-dark-bg').count()) === 0);
 
   // 6. 模糊 / 遮罩滑块实时生效
-  await win.evaluate(() => {
-    const inputs = document.querySelectorAll('.eh-panel .eh-range');
-    const blur = inputs[1];
-    if (blur) {
-      // React 的受控 input 用 value tracker 去重：必须走原生 setter 再派发 input
+  // v0.4.5：以前按"第 2 个 .eh-range"取模糊滑块 —— 面板结构一变（多/少一个滑块）就取错，
+  // 表现为偶发 `blur(0px)`。现在按**标签文字**找，并重试到值真的生效为止。
+  const setBlur = async (value) => {
+    return win.evaluate((v) => {
+      const rows = [...document.querySelectorAll('.eh-panel .eh-range-row, .eh-panel label, .eh-panel .eh-field')];
+      let range = null;
+      for (const r of rows) {
+        if (!/模糊/.test(r.textContent || '')) continue;
+        range = r.querySelector('input[type="range"]');
+        if (range) break;
+      }
+      // 兜底：老结构里没有包行，就退回"第 2 个滑块"
+      if (!range) range = document.querySelectorAll('.eh-panel .eh-range')[1];
+      if (!range) return { found: false };
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(blur, '8');
-      blur.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  });
-  await sleep(500);
-  const blurState = await win.evaluate(() => {
-    const m = document.querySelector('.empty-home .eh-media');
-    return {
-      filter: m ? getComputedStyle(m).filter : '',
-      saved: JSON.parse(localStorage.getItem('bc-empty-home-bg') || 'null')
-    };
-  });
-  ok('模糊滑块实时写进背景样式并保存', /blur\(8px\)/.test(blurState.filter) && blurState.saved?.blur === 8,
+      setter?.call(range, String(v));
+      range.dispatchEvent(new Event('input', { bubbles: true }));
+      range.dispatchEvent(new Event('change', { bubbles: true }));
+      return { found: true, now: range.value };
+    }, value);
+  };
+  let blurState = null;
+  for (let i = 0; i < 8; i += 1) {
+    await setBlur(8);
+    await sleep(320);
+    blurState = await win.evaluate(() => {
+      const m = document.querySelector('.empty-home .eh-media');
+      return {
+        filter: m ? getComputedStyle(m).filter : '',
+        saved: JSON.parse(localStorage.getItem('bc-empty-home-bg') || 'null')
+      };
+    });
+    if (/blur\(8px\)/.test(blurState.filter || '') && blurState.saved?.blur === 8) break;
+  }
+  ok('模糊滑块实时写进背景样式并保存', /blur\(8px\)/.test(blurState?.filter || '') && blurState?.saved?.blur === 8,
     JSON.stringify(blurState));
 
   const realErrs = errs.filter((t) => !/Failed to load resource/.test(t));

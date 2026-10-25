@@ -1,4 +1,4 @@
-﻿// BlockCanvas · CSS 属性 Schema
+// BlockCanvas · CSS 属性 Schema
 // 按需添加属性架构：所有可选 CSS 属性都在此声明
 // Inspector 根据 schema 渲染对应输入组件，并管理"哪些属性已添加"
 
@@ -675,6 +675,77 @@ export const SCHEMA: PropertySchema[] = [
     key: 'transform', label: '变换与缩放 (transform)', category: '其他', input: 'transform', scope: '子',
     placeholder: '例：scale(1.05) / translateY(-4px)',
     help: { title: '变换与缩放 transform', content: '用于实现微动效：\n· translateY(-4px) —— 向上悬浮 4px (卡片 hover 常用)\n· scale(1.05) —— 放大 1.05 倍\n· rotate(45deg) —— 旋转 45 度' }
+  },
+
+  // ==========================================================================
+  // v0.4.5 E1：补齐缺失的 CSS 属性（背景与图片 / 尺寸与对象 / 视觉效果 / 文字排版 / 交互行为）
+  // 只补原来没有的；已有的 object-fit / filter / cursor 等不重复添加。
+  // ==========================================================================
+  {
+    key: 'aspectRatio', label: '宽高比 (aspect-ratio)', category: '盒模型', input: 'text', scope: '子',
+    placeholder: '例：16 / 9 或 1',
+    help: { title: '宽高比 aspect-ratio', content: '只定一个尺寸，另一个按比例自动算。\n\n· 16 / 9 —— 视频/封面常用\n· 1 —— 正方形头像位\n\n配 width: 100% 用时，高度会自动跟着宽度走，图片墙不会变形。' }
+  },
+  {
+    key: 'overflowX', label: '横向溢出 (overflow-x)', category: '盒模型', input: 'select', scope: '子',
+    options: ['visible', 'hidden', 'auto', 'scroll'],
+    optionLabels: { visible: '可见（会溢出）', hidden: '裁掉', auto: '需要时才出滚动条', scroll: '总是出滚动条' },
+    help: { title: '溢出处理 overflow', content: '内容比容器大时怎么办：\n· hidden —— 直接裁掉（做圆角图片、跑马灯最常用）\n· auto —— 超了才出现滚动条\n\n只影响横向；纵向请用 overflow-y。' }
+  },
+  {
+    key: 'overflowY', label: '纵向溢出 (overflow-y)', category: '盒模型', input: 'select', scope: '子',
+    options: ['visible', 'hidden', 'auto', 'scroll'],
+    optionLabels: { visible: '可见（会溢出）', hidden: '裁掉', auto: '需要时才出滚动条', scroll: '总是出滚动条' }
+  },
+  {
+    key: 'clipPath', label: '裁剪形状 (clip-path)', category: '其他', input: 'text', scope: '子',
+    placeholder: '例：circle(50%) / inset(10px round 8px) / polygon(...)',
+    help: { title: '裁剪形状 clip-path', content: '把元素裁成任意形状：\n\n· circle(50%) —— 裁成正圆\n· inset(10px round 8px) —— 内缩 10px 且圆角 8px\n· polygon(50% 0, 100% 100%, 0 100%) —— 三角形\n\n常用于斜切卡片、异形头像。' }
+  },
+  {
+    key: 'mixBlendMode', label: '混合模式 (mix-blend-mode)', category: '其他', input: 'select', scope: '子',
+    options: ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'hard-light', 'soft-light', 'difference', 'exclusion', 'luminosity'],
+    optionLabels: { normal: '正常', multiply: '正片叠底（变暗）', screen: '滤色（变亮）', overlay: '叠加', darken: '取暗', lighten: '取亮', 'hard-light': '强光', 'soft-light': '柔光', difference: '差值', exclusion: '排除', luminosity: '明度' },
+    help: { title: '混合模式 mix-blend-mode', content: '让元素和它下面的内容"叠在一起"发生颜色混合。\n\n做文字压在图片上、发光叠加时非常有用。和背景的 background-blend-mode 是一对。' }
+  },
+  {
+    key: 'isolation', label: '隔离层叠 (isolation)', category: '其他', input: 'select', scope: '子',
+    options: ['auto', 'isolate'],
+    optionLabels: { auto: '不隔离（默认）', isolate: '隔离（只和本层混合）' },
+    help: { title: '隔离 isolation', content: '当混合模式"串味"到背景时，给容器加 isolate 可以把混合限制在容器内部。\n\n典型场景：卡片里做混合效果，但不希望卡片外面也变色。' }
+  },
+  {
+    key: 'backgroundAttachment', label: '背景附着 (background-attachment)', category: '颜色', input: 'select', scope: '子',
+    options: ['scroll', 'fixed', 'local'],
+    optionLabels: { scroll: '跟随元素滚动', fixed: '固定在视口（视差感）', local: '跟随内容滚动' },
+    help: { title: '背景附着 background-attachment', content: '背景图跟着谁动：\n· scroll —— 跟着元素走（默认）\n· fixed —— 固定在窗口上，滚动页面时背景不动，做出视差效果\n\n注意：fixed 在移动端浏览器上兼容性一般。' }
+  },
+  {
+    key: 'backgroundBlendMode', label: '背景混合 (background-blend-mode)', category: '颜色', input: 'select', scope: '子',
+    options: ['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'hard-light', 'soft-light', 'difference'],
+    optionLabels: { normal: '正常', multiply: '正片叠底', screen: '滤色', overlay: '叠加', darken: '取暗', lighten: '取亮', 'hard-light': '强光', 'soft-light': '柔光', difference: '差值' },
+    help: { title: '背景混合 background-blend-mode', content: '同一元素的多个背景层（颜色 + 图片 + 渐变）之间怎么混合。\n\n典型用法：给图片铺一层颜色再用 multiply，做统一的色调。' }
+  },
+  {
+    key: 'scrollBehavior', label: '滚动行为 (scroll-behavior)', category: '其他', input: 'select', scope: '子',
+    options: ['auto', 'smooth'],
+    optionLabels: { auto: '瞬间跳转', smooth: '平滑滚动' },
+    help: { title: '滚动行为 scroll-behavior', content: '点锚点链接跳转时：\n· auto —— 直接跳过去\n· smooth —— 平滑滚过去\n\n配合"回到顶部"按钮效果很好。' }
+  },
+  {
+    key: 'textIndent', label: '首行缩进 (text-indent)', category: '字体与排版', input: 'number', unit: 'em', scope: '子',
+    help: { title: '首行缩进 text-indent', content: '只缩进第一行，做中文段落排版最自然。\n\n用 em 作单位会跟着字号走：2em = 缩进两个汉字。' }
+  },
+  {
+    key: 'writingMode', label: '书写方向 (writing-mode)', category: '字体与排版', input: 'select', scope: '子',
+    options: ['horizontal-tb', 'vertical-rl', 'vertical-lr'],
+    optionLabels: { 'horizontal-tb': '横排（默认）', 'vertical-rl': '竖排 · 从右往左', 'vertical-lr': '竖排 · 从左往右' },
+    help: { title: '书写方向 writing-mode', content: '把文字改成竖排（古籍、诗词、侧边标签）。\n\n· vertical-rl —— 从右往左竖排，中文传统读法\n· vertical-lr —— 从左往右竖排' }
+  },
+  {
+    key: 'columnCount', label: '分栏数 (column-count)', category: '字体与排版', input: 'text', scope: '子',
+    placeholder: '例：2',
+    help: { title: '分栏 column-count', content: '把一段长文字自动排成多栏，像报纸那样。\n\n· column-count: 2 —— 排成两栏\n· 常配 column-gap 控制栏间距\n\n适合介绍性长段落，不适合代码块。' }
   }
 ];
 

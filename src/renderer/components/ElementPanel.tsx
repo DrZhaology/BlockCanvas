@@ -3,6 +3,7 @@ import { useScene, findNode } from '@store/sceneStore';
 import type { ElementType } from '@lib/types';
 import { exportHTML } from '@lib/exporter';
 import { HelpButton } from './HelpButton';
+import { AssetGallery } from './AssetGallery';
 import { Collapse } from './Collapse';
 import { getPluginElements } from '@lib/pluginHost';
 import { TABLE_STYLE_PRESETS, applyTableStylePreset } from '@lib/tablePresets';
@@ -99,6 +100,8 @@ const GROUPS: { title: string; items: ElementDef[] }[] = [
     title: '多媒体与其他',
     items: [
       { type: 'img', label: '图片', help: { tag: 'img', what: '插入一张图片', where: '任意位置；src 选本地文件或填网址' } },
+      { type: 'video', label: '视频', help: { tag: 'video', what: '插入一段视频（带播放控件，可循环）', where: '任意位置；选本地 mp4/webm 或填网址' } },
+      { type: 'audio', label: '音频', help: { tag: 'audio', what: '插入一段音频（带播放控件）', where: '任意位置；选本地 mp3/wav 或填网址' } },
       { type: 'figcaption', label: '图注', help: { tag: 'figcaption', what: 'figure 图文块的说明文字', where: '只能放在 figure 内部' } },
       { type: 'hr', label: '分割线', help: { tag: 'hr', what: '一条水平分割线，隔开两段内容', where: '任意两个区块之间' } }
       // 「换行 br」已从插入面板移除（v0.4.4）：文本里直接敲回车就会自动生成 <br>，
@@ -131,7 +134,7 @@ export function ElementPanel() {
   const insertTemplate = useScene((s) => s.insertTemplate);
   const autoInherit = useScene((s) => s.autoInherit);
   const setAutoInherit = useScene((s) => s.setAutoInherit);
-  const [tab, setTab] = useState<'element' | 'templates'>(() => {
+  const [tab, setTab] = useState<'element' | 'templates' | 'assets'>(() => {
     try { return (localStorage.getItem('bc-elem-tab') as any) || 'element'; } catch { return 'element'; }
   });
   const [scan, setScan] = useState<ScanResult | null>(null);
@@ -143,7 +146,7 @@ export function ElementPanel() {
     if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = 0; }
   };
 
-  const changeTab = (nextTab: 'element' | 'templates') => {
+  const changeTab = (nextTab: 'element' | 'templates' | 'assets') => {
     setTab(nextTab);
     try { localStorage.setItem('bc-elem-tab', nextTab); } catch {}
   };
@@ -255,8 +258,21 @@ export function ElementPanel() {
           onClick={() => changeTab('templates')}
           title="预设组件模板库"
         >模板</button>
+        {/* v0.4.5：素材库 —— 工程里用过的图片/视频/音频，点一下就插到画布 */}
+        <button
+          className={"inspector-tab" + (tab === 'assets' ? ' active' : '')}
+          onClick={() => changeTab('assets')}
+          title="素材库：工程里用过的图片、视频、音频"
+        >素材</button>
       </div>
 
+      {/*
+        v0.4.5 第十六批（用户反馈「下方元素插入栏没有切换板块的动画」）：
+        以前三个板块是各自 `{tab === 'x' && …}` 条件渲染 —— 切换时内容直接替换，没有过渡。
+        现在外面套一层 `.elem-tab-anim` 并用 `key={tab}` 强制重建，
+        每次切换都会播一次进场动画（与右侧属性面板的 `.insp-tab-anim` 用同一套 bcSwapIn）。
+      */}
+      <div className="elem-tab-anim" key={tab}>
       {tab === 'element' && (
         <div className="elem-main-wrap">
           <div className="elem-top-bar">
@@ -377,6 +393,10 @@ export function ElementPanel() {
           />
         </div>
       )}
+
+      {/* v0.4.5：素材库 */}
+      {tab === 'assets' && <AssetGallery />}
+      </div>
     </div>
   );
 }

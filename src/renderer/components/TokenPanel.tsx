@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useScene } from '@store/sceneStore';
 import {
-  DEFAULT_TOKENS, TOKEN_GROUPS, cssVarName, tokenRef,
+  DEFAULT_TOKENS, TOKEN_GROUPS, cssVarName, tokenRef, legacyVarName,
   isValidTokenName, uniqueTokenName, groupTokens,
   type TokenEntry, type TokenGroup
 } from '@lib/designTokens';
@@ -111,24 +111,25 @@ export function TokenPanel() {
     const clean = nextName.trim();
     if (!clean || clean === oldName) { setEditingName(null); return; }
     if (!isValidTokenName(clean)) {
-      void appAlert('变量名只能用小写字母开头，且只包含小写字母、数字和连字符（例如 primary、bg-soft）。', '变量名不规范');
+      void appAlert('变量名可以用大小写字母、数字、连字符和下划线（例如 primary、Brand-2、space_md），不能以连字符开头。', '变量名不规范');
       return;
     }
     if (list.some((t) => t.name === clean)) {
       void appAlert(`已经有一个叫「${clean}」的变量了，换一个名字。`, '名字重复');
       return;
     }
-    // 改名要连带把已写进样式里的 var(--bc-old) 一起换掉，否则引用会断
-    const oldRef = tokenRef(oldName);
+    // 改名要连带把已写进样式里的引用一起换掉，否则引用会断。
+    // v0.4.5：老工程里是 var(--bc-old)，新写法是 var(--old)，两种都要换。
+    const refs = [tokenRef(oldName), `var(${legacyVarName(oldName)})`];
     const newRef = tokenRef(clean);
     const replaceIn = (obj: Record<string, string>): [Record<string, string>, boolean] => {
       const out: Record<string, string> = { ...obj };
       let changed = false;
       for (const [k, v] of Object.entries(out)) {
-        if (typeof v === 'string' && v.includes(oldRef)) {
-          out[k] = v.split(oldRef).join(newRef);
-          changed = true;
-        }
+        if (typeof v !== 'string') continue;
+        let next = v;
+        for (const r of refs) if (next.includes(r)) next = next.split(r).join(newRef);
+        if (next !== v) { out[k] = next; changed = true; }
       }
       return [out, changed];
     };
@@ -287,7 +288,7 @@ export function TokenPanel() {
                 '【怎么用】\n' +
                 '· 点「＋ 新建变量」，选一个模板（主色 / 圆角 / 间距…）就建好了，名字可以随后改。\n' +
                 '· 在任意颜色输入框里点「变量」页签的色块，或点击数值输入框旁的 var 按钮，就会写入 var(--bc-xxx) 而不是写死数值。\n' +
-                '· 变量名只能用小写字母 / 数字 / 连字符，改名时已引用的地方会自动跟着改。'
+                '· 变量名可以用大小写字母 / 数字 / 连字符 / 下划线（如 primary、Brand-2、space_md），不再强制加 bc- 前缀；改名时已引用的地方会自动跟着改。'
               }
             />
           </div>

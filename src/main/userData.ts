@@ -1,5 +1,5 @@
 import { app } from 'electron';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import {
   existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, unlinkSync, rmSync, copyFileSync
 } from 'node:fs';
@@ -174,6 +174,14 @@ export function writeAppConfig(patch: Partial<AppConfig>): AppConfig {
 // 这里不再保留实现，避免出现"两份会话逻辑"。
 
 // ============ 项目与备份管理 ============
+/**
+ * 项目类型（v0.4.5 第 14 批）。
+ *
+ * 用户要求：「不同的项目类型要单独标注，可以有这几种：网页项目、网站项目（对应后续的多网页管理，
+ * 这一轮没让你做）、外部项目（不在 data/project），以及别的，所有的解释都在上方的小问号。」
+ */
+export type ProjectKind = 'page' | 'site' | 'external' | 'missing';
+
 export interface ProjectFileInfo {
   fileName: string;
   filePath: string;
@@ -183,10 +191,88 @@ export interface ProjectFileInfo {
   elementCount?: number;
   previewText?: string;
   backupCount?: number; // 该项目专属的快照数量
+  /** v0.4.5：来自 data/projects 以外（用户从别处导入的工程） */
+  external?: boolean;
+  /** v0.4.5：登记过但磁盘上已经不在了（被移动/删除），列表里置灰提示 */
+  missing?: boolean;
+  /** v0.4.5：项目类型（列表里单独标注） */
+  kind?: ProjectKind;
+  /** v0.4.5：页面数（多页工程 > 1；现在恒为 1，为下一轮的多页管理预留） */
+  pageCount?: number;
+}
+
+/** 外部工程登记表（data/external-projects.json） */
+export interface ExternalProjectEntry {
+  path: string;
+  name?: string;
+  addedAt: string;
+}
+
+function externalRegistryPath(): string {
+  return join(dataRoot(), 'external-projects.json');
+}
+
+const normPath = (p: string) => String(p || '').replace(/[\\/]+/g, '/').toLowerCase();
+
+export function readExternalRegistry(): ExternalProjectEntry[] {
+  try {
+    const p = externalRegistryPath();
+    if (!existsSync(p)) return [];
+    const arr = JSON.parse(readFileSync(p, 'utf8'));
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((e: ExternalProjectEntry) => e && typeof e.path === 'string' && e.path.trim());
+  } catch {
+    return [];
+  }
+}
+
+function writeExternalRegistry(list: ExternalProjectEntry[]): void {
+  try {
+    mkdirSync(dataRoot(), { recursive: true });
+    writeFileSync(externalRegistryPath(), JSON.stringify(list, null, 2), 'utf8');
+  } catch { /* 登记失败不影响打开工程 */ }
+}
+
+/** 把一个位于 data/projects 之外的工程登记进列表（重复登记自动去重） */
+export function registerExternalProject(filePath: string, name?: string): void {
+  const p = String(filePath || '').trim();
+  if (!p) return;
+  const defaultDir = join(dataRoot(), 'projects');
+  if (normPath(p).startsWith(normPath(defaultDir) + '/')) return; // 默认目录里的不用登记
+  const list = readExternalRegistry();
+  const hit = list.find((e) => normPath(e.path) === normPath(p));
+  if (hit) {
+    if (name) hit.name = name;
+  } else {
+    list.push({ path: p, name, addedAt: new Date().toISOString() });
+  }
+  writeExternalRegistry(list);
+}
+
+/** 从列表里移除一个外部工程（不动磁盘文件） */
+export function forgetExternalProject(filePath: string): boolean {
+  const list = readExternalRegistry();
+  const next = list.filter((e) => normPath(e.path) !== normPath(filePath));
+  if (next.length === list.length) return false;
+  writeExternalRegistry(next);
+  return true;
 }
 
 export function sanitizeProjectFolder(name: string): string {
   return (name || '').trim().replace(/[\\/:*?"<>|]+/g, '_') || '_general';
+}
+
+/**
+ * 从 manifest 推断项目类型与页面数。
+ *
+ * 现在只有「网页项目」（单页）一种；多页工程（网站项目）是下一轮的事，
+ * 但这里先把判定写出来 —— 只要 manifest.meta.pageCount > 1 就自动标成「网站项目」，
+ * 将来实现多页时**列表侧不用再改**。
+ */
+function kindOfManifest(m: { meta?: Record<string, unknown> } | null | undefined): { kind: ProjectKind; pageCount: number } {
+  const raw = Number((m?.meta as Record<string, unknown> | undefined)?.pageCount ?? 1);
+  const pageCount = Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 1;
+  return { kind: pageCount > 1 ? 'site' : 'page', pageCount };
 }
 
 export function listProjects(): ProjectFileInfo[] {
@@ -215,10 +301,60 @@ export function listProjects(): ProjectFileInfo[] {
         updatedAt: stat.mtime.toISOString(),
         elementCount: m.manifest.meta?.elementCount ?? 0,
         previewText: m.manifest.meta?.description || '',
-        backupCount
+        backupCount,
+        ...kindOfManifest(m.manifest)
       });
     } catch {}
   }
+
+  // v0.4.5：把"外部工程"（用户从别处导入的）也并进列表。
+  // 文件被移动/删掉的保留一条 missing 记录，让用户知道"它去哪了"，
+  // 而不是无声消失、以为工程丢了。
+  for (const e of readExternalRegistry()) {
+    const full = e.path;
+    const base = full.replace(/^.*[\\/]/, '');
+    if (!existsSync(full)) {
+      list.push({
+        fileName: base,
+        filePath: full,
+        name: e.name || base.replace(/\.bcproj$/i, ''),
+        size: 0,
+        updatedAt: e.addedAt || new Date(0).toISOString(),
+        elementCount: 0,
+        previewText: '文件已不在原位置（可能被移动或删除）',
+        backupCount: 0,
+        external: true,
+        missing: true,
+        kind: 'missing',
+        pageCount: 1
+      });
+      continue;
+    }
+    try {
+      const stat = statSync(full);
+      const m = readManifestOnly(full);
+      const projName = (m.ok && m.manifest?.name) || e.name || base.replace(/\.bcproj$/i, '');
+      const backupDir = join(dataRoot(), 'backups', sanitizeProjectFolder(projName));
+      const backupCount = existsSync(backupDir)
+        ? readdirSync(backupDir).filter((x) => x.endsWith('.bcproj')).length
+        : 0;
+      list.push({
+        fileName: base,
+        filePath: full,
+        name: projName,
+        size: stat.size,
+        updatedAt: stat.mtime.toISOString(),
+        elementCount: (m.ok && m.manifest?.meta?.elementCount) || 0,
+        previewText: (m.ok && m.manifest?.meta?.description) || '',
+        backupCount,
+        external: true,
+        // 外部工程即使有多个页面也优先标「外部项目」—— 位置信息对用户更重要
+        kind: 'external',
+        pageCount: m.ok && m.manifest ? kindOfManifest(m.manifest).pageCount : 1
+      });
+    } catch { /* 单个外部工程读不出来就跳过 */ }
+  }
+
   return list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
@@ -368,13 +504,19 @@ function countNodes(node: any): number {
 }
 
 /**
- * 从「种子扩展目录」同步内置扩展到运行时 data/extensions/
- * 同名 id 覆盖，用户第三方扩展保留不动
+ * 从「内置扩展源目录」同步内置扩展到运行时 data/extensions/
+ * 同名 id 覆盖，用户第三方扩展保留不动。
+ *
+ * v0.4.5 目录统一：源码里的扩展**只放** `builtin-extensions/`（仓库根目录不再有 extensions/），
+ * 运行时**只读** data/extensions/。这里负责把内置的那份种进去，用户装的那份不受影响。
+ *   · 打包后：随包分发的 resources/builtin-extensions
+ *   · 开发态：仓库根的 builtin-extensions
  */
 function seedExtensionsFromZip(extDir: string) {
   try {
-    // 种子路径：exe 同级的 data/extensions/
-    const seedExtDir = join(dirname(process.execPath), 'data', 'extensions');
+    const seedExtDir = app.isPackaged
+      ? join(process.resourcesPath, 'builtin-extensions')
+      : join(app.getAppPath(), 'builtin-extensions');
     if (!existsSync(seedExtDir)) return;
 
     for (const kindDir of ['plugins', 'resources']) {

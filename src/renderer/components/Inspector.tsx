@@ -4,7 +4,7 @@ import { useScene, findNode, getEffectiveStyle } from '@store/sceneStore';
 import { TEXT_TAGS, SELF_CLOSING_TAGS, CONTAINER_TAGS } from '@lib/types';
 import type { ElementType, SceneElement, SceneGraph } from '@lib/types';
 import { SCHEMA, ATTRS_SCHEMA, DEFAULT_VISIBLE_PROPS,
-  getSchemaItem, isApplicable, hasStyleValue, applyUnit, UNIT_HELP_TEXT
+  getSchemaItem, isApplicable, hasStyleValue, applyUnit, presetValue, UNIT_HELP_TEXT
 } from '@lib/propertySchema';
 import { getPluginProperties } from '@lib/pluginHost';
 import { AddPropertyMenu } from './AddPropertyMenu';
@@ -14,9 +14,12 @@ import { Box4Input } from './Box4Input';
 import { useShowBr } from '@lib/showBr';
 import { peekPendingPropFocus, subscribePropFocus, takePendingPropFocus, type PropFocusRequest } from '@lib/propFocus';
 import { TrblInput } from './TrblInput';
+import { MediaPropsCard } from './MediaPropsCard';
+import { PositionGhostCard } from './PositionGhostCard';
 import { ColorPicker, ColorField } from './ColorPicker';
 import { NumberUnitInput } from './NumberUnitInput';
 import { FontFamilyInput } from './FontFamilyInput';
+import { FontPickerModal } from './FontPickerModal';
 import { TransformInput } from './TransformInput';
 import { BorderInput } from './BorderInput';
 import { BoxShadowInput } from './BoxShadowInput';
@@ -85,6 +88,9 @@ export function Inspector() {
   const selectedIdForSync = scene.selectedId;
   useEffect(() => {
     setJustAddedKey(null);
+    // v0.4.5：选中元素时，无论当前停在「类名 / 页面 / 变量」哪个页签，都跳回「元素」。
+    // 用户的心智是"我点了一个元素，就要看这个元素的属性"；停在别处会让人以为没选中。
+    if (selectedIdForSync) setInspectorTabRaw('element');
   }, [selectedIdForSync]);
 
   // 中键属性搜索：右侧面板可能停在「页面 / 类名 / 变量」页签（ElementPropsBody 未挂载），
@@ -218,7 +224,12 @@ type PageQuickKey = keyof NonNullable<SceneGraph['quickCss']> & string;
 interface PagePropDef {
   key: PageQuickKey;
   label: string;
-  type: 'color' | 'text';
+  /**
+   * 卡片用哪种编辑器。
+   * v0.4.5 第十六批新增 `'font'`：字体走元素那一套「字体库」弹窗
+   * （用户反馈「页面和变量里面的字体还是原始的，没有类似单个元素的 font family 的设置方式」）。
+   */
+  type: 'color' | 'text' | 'font';
   placeholder?: string;
   /** 对应元素 SCHEMA 的 key：决定这张卡片用哪种专属编辑器 */
   schemaKey?: string;
@@ -228,7 +239,7 @@ const PAGE_PROPS: PagePropDef[] = [
   { key: 'bodyBg', label: '页面背景色', type: 'color', schemaKey: 'backgroundColor' },
   { key: 'textColor', label: '文字颜色', type: 'color', schemaKey: 'color' },
   { key: 'linkColor', label: '链接颜色', type: 'color', schemaKey: 'color' },
-  { key: 'fontFamily', label: '页面字体', type: 'text', schemaKey: 'fontFamily' },
+  { key: 'fontFamily', label: '页面字体', type: 'font', schemaKey: 'fontFamily' },
   { key: 'bodyFontSize', label: '正文字号', type: 'text', schemaKey: 'fontSize' },
   { key: 'bodyLineHeight', label: '正文行高', type: 'text', schemaKey: 'lineHeight' },
   { key: 'headingColor', label: '标题颜色（h1~h6）', type: 'color', schemaKey: 'color' }
@@ -440,6 +451,18 @@ function PageCssBody() {
 }
 
 // ============ 页面属性卡片（与元素 CSS 属性行同一套视觉 / 编辑器） ============
+// v0.4.5：删除属性时先播完"向右滑出 + 高度收起"，再真正删除。
+// 时长要和 CSS 里的 .is-leaving 动画（0.34s）对齐：提前删会看到"走一半突然消失"。
+// 系统开了"减少动态效果"时直接删（不做动画）。
+const PROP_REMOVE_MS = 340;
+function animateRemove(el: Element | null, done: () => void) {
+  const row = el?.closest('.prop-row') as HTMLElement | null;
+  const reduce = typeof window !== 'undefined'
+    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  if (!row || reduce) { done(); return; }
+  row.classList.add('is-leaving');
+  window.setTimeout(done, PROP_REMOVE_MS);
+}
 // 只绑定「值 + 写回」，不碰元素 / 断点，所以能同时服务 body 常用项与任意全局 CSS。
 function PagePropRow(props: {
   label: string;
@@ -461,6 +484,8 @@ function PagePropRow(props: {
   const unit = schema?.unit;
   const value = props.value ?? '';
   const canSides = Boolean(schema?.sides && props.sideGet && props.sideSet);
+  // 页面/变量的字体：复用元素的「字体库」弹窗（v0.4.5 第十六批）
+  const [fontPickerOpen, setFontPickerOpen] = useState(false);
 
   return (
     <div className="prop-row page-prop-row" data-cat={schema?.category ?? '其他'}>
@@ -469,7 +494,7 @@ function PagePropRow(props: {
           {props.label}
           {schema?.help && <HelpButton title={schema.help.title} content={schema.help.content} />}
         </span>
-        <button className="prop-remove" title="删除此属性" onClick={props.onRemove}>
+        <button className="prop-remove" title="删除此属性" onClick={(e) => animateRemove(e.currentTarget, props.onRemove)}>
           <Icon name="close" size={12} />
         </button>
       </div>
@@ -494,6 +519,35 @@ function PagePropRow(props: {
             onFocusStart={props.onFocusStart}
             onFocusEnd={props.onFocusEnd}
           />
+        ) : input === 'font' ? (
+          /*
+           * v0.4.5 第十六批（用户反馈）：「页面和变量里面的字体还是原始的，
+           * 没有类似单个元素的 font family 的设置方式（是有一个弹窗）。」
+           * 这里直接复用元素那一套「字体库」弹窗（FontPickerModal）：
+           * 同样的搜索、同样的预览、同样的商用许可证徽章，只是写进 bodyExtra / token。
+           */
+          <div className="page-font-field">
+            <input
+              className="page-quick-input page-font-input"
+              value={value}
+              placeholder="留空 = 用浏览器默认字体"
+              spellCheck={false}
+              onFocus={props.onFocusStart}
+              onChange={(e) => props.onChange(e.target.value)}
+              onBlur={props.onFocusEnd}
+            />
+            <button
+              className="btn-mini page-font-pick"
+              title="打开字体库：可搜索本机字体、预览效果、查看商用许可"
+              onClick={() => { props.onFocusStart(); setFontPickerOpen(true); }}
+            >字体库…</button>
+            <FontPickerModal
+              open={fontPickerOpen}
+              initial={value}
+              onClose={() => { setFontPickerOpen(false); props.onFocusEnd(); }}
+              onApply={(v) => { props.onChange(v); setFontPickerOpen(false); props.onFocusEnd(); }}
+            />
+          </div>
         ) : input === 'select' && schema?.options ? (
           <select
             className="page-quick-input"
@@ -886,7 +940,21 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   const visibleSchema: typeof SCHEMA = [];
   const visiblePropList = selected.visibleProps ?? [];
   const allSchema = [...SCHEMA, ...getPluginProperties()];
-  const isTextGradientEl = selected.style.WebkitTextFillColor === 'transparent';
+  /**
+   * v0.4.5：判断"这条属性已添加了吗"必须看**当前断点合并后的样式**。
+   *
+   * 以前只看 `selected.style`（基础层）。可是写入是跟着当前断点走的 ——
+   * 画布窄一点（右侧面板加宽后默认只有 ~753px）就会落到 tablet 断点，
+   * 值写进 `responsive.tablet`，基础层依然是空的 → **刚设好的属性行当场消失**。
+   * 合并之后"面板里看到的行"与"画布上生效的样式"始终一致。
+   */
+  const styleForPresence: Record<string, string | undefined> = {
+    ...(selected.style as unknown as Record<string, string | undefined>),
+    ...((activeBreakpoint !== 'desktop'
+      ? (selected.responsive?.[activeBreakpoint] as unknown as Record<string, string | undefined>)
+      : undefined) ?? {})
+  };
+  const isTextGradientEl = styleForPresence.WebkitTextFillColor === 'transparent';
   // 「过渡动画 (transition)」由「交互状态 (伪类)」区域的滑块统一管理，
   // 不再在下方「CSS 样式属性」里重复出现一条（用户若从 + 添加属性 显式加过，仍然显示）
   const PSEUDO_MANAGED_KEYS = new Set(['transition']);
@@ -894,8 +962,8 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
     // v0.4.4：显式添加过的属性即使"当前条件不满足"也要渲染出来（行上标「不生效」），
     // 否则 left/right/top/bottom 在 position:static 时加进来会直接消失（用户反馈）。
     if (!isApplicable(s, selected.type) && !visiblePropList.includes(s.key)) continue;
-    const extraBg = s.key === 'backgroundColor' && isGradient(selected.style.backgroundImage) && !isTextGradientEl;
-    const byValue = hasStyleValue(selected.style, s as any) || extraBg;
+    const extraBg = s.key === 'backgroundColor' && isGradient(styleForPresence.backgroundImage) && !isTextGradientEl;
+    const byValue = hasStyleValue(styleForPresence, s as any) || extraBg;
     const helperHidden =
       !showHelperInCss && HELPER_MANAGED_KEYS.has(s.key) && !visiblePropList.includes(s.key);
     const pseudoHidden =
@@ -936,14 +1004,34 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
   // ============ 中键搜索：定位到某条 CSS 属性（橙色高亮）============
   // 画布上对元素按中键 → 敲属性名 → Enter → 这里展开「CSS 样式属性」、确保该行存在、滚动并闪烁高亮。
   const [flashKey, setFlashKey] = useState<string | null>(null);
+  /**
+   * 定位「幽灵卡片」（v0.4.5 第十六批 · 用户澄清后的真实需求）
+   * ------------------------------------------------------------------
+   * 用户原话：「中间选中元素输入 position，Enter 就可以直接定位到这个元素右侧的
+   *            position 的幽灵卡片，只是用来临时数据修改，避免去快捷助手里面改。」
+   *
+   * 所以：中键搜到 position（或 left/top/right/bottom）时，除了展开 CSS 属性区，
+   * 还额外弹出这张**临时**卡片 —— 因为 position 的可编辑项分散在快捷助手里，
+   * 用户搜 position 却"点不进去"（反馈原话："对于定位 position 元素没有用"）。
+   */
+  const [showPosGhost, setShowPosGhost] = useState(false);
   useEffect(() => {
     const apply = (req: PropFocusRequest) => {
       const key = req.key;
       if (!key) return;
+      // 定位相关属性 → 同时亮出临时卡片
+      const POS_KEYS = new Set(['position', 'left', 'right', 'top', 'bottom', 'zIndex', 'inset']);
+      if (POS_KEYS.has(key)) setShowPosGhost(true);
       // add 默认 true（老行为）；中键搜索在"未添加"时按 Enter 会传 false —— 只提示、不偷偷加
       const shouldAdd = req.add !== false;
       setSecOpen((p) => ({ ...p, css: true }));
       if (shouldAdd) addVisibleProp(elementId, key);
+      // v0.4.5：中键搜索的「属性值预测」—— 顺手把值也写进去（裸数字按 schema.unit 补单位）
+      if (req.value !== undefined) {
+        const item = getSchemaItem(key);
+        const v = item ? presetValue(item, req.value) : req.value;
+        updateStyle(elementId, { [key]: v } as never);
+      }
       setFlashKey(key);
       // 滚动到该行：**不用 scrollIntoView('center')** —— 行在列表末尾时容器已经滚不动，
       // 只能贴底，容易被面板底部挡住（用户反馈"末尾元素定位不到"）。
@@ -1036,29 +1124,35 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
         </div>
       </div>
 
-      {/* 未命名的强提醒：没有类名 / ID / 关系选择器时，伪类样式导出后必然失效。
-          这里做闪烁提示，尽量在用户"白干一场"之前拦下来。 */}
+      {/* 未命名的提醒：没有类名 / ID / 关系选择器时，伪类样式导出后必然失效。
+          v0.4.5：从一整块黄色大卡片压成**一行**（图标 + 一句话 + 起名按钮）。
+          它每个新元素都会出现，占掉 180px 面板高度实在太吵；
+          详细原因放进 title，需要时悬停即可看到。 */}
       {hasInlineStyle && (
-        <div className="cls-warn-flash" role="alert">
-          <span className="cls-warn-ico"><Icon name="warning" size={18} /></span>
+        <div
+          className="cls-warn-flash"
+          role="alert"
+          title={
+            `这 ${stylePropCount} 项样式会以行内样式导出。\n` +
+            '行内样式无法承载 :hover / :active / :focus 这类伪类，\n' +
+            '所以给元素起一个类名（或设 ID / 关系选择器）后，伪类样式才能在导出的网页里生效。'
+          }
+        >
+          <span className="cls-warn-ico"><Icon name="warning" size={13} /></span>
           <div className="cls-warn-body">
             <div className="cls-warn-title">样式还没有名字</div>
-            <div className="cls-warn-desc">
-              这 {stylePropCount} 项样式会以<b>行内样式</b>导出；:hover / :active / :focus 这类伪类样式
-              必须有「类名 / ID / 关系选择器」才能在导出后生效。
-            </div>
-            <div className="cls-warn-actions">
-              <button
-                className="btn-primary btn-mini"
-                onClick={() => setSecOpen((p) => ({ ...p, identity: true }))}
-              >起个名字</button>
-              <button
-                className="btn-secondary btn-mini"
-                onClick={() => window.dispatchEvent(new CustomEvent('bc:open-class'))}
-                title="到「类名 · ID 总览」里批量给未命名元素起名"
-              >打开类名总览</button>
-            </div>
+            <div className="cls-warn-desc">伪类样式导出后会失效</div>
           </div>
+          <button
+            className="cls-warn-btn"
+            onClick={() => setSecOpen((p) => ({ ...p, identity: true }))}
+            title="给当前元素起一个类名"
+          >起名</button>
+          <button
+            className="cls-warn-btn is-ghost"
+            onClick={() => window.dispatchEvent(new CustomEvent('bc:open-class'))}
+            title="到「类名 · ID 总览」里批量给未命名元素起名"
+          >总览</button>
         </div>
       )}
 
@@ -1225,6 +1319,21 @@ function ElementPropsBody(props: { selected: SceneElement; justAddedKey: string 
           </div>
         </Collapse>
       </div>
+
+      {/* 0. 定位「幽灵卡片」（v0.4.5 第十六批）：中键搜 position / left / top… 时临时出现，
+             就地改定位，不用去快捷助手里翻。Esc 或 × 关闭。 */}
+      {showPosGhost && (
+        <PositionGhostCard
+          elementId={elementId}
+          elementType={elementType}
+          onClose={() => setShowPosGhost(false)}
+        />
+      )}
+
+      {/* 1.5 媒体属性卡（v0.4.5）：video / audio 专用，只有这几个属性，不该让人手填 src */}
+      {(elementType === 'video' || elementType === 'audio') && (
+        <MediaPropsCard elementId={elementId} elementType={elementType} />
+      )}
 
       {/* 2. 快捷助手折叠区（Flex & Grid + 文字渐变 + 未来更多） */}
       <div className="inspector-sec">
@@ -1994,7 +2103,7 @@ function PropertyRow(props: {
 
   return (
     <div
-      className={'prop-row' + (highlight ? ' highlight' : '') + (flash ? ' flash' : '') + (!app.applicable ? ' is-inapplicable' : '')}
+      className={'prop-row' + (highlight ? ' highlight is-just-added' : '') + (flash ? ' flash' : '') + (!app.applicable ? ' is-inapplicable' : '')}
       // 分类配色：CSS 用 data-cat 给每类属性一条不同颜色的左边线，密集列表也能一眼分清
       data-cat={schemaItem.category}
       // 中键搜索定位用：找到这一行并滚动/高亮
@@ -2004,10 +2113,11 @@ function PropertyRow(props: {
     >
       <div className="prop-row-header">
         <span>
-          {schemaItem.scope && (
-            <span className="prop-scope" title={schemaItem.scope === '父' ? '此属性作用在父容器上，影响子元素排布' : '此属性作用在子元素上'}>
-              {schemaItem.scope}
-            </span>
+          {/* v0.4.5：以前每个属性名前都挂一个"子"字小方块，看起来像乱码。
+              现在只在**真的作用于父容器**（flex/grid 这类）时显示一枚"父级"小标签，
+              其余属性靠左侧分类色条区分，不再堆字。 */}
+          {schemaItem.scope === '父' && (
+            <span className="prop-scope" title="此属性作用在父容器上，影响子元素排布">父级</span>
           )}
           {schemaItem.label}{help}
           {isOverridden && (
@@ -2029,7 +2139,7 @@ function PropertyRow(props: {
           )}
           {highlight && <span className="prop-new-badge">新</span>}
         </span>
-        <button className="prop-remove" title="删除此属性" onClick={onRemove}><Icon name="close" size={12} /></button>
+        <button className="prop-remove" title="删除此属性" onClick={(e) => animateRemove(e.currentTarget, onRemove)}><Icon name="close" size={12} /></button>
       </div>
       <div className="prop-row-body">
         {schemaItem.input === 'font' && (

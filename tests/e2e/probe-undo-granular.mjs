@@ -22,10 +22,10 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-undo-probe');
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
-  for (const rel of [resolve(ROOT, 'extensions'), resolve(ROOT, 'data', 'extensions')]) {
+  for (const rel of [resolve(ROOT, 'builtin-extensions'), resolve(ROOT, 'data', 'extensions')]) {
     if (existsSync(rel)) cpSync(rel, resolve(DATA_DIR, 'extensions'), { recursive: true });
   }
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -69,9 +69,13 @@ async function main() {
   ok('找到不透明度滑块', dragged === true);
   await sleep(400);
   const past1 = await win.evaluate(() => window.__sceneStore.getState().history.past.length);
+  // v0.4.5：属性写入跟着**当前断点**走（画布 753px → tablet），所以读值要把断点层合并进来，
+  // 只读 node.style 会读到 undefined（断言写错，不是功能坏）。
   const op = await win.evaluate((eid) => {
-    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
-    return n.style.opacity;
+    const st = window.__sceneStore.getState();
+    const n = st.scene.root.children.find((c) => c.id === eid);
+    const bp = st.activeBreakpoint;
+    return (n.responsive?.[bp]?.opacity) ?? n.style.opacity;
   }, id);
   ok('滑块拖动后 opacity 已写入', op === '0.5', String(op));
   ok('滑块连续拖动只产生 1 条撤销记录', past1 - past0 === 1, `${past0} → ${past1}`);
@@ -119,10 +123,14 @@ async function main() {
 
   // ============ 3. 选中元素 + 焦点在属性输入框里，Ctrl+Z / Ctrl+Y 也要能用（v0.4.4h）============
   // 用户反馈的 bug：点画布选中元素后，焦点留在右侧输入框 → 全局快捷键被输入框守卫吃掉。
-  const w0 = await win.evaluate((eid) => {
-    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
-    return n.style.width;
-  }, id);
+  // v0.4.5：断点感知读值（属性写入落在当前断点那一层）
+  const readW = (eid) => win.evaluate((x) => {
+    const st = window.__sceneStore.getState();
+    const n = st.scene.root.children.find((c) => c.id === x);
+    const bp = st.activeBreakpoint;
+    return (n.responsive?.[bp]?.width) ?? n.style.width;
+  }, eid);
+  const w0 = await readW(id);
 
   // 点进宽度输入框（焦点停在输入框里），再用滚轮连续调值（模拟用户连续操作）
   await win.locator('[data-prop-key="width"] input').first().click();
@@ -138,10 +146,7 @@ async function main() {
     }
   });
   await sleep(600);
-  const wChanged = await win.evaluate((eid) => {
-    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
-    return n.style.width;
-  }, id);
+  const wChanged = await readW(id);
   ok('滚轮已改变宽度', wChanged !== w0, `${w0} → ${wChanged}`);
 
   // 焦点仍在输入框里 → 按 Ctrl+Z 应该整体还原（而不是被输入框吃掉）
@@ -149,18 +154,12 @@ async function main() {
   ok('按 Ctrl+Z 之前焦点仍在输入框里', focusStill === 'INPUT', focusStill);
   await win.keyboard.press('Control+z');
   await sleep(500);
-  const wUndo = await win.evaluate((eid) => {
-    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
-    return n.style.width;
-  }, id);
+  const wUndo = await readW(id);
   ok('焦点在输入框里时 Ctrl+Z 仍然生效', wUndo === w0, `${wChanged} → ${wUndo}`);
 
   await win.keyboard.press('Control+y');
   await sleep(500);
-  const wRedo = await win.evaluate((eid) => {
-    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid);
-    return n.style.width;
-  }, id);
+  const wRedo = await readW(id);
   ok('Ctrl+Y 重做也生效', wRedo === wChanged, String(wRedo));
 
   // 点画布 → 焦点主动离开输入框（这样后续快捷键不会被吃掉）

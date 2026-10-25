@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import logoUrl from '@renderer/assets/logo.svg';
 import { readPersisted, writePersisted } from '@lib/usePersisted';
 import { Icon } from './Icon';
@@ -46,6 +46,78 @@ const BG_PRESETS: { label: string; value: string }[] = [
 const DEFAULT_BG: BgSpec = { kind: 'preset', value: BG_PRESETS[0].value };
 const DEFAULT_GRADIENT = 'linear-gradient(160deg, #dbeafe 0%, #ffffff 100%)';
 
+/**
+ * 「解不了的视频」黑名单（v0.4.5）
+ *
+ * 背景：Chromium 遇到解不了的编码会打 `ffmpeg_common.cc Unsupported pixel format: -1`，
+ * 那条日志来自**原生解码器**，JS 完全屏蔽不了。之前只做到「失败就回退背景」，
+ * 但每次启动仍会先尝试解码一次 → 每次进首页还是刷同一条错误。
+ *
+ * 现在把失败过的文件路径记下来：以后连 `<video>` 都不挂载，从根上不再触发解码。
+ * 只记最近 20 条，用户换新文件不受影响。
+ */
+const BAD_VIDEO_KEY = 'bc-empty-home-bad-videos';
+function readBadVideos(): string[] {
+  try {
+    const arr = JSON.parse(localStorage.getItem(BAD_VIDEO_KEY) || '[]');
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+function markBadVideo(src: string): void {
+  try {
+    const list = readBadVideos();
+    if (!src || list.includes(src)) return;
+    localStorage.setItem(BAD_VIDEO_KEY, JSON.stringify([...list, src].slice(-20)));
+  } catch { /* 记不住也无所谓，只是下次还会试一次 */ }
+}
+
+/**
+ * 视频能不能解（v0.4.5）。
+ * Chromium 遇到解不了的编码会打 `Unsupported pixel format: -1`（ffmpeg_common.cc），
+ * 那条日志来自原生解码器，JS 没法屏蔽；能做的是**事先探一次**。
+ *
+ * ⚠ v0.4.5 第 15 批修正（用户反馈）：「我的一个 mp4 明明正常播放下方还红色提示解码不了，退回默认壁纸。」
+ *
+ * 老实现把"探测超时"也当成"解不了"（4 秒没 metadata 就判死）。可大一点的 mp4 走自定义协议
+ * 光读 metadata 就要几秒 —— 于是一个**完全正常**的视频被误判、拉黑、还弹红字。
+ *
+ * 现在区分三种结果：
+ *   · 'ok'        → 有 metadata，正常
+ *   · 'timeout'   → 只是**慢**，不代表坏：**不拉黑、不换壁纸**，让它继续加载
+ *   · 'unsupported' → 明确报错（MEDIA_ERR_SRC_NOT_SUPPORTED / DECODE）才判定解不了
+ */
+type VideoProbe = 'ok' | 'timeout' | 'unsupported';
+
+function probeVideoPlayable(src: string, timeoutMs = 9000): Promise<VideoProbe> {
+  return new Promise((resolve) => {
+    if (!src) { resolve('unsupported'); return; }
+    const v = document.createElement('video');
+    v.muted = true;
+    v.preload = 'metadata';
+    v.crossOrigin = 'anonymous';
+    let settled = false;
+    const done = (r: VideoProbe) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      v.removeAttribute('src');
+      v.load();
+      resolve(r);
+    };
+    const timer = window.setTimeout(() => done('timeout'), timeoutMs);
+    v.onloadedmetadata = () => done('ok');
+    v.onerror = () => {
+      // 只有"真的不支持/解码失败"才算坏；网络类错误（被中断、暂时读不到）不拉黑
+      const code = v.error?.code;
+      const bad = code === MediaError.MEDIA_ERR_DECODE || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
+      done(bad ? 'unsupported' : 'timeout');
+    };
+    v.src = src;
+  });
+}
+
 /** 本地路径 → bc-img://（与画布同一套协议；相对路径由主进程按 data / app 目录解析） */
 function mediaSrc(src: string): string {
   const s = (src || '').trim();
@@ -86,6 +158,55 @@ function loadBg(): BgSpec {
     return s as BgSpec;
   }
   return DEFAULT_BG;
+}
+
+// ============================================================================
+// v0.4.5：**记住主界面的颜色模式**（用户反馈）
+// ----------------------------------------------------------------------------
+// 用户原话：「比如可以记录主界面的颜色模式，比如背景是淡色的，记录一下，那么显示的字体就是黑色的。
+//            因为现在直接进入会有一个过渡期，如果背景深色的，会等一会儿再把文字变成白色。」
+//
+// 原因：文字反色以前**只能等异步采样**（图片要 onload、视频要等 1.8 秒那一帧），
+// 所以进首页时先按"浅色底 → 黑字"画一帧，采样完才翻成白字 —— 那一下很跳。
+//
+// 现在两道保险：
+//  1. **能同步算的就同步算**：纯色 / 渐变直接解析颜色算亮度，第一帧就是对的（根本不进过渡期）；
+//  2. **算不了的记住上次结果**：图片 / 视频按"背景签名"（类型+路径+压暗+模糊）记住上次判定，
+//     下次进首页直接套用；签名没变就完全不需要再翻色。
+// ============================================================================
+const BG_DARK_KEY = 'bc-home-dark';        // 上次判定结果（true = 深色底 → 白字）
+const BG_DARK_SIG_KEY = 'bc-home-dark-sig'; // 该结果对应的背景签名
+
+/** 背景签名：同一种背景（含压暗/模糊参数）算同一档，换背景就重新判定 */
+function bgSignature(spec: BgSpec): string {
+  if (spec.kind === 'preset') return 'preset:' + spec.value;
+  if (spec.kind === 'gradient') return 'gradient:' + (spec.css || DEFAULT_GRADIENT);
+  return `${spec.kind}:${spec.src}:${spec.dim ?? 0}:${spec.blur ?? 0}`;
+}
+
+/** 同步判定"要不要用白字"；算不出来的（图片/视频）用记下来的结果兜底 */
+function initialOnDark(spec: BgSpec): boolean {
+  if (spec.kind === 'preset') return (cssLuminance(spec.value) ?? 1) < 0.5;
+  if (spec.kind === 'gradient') return (cssLuminance(spec.css || DEFAULT_GRADIENT) ?? 1) < 0.5;
+  const sig = bgSignature(spec);
+  const lastSig = readPersisted<string>(BG_DARK_SIG_KEY, '');
+  if (lastSig === sig) return readPersisted<boolean>(BG_DARK_KEY, false);
+  // 这个背景没记过 → 沿用"上一次的整体模式"，至少不会先黑后白地闪一下
+  return readPersisted<boolean>(BG_DARK_KEY, false);
+}
+
+/** 记下这次判定（同时记全局默认），下次进首页第一帧就是对的 */
+function rememberOnDark(spec: BgSpec, dark: boolean): void {
+  try {
+    localStorage.setItem(BG_DARK_KEY, JSON.stringify(dark));
+    localStorage.setItem(BG_DARK_SIG_KEY, JSON.stringify(bgSignature(spec)));
+  } catch { /* 隐私模式下写不了，忽略 */ }
+}
+
+// 探针钩子（开发无关，只是让 E2E 能直接断言"首帧判定"这个纯函数，
+// 否则一张 data URL 图片加载太快，观测不到"记忆值"那一帧）：
+if (typeof window !== 'undefined') {
+  (window as unknown as Record<string, unknown>).__bcHomeDark = { initialOnDark, bgSignature, rememberOnDark };
 }
 
 function loadSaved(): SavedBg[] {
@@ -154,13 +275,16 @@ export function EmptyHome(props: {
   const [panelOpen, setPanelOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>('preset');
   const [leaving, setLeaving] = useState(false);
-  // 深色背景 → 文字/玻璃控件自动转白
-  const [onDark, setOnDark] = useState(false);
+  // 深色背景 → 文字/玻璃控件自动转白。
+  // v0.4.5：**首帧就是对的**——纯色/渐变同步算，图片/视频用记住的上次结果（见 initialOnDark）。
+  const [onDark, setOnDark] = useState(() => initialOnDark(bg));
   const panelRef = useRef<HTMLDivElement>(null);
 
   // 图片 / 视频的草稿参数（输入即生效，所以直接跟 bg 同步）
   const [imgSrc, setImgSrc] = useState(() => (bg.kind === 'image' ? bg.src : ''));
   const [vidSrc, setVidSrc] = useState(() => (bg.kind === 'video' ? bg.src : ''));
+  // 已知解不了的视频（A9）：不挂载 <video>，避免原生解码器反复报错
+  const [badVideos, setBadVideos] = useState<string[]>(() => readBadVideos());
   const [dim, setDim] = useState(() => (bg.kind === 'image' || bg.kind === 'video' ? bg.dim : 12));
   const [blur, setBlur] = useState(() => (bg.kind === 'image' || bg.kind === 'video' ? bg.blur : 0));
   const [gradCss, setGradCss] = useState(() => (bg.kind === 'gradient' ? bg.css : DEFAULT_GRADIENT));
@@ -199,12 +323,20 @@ export function EmptyHome(props: {
   };
 
   // 面板点外部 / Esc 关闭
+  // v0.4.5 修复：调色盘 / 变量菜单 / 取色面板都是 createPortal 挂到 body 的，
+  // 在它们上面按下鼠标会被当成"点了面板外面"，于是选完色标颜色整个设置面板就关了。
+  // 这里把「属于调色盘体系」的浮层排除掉。
   useEffect(() => {
     if (!panelOpen) return;
+    const inPicker = (t: EventTarget | null) =>
+      !!(t as HTMLElement | null)?.closest?.(
+        '.cp-modal, .cp-modal-mask, .cp-varmenu, .cp-varmenu-mask, .bc-varmenu, .cp-sv, .cp-hue, .cp-alpha, .bc-color-portal'
+      );
     const onDown = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setPanelOpen(false);
+      if (inPicker(e.target)) return;
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) closePanel();
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPanelOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closePanel(); };
     document.addEventListener('mousedown', onDown, true);
     window.addEventListener('keydown', onKey);
     return () => {
@@ -214,15 +346,40 @@ export function EmptyHome(props: {
   }, [panelOpen]);
 
   // 搜索框点外部 → 收起结果
+  // v0.4.5 修复：以前只监听 document 的 mousedown，且"点在 .eh-search 内部就不关"。
+  // 结果面板本身在 .eh-search 里，于是它挡住下面的按钮时，点按钮的 mousedown 落在面板上
+  // → 面板不关、按钮也点不到，形成死锁（用户反馈"首页搜索框点不进去"）。
+  // 现在：① 点面板的空白处也关；② 窗口失焦（弹原生对话框等）就关；
+  //       ③ Esc 关；④ 组件挂载时清空查询词与焦点状态。
   useEffect(() => {
     if (!focused) return;
     const onDown = (e: MouseEvent) => {
-      if (searchRef.current?.contains(e.target as Node)) return;
+      const t = e.target as HTMLElement | null;
+      // 点结果项本身要交给它自己的 onClick 处理
+      if (t?.closest?.('.eh-hit, .eh-result, .eh-search-clear')) return;
+      if (searchRef.current?.contains(e.target as Node) && !t?.closest?.('.eh-results')) return;
       setFocused(false);
     };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFocused(false); };
+    const onBlur = () => setFocused(false);
     document.addEventListener('mousedown', onDown, true);
-    return () => document.removeEventListener('mousedown', onDown, true);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      document.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('blur', onBlur);
+    };
   }, [focused]);
+
+  // 回到首页（组件重新挂载）时，搜索状态必须是干净的
+  // —— 否则上次的查询词 + 结果面板会挂在页面上挡住按钮。
+  useEffect(() => {
+    setQuery('');
+    setFocused(false);
+    setActiveIdx(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // —— 视频背景：窗口不可见 / 首页卸载时暂停，避免后台空转 ——
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -239,12 +396,17 @@ export function EmptyHome(props: {
   }, [bg.kind]);
 
   // —— 文字颜色自动反色 ——
-  // 预设 / 渐变：直接解析颜色算亮度
+  // 预设 / 渐变：直接解析颜色算亮度（**同步**，第一帧就对，不会先黑后白）
   useEffect(() => {
     if (bg.kind !== 'preset' && bg.kind !== 'gradient') return;
     const lum = cssLuminance(bgCss(bg));
-    if (lum !== null) setOnDark(lum < 0.5);
+    if (lum !== null) { const dark = lum < 0.5; setOnDark(dark); rememberOnDark(bg, dark); }
   }, [bg]);
+  // 换背景时先用"记住的结果"预置一次，避免异步采样回来之前闪一下反色
+  useEffect(() => {
+    setOnDark(initialOnDark(bg));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bgSignature(bg)]);
   // 图片：加载后采样一次
   useEffect(() => {
     if (bg.kind !== 'image' || !bg.src.trim()) return;
@@ -254,9 +416,9 @@ export function EmptyHome(props: {
     img.onload = () => {
       if (!alive) return;
       const lum = frameLuminance(img);
-      if (lum !== null) setOnDark(lum < 0.5);
+      if (lum !== null) { const dark = lum < 0.5; setOnDark(dark); rememberOnDark(bg, dark); }
     };
-    img.onerror = () => { if (alive) setOnDark(true); };
+    img.onerror = () => { if (alive) { setOnDark(true); rememberOnDark(bg, true); } };
     img.src = mediaSrc(bg.src);
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -268,7 +430,7 @@ export function EmptyHome(props: {
       const v = videoRef.current;
       if (!v || v.readyState < 2) return;
       const lum = frameLuminance(v);
-      if (lum !== null) setOnDark(lum < 0.5);
+      if (lum !== null) { const dark = lum < 0.5; setOnDark(dark); rememberOnDark(bg, dark); }
     };
     const t = window.setInterval(tick, 1800);
     window.setTimeout(tick, 600);
@@ -309,7 +471,9 @@ export function EmptyHome(props: {
         st.switchTab(existing.id);
         showToast(`「${existing.name}」已经打开着，已为你切换过去`);
       } else {
-        withViewTransition(() => st.newTab(p.name, res.project.scene, p.filePath));
+        // v0.4.5：**必须把 res.history 一起传进去** —— 首页「最近项目」这条路以前漏了，
+        // 于是从这里打开的工程撤销栈是空的（用户反馈"重新打开项目 Ctrl+Z 完全无法执行"）。
+        withViewTransition(() => st.newTab(p.name, res.project.scene, p.filePath, res.history));
       }
       setFocused(false);
     } catch (e) {
@@ -318,7 +482,8 @@ export function EmptyHome(props: {
   };
 
   const openDocHit = (h: DocHit) => {
-    window.dispatchEvent(new CustomEvent('bc:open-help-doc', { detail: { doc: h.doc, id: h.id } }));
+    // v0.4.5：把搜索词带上 —— 落地后 HelpCenter 要用黄色荧光笔标出关键词
+    window.dispatchEvent(new CustomEvent('bc:open-help-doc', { detail: { doc: h.doc, id: h.id, q: q.trim() } }));
     setFocused(false);
   };
 
@@ -357,9 +522,19 @@ export function EmptyHome(props: {
         applyBg({ kind: 'image', src: res.path, dim, blur });
         setTab('image');
       } else {
+        // v0.4.5：先探一次能不能解码。注意区分"慢"和"坏"——
+        // 慢（timeout）照样套用，让浏览器继续加载；只有明确不支持才拦下并说明。
+        const probe = await probeVideoPlayable(mediaSrc(res.path));
+        if (probe === 'unsupported') {
+          showToast('这段视频的编码在编辑器里解不了（导出后在浏览器里仍可正常播放）。建议换一个 mp4 / webm。', 'err');
+          return;
+        }
         setVidSrc(res.path);
         applyBg({ kind: 'video', src: res.path, dim, blur });
         setTab('video');
+        if (probe === 'timeout') {
+          showToast('这个视频比较大，正在后台继续加载…');
+        }
       }
     } catch {
       showToast('选择文件失败', 'err');
@@ -374,6 +549,18 @@ export function EmptyHome(props: {
     setVidSrc(src);
     if (src.trim()) applyBg({ kind: 'video', src: src.trim(), dim: d, blur: b });
   };
+
+  // v0.4.5（用户反馈 A补）：设置面板以前是"条件渲染 → 直接消失"，没有退场。
+  // 这里加一个 170ms 的收起过程：先挂 is-closing 播动画，再真正卸载。
+  const [panelClosing, setPanelClosing] = useState(false);
+  const closePanel = useCallback(() => {
+    if (!panelOpen || panelClosing) return;
+    setPanelClosing(true);
+    window.setTimeout(() => {
+      setPanelOpen(false);
+      setPanelClosing(false);
+    }, 170);
+  }, [panelOpen, panelClosing]);
 
   const saveCurrent = () => {
     const name = saveName.trim() || `我的背景 ${saved.length + 1}`;
@@ -411,7 +598,9 @@ export function EmptyHome(props: {
           }}
         />
       )}
-      {bg.kind === 'video' && (
+      {/* v0.4.5（A9）：已知解不了的视频**根本不挂载** <video>，
+          否则每次进首页都会让原生解码器再报一次 Unsupported pixel format。 */}
+      {bg.kind === 'video' && !badVideos.includes(bg.src) && (
         <video
           ref={videoRef}
           className="eh-media eh-video"
@@ -423,6 +612,22 @@ export function EmptyHome(props: {
           preload="auto"
           disablePictureInPicture
           crossOrigin={isLocalMedia(media) ? 'anonymous' : undefined}
+          // v0.4.5 第 15 批修正（用户反馈："我的 mp4 明明正常播放还提示解码不了、退回默认壁纸"）：
+          // 只有**明确的解码/格式错误**才拉黑并回退；网络中断、临时读不到一律不算坏
+          //（否则一次偶发失败就会把这个视频永久打进黑名单）。
+          onError={() => {
+            const code = videoRef.current?.error?.code;
+            const reallyBad = code === MediaError.MEDIA_ERR_DECODE || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED;
+            if (!reallyBad) {
+              // 只是暂时读不到：等下一轮（切回首页/重开）再试，不动用户的背景设置
+              showToast('视频暂时加载不出来（文件可能正被占用或移动），稍后会自动重试');
+              return;
+            }
+            markBadVideo(bg.src);
+            setBadVideos((prev) => (prev.includes(bg.src) ? prev : [...prev, bg.src]));
+            applyBg(DEFAULT_BG);
+            showToast('这段视频的编码在编辑器里解不了，已切回默认背景（导出后在浏览器里仍可正常播放）', 'err');
+          }}
           style={{
             filter: mediaBlur > 0 ? `blur(${mediaBlur}px)` : undefined,
             transform: mediaBlur > 0 ? `scale(${(1 + mediaBlur / 400).toFixed(3)})` : undefined
@@ -442,10 +647,10 @@ export function EmptyHome(props: {
           <Icon name="gear" size={16} />
         </button>
         {panelOpen && (
-          <div className="eh-panel">
+          <div className={"eh-panel" + (panelClosing ? " is-closing" : "")}>
             <div className="eh-panel-head">
               <span>页面设置</span>
-              <button className="eh-panel-x" onClick={() => setPanelOpen(false)} title="关闭">
+              <button className="eh-panel-x" onClick={closePanel} title="关闭">
                 <Icon name="close" size={13} />
               </button>
             </div>
@@ -466,6 +671,11 @@ export function EmptyHome(props: {
               ))}
             </div>
 
+            {/* v0.4.5 第十六批（用户反馈「多个板块切换的时候没有动画」）：
+                四个板块是条件渲染，切换时 DOM 直接替换 —— 硬切。
+                包一层 + key={tab} 强制重建，每次切换播一次 bcSwapIn。
+                （.eh-panel 是普通块级容器，不是 flex，所以这层包装不影响布局） */}
+            <div className="eh-panel-tabbody" key={tab}>
             {tab === 'preset' && (
               <>
                 <div className="eh-bggrid">
@@ -634,6 +844,7 @@ export function EmptyHome(props: {
                 <div className="eh-panel-foot">支持 mp4 / webm / ogv；窗口不可见时自动暂停，不占显卡。</div>
               </>
             )}
+            </div>
 
             <div className="eh-panel-foot">只影响首页，不会进入工程导出</div>
           </div>

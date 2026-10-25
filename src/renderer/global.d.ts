@@ -11,6 +11,14 @@ export interface ProjectFileInfo {
   elementCount?: number;
   previewText?: string;
   backupCount?: number;
+  /** v0.4.5：来自 data/projects 以外（从别处导入/打开的工程） */
+  external?: boolean;
+  /** v0.4.5：登记过但磁盘上已经不在（被移动/删除） */
+  missing?: boolean;
+  /** v0.4.5：项目类型 —— page 网页项目 / site 网站项目（多页，下一轮）/ external 外部项目 / missing 文件已丢失 */
+  kind?: 'page' | 'site' | 'external' | 'missing';
+  /** v0.4.5：页面数（多页工程 > 1；现在恒为 1，为下一轮多页管理预留） */
+  pageCount?: number;
 }
 
 export interface DataPathsInfo {
@@ -69,10 +77,60 @@ declare global {
       // 导出与网页管理
       exportHTML: (html: string, defaultName?: string) => Promise<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>;
       exportHTMLWithProject: (html: string, scene: unknown, defaultName?: string, projectName?: string) => Promise<{ ok: boolean; htmlPath?: string; projectPath?: string; error?: string; canceled?: boolean }>;
+      /**
+       * v0.4.5：导出为"网站文件夹"（index.html + assets/），按导出位置重算相对路径。
+       * 这是一条主进程任务，进度可在工具栏「任务」里看到。
+       */
+      exportSite: (payload: {
+        html: string;
+        scene: unknown;
+        projectName?: string;
+        projectPath?: string;
+      }) => Promise<{
+        ok: boolean;
+        outDir?: string;
+        htmlPath?: string;
+        projectPath?: string;
+        copied?: number;
+        crossDrive?: number;
+        error?: string;
+        canceled?: boolean;
+      }>;
+      /** 取某个工程上次导出的目录（没有就返回默认目录） */
+      exportLastDir: (key: string) => Promise<string>;
       previewOpen: (html: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
 
       // 项目工程管理 (.bcproj)
       listProjects: () => Promise<ProjectFileInfo[]>;
+      /** v0.4.5：把外部工程从列表移除（不动磁盘文件） */
+      forgetExternalProject: (filePath: string) => Promise<boolean>;
+      /** v0.4.5：抢救损坏的工程文件（只读，返回能救出来的场景） */
+      salvageProject: (filePath: string) => Promise<{
+        ok: boolean;
+        scene?: unknown;
+        name?: string;
+        notes: string[];
+        error?: string;
+      }>;
+      /** v0.4.5：更新日志路径（排障用） */
+      updateLogPath: () => Promise<string>;
+      /** v0.4.5：读更新日志尾部若干行 */
+      updateLogTail: (maxLines?: number) => Promise<string>;
+      /** v0.4.5：素材库列表（图片会带缩略图地址，避免首屏解码全尺寸原图） */
+      listAssets: () => Promise<Array<{
+        name: string;
+        url: string;
+        thumbUrl?: string | null;
+        bytes: number;
+        mtime: string;
+        kind: 'image' | 'video' | 'audio' | 'other';
+      }>>;
+      /** v0.4.5：导入素材到库（弹文件选择框） */
+      importAssets: () => Promise<{
+        ok: boolean;
+        canceled?: boolean;
+        items?: Array<{ name: string; url: string; thumbUrl?: string | null; bytes: number; mtime: string; kind: 'image' | 'video' | 'audio' | 'other' }>;
+      }>;
       saveProject: (projectData: { name?: string; scene: unknown; meta?: unknown; history?: { past?: unknown[]; future?: unknown[] } }, saveAs?: boolean, customPath?: string) => Promise<{ ok: boolean; path?: string; name?: string; error?: string; canceled?: boolean }>;
       openProjectFile: (customPath?: string) => Promise<{ ok: boolean; project?: any; path?: string; error?: string; canceled?: boolean; container?: string; history?: { past?: any[]; future?: any[] } }>;
       deleteProject: (fileName: string, projectName?: string) => Promise<{ ok: boolean; error?: string }>;
@@ -182,10 +240,16 @@ declare global {
       ) => Promise<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>;
 
       onMenu: (channel: string, cb: () => void) => () => void;
+      /** v0.4.5：安静启动模式（自动化脚本）—— 此时窗口不可激活，document.hasFocus() 恒为 false */
+      quietLaunch: boolean;
+      /** v0.4.5：系统层要求打开某个 .bcproj（双击文件 / 第二个实例 / macOS open-file） */
+      onOpenProjectPath: (cb: (path: string) => void) => () => void;
+      /** v0.4.5：启动加载页的真实进度（主进程逐条播报） */
+      onLoadProgress: (cb: (p: { id: string; label: string; percent: number }) => void) => () => void;
       setNativeTheme: (source: 'dark' | 'light' | 'system') => void;
       pickImageSrc: (mode?: 'abs' | 'rel') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
       /** 首页背景用：选择图片 / 视频文件（返回绝对路径，渲染层用 bc-img:// 显示） */
-      pickMediaSrc: (kind: 'image' | 'video') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
+      pickMediaSrc: (kind: 'image' | 'video' | 'audio') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
     };
     __sceneStore?: any;
   }

@@ -22,10 +22,10 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-alt-probe');
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
-  for (const rel of [resolve(ROOT, 'extensions'), resolve(ROOT, 'data', 'extensions')]) {
+  for (const rel of [resolve(ROOT, 'builtin-extensions'), resolve(ROOT, 'data', 'extensions')]) {
     if (existsSync(rel)) cpSync(rel, resolve(DATA_DIR, 'extensions'), { recursive: true });
   }
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -41,6 +41,38 @@ async function main() {
     const r = el.getBoundingClientRect();
     return { x: r.x, y: r.y, w: r.width, h: r.height };
   }, id);
+
+  /**
+   * 读元素"某一层"的样式。
+   *
+   * 为什么需要这个：属性面板的写入是**跟着当前断点**走的 ——
+   * 画布宽度落在哪个断点，拖动结果就写在 `responsive[断点]` 里，而不是 `style`。
+   * 默认窗口（1280×800）下右侧面板占 456px，画布只剩 ~753px → 会落到 tablet 断点。
+   * 以前这里直接断言 `style.width`，在窄窗口下必然失败（断言本身写错了，不是功能坏了）。
+   */
+  const layersOf = (eid) => win.evaluate((id2) => {
+    const st = window.__sceneStore.getState();
+    const bp = st.activeBreakpoint;
+    const find = (n, x) => (n.id === x ? n : (n.children || []).reduce((a, k) => a || find(k, x), null));
+    const n = find(st.scene.root, id2);
+    return { bp, base: (n && n.style) || {}, resp: (n && n.responsive && n.responsive[bp]) || {} };
+  }, eid);
+
+  /** 某一层里"显式写过"这个 key 吗（包括写成 undefined 的显式清空） */
+  const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+  /** 某条属性在哪一层有非空值（返回 'base' | 'resp' | null） */
+  const whereHas = (layers, key) => {
+    if (layers.resp[key] !== undefined && layers.resp[key] !== '') return 'resp';
+    if (layers.base[key] !== undefined && layers.base[key] !== '') return 'base';
+    return null;
+  };
+  /** 某条属性在哪一层被显式写了（包括写成 undefined 的"清空"） */
+  const whereSet = (layers, key) => {
+    if (Object.prototype.hasOwnProperty.call(layers.resp, key)) return 'resp';
+    if (Object.prototype.hasOwnProperty.call(layers.base, key)) return 'base';
+    return null;
+  };
 
   // ============ 1. 块级元素：贴右边 → ew-resize；拖动 → 变宽 ============
   const id = await win.evaluate(() => {
@@ -60,8 +92,12 @@ async function main() {
   await win.mouse.move(r1.x + r1.w + 60, r1.y + r1.h / 2, { steps: 10 });
   await win.mouse.up();
   await sleep(300);
-  const w2 = await win.evaluate((eid) => parseFloat(window.__sceneStore.getState().scene.root.children.find((c) => c.id === eid).style.width), id);
-  ok('贴右边拖动 → 宽度变大', w2 > 240, String(w2));
+  // 断点感知的断言：拖动结果可能写在 base 或当前断点那一层；再叠加"渲染宽度确实变大了"
+  const w2layers = await layersOf(id);
+  const w2render = (await rectOf(id))?.w ?? -1;
+  const w2store = parseFloat(String(w2layers.resp.width ?? w2layers.base.width ?? ''));
+  ok('贴右边拖动 → 宽度变大', w2render > 240 && w2store > 240,
+    `渲染=${Math.round(w2render)} 存储=${w2store} 断点=${w2layers.bp}`);
 
   // 左下角光标应是 nesw（右上-左下）
   const r1b = await rectOf(id);
@@ -360,13 +396,11 @@ async function main() {
   await win.mouse.up();
   await win.keyboard.up('Alt');
   await sleep(400);
-  const fixedStyle = await win.evaluate((e) => {
-    const find = (n, id) => (n.id === id ? n : (n.children || []).reduce((a, k) => a || find(k, id), null));
-    return find(window.__sceneStore.getState().scene.root, e)?.style || {};
-  }, fid2);
-  ok('fixed 拖到画布底边 → 写成 bottom: 0（而不是 top 绝对值）',
-    fixedStyle.bottom === '0px' && (fixedStyle.top === undefined || fixedStyle.top === ''),
-    JSON.stringify({ top: fixedStyle.top, bottom: fixedStyle.bottom }));
+  const fixedStyle = await layersOf(fid2);
+  const fixedBottom = whereHas(fixedStyle, 'bottom');
+  ok('fixed 拖到画布底边 → 锚定 bottom（而不是 top 绝对值）',
+    fixedBottom !== null && String(fixedStyle[fixedBottom].bottom) === '0px' && whereHas(fixedStyle, 'top') === null,
+    JSON.stringify({ bp: fixedStyle.bp, bottom: fixedBottom ? fixedStyle[fixedBottom].bottom : null, top: whereHas(fixedStyle, 'top'), hasBottomInBase: hasOwn(fixedStyle.base, 'bottom') }));
 
   // ============ 4j. relative 拖到父容器中线 → margin-left/right: auto ============
   const rid2 = await win.evaluate(() => {
@@ -398,25 +432,78 @@ async function main() {
   await win.mouse.up();
   await win.keyboard.up('Alt');
   await sleep(400);
-  const relStyle = await win.evaluate((e) => {
-    const find = (n, id) => (n.id === id ? n : (n.children || []).reduce((a, k) => a || find(k, id), null));
-    return find(window.__sceneStore.getState().scene.root, e)?.style || {};
-  }, rid2);
+  const relStyle = await layersOf(rid2);
+  const relMl = whereHas(relStyle, 'marginLeft');
+  const relMr = whereHas(relStyle, 'marginRight');
   ok('relative 拖到中线 → 自动用 margin-left/right: auto',
-    relStyle.marginLeft === 'auto' && relStyle.marginRight === 'auto' && (relStyle.left === undefined || relStyle.left === ''),
-    JSON.stringify({ left: relStyle.left, ml: relStyle.marginLeft, mr: relStyle.marginRight }));
+    relMl !== null && relMr !== null
+      && String(relStyle[relMl].marginLeft) === 'auto' && String(relStyle[relMr].marginRight) === 'auto'
+      && whereHas(relStyle, 'left') === null,
+    JSON.stringify({ bp: relStyle.bp, ml: relMl, mr: relMr, left: whereHas(relStyle, 'left') }));
 
-  // ============ 5. Alt + 滚轮 = 缩放 ============
+  // ============ 5. Alt + 滚轮 = 精准微调（v0.4.5 第十六批改契约） ============
+  // 用户原话：「Alt + 滚轮是精准定位」——1px/格、Shift 加速到 10px。
+  // 缩放让位给 Ctrl + 滚轮（下面第 6 段验证）。
+  // 自己造一个元素来测（不依赖前面步骤留下的元素 —— 它可能已经被删掉了）
+  const nud = await win.evaluate(async () => {
+    const st = window.__sceneStore.getState();
+    st.addElement('div', null);
+    const id = window.__sceneStore.getState().scene.selectedId;
+    window.__sceneStore.getState().updateStyle(id, { position: 'relative', left: '0px', top: '0px' });
+    await new Promise((r) => setTimeout(r, 500));
+    const find = (n, x) => (n.id === x ? n : (n.children || []).reduce((a, k) => a || find(k, x), null));
+    const bp = window.__sceneStore.getState().activeBreakpoint;
+    const read = () => {
+      const n = find(window.__sceneStore.getState().scene.root, id);
+      return n ? { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) } : {};
+    };
+    const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
+    if (!el) return { id, missing: true };
+    try { el.scrollIntoView({ block: 'center' }); } catch { /* 忽略 */ }
+    const r = el.getBoundingClientRect();
+    return { id, missing: false, top0: read().top, x: Math.max(4, r.left + r.width / 2), y: Math.max(4, r.top + r.height / 2) };
+  });
+  ok('准备：微调测试元素就绪', nud.missing === false && String(nud.top0) === '0px', JSON.stringify(nud));
+
+  if (!nud.missing) {
+    await win.keyboard.down('Alt');
+    await win.mouse.move(nud.x, nud.y);
+    await win.mouse.wheel(0, -1);
+    await sleep(300);
+    const nudged = await win.evaluate((id) => {
+      const bp = window.__sceneStore.getState().activeBreakpoint;
+      const find = (n, x) => (n.id === x ? n : (n.children || []).reduce((a, k) => a || find(k, x), null));
+      const n = find(window.__sceneStore.getState().scene.root, id);
+      const m = n ? { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) } : {};
+      return { top: m.top, boxModel: !!document.querySelector('.bc-boxm') };
+    }, nud.id);
+    await win.keyboard.down('Shift');
+    await win.mouse.wheel(0, -1);
+    await win.keyboard.up('Shift');
+    await sleep(300);
+    const nudged2 = await win.evaluate((id) => {
+      const bp = window.__sceneStore.getState().activeBreakpoint;
+      const find = (n, x) => (n.id === x ? n : (n.children || []).reduce((a, k) => a || find(k, x), null));
+      const n = find(window.__sceneStore.getState().scene.root, id);
+      const m = n ? { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) } : {};
+      return m.top;
+    }, nud.id);
+    await win.keyboard.up('Alt');
+    ok('Alt + 滚轮一格 = 精准微调 1px（不再是缩放）',
+      String(nudged.top) === '-1px', `${nud.top0} → ${nudged.top}`);
+    ok('Alt + Shift + 滚轮 = 加速到 10px（累计 -11px）',
+      String(nudged2) === '-11px', String(nudged2));
+    ok('Alt + 滚轮期间不显示盒模型', nudged.boxModel === false, String(nudged.boxModel));
+  }
+
+  // ============ 6. Ctrl + 滚轮 = 缩放（Alt 已让给微调） ============
   const z0 = await win.evaluate(() => document.querySelector('.canvas').getBoundingClientRect().width);
-  await win.keyboard.down('Alt');
-  await win.mouse.move(rf.x + rf.w / 2, rf.y + rf.h / 2);
+  await win.keyboard.down('Control');
   await win.mouse.wheel(0, -120);
-  await sleep(200);
-  await win.mouse.wheel(0, -120);
-  await sleep(300);
-  await win.keyboard.up('Alt');
+  await sleep(250);
+  await win.keyboard.up('Control');
   const z1 = await win.evaluate(() => document.querySelector('.canvas').getBoundingClientRect().width);
-  ok('Alt + 滚轮能缩放画布', z1 > z0 + 1, `${Math.round(z0)} → ${Math.round(z1)}`);
+  ok('Ctrl + 滚轮能缩放画布', z1 > z0 + 1, `${Math.round(z0)} → ${Math.round(z1)}`);
 
   ok('无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));
 

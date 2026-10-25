@@ -64,12 +64,12 @@ async function main() {
   // 清不掉就沿用旧目录，别让清理动作把整轮测试打断。
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC = resolve(ROOT, 'extensions');
+  const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
   // 导出验证：命中 BC_AUTO_EXPORT_PATH 时主进程跳过保存对话框直接落盘
   const EXPORT_PATH = resolve(ROOT, 'tests/e2e/tmp-table-export.html');
   if (existsSync(EXPORT_PATH)) rmSync(EXPORT_PATH, { force: true });
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR, BC_AUTO_EXPORT_PATH: EXPORT_PATH };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR, BC_AUTO_EXPORT_PATH: EXPORT_PATH };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -264,7 +264,7 @@ async function main() {
   mkdirSync(resolve(ROOT, 'tests/e2e/shots-v042'), { recursive: true });
     await win.locator('[data-cell="0-0"]').hover();
   await sleep(400);
-  await win.screenshot({ path: resolve(ROOT, 'tests/e2e/shots-v042/table-editor.png'), timeout: 5000 });
+  await win.screenshot({ path: resolve(ROOT, 'tests/e2e/shots-v042/table-editor.png'), timeout: 20000 }).catch(() => {});
   const b00 = await win.locator('[data-cell="0-0"]').boundingBox();
   const b12 = await win.locator('[data-cell="1-2"]').boundingBox();
   if (b00 && b12) {
@@ -273,7 +273,7 @@ async function main() {
     await win.mouse.move(b12.x + b12.width / 2, b12.y + b12.height / 2, { steps: 8 });
     await win.mouse.up();
     await sleep(500);
-    await win.screenshot({ path: resolve(ROOT, 'tests/e2e/shots-v042/table-editor-select.png'), timeout: 5000 });
+    await win.screenshot({ path: resolve(ROOT, 'tests/e2e/shots-v042/table-editor-select.png'), timeout: 20000 }).catch(() => {});
   }
 
   // ============ 11. 结构开关：表头行 / 表尾行 / 标题 ============
@@ -597,7 +597,7 @@ async function main() {
   const btnBox = await win.locator('.tb-health-btn').first().boundingBox();
   if (btnBox) {
     await win.screenshot({
-      timeout: 5000,
+      timeout: 20000,
       path: resolve(ROOT, 'tests/e2e/shots-v042/health-badge.png'),
       clip: { x: btnBox.x - 16, y: btnBox.y - 16, width: btnBox.width + 44, height: btnBox.height + 32 }
     });
@@ -753,7 +753,7 @@ async function main() {
     const x = Math.max(0, sideBox.x);
     const y = Math.max(0, sideBox.y);
     await win.screenshot({
-      timeout: 5000,
+      timeout: 20000,
       path: resolve(ROOT, 'tests/e2e/shots-v042/table-live.png'),
       clip: { x, y, width: Math.min(sideBox.width, vp.w - x), height: Math.min(sideBox.height, vp.h - y) }
     });
@@ -762,7 +762,7 @@ async function main() {
   const stageBox = await win.locator('.table-stage').first().boundingBox();
   if (stageBox) {
     await win.screenshot({
-      timeout: 5000,
+      timeout: 20000,
       path: resolve(ROOT, 'tests/e2e/shots-v042/table-left-live.png'),
       clip: { x: Math.max(0, stageBox.x), y: Math.max(0, stageBox.y), width: stageBox.width, height: Math.min(stageBox.height, 520) }
     });
@@ -776,7 +776,7 @@ async function main() {
     const x2 = Math.max(0, styleCard.x);
     const y2 = Math.max(0, Math.min(styleCard.y, vp2.h - 200));
     await win.screenshot({
-      timeout: 5000,
+      timeout: 20000,
       path: resolve(ROOT, 'tests/e2e/shots-v042/table-style-preview.png'),
       clip: { x: x2, y: y2, width: styleCard.width, height: Math.min(styleCard.height, vp2.h - y2) }
     });
@@ -813,16 +813,22 @@ async function main() {
   await mkTable();
 
   const dumpTables = () => win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    const bp = st.activeBreakpoint;
+    // v0.4.5：属性写入跟着当前断点走（画布 753px → tablet，值在 responsive.tablet），
+    // 这里把断点层合并进来，读到的才是"实际生效"的样式（否则会误报"没写进去"）。
+    const merged = (n) => ({ ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) });
     const tables = [];
     const find = (n) => { if (n.type === 'table') tables.push(n); for (const c of n.children) find(c); };
-    find(window.__sceneStore.getState().scene.root);
+    find(st.scene.root);
     const out = [];
     for (const t of tables) {
       const nodes = [];
       const walk = (n, d) => {
+        const s = merged(n);
         nodes.push({ d, type: n.type, id: n.id,
           rsel: (n.attrs && n.attrs.relSelector) || '',
-          style: Object.keys(n.style || {}).map((k) => k + '=' + n.style[k]).join(',') });
+          style: Object.keys(s).map((k) => k + '=' + s[k]).join(',') });
         for (const c of n.children) walk(c, d + 1);
       };
       walk(t, 0);

@@ -2,6 +2,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { ErrorBoundary } from '@comp/ErrorBoundary';
+import { startAnimGovernor } from '@lib/animGovernor';
+import { warmHomeBackground } from '@lib/preloadHomeBg';
 import './styles/01-foundation.css';
 import './styles/02-tabbar.css';
 import './styles/03-toolbar.css';
@@ -28,7 +30,24 @@ import './styles/23-v044d-ui.css'; // v0.4.4d：UI 统一（动效/选择器）+
 import './styles/24-v044h-ui.css'; // v0.4.4h：Alt 墙提示 + 拖到墙外改父子关系 + 中键属性搜索两态 + 删除项目三步防护
 import './styles/25-v044-storage-ui.css'; // v0.4.4：设置→存储占用明细（分类互斥可加和 + 分类清理）
 import './styles/26-empty-home.css'; // v0.4.4：空页面（关掉全部标签后的首页）+ 全局轻提示 toast
+import './styles/27-v045-ui.css'; // v0.4.5：只读快照预览 / 色标卡片 / 外轮廓 / 面板密度
+import './styles/28-v045-zindex.css'; // v0.4.5：全程序 z-index 标尺落地 + 变量菜单 + 属性搜索高亮
+import './styles/29-v045-perf.css'; // v0.4.5：动画性能（精简/关闭档、不可见暂停）+ 加载页深色底
+// v0.4.5：语义主题变量（深色插件化的地基）。
+// 必须**最后**加载：旧的 foundation 里已经定义过 --danger-tint 等同名变量，
+// 这里要覆盖它们，才能让"只写一次语义变量、深色自动切换"成立。
+// 详见 docs/v0.4.5-待实施-多页与深色插件化.md
+import './styles/00-theme-tokens.css';
 import './animations.css'; // 统一动画体系：token + 全部 keyframes（分片里只写引用）
+
+// v0.4.5：动画性能总督（不可见即暂停 / 掉帧自动精简 / 尊重系统"减少动态效果"）。
+// 必须在渲染之前启动：它要往 <html> 上写 data-bc-anim，避免首帧先按完整动效画一遍。
+startAnimGovernor();
+
+// v0.4.5：**趁加载页还盖着**就把首页背景（图片/视频）预热起来。
+// 否则"进首页 → 才开始下载背景图"会有明显的空白延迟（用户反馈过）。
+// 放在 render 之前：它只是发请求，不阻塞首帧。
+warmHomeBackground();
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

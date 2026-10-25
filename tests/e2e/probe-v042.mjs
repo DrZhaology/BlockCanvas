@@ -31,7 +31,7 @@ async function main() {
   // 清不掉就沿用旧目录，别让清理动作把整轮测试打断。
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC_EXT = resolve(ROOT, 'extensions');
+  const SRC_EXT = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC_EXT)) cpSync(SRC_EXT, resolve(DATA_DIR, 'extensions'), { recursive: true });
 
   // 压测：再克隆 2 个资源包（共 3 包 × 4 分类 = 12 个可折叠板块），
@@ -55,7 +55,7 @@ async function main() {
 
   // 注意：若宿主环境带 ELECTRON_RUN_AS_NODE=1，Electron 会退化成纯 Node，
   // 表现为 Playwright "Process failed to launch!"，这里显式剔除。
-  const childEnv = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const childEnv = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete childEnv.ELECTRON_RUN_AS_NODE;
 
   const app = await electron.launch({

@@ -21,9 +21,9 @@ async function main() {
   const DATA_DIR = resolve(tmpdir(), 'bc-css-probe');
   try { rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* 忽略 */ }
   mkdirSync(DATA_DIR, { recursive: true });
-  const SRC = resolve(ROOT, 'extensions');
+  const SRC = resolve(ROOT, 'builtin-extensions');
   if (existsSync(SRC)) cpSync(SRC, resolve(DATA_DIR, 'extensions'), { recursive: true });
-  const env = { ...process.env, BC_DATA_DIR: DATA_DIR };
+  const env = { ...process.env, BC_NO_FOCUS: '1', BC_DATA_DIR: DATA_DIR };
   delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['.', '--disable-gpu', '--no-sandbox'], cwd: ROOT, executablePath: electronPath, env });
   const win = await app.firstWindow();
@@ -40,9 +40,23 @@ async function main() {
     return window.__sceneStore.getState().scene.selectedId;
   });
   await sleep(400);
+  /**
+   * 读元素样式（**断点感知**）。
+   *
+   * v0.4.5：属性面板的写入是跟着**当前断点**走的 —— 画布宽度落在哪个断点，
+   * 值就写在 `responsive[断点]` 里而不是 `style`。默认窗口（1280×800）下右侧面板占 456px，
+   * 画布只剩 ~753px → 会落到 tablet 断点。以前这里只读 `style`，在窄窗口下必然读到空值
+   *（断言本身写错了，不是功能坏了）。
+   */
   const nodeStyle = () => win.evaluate((x) => {
+    const st = window.__sceneStore.getState();
+    const bp = st.activeBreakpoint;
     const find = (n, i) => (n.id === i ? n : (n.children || []).reduce((a, k) => a || find(k, i), null));
-    return find(window.__sceneStore.getState().scene.root, x)?.style || {};
+    const n = find(st.scene.root, x);
+    const base = (n && n.style) || {};
+    const resp = (n && n.responsive && n.responsive[bp]) || {};
+    // 当前断点优先，其次回落到 base —— 这就是画布上"实际生效"的值
+    return { ...base, ...resp, __bp: bp, __base: base, __resp: resp };
   }, id);
 
   // ============ 1. 帮助气泡不再被面板盖住 ============
@@ -167,7 +181,8 @@ async function main() {
     st.updateStyle(x, { marginTop: '10px', marginRight: '10px', marginBottom: '10px', marginLeft: '10px' });
   }, id);
   await sleep(400);
-  const mtInput = win.locator('[data-prop-key="margin"] .trbl4-input').first();
+  // margin 卡片展开成四个分边输入框（.trbl4-num），以前探针找的是 .trbl4-input（不存在的类名）
+  const mtInput = win.locator('[data-prop-key="margin"] .trbl4-num, [data-prop-key="margin"] .trbl4-input').first();
   if (await mtInput.count()) {
     await mtInput.click();
     await mtInput.dispatchEvent('wheel', { deltaY: -120 });

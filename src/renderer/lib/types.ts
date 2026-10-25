@@ -49,10 +49,20 @@ export type ElementType =
   | 'hr'
   | 'br'
   | 'form'
-  | 'pre';
+  | 'pre'
+  // v0.4.5：媒体元素
+  | 'video'
+  | 'audio';
 
 // 自闭合元素：无 children，渲染与导出都需特殊处理（Canvas.tsx 和 exporter.ts 共用）
 export const SELF_CLOSING_TAGS: ReadonlySet<ElementType> = new Set(['img', 'input', 'hr', 'br']);
+
+/**
+ * 媒体元素（v0.4.5）：<video> / <audio>。
+ * 画布上按"没有子元素"渲染，但**导出时必须有闭合标签**（`<video src=…></video>` 才合法），
+ * 所以不要把它们塞进 SELF_CLOSING_TAGS —— 否则导出的 HTML 会少了闭合标签。
+ */
+export const MEDIA_TAGS: ReadonlySet<ElementType> = new Set(['video', 'audio']);
 
 // 文本独占元素：有开闭标签，但 textarea 不允许 ReactNode 子元素，只能放文本内容
 // （避免 textarea 走递归 children 分支渲染崩溃）
