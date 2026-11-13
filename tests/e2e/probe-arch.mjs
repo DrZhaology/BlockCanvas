@@ -57,6 +57,31 @@ check('canvas/ 子模块不反向依赖 Canvas.tsx', backRefs.length === 0, back
 check('CanvasNode.tsx 不直接 import walls.ts（渲染与几何分离）',
   !/from '\.\/walls'/.test(text(join(canvasDir, 'CanvasNode.tsx'))), '');
 
+// ── R6-2：Inspector 拆分 ─────────────────────────────────────────
+console.log('\n── R6-2 Inspector 拆分 ──');
+const inspDir = 'src/renderer/components/inspector';
+check('inspector/ 目录存在', existsSync(R(inspDir)), inspDir);
+const expectInsp = [
+  'ElementPropsBody.tsx', 'PageCssBody.tsx', 'useCanvasWidth.ts', 'shared.ts',
+  'sections/IdentitySection.tsx', 'sections/PseudoSection.tsx', 'sections/CssPropsSection.tsx',
+  'rows/PropertyRow.tsx', 'rows/AttrRow.tsx', 'rows/ImgPickerRow.tsx',
+  'rows/SelectorRows.tsx', 'rows/MultiSelectRows.tsx'
+];
+const missInsp = expectInsp.filter((m) => !existsSync(R(inspDir + '/' + m)));
+check('预期模块齐全', missInsp.length === 0, missInsp.join(', '));
+const inspMax = maxLines(inspDir);
+check('inspector/ 下每个文件 ≤600 行', inspMax.max <= 600, `最大 ${inspMax.file} = ${inspMax.max} 行`);
+const inspLines = lines('src/renderer/components/Inspector.tsx');
+check('Inspector.tsx（外壳）≤400 行', inspLines > 0 && inspLines <= 400, `${inspLines} 行`);
+// 子模块不许反向依赖外壳（否则又绕回上帝组件）
+const inspBack = walk(inspDir).filter((f) => /from '(\.\.\/)+Inspector'/.test(text(f)));
+check('inspector/ 子模块不反向依赖 Inspector.tsx', inspBack.length === 0, inspBack.join(', '));
+// 叶子行组件不许反过来 import 区块组件
+const leafBack = ['rows/PropertyRow.tsx', 'rows/AttrRow.tsx', 'rows/ImgPickerRow.tsx']
+  .filter((f) => /from '(\.\.\/)+sections\//.test(text(R(inspDir + '/' + f))));
+check('行组件不反向依赖区块组件', leafBack.length === 0, leafBack.join(', '));
+check('Inspector.tsx 仍导出 Inspector', /export function Inspector\b/.test(text('src/renderer/components/Inspector.tsx')), '');
+
 // ── 全项目单文件行数红线 ─────────────────────────────────────────
 console.log('\n── 单文件行数红线 ──');
 function walk(dir, out = []) {

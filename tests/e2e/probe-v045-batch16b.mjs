@@ -39,7 +39,23 @@ async function main() {
   const css29 = readFileSync(resolve(ROOT, 'src/renderer/styles/29-v045-perf.css'), 'utf8');
   const css27 = readFileSync(resolve(ROOT, 'src/renderer/styles/27-v045-ui.css'), 'utf8');
   const layer = readFileSync(resolve(ROOT, 'src/renderer/components/LayerTree.tsx'), 'utf8');
-  const inspector = readFileSync(resolve(ROOT, 'src/renderer/components/Inspector.tsx'), 'utf8');
+  /**
+   * v0.4.6（R6-2）：属性面板拆成了 Inspector.tsx（外壳）+ inspector/{ElementPropsBody,PageCssBody,
+   * sections/*,rows/*}。断言只关心"这些实现在不在"，所以整目录拼起来匹配。
+   */
+  const inspectorDir = resolve(ROOT, 'src/renderer/components/inspector');
+  const inspector = [
+    readFileSync(resolve(ROOT, 'src/renderer/components/Inspector.tsx'), 'utf8'),
+    ...(existsSync(inspectorDir)
+      ? (function walk(dir) {
+        return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+          const p = resolve(dir, e.name);
+          if (e.isDirectory()) return walk(p);
+          return /\.tsx?$/.test(e.name) ? [readFileSync(p, 'utf8')] : [];
+        });
+      })(inspectorDir)
+      : [])
+  ].join('\n');
 
   // —— 更新器 ——
   check('更新器：改名目标收敛成固定 BlockCanvas（不再带版本号）',
