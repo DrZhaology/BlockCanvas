@@ -479,6 +479,35 @@ export function Settings(props: Props) {
           {/* ——— 2. 编辑器与画布 ——— */}
           {section === 'editor' && (
             <>
+              {/* v0.4.6（R6-9）：竖屏验收 —— 把窗口一键设成手机尺寸。
+                  用户提到"电脑完全支持屏幕竖屏"，竖屏显示器就是现成的手机验收台；
+                  但手动把窗口拖到 412×915 很难精确，所以给三个真机尺寸的按钮。 */}
+              <div className="fluent-group-title">竖屏 / 手机尺寸验收</div>
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="phone" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">一键切换到手机窗口尺寸 (Portrait Acceptance)</div>
+                  <div className="fluent-card-desc">
+                    窗口小于 900px 时，编辑器外壳会自动换成<b>窄屏形态</b>：左右面板改抽屉，
+                    画布占满。用真机尺寸看一眼，比在宽屏上想象准确得多。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl portrait-accept-ctrl">
+                  <button className="fluent-btn" onClick={() => void window.bc.setAcceptanceSize('android')} title="412 × 915（Pixel 7 / 多数安卓）">
+                    安卓 412×915
+                  </button>
+                  <button className="fluent-btn" onClick={() => void window.bc.setAcceptanceSize('iphone')} title="390 × 844（iPhone 14/15）">
+                    iPhone 390×844
+                  </button>
+                  <button className="fluent-btn" onClick={() => void window.bc.setAcceptanceSize('compact')} title="360 × 800（国产安卓偏窄档，最容易挤爆）">
+                    窄档 360×800
+                  </button>
+                  <button className="fluent-btn is-ghost" onClick={() => void window.bc.setAcceptanceSize('reset')} title="恢复 1280 × 800 编辑尺寸">
+                    恢复编辑尺寸
+                  </button>
+                </div>
+              </div>
+
               <div className="fluent-group-title">工作区排版布局</div>
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="layout" /></div>

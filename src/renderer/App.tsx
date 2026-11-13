@@ -31,6 +31,8 @@ import { EmptyHome } from '@comp/EmptyHome';
 import { SnapshotInfoPanel } from '@comp/SnapshotBar';
 import { LoadingScreen } from '@comp/LoadingScreen';
 import { useLoadScreen } from '@store/loadStore';
+import { useShellMode } from '@lib/shellMode';
+import { Icon } from '@comp/Icon';
 
 // BlockCanvas · 主界面
 // - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
@@ -59,6 +61,20 @@ export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 
 export default function App() {
   // v0.4.2：全局「横向滚动区直接滚轮」桥接（容器加 .bc-hscroll 即生效）
   useHorizontalWheel();
+  /**
+   * v0.4.6（R6-7）：外壳断点。
+   *
+   * ⚠ 别和画布断点混了：`BREAKPOINTS`（768/480）是**被设计的那张网页**的断点，
+   * 这个 `shell.mode` 是**编辑器自己的界面**在窄窗口下换形态（左右面板变抽屉）。
+   * 以前窗口锁在 ≥960，所以"外壳窄屏"这件事根本不存在 —— 现在放开到 360。
+   */
+  const shell = useShellMode();
+  // 窄屏下的抽屉：'left' 元素面板 / 'right' 属性面板 / null 都收起
+  const [drawer, setDrawer] = useState<'left' | 'right' | null>(null);
+  // 窄屏切回宽屏时把抽屉收掉（否则回到宽屏还挂着一个半透明遮罩）
+  useEffect(() => {
+    if (shell.mode === 'wide' && drawer !== null) setDrawer(null);
+  }, [shell.mode, drawer]);
   const [rightTab, setRightTabRaw] = usePersistentState<RightTab>(RIGHT_TAB_KEY, 'inspector');
   // v0.4.4：页签切换不再走 View Transition —— VT 的旧帧快照会让文字"停一会儿"。
   // 改为内容重挂载 + 轻量入场动画（见 .tab-body 的 bcSwapIn）。
@@ -575,7 +591,7 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className="app" data-shell={shell.mode}>
       {view === 'table' && tableEditId ? (
         <TableEditor tableId={tableEditId} onBack={() => switchView('editor')} />
       ) : view === 'update' ? (
@@ -637,12 +653,36 @@ export default function App() {
               <div
                 className={"workspace" + (pocketExpanded ? " pocket-expanded" : "") + (readonly ? " is-readonly" : "")}
                 data-layout={layout}
+                data-drawer={drawer ?? 'none'}
                 style={{
                   '--bc-bottom-height': effectiveBottomHeight + 'px',
                   '--bc-right-width': effectiveRightWidth + 'px',
                   '--bc-left-width': effectiveLeftWidth + 'px'
                 } as React.CSSProperties}
               >
+                {/* v0.4.6（R6-8）：窄屏外壳的两个抽屉入口（宽屏不渲染，DOM 里也不留） */}
+                {shell.mode === 'narrow' && (
+                  <>
+                    {!readonly && (
+                      <button
+                        className={'shell-drawer-btn is-left' + (drawer === 'left' ? ' is-on' : '')}
+                        onClick={() => setDrawer((d) => (d === 'left' ? null : 'left'))}
+                        title="元素面板：插入元素 / 模板"
+                        aria-expanded={drawer === 'left'}
+                      ><Icon name="grid" size={16} /></button>
+                    )}
+                    <button
+                      className={'shell-drawer-btn is-right' + (drawer === 'right' ? ' is-on' : '')}
+                      onClick={() => setDrawer((d) => (d === 'right' ? null : 'right'))}
+                      title={rightTab === 'layers' ? '图层' : '属性'}
+                      aria-expanded={drawer === 'right'}
+                    ><Icon name={rightTab === 'layers' ? 'layers' : 'sliders'} size={16} /></button>
+                    {/* 抽屉打开时的遮罩：点它就关，符合手机上"点外面关闭"的习惯 */}
+                    {drawer !== null && (
+                      <div className="shell-drawer-scrim" onClick={() => setDrawer(null)} />
+                    )}
+                  </>
+                )}
                 {/* 只读模式下左侧元素面板整个不出现（快照不能改内容，留一个空面板只会挤占画布） */}
                 {!readonly && (
                   <div className="elem-pane-wrap" data-bc-avoid="elem-pane">

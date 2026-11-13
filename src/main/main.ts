@@ -332,11 +332,23 @@ async function createWindow() {
    * 正常双击启动（没有 BC_NO_FOCUS）行为完全不变。
    */
   const noFocus = process.env['BC_NO_FOCUS'] === '1';
+  /**
+   * v0.4.6（R6-7）：外壳最小宽度从 960 放开到 360。
+   *
+   * 以前锁 960：编辑器外壳根本压不到手机宽度，所以"窄屏外壳"这件事**根本不存在**
+   * （不是做得不好）。现在放开，才能：
+   *   · 在竖屏显示器上按 412×915 / 390×844 验收真实手机布局；
+   *   · 为 Web 版与将来的安卓外壳打基础。
+   *
+   * 900 以下由渲染层切 `data-shell="narrow"`（左右面板改抽屉 / 覆盖层）。
+   * 开发态可以用环境变量 BC_MIN_WIN_WIDTH 临时调（探针固定窗口尺寸时会用到）。
+   */
+  const minWinW = Math.max(320, Number(process.env['BC_MIN_WIN_WIDTH'] ?? 360) || 360);
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
-    minWidth: 960,
-    minHeight: 640,
+    minWidth: minWinW,
+    minHeight: 560,
     title: 'BlockCanvas 积木画布',
     ...(iconPath ? { icon: iconPath } : {}),
     backgroundColor: '#f3f3f3',
@@ -514,9 +526,37 @@ ipcMain.handle('task:reveal', async (_evt, id: string) => {
   const err = await revealTask(id);
   return { ok: !err, error: err || undefined };
 });
+/**
+ * v0.4.6（R6-9）：「竖屏验收」—— 一键把窗口设成手机尺寸。
+ *
+ * 背景：用户提到"电脑完全支持屏幕竖屏"，竖屏 Windows 就是现成的手机验收台。
+ * 但手动把窗口拖到 412×915 很别扭（还容易差几像素），所以给一个精确尺寸的入口。
+ *
+ * 尺寸取真机常见值：
+ *   · 412×915 = Pixel 7 / 多数 1080p 安卓（最常用的 Android 逻辑分辨率）
+ *   · 390×844 = iPhone 14 / 15
+ *   · 360×800 = 国产安卓偏窄的一档（最容易挤爆的宽度）
+ * 返回**实际**得到的尺寸（窗口管理器可能因最小尺寸/屏幕边界修正），探针据此断言。
+ */
+ipcMain.handle('win:set-acceptance-size', (_evt, preset: 'android' | 'iphone' | 'compact' | 'reset') => {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win || win.isDestroyed()) return { ok: false, error: '没有窗口' };
+  const sizes = {
+    android: { width: 412, height: 915 },
+    iphone: { width: 390, height: 844 },
+    compact: { width: 360, height: 800 },
+    reset: { width: 1280, height: 800 }
+  } as const;
+  const s = sizes[preset] ?? sizes.android;
+  // 先把最小尺寸放开，否则 setSize 会被钳制在 minWidth 上（这正是以前做不到的原因）
+  win.setMinimumSize(320, 480);
+  win.setSize(s.width, s.height);
+  win.center();
+  const [w, h] = win.getSize();
+  return { ok: true, width: w, height: h, requested: s };
+});
 // 「打开 zip 所在的文件夹」用：给一个文件路径就定位到它，给目录就打开目录。
-ipcMain.handle('shell:reveal', async (_evt, p: string) => {
-  if (!p) return { ok: false, error: '缺少路径' };
+ipcMain.handle('shell:reveal', async (_evt, p: string) => {  if (!p) return { ok: false, error: '缺少路径' };
   try {
     if (existsSync(p) && statSync(p).isDirectory()) return { ok: !(await shell.openPath(p)) };
     shell.showItemInFolder(p);
@@ -1208,7 +1248,16 @@ function collectFiles(base: string, rel: string): { rel: string; abspath: string
 
 function scanExtensions() {
   const result: {
-    plugins: { id: string; name: string; version: string; author: string; description: string; enabled: boolean; error: string | null }[];
+    plugins: {
+      id: string; name: string; version: string; author: string; description: string; enabled: boolean;
+      error: string | null;
+      /**
+       * v0.4.6（R6-22）：把 manifest 原样带回去 —— 渲染层要按 `apiVersion` / `permissions`
+       * 裁剪插件能拿到的宿主能力。只传这几个字段（不透传整个 manifest），
+       * 避免把插件作者写的任意内容塞进 IPC。
+       */
+      manifest?: { apiVersion?: string; permissions?: string[] };
+    }[];
     resources: {
       id: string; name: string; version: string; author: string; description: string;
       categories: any[];
@@ -1245,7 +1294,12 @@ function scanExtensions() {
         };
         if (kind === 'plugins') {
           if (!mf.main) throw new Error('缺少 main 字段（插件入口文件）');
-          result.plugins.push({ ...base, error: null });
+          // v0.4.6（R6-22）：只回传裁剪所需的两项，其余 manifest 内容不过 IPC
+          const manifest = {
+            apiVersion: mf.apiVersion === undefined ? undefined : String(mf.apiVersion),
+            permissions: Array.isArray(mf.permissions) ? mf.permissions.map((x: unknown) => String(x)) : undefined
+          };
+          result.plugins.push({ ...base, error: null, manifest });
         } else {
           if (!Array.isArray(mf.templates) || mf.templates.length === 0) throw new Error('缺少 templates 列表（资源包至少一个模板）');
           const categories: any[] = Array.isArray(mf.categories) ? mf.categories : [];

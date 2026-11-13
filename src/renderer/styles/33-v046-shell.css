@@ -1,0 +1,196 @@
+/* ============================================================================
+   v0.4.6 · 窄屏外壳 (R6-7 / R6-8 / R6-10)
+   ----------------------------------------------------------------------------
+   背景：主窗口以前被 `minWidth: 960` 硬锁住，所以"编辑器自己的手机界面"这件事
+   **根本不存在**（不是做得不好）。本版放开到 360，按 900px 切外壳形态：
+
+     data-shell="wide"    ≥900px —— 左右面板并排（原样）
+     data-shell="narrow"  <900px —— 左右面板改**抽屉**，画布占满，抽屉入口浮在画布上
+
+   为什么阈值是 900 而不是 768：
+     右侧属性面板默认 456 + 左侧元素面板 230 = 686，900 - 686 = 214px 画布；
+     再窄连"看出页面大概样子"都不够，所以 900 是"并排还能用"的下限。
+
+   ⚠ 这一层只管**编辑器外壳**。被设计的那张网页仍按 768 / 480 断点走（lib/device）。
+   ========================================================================== */
+
+/* ── 抽屉入口按钮（只在窄屏渲染，DOM 里宽屏不出现） ───────────────────── */
+.shell-drawer-btn {
+  position: absolute;
+  top: 50%;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 触摸目标 ≥44×44（R6-10 的硬指标） */
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
+  transition: background var(--dur-fast, 120ms) var(--ease-out, ease),
+              color var(--dur-fast, 120ms) var(--ease-out, ease);
+}
+
+.shell-drawer-btn.is-left {
+  left: 0;
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+}
+
+.shell-drawer-btn.is-right {
+  right: 0;
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+}
+
+.shell-drawer-btn:hover { background: var(--panel-tint); }
+.shell-drawer-btn.is-on { background: var(--accent, #2563eb); color: #fff; border-color: var(--accent, #2563eb); }
+
+/* 遮罩：点一下就收起（手机上"点外面关闭"的习惯） */
+.shell-drawer-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(1px);
+  animation: bcScrimIn 140ms var(--ease-out, ease);
+}
+
+@keyframes bcScrimIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── 窄屏形态：左右面板变抽屉 ─────────────────────────────────────────── */
+.app[data-shell='narrow'] .workspace {
+  /* 窄屏下不并排了：画布占满，两个面板都抽出来 */
+  grid-template-columns: 1fr !important;
+  grid-template-areas: 'canvas' !important;
+}
+
+.app[data-shell='narrow'] .canvas-area {
+  grid-area: canvas;
+}
+
+/* 面板变成覆盖层：从侧边滑入，占满高度 */
+.app[data-shell='narrow'] .elem-pane-wrap,
+.app[data-shell='narrow'] .right-pane-wrap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 58;
+  /* 窄屏下宽度用视口的 88%（留一条缝看得见遮罩，知道"这层是浮起来的"） */
+  width: min(86vw, 360px);
+  max-width: 86vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  visibility: hidden;
+  transition: transform var(--dur-mid, 180ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+              opacity var(--dur-mid, 180ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+              visibility 0s linear var(--dur-mid, 180ms);
+}
+
+.app[data-shell='narrow'] .elem-pane-wrap {
+  left: 0;
+  transform: translateX(-102%);
+}
+
+.app[data-shell='narrow'] .right-pane-wrap {
+  right: 0;
+  /* 窄屏下右侧面板不再需要"固定 456"，直接吃满抽屉宽度 */
+  width: min(92vw, 420px);
+  max-width: 92vw;
+  transform: translateX(102%);
+}
+
+.app[data-shell='narrow'] .workspace[data-drawer='left'] .elem-pane-wrap,
+.app[data-shell='narrow'] .workspace[data-drawer='right'] .right-pane-wrap {
+  transform: translateX(0);
+  opacity: 1;
+  visibility: visible;
+  transition: transform var(--dur-mid, 180ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+              opacity var(--dur-mid, 180ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+              visibility 0s linear 0s;
+}
+
+/* 抽屉里不要拖手（窄屏没地方给你拖宽度） */
+.app[data-shell='narrow'] .panel-resizer { display: none !important; }
+
+/* 窄屏下画布区的内边距收紧，给内容留地方 */
+.app[data-shell='narrow'] .canvas-wrap {
+  padding: 10px;
+}
+
+/* 只读快照：窄屏下右侧面板本来就是抽屉，不需要固定宽度 */
+.app[data-shell='narrow'] .workspace.is-readonly .right-pane-wrap {
+  width: min(96vw, 420px);
+}
+
+/* ── 触摸目标审计（R6-10）：窄屏下所有可点元素 ≥44×44 ────────────────── */
+/* 这里只做"该大的地方大"，具体违规清单由 probe-ui-overflow 扫描输出 */
+.app[data-shell='narrow'] .toolbar .tb-btn,
+.app[data-shell='narrow'] .toolbar .tb-more-btn,
+.app[data-shell='narrow'] .tab-bar .tab-btn,
+.app[data-shell='narrow'] .inspector-tab,
+.app[data-shell='narrow'] .pseudo-tab {
+  min-height: 44px;
+}
+
+.app[data-shell='narrow'] .toolbar .tb-btn,
+.app[data-shell='narrow'] .toolbar .tb-more-btn {
+  min-width: 44px;
+}
+
+/* 工具栏在窄屏下横向滚动（放不下就滚，不要换行把高度顶起来） */
+.app[data-shell='narrow'] .tb-main {
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  scrollbar-width: thin;
+}
+
+/* ── 设置页：竖屏验收的四个按钮 ───────────────────────────────────────── */
+.portrait-accept-ctrl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* 窄屏下设置页本身也要能用（Fluent 侧边栏在窄屏会挤掉内容区） */
+.app[data-shell='narrow'] .fluent-settings-page {
+  grid-template-columns: 1fr;
+}
+
+.app[data-shell='narrow'] .fluent-sidebar {
+  /* 窄屏下侧边栏改为顶部横条，可横向滚动 */
+  flex-direction: row;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-height: none;
+  height: auto;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.app[data-shell='narrow'] .fluent-sidebar .fluent-nav-item {
+  min-width: 44px;
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+.app[data-shell='narrow'] .fluent-main {
+  padding: 12px;
+}
+
+/* 空首页 / 项目中心在窄屏下的内边距收紧（内容本来就有自适应） */
+.app[data-shell='narrow'] .empty-home,
+.app[data-shell='narrow'] .projects-page {
+  padding-left: 12px;
+  padding-right: 12px;
+}

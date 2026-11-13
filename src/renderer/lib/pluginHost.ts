@@ -1,5 +1,6 @@
 import { useToolbar, type ToolbarItem } from '@store/toolbarStore';
 import type { PropertySchema } from '@lib/propertySchema';
+import { parseManifestPermissions, applyPermissionGate, type PluginPermission } from '@lib/pluginPermissions';
 
 // BlockCanvas · 插件执行宿主
 // 原则：插件兼容程序，不是程序兼容插件。
@@ -9,14 +10,18 @@ import type { PropertySchema } from '@lib/propertySchema';
 //   - 入口文件以源码字符串下发，渲染进程用 new Function 求值（CSP 已开 unsafe-eval），
 //     不改动象素级 DOM 结构，也不注入任何全局变量（每个插件拿到独立的 Bc）。
 //
-// 插件可注册的能力：
-//   - Bc.registerElement：在元素面板新增按钮（type + label + help）
-//   - Bc.registerProperty：在属性面板新增 CSS 属性 schema 项
-//   - Bc.registerExportHook：导出 HTML 前后钩子（可修改 HTML 字符串）
-//   - Bc.registerCommand：注册工具栏按钮
-//   - Bc.registerCss：注入自定义 CSS
+// 插件可注册的能力（v0.4.6 起**必须先在 manifest 里声明**，见 lib/pluginPermissions）：
+//   - element    → Bc.registerElement：在元素面板新增按钮（type + label + help）
+//   - property   → Bc.registerProperty：在属性面板新增 CSS 属性 schema 项
+//   - export     → Bc.registerExportHook：导出 HTML 前后钩子（可修改 HTML 字符串）
+//   - command    → Bc.registerCommand：注册工具栏命令（一律收进「⋯更多」）
+//   - css        → Bc.registerCss：注入自定义 CSS
+//   - hostApi    → Bc.api：透传 window.bc（高危，默认不给）
 //
-// 安全边界：插件只能读写渲染进程 DOM 和 React 状态，无法直接访问文件系统/网络。
+// 安全边界（诚实说明，别当成沙箱）：
+//   插件仍与宿主**同上下文**（new Function），所以能触达 window 上的东西。
+//   这里做的是"少给参数"：未声明的方法在 Bc 上**根本不存在**，
+//   误用会当场 TypeError，而不是静默改坏工程。真隔离（iframe/Worker）留到后面。
 
 interface PluginBindings {
   start?: () => void;
@@ -145,13 +150,22 @@ function makeBc(pluginId: string) {
   };
 }
 
-function startPlugin(id: string, source: string) {
+function startPlugin(id: string, source: string, permissions: PluginPermission[]) {
   const { bc, bindings } = makeBc(id);
+  /**
+   * v0.4.6（R6-22）：按 manifest 声明裁剪 Bc。
+   * 未声明的方法**直接删掉**（而不是给个抛错的空函数）—— 空函数会让插件以为注册成功，
+   * 排查起来比 `TypeError: Bc.registerCss is not a function` 难十倍。
+   */
+  const { bc: gated, removed } = applyPermissionGate(bc, permissions);
+  if (removed.length > 0) {
+    console.info(`[插件:${id}] 未声明能力，已隐藏：${removed.join(', ')}（在 manifest.permissions 里声明即可使用）`);
+  }
   // 插件入口形如：(function (Bc) { ... })(Bc)。把 host 当实参传入。
   const fn = new Function('Bc', source);
-  fn(bc);
+  fn(gated);
   bindings.start?.();
-  return { id, stop: bindings.stop } as ActivePlugin;
+  return { id, stop: bindings.stop, permissions } as ActivePlugin;
 }
 
 /** 重启全部启用插件：停旧的 → 清旧插件项 → 加载新批次 */
@@ -171,12 +185,21 @@ export async function refreshPlugins(): Promise<void> {
     const plugins = (scan.plugins ?? []).filter((p) => p.enabled);
     for (const p of plugins) {
       try {
+        // v0.4.6（R6-22）：先按 manifest 解析接口声明（版本 incompatible 就拒绝加载）
+        const decl = parseManifestPermissions((p as unknown as { manifest?: Record<string, unknown> }).manifest);
+        if (decl.rejected) {
+          console.warn(`[插件:${p.id}] 已拒绝加载：${decl.rejected}`);
+          continue;
+        }
+        if (decl.ignored.length > 0) {
+          console.warn(`[插件:${p.id}] 有未知能力被忽略：${decl.ignored.join(', ')}（可能是插件的 API 版本更高）`);
+        }
         const src = await window.bc.getPluginSource(p.id);
         if (!src.ok || !src.source) {
           console.warn('[插件:' + p.id + '] 未加载：', src.error ?? '无源码');
           continue;
         }
-        active.push(startPlugin(p.id, src.source));
+        active.push(startPlugin(p.id, src.source, decl.permissions));
       } catch (e) {
         console.warn('[插件:' + p.id + '] 执行失败，已跳过：', e);
       }

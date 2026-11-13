@@ -63,7 +63,11 @@ export interface StorageBreakdownInfo {
 
 declare global {
   interface ScanResult {
-    plugins: { id: string; name: string; version: string; author: string; description: string; enabled: boolean; error: string | null }[];
+    plugins: {
+      id: string; name: string; version: string; author: string; description: string; enabled: boolean; error: string | null;
+      /** v0.4.6（R6-22）：插件接口声明 —— 只有这两项会过 IPC，用于裁剪插件能力 */
+      manifest?: { apiVersion?: string; permissions?: string[] };
+    }[];
     resources: {
       id: string; name: string; version: string; author: string; description: string;
       categories?: { id: string; name: string; description: string }[];
@@ -247,6 +251,15 @@ declare global {
       /** v0.4.5：启动加载页的真实进度（主进程逐条播报） */
       onLoadProgress: (cb: (p: { id: string; label: string; percent: number }) => void) => () => void;
       setNativeTheme: (source: 'dark' | 'light' | 'system') => void;
+      /**
+       * v0.4.6（R6-9）：竖屏验收 —— 一键把窗口设成手机尺寸。
+       * preset: android 412×915 / iphone 390×844 / compact 360×800 / reset 1280×800。
+       * 返回**实际**得到的尺寸（窗口管理器可能修正），用它对账。
+       */
+      setAcceptanceSize: (preset: 'android' | 'iphone' | 'compact' | 'reset') => Promise<{
+        ok: boolean; width?: number; height?: number;
+        requested?: { width: number; height: number }; error?: string;
+      }>;
       pickImageSrc: (mode?: 'abs' | 'rel') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
       /**
        * v0.4.6（R6-18）：媒体编码探测。

@@ -84,6 +84,8 @@ const PROBES = [
   'probe-fixed-airwall',
   'probe-sticky',
   'probe-codec',
+  'probe-plugin-perms',
+  'probe-shell-narrow',
   'probe-ui-overflow'
 ];
 

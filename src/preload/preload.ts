@@ -199,6 +199,12 @@ contextBridge.exposeInMainWorld('bc', {
   },
   setNativeTheme: (source: 'dark' | 'light' | 'system') =>
     ipcRenderer.send('theme:set-source', source),
+  /**
+   * v0.4.6（R6-9）：竖屏验收 —— 一键把窗口设成手机尺寸（412×915 / 390×844 / 360×800）。
+   * 竖屏 Windows 显示器就是现成的手机验收台，但手动拖窗口很难精确到这个尺寸。
+   */
+  setAcceptanceSize: (preset: 'android' | 'iphone' | 'compact' | 'reset') =>
+    ipcRenderer.invoke('win:set-acceptance-size', preset),
   pickImageSrc: (mode?: 'abs' | 'rel') =>
     ipcRenderer.invoke('img:pick-src', mode),
   /**

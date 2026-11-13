@@ -1,0 +1,11 @@
+{
+  "id": "probe-bad-version",
+  "type": "plugin",
+  "name": "Probe plugin (apiVersion too high)",
+  "version": "1.0.0",
+  "author": "BlockCanvas test",
+  "description": "For automated probes only: declares an unsupported apiVersion and must be refused.",
+  "apiVersion": "99",
+  "permissions": ["css"],
+  "main": "index.js"
+}

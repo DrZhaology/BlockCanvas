@@ -1,0 +1,10 @@
+{
+  "id": "probe-no-perm",
+  "type": "plugin",
+  "name": "Probe plugin (no permissions declared)",
+  "version": "1.0.0",
+  "author": "BlockCanvas test",
+  "description": "For automated probes only: declares minimum capabilities, then tries to call undeclared ones.",
+  "apiVersion": "1",
+  "main": "index.js"
+}
