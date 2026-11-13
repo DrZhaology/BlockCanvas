@@ -1,0 +1,73 @@
+/* ============================================================================
+   v0.4.6 · 画布「首屏线」(R6-16)
+   ----------------------------------------------------------------------------
+   问题：`position: fixed` 在浏览器里相对**视口**定位，但画布高度是随内容长的。
+   于是 `bottom: 0` 在画布上永远贴不到"首屏底部"，用户拖到底也写不出 bottom:0；
+   反之写死的 bottom 值在长页面上又跑到看不见的地方。
+
+   解决：场景里记住一个「基准视口高度」(默认 900)，画布至少撑到这么高，
+   并在该高度画一条首屏线 —— fixed 元素的拖动墙止步于此。
+
+   这条线必须 pointer-events: none（纯参考，不能挡拖动/框选）。
+   ========================================================================== */
+
+.canvas-viewport-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  pointer-events: none;
+  /* 压在内容之上但不抢交互；比选中框(z-index 由元素自己管)低一档 */
+  z-index: 40;
+  border-top: 1px dashed var(--accent, #2563eb);
+  opacity: 0.55;
+}
+
+.canvas-viewport-line > span {
+  position: absolute;
+  right: 6px;
+  top: -1px;
+  transform: translateY(-100%);
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--accent, #2563eb);
+  border-radius: 3px 3px 0 0;
+  opacity: 0.85;
+  /* 缩小画布时也别糊成一团 */
+  letter-spacing: 0.02em;
+}
+
+/* 隐藏（Alt 拖动 / 框选中）时不要干扰读数 —— 那两种状态下屏幕上的辅助线已经很多了 */
+body.bc-alt-dragging .canvas-viewport-line,
+body.bc-marqueeing .canvas-viewport-line {
+  opacity: 0.25;
+}
+
+/* 「首屏高度」这一行：数字框 + 单位，跟 body 设置里其它行对齐 */
+.page-quick-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.page-quick-inline .prop-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--panel-soft);
+  color: var(--text);
+}
+.page-quick-inline .prop-input:focus { border-color: var(--accent); outline: none; }
+.page-quick-unit {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-muted);
+}

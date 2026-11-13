@@ -73,6 +73,9 @@ export function PageCssBody() {
   const setBodyExtra = useScene((s) => s.setBodyExtra);
   const beginStyleEdit = useScene((s) => s.beginStyleEdit);
   const endStyleEdit = useScene((s) => s.endStyleEdit);
+  // v0.4.6（R6-16）：基准视口高度（fixed 的空气墙）—— 只影响画布，不进导出
+  const viewportHeight = useScene((s) => s.scene.viewportHeight) ?? 900;
+  const setViewportHeight = useScene((s) => s.setViewportHeight);
   // 两块开合记忆：存工程文件 scene.uiState.pageSec（与右侧其他板块同一机制，不触发脏标记）
   const pageSec = useScene((s) => s.scene.uiState?.pageSec);
   const setPageSec = useScene((s) => s.setPageSec);
@@ -187,6 +190,42 @@ export function PageCssBody() {
             onRemove={() => removeKey(item.key)}
           />
         ))}
+        {/* v0.4.6（R6-16）：基准视口高度 —— 只影响编辑器里的画布，不进导出。
+            它解决的是「fixed 元素往下拖永远贴不到底」：画布会随内容长长，
+            所以要先告诉它"浏览器窗口有多高"。 */}
+        <div className="page-quick-row">
+          <span className="page-quick-label">
+            首屏高度
+            <HelpButton
+              title="首屏高度（基准视口）"
+              content={
+                '浏览器窗口在真实网页里是有高度的（比如 900px），而画布会随内容一直变长。\n\n' +
+                '· 固定定位（position: fixed）的元素以"浏览器窗口"为参照：\n' +
+                '  bottom: 0 = 贴在首屏底部，而不是几千米长的页面底部。\n' +
+                '· 没有这个基准，画布上把元素拖到底也写不出 bottom: 0。\n\n' +
+                '这一项只影响编辑器里的画布与拖动边界，不写进导出的网页。'
+              }
+            />
+          </span>
+          <div className="page-quick-inline">
+            <input
+              type="number"
+              className="prop-input"
+              min={320}
+              max={4000}
+              step={10}
+              value={viewportHeight}
+              onFocus={() => beginStyleEdit()}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isFinite(n)) setViewportHeight(n);
+              }}
+              onBlur={() => endStyleEdit()}
+              title="画布至少撑这么高；固定定位元素的拖动墙止步于这条线"
+            />
+            <span className="page-quick-unit">px</span>
+          </div>
+        </div>
         {/* v0.4.4 修：body 区不再放「添加属性」。
             以前这里也有一个添加菜单，但 bodyExtra 的卡片渲染在「全局样式」区，
             用户点 body 区的按钮 → 属性跑到下面去了（反馈 #6）。现在只保留全局样式区一个入口。 */}

@@ -248,6 +248,19 @@ declare global {
       onLoadProgress: (cb: (p: { id: string; label: string; percent: number }) => void) => () => void;
       setNativeTheme: (source: 'dark' | 'light' | 'system') => void;
       pickImageSrc: (mode?: 'abs' | 'rel') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
+      /**
+       * v0.4.6（R6-18）：媒体编码探测。
+       *   result = 'supported'   → 容器头里的编码当前能解
+       *   result = 'unsupported' → 明确解不了（HEVC / 杜比视界 / 10bit AVC…），别挂 <video>
+       *   result = 'unknown'     → 读不出来 → **照常尝试播放**（绝不因为探测失败就误杀）
+       */
+      probeMediaCodec: (filePath: string) => Promise<{
+        ok: boolean;
+        result: 'supported' | 'unsupported' | 'unknown';
+        codecs: string[];
+        advice?: string;
+        error?: string;
+      }>;
       /** 首页背景用：选择图片 / 视频文件（返回绝对路径，渲染层用 bc-img:// 显示） */
       pickMediaSrc: (kind: 'image' | 'video' | 'audio') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
     };

@@ -61,7 +61,7 @@ export function pickDropTarget(
  *   · 常规流子元素：父容器**设了固定高度**时下墙 = 父内容盒底（不再穿出父容器）；
  *     自适应高度的父允许撑长（不设下墙）。
  */
-export function boundsFor(el: HTMLElement, rect: DOMRect): Bounds {
+export function boundsFor(el: HTMLElement, rect: DOMRect, viewportHeight = 900): Bounds {
   const canvasEl = el.closest('.canvas') as HTMLElement | null;
   const cs = getComputedStyle(el);
   const pos = cs.position;
@@ -99,12 +99,18 @@ export function boundsFor(el: HTMLElement, rect: DOMRect): Bounds {
 
   // v0.4.4：`fixed` 是**独立的视口层** —— 它相对画布（= 模拟浏览器视口）定位，
   // 不与文档流里的兄弟元素碰撞，四面墙都取画布视口。
+  //
+  // v0.4.6（R6-16）：但画布高度是随内容长的（短页面 600、长页面 3000），
+  // 拿"画布底"当视口底会让 `bottom: 0` 永远贴不到首屏底部。
+  // 所以 fixed 的上下墙改用「首屏线」：画布顶部 + 基准视口高度。
+  // 画布比它矮时（内容很少），仍以画布底为下限，免得墙跑到画布外面。
   if (isFixed && canvasEl) {
     const vb = boxOf(canvasEl);
+    const vp = Math.min(vb.bottom, vb.top + viewportHeight);
     wallLeft = vb.left + m.left;
     wallRight = vb.right - m.right;
     wallTop = vb.top + m.top;
-    wallBottom = vb.bottom - m.bottom;
+    wallBottom = vp - m.bottom;
   }
   // 每面墙要画的"整面"（默认铺满父容器内容盒；被兄弟元素挡住时改成画在那个兄弟的边上）
   let barL: Bar | null = vBar(wallLeft, pb.top, pb.bottom);
@@ -113,8 +119,9 @@ export function boundsFor(el: HTMLElement, rect: DOMRect): Bounds {
   let barB: Bar | null = Number.isFinite(wallBottom) ? hBar(wallBottom, pb.left, pb.right) : null;
   if (isFixed && canvasEl) {
     const vb = boxOf(canvasEl);
-    barL = vBar(wallLeft, vb.top, vb.bottom);
-    barR = vBar(wallRight, vb.top, vb.bottom);
+    const vp = Math.min(vb.bottom, vb.top + viewportHeight);
+    barL = vBar(wallLeft, vb.top, vp);
+    barR = vBar(wallRight, vb.top, vp);
     barT = hBar(wallTop, vb.left, vb.right);
     barB = hBar(wallBottom, vb.left, vb.right);
   }

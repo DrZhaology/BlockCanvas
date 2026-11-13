@@ -20,6 +20,8 @@ export const LOCK_FRAME_SEC = 1;
 export type AltDragOptions = {
   /** 当前缩放（要 ÷ zoom 才能把 client px 换成 CSS px） */
   zoom: number;
+  /** 基准视口高度（fixed 的空气墙 / 首屏线） */
+  viewportHeight?: number;
   /** 画布元素（fixed 的包含块 = 它，相当于浏览器视口） */
   canvasRef: React.RefObject<HTMLDivElement | null>;
   /** Ctrl+滚轮缩放请求 */
@@ -28,9 +30,11 @@ export type AltDragOptions = {
   onMiddlePress?: (id: string, x: number, y: number) => void;
 };
 
-export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: AltDragOptions) {
+export function useAltDrag({ zoom, viewportHeight = 900, canvasRef, onZoomChange, onMiddlePress }: AltDragOptions) {
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
+  const viewportHeightRef = useRef(viewportHeight);
+  viewportHeightRef.current = viewportHeight;
 
   const [altHover, setAltHover] = useState<AltHover | null>(null);
   const altHoverRef = useRef<AltHover | null>(null);
@@ -111,7 +115,7 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
 
   // ── 每帧用的上下文（传给 altDragMove.ts） ────────────────────────────────────
   const ctx: AltDragCtx = {
-    zoomRef, canvasRef, altPadRef,
+    zoomRef, viewportHeightRef, canvasRef, altPadRef,
     setAltPad, setWallHints, setAltBadge, setGuides, setDropTarget, setBoxModel,
     flashWall, spawnAltGhost, moveAltGhost, removeAltGhost,
     altPreviewTimer, altPreviewRef,
@@ -317,7 +321,7 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
     const rect = el.getBoundingClientRect();
     const pos = cs.position;
     const positioned = pos === 'absolute' || pos === 'fixed' || pos === 'relative';
-    const bounds: Bounds = boundsFor(el, rect);
+    const bounds: Bounds = boundsFor(el, rect, viewportHeightRef.current);
     const parentNode = findNode(root, h.id);
     const posKind = (['relative', 'absolute', 'fixed', 'sticky'] as const).includes(pos as never)
       ? (pos as 'relative' | 'absolute' | 'fixed' | 'sticky')

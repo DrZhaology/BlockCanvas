@@ -20,6 +20,8 @@ import {
   readProject, writeProject, readManifestOnly, migrateAllProjectFilesAsync
 } from './projectFile';
 import * as projectFileApi from './projectFile';
+// v0.4.6（R6-18）：媒体编码探测 —— 挂 <video> 之前先读容器头，避开原生解码器报错
+import { probeCodec, codecAdvice } from './codecProbe';
 // v0.4.5：工程素材（保存时收集本地图片/视频进容器，打开时解包到缓存）
 import {
   collectSceneAssets, extractProjectAssets, resolveCachedAsset, listAssetCache, importAssetToCache,
@@ -65,6 +67,11 @@ try {
 if (!app.isPackaged) {
   (globalThis as unknown as Record<string, unknown>)['__bcPaths'] = pathUtils;
   (globalThis as unknown as Record<string, unknown>)['__bcProjectFile'] = projectFileApi;
+  // v0.4.6（R6-18）：编码探测是"读二进制头"的活，靠 E2E 黑盒太贵 —— 挂出来直接单测
+  (globalThis as unknown as Record<string, unknown>)['__bcCodec'] = {
+    probe: (filePath: string, ext: string) => probeCodec(filePath, ext),
+    advice: (codecs: string[]) => codecAdvice(codecs)
+  };
 }
 
 // electron-vite 在 dev 模式下注入 ELECTRON_RENDERER_URL；
@@ -595,6 +602,36 @@ ipcMain.handle('project:forget-external', (_evt, filePath: string) => forgetExte
 
 // v0.4.5：素材库（图库面板）—— 列出缓存里的素材 / 导入新素材
 ipcMain.handle('assets:list', () => listAssetCache());
+
+/**
+ * v0.4.6（R6-18）：媒体编码探测 —— 挂载 `<video>` **之前**先问一句"这个编码现在能解吗"。
+ *
+ * 为什么需要：Chromium 遇到不带的编码（HEVC / 杜比视界 / 10bit H.264）会打
+ * `ffmpeg_common.cc Unsupported pixel format: -1` 并白屏。那条日志来自**原生解码器**，
+ * JS 侧屏蔽不了 —— 唯一能"根治"的办法就是别让它有机会尝试：先读容器头，
+ * 确定解不了就根本不挂 <video>。
+ *
+ * 返回 result = 'unknown' 时（读不出来 / 不是 MP4/WebM）调用方应当**照常尝试播放**，
+ * 绝不能因为探测失败就误杀一个正常视频。
+ */
+ipcMain.handle('media:probe-codec', (_evt, filePath: string) => {
+  try {
+    const raw = decodeURIComponent(String(filePath ?? '')).replace(/^bc-img:\/\/file\//i, '');
+    let p = raw;
+    if (!isAbsolutePathAny(p)) {
+      const clean = p.replace(/^\.?\/+/, '');
+      const cands = [join(dataRoot(), 'projects', clean), join(dataRoot(), clean), join(app.getAppPath(), clean)];
+      for (const c of cands) if (existsSync(c)) { p = c; break; }
+    }
+    const ext = (p.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase();
+    const r = probeCodec(p, ext);
+    return { ok: true, ...r, advice: r.result === 'unsupported' ? codecAdvice(r.codecs) : '' };
+  } catch (e) {
+    // 探测本身失败永远不该阻塞播放
+    return { ok: false, result: 'unknown', codecs: [], advice: '', error: String(e) };
+  }
+});
+
 ipcMain.handle('assets:import', async () => {
   const res = await showOpenDialog({
     title: '导入素材',

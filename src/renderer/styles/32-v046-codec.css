@@ -1,0 +1,100 @@
+/* ============================================================================
+   v0.4.6 · 视频编码不支持时的占位块 (R6-18)
+   ----------------------------------------------------------------------------
+   Chromium 的原生解码器遇到不带的编码（HEVC / 杜比视界 / 10bit H.264）会报
+   `ffmpeg_common.cc Unsupported pixel format: -1` 并白屏，那条日志 JS 屏蔽不了。
+   唯一能根治的办法是"挂之前先读容器头，解不了就根本不挂 <video>"。
+
+   这块占位就是这个"不挂"的结果：尺寸、位置、选中、拖动都和真元素一致，
+   只是里面没有 video —— 用户看到的是清楚的说明，而不是一片空白。
+   ========================================================================== */
+
+.canvas .bc-codec-blocked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 90px;
+  padding: 10px;
+  box-sizing: border-box;
+  color: #92400e;
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(251, 191, 36, 0.10) 0 8px,
+      rgba(251, 191, 36, 0.02) 8px 16px
+    ),
+    #fffbeb;
+  border: 1px dashed #f59e0b;
+  border-radius: 4px;
+  text-align: center;
+  user-select: none;
+}
+
+.bc-codec-blocked-ico {
+  color: #d97706;
+  line-height: 0;
+}
+
+.bc-codec-blocked-title {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.bc-codec-blocked-desc {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: #b45309;
+  opacity: 0.9;
+  word-break: break-all;
+}
+
+/* 选中时给一圈更明确的高亮（这个块本身不是真视频，需要看得出"被选中了"） */
+.canvas .bc-codec-blocked[data-bc-sel='1'] {
+  border-color: var(--accent, #2563eb);
+}
+
+/* ── 属性面板里的编码警告卡（MediaPropsCard） ───────────────────────────── */
+.media-codec-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0 0 8px;
+  padding: 8px 9px;
+  border-radius: 5px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+
+.media-codec-ico {
+  flex: none;
+  margin-top: 1px;
+  color: #d97706;
+  line-height: 0;
+}
+
+.media-codec-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #92400e;
+}
+
+.media-codec-body b {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.media-codec-body code {
+  align-self: flex-start;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  color: #7c2d12;
+  background: rgba(245, 158, 11, 0.16);
+}

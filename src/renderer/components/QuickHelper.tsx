@@ -8,6 +8,7 @@ import { Collapse } from './Collapse';
 import { Icon } from './Icon';
 import { useEffect, useRef, useState } from 'react';
 import { usePersistedBool } from '@lib/usePersisted';
+import { readSticky } from './canvas/sticky';
 import {
   isGradient,
   GRADIENT_PRESETS,
@@ -118,6 +119,8 @@ export function QuickHelper(props: Props) {
   // —— 定位：锚定哪两边 + 切换定位时的 margin 提示（v0.4.5 第十六批）——
   const posNow = (eff.position ?? 'static') as PosKind;
   const relLike = posNow === 'relative' || posNow === 'sticky';
+  // v0.4.6（R6-17）：sticky 是否真的会吸附（没写 top/bottom 就永远不会）
+  const stickyInfo = readSticky(eff as Record<string, string | undefined>);
   /** 横向/纵向锚定边。relative/sticky 固定 left+top（偏移是相对自身原位的位移） */
   const [anchorX, setAnchorX] = useState<'left' | 'right'>('left');
   const [anchorY, setAnchorY] = useState<'top' | 'bottom'>('top');
@@ -589,8 +592,29 @@ export function QuickHelper(props: Props) {
               <div className="pos-rel-note">
                 <Icon name="info" size={12} />
                 <span>
-                  相对定位：元素<strong>原文档流位置</strong>不动，只按 left / top 做偏移。
-                  所以这里的数值是"位移量"，可以填负数。
+                  {posNow === 'sticky'
+                    ? <>粘性定位：元素先跟随内容滚动，直到碰到你设的<strong>吸附距离</strong>才挂住。</>
+                    : <>相对定位：元素<strong>原文档流位置</strong>不动，只按 left / top 做偏移。所以这里的数值是"位移量"，可以填负数。</>}
+                </span>
+              </div>
+            )}
+            {/* v0.4.6（R6-17）：sticky 没写吸附距离 = 永远不会吸附（最常见的错，必须显性提示） */}
+            {posNow === 'sticky' && stickyInfo?.state === 'idle' && (
+              <div className="pos-sticky-warn">
+                <Icon name="warning" size={12} />
+                <span>
+                  还没设<strong>吸附距离</strong> —— 没有 top / bottom 的话，sticky <strong>永远不会吸附</strong>，
+                  看起来和普通元素一模一样。在上面的纵向锚定里填一个值（比如 20px）试试。
+                </span>
+              </div>
+            )}
+            {posNow === 'sticky' && stickyInfo?.state === 'armed' && (
+              <div className="pos-sticky-ok">
+                <Icon name="check" size={12} />
+                <span>
+                  会吸附：滚动到距{stickyInfo.side === 'top' ? '顶部' : stickyInfo.side === 'bottom' ? '底部' : '侧边'} {stickyInfo.offset} 处挂住
+                  （画布上已用角标和虚线标出吸附线）。
+                  {stickyInfo.horizontal && ' 横向还设了 left/right：只有容器能横向滚动时才生效。'}
                 </span>
               </div>
             )}

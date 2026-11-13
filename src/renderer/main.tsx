@@ -33,6 +33,9 @@ import './styles/26-empty-home.css'; // v0.4.4：空页面（关掉全部标签�
 import './styles/27-v045-ui.css'; // v0.4.5：只读快照预览 / 色标卡片 / 外轮廓 / 面板密度
 import './styles/28-v045-zindex.css'; // v0.4.5：全程序 z-index 标尺落地 + 变量菜单 + 属性搜索高亮
 import './styles/29-v045-perf.css'; // v0.4.5：动画性能（精简/关闭档、不可见暂停）+ 加载页深色底
+import './styles/30-v046-viewport.css'; // v0.4.6：画布「首屏线」（fixed 的参照底面）
+import './styles/31-v046-sticky.css'; // v0.4.6：sticky 生效状态角标 + 吸附线
+import './styles/32-v046-codec.css'; // v0.4.6：视频编码不支持时的占位块 + 属性面板警告卡
 // v0.4.5：语义主题变量（深色插件化的地基）。
 // 必须**最后**加载：旧的 foundation 里已经定义过 --danger-tint 等同名变量，
 // 这里要覆盖它们，才能让"只写一次语义变量、深色自动切换"成立。

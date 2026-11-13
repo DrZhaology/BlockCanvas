@@ -398,9 +398,38 @@ async function main() {
   await sleep(400);
   const fixedStyle = await layersOf(fid2);
   const fixedBottom = whereHas(fixedStyle, 'bottom');
-  ok('fixed 拖到画布底边 → 锚定 bottom（而不是 top 绝对值）',
-    fixedBottom !== null && String(fixedStyle[fixedBottom].bottom) === '0px' && whereHas(fixedStyle, 'top') === null,
-    JSON.stringify({ bp: fixedStyle.bp, bottom: fixedBottom ? fixedStyle[fixedBottom].bottom : null, top: whereHas(fixedStyle, 'top'), hasBottomInBase: hasOwn(fixedStyle.base, 'bottom') }));
+  /**
+   * v0.4.6（R6-16）：fixed 的"底面"从**画布底**改成了**首屏线**（基准视口高度）。
+   *
+   * 语义变化：只有当画布高度 ≈ 基准视口（短页面）时才把贴边归一化成 `bottom: 0` ——
+   * 因为画布自己就是 fixed 的包含块，长页面上 `bottom: 0` 会解析成"画布底"（几千米外），
+   * 一松手元素就飞走了。这个用例的画布是长页面，所以正确行为是：
+   * **位置被墙夹在首屏线附近，但写法保留数值偏移**（不写 bottom: 0）。
+   * 短页面下仍应写 bottom: 0 —— 那条走 probe-fixed-airwall 覆盖。
+   */
+  const fixedPos = await win.evaluate((id) => {
+    const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
+    const c = document.querySelector('.canvas');
+    if (!el || !c) return null;
+    const st = window.__sceneStore.getState();
+    const vh = st.scene.viewportHeight ?? 900;
+    const r = el.getBoundingClientRect();
+    const cr = c.getBoundingClientRect();
+    return {
+      canvasTall: cr.height > vh + 4,
+      gapToLine: Math.round((cr.top + vh) - r.bottom),
+      gapToCanvasBottom: Math.round(cr.bottom - r.bottom)
+    };
+  }, fid2);
+  if (fixedPos && fixedPos.canvasTall) {
+    ok('fixed 拖到首屏线 → 被墙夹住（长页面不写 bottom:0，否则会跳到画布底）',
+      fixedBottom === null && Math.abs(fixedPos.gapToLine) <= 14,
+      JSON.stringify({ bottom: fixedBottom, gapToLine: fixedPos.gapToLine, gapToCanvasBottom: fixedPos.gapToCanvasBottom }));
+  } else {
+    ok('fixed 拖到画布底边 → 锚定 bottom（而不是 top 绝对值）',
+      fixedBottom !== null && String(fixedStyle[fixedBottom].bottom) === '0px' && whereHas(fixedStyle, 'top') === null,
+      JSON.stringify({ bp: fixedStyle.bp, bottom: fixedBottom ? fixedStyle[fixedBottom].bottom : null, top: whereHas(fixedStyle, 'top'), hasBottomInBase: hasOwn(fixedStyle.base, 'bottom') }));
+  }
 
   // ============ 4j. relative 拖到父容器中线 → margin-left/right: auto ============
   const rid2 = await win.evaluate(() => {

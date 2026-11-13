@@ -280,6 +280,18 @@ export interface SceneGraph {
   // 页面「全局样式」（v0.4.5）：可视化添加任意 CSS 属性，导出/画布都作用于 body。
   // key = CSS 属性名（kebab-case），value = 值；空值或空串 = 不输出。
   bodyExtra?: Record<string, string>;
+  /**
+   * 基准视口高度（v0.4.6 / R6-16）：fixed 元素的"空气墙"。
+   *
+   * 问题：`position: fixed` 在浏览器里相对**视口**定位，但画布高度是随内容长的
+   * （短页面 600px、长页面 3000px），于是 `bottom: 0` 在画布上永远贴不到"首屏底部"——
+   * 用户拖到底也不会变成 bottom:0，写死的 bottom 值在长页面上又跑到看不见的地方。
+   *
+   * 解决：场景里记住一个"基准视口高度"（默认 900），画布**至少**撑到这么高，
+   * 并在该高度画一条「首屏线」。fixed 元素的拖动边界止步于这条线。
+   * 内容比它长时仍然继续变长（首屏线看得见，fixed 不会跟着跑）。
+   */
+  viewportHeight?: number;
   // 设计变量 / Token（v0.4.0）：项目级统一定义，元素样式里写 var(--bc-xxx) 引用。
   // 导出时在 <style> 最前面生成 :root{...}，脱离本软件同样生效；改一处全站跟着变。
   tokens?: import('./designTokens').TokenEntry[];

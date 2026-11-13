@@ -79,6 +79,11 @@ const PROBES = [
   'probe-v045-batch16',
   'probe-v045-batch16b',
   'probe-input-focus',
+  // v0.4.6 新增：结构重构（R6-1/2/6）+ 三个功能修复（R6-16/17/18）
+  'probe-arch',
+  'probe-fixed-airwall',
+  'probe-sticky',
+  'probe-codec',
   'probe-ui-overflow'
 ];
 

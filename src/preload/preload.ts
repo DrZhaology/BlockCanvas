@@ -201,6 +201,14 @@ contextBridge.exposeInMainWorld('bc', {
     ipcRenderer.send('theme:set-source', source),
   pickImageSrc: (mode?: 'abs' | 'rel') =>
     ipcRenderer.invoke('img:pick-src', mode),
+  /**
+   * v0.4.6（R6-18）：媒体编码探测。
+   * 挂 `<video>` 之前先问一句"这个编码现在能解吗"—— 解不了就根本不挂，
+   * 从根上避免 Chromium 原生解码器反复报 `Unsupported pixel format: -1`。
+   * 返回 result='unknown' 时（读不出来）**应当照常播放**，不要误杀。
+   */
+  probeMediaCodec: (filePath: string) =>
+    ipcRenderer.invoke('media:probe-codec', filePath),
   /** 首页背景：选择图片 / 视频文件（返回绝对路径） */
   pickMediaSrc: (kind: 'image' | 'video' | 'audio') =>
     ipcRenderer.invoke('media:pick-src', kind)

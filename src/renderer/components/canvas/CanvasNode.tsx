@@ -18,6 +18,7 @@ import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS, TEXT_TAGS, MEDIA_TAG
 import type { SceneElement } from '@lib/types';
 import { selectorForNode, cssTextToObject, simplifyStyle } from '@lib/styleClass';
 import { useShowBr } from '@lib/showBr';
+import { useVideoCodecGate, CodecBlockedNotice } from './videoCodecGate';
 import { Icon } from '../Icon';
 import { LOCK_FRAME_SEC } from './useAltDrag';
 import { toRenderableSrc } from './mediaSrc';
@@ -249,11 +250,18 @@ export const CanvasNode = React.memo(function CanvasNode(props: CanvasNodeProps)
   const editDeco = pick('textDecoration');
 
   /**
+   * v0.4.6（R6-18）：**挂载之前先问一句"这个编码能解吗"**（判定与占位块都在
+   * canvas/videoCodecGate.tsx，那里写清了三条不能破的规矩）。
+   */
+  const codecGate = useVideoCodecGate(node.type, node.attrs?.srcAbs, node.attrs?.src);
+  const codecBlocked = codecGate.blocked;
+
+  /**
    * 媒体元素（video / audio）的专属属性 —— 提前算好放成变量。
    * v0.4.5：音频要用自己的外壳渲染（见下方 `node.type === 'audio'` 分支），
    * 外壳里需要这份 props，所以不能再塞在 commonProps 里。
    */
-  const mediaProps: Record<string, unknown> = MEDIA_TAGS.has(node.type)
+  const mediaProps: Record<string, unknown> = MEDIA_TAGS.has(node.type) && !codecBlocked
     ? (() => {
         // v0.4.5（用户反馈 C补2 / C补3 / C补8）：
         //  · 原生控件会吃掉鼠标事件 —— 音频整块都是控件区，所以"怎么点都选不中"；
@@ -495,6 +503,26 @@ export const CanvasNode = React.memo(function CanvasNode(props: CanvasNodeProps)
           <span className="bc-audio-ph" aria-hidden="true">♪ 音频</span>
         )}
       </span>
+    );
+  }
+
+  /**
+   * v0.4.6（R6-18）：**编码解不了的视频，画布上不挂 <video>** —— 挂上就等于让
+   * Chromium 的原生解码器尝试初始化（并报 Unsupported pixel format 白屏），
+   * 而那条日志 JS 屏蔽不了。改画占位块，选中/拖动行为与真元素一致。
+   *
+   * ⚠ 位置：必须在"容器型 return"之前（video 是 MEDIA_TAGS，不走 SELF_CLOSING 分支）。
+   */
+  if (codecBlocked) {
+    const userCls = (commonProps as { className?: string }).className;
+    return (
+      <CodecBlockedNotice
+        verdict={codecGate.verdict}
+        commonProps={commonProps}
+        className={userCls}
+        style={baseStyle}
+        onClick={handleClick}
+      />
     );
   }
 

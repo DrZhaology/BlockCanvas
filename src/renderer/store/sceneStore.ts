@@ -553,6 +553,8 @@ export interface SceneStore {
   setTokenGroupOpen: (group: string, open: boolean) => void;
   /** 页面「全局样式」：任意 CSS 属性（key=属性名），undefined/空串 = 删除该属性；走撤销栈 */
   setBodyExtra: (patch: Record<string, string | undefined>) => void;
+  /** 基准视口高度（v0.4.6 / R6-16）：fixed 的空气墙 + 画布最小高度；走撤销栈 */
+  setViewportHeight: (px: number) => void;
 }
 
 // 初始空场景：一个 body 根
@@ -1602,6 +1604,22 @@ export const useScene = create<SceneStore>((set) => ({
     });
   },
 
+  // 基准视口高度（v0.4.6 / R6-16）：
+  //  · 画布最小高度 = 它（短页面也能看见整屏，fixed: bottom:0 有落点）；
+  //  · fixed 元素的拖动墙止步于这条线（"首屏线"）。
+  // 走撤销栈：用户改了它也算一次可回退的编辑。
+  setViewportHeight: (px) => {
+    set((st) => {
+      const next = Math.max(320, Math.min(4000, Math.round(px)));
+      if ((st.scene.viewportHeight ?? 900) === next) return st;
+      const push = !st.styleEditPending;
+      return {
+        scene: { ...st.scene, viewportHeight: next },
+        history: push ? pushPast(st.history, st.scene) : st.history
+      };
+    });
+  },
+
   setPageSec: (patch) => set((st) => ({
     scene: {
       ...st.scene,
@@ -1717,6 +1735,7 @@ if (typeof window !== 'undefined') {
       prev.globalCss !== state.scene.globalCss ||
       prev.quickCss !== state.scene.quickCss ||
       prev.bodyExtra !== state.scene.bodyExtra ||
+      prev.viewportHeight !== state.scene.viewportHeight ||
       curPastLen > lastPastLen;
 
     lastPastLen = curPastLen;

@@ -16,6 +16,8 @@ import type { AltDragState, Bar } from './types';
 
 export type AltDragCtx = {
   zoomRef: React.MutableRefObject<number>;
+  /** 基准视口高度（fixed 的空气墙 / 首屏线），由场景提供 */
+  viewportHeightRef: React.MutableRefObject<number>;
   canvasRef: React.RefObject<HTMLDivElement | null>;
   altPadRef: React.MutableRefObject<number>;
   setAltPad: React.Dispatch<React.SetStateAction<number>>;
@@ -365,19 +367,11 @@ export function applyAltDragMove(d: AltDragState, ev: PointerEvent, ctx: AltDrag
   }
 
   // —— Alt 拖动时画布持续向下生长（v0.4.5：按鼠标位置主动预留，不再等元素撞墙）——
-  // fixed 也要长：它的墙就是画布（= 视口），画布越长它能去的地方越远。
+  // v0.4.6（R6-16）：fixed 的墙**不再跟着画布长**。画布长出来的部分是"内容区"，
+  // 而 fixed 的参照物是**基准视口**（首屏线）—— 让它跟着长就等于回到老问题：
+  // 想把 fixed 拖到底，画布一长就永远拖不到。
   const canvasEl = ctx.canvasRef.current;
-  if (canvasEl) {
-    ctx.growCanvasForDrag(ev.clientY);
-    // fixed 的下墙跟着画布走 —— 画布刚长出来的部分也要能拖进去，否则墙还停在旧下沿
-    if (d.isFixed && Number.isFinite(d.bounds.maxY)) {
-      const cr = canvasEl.getBoundingClientRect();
-      const cs2 = getComputedStyle(canvasEl);
-      const padB = parseFloat(cs2.paddingBottom) || 0;
-      d.bounds.maxY = cr.bottom - (parseFloat(cs2.borderBottomWidth) || 0) - padB - d.rect.height;
-      d.bounds.barB = { x: cr.left, y: cr.bottom - padB, w: cr.width, h: 4 };
-    }
-  }
+  if (canvasEl) ctx.growCanvasForDrag(ev.clientY);
 
   st.updateStyle(d.id, patch);
   if (hit) ctx.flashWall(hit);
@@ -423,6 +417,18 @@ export function finishAltDrag(d: AltDragState, ctx: AltDragCtx): void {
       left: cvRaw.left,
       right: cvRaw.right
     } : undefined;
+    /**
+     * v0.4.6（R6-16）：fixed 的"底面"是**首屏线**，不是画布底。
+     *
+     * 以前拿画布底（cv.bottom）当视口底 —— 可画布会随内容长到 3000px，
+     * 于是"往下拖到贴底"永远贴不到用户心里的"首屏底部"，`bottom: 0` 写不出来；
+     * 反过来，之前写死的 bottom 值在长页面上又跑到看不见的地方。
+     * 现在按基准视口高度算首屏线，画布比它矮时仍取画布底（免得线跑到画布外）。
+     */
+    const vp = cvRaw
+      ? Math.min(cvRaw.bottom - padNow, cvRaw.top + (ctx.viewportHeightRef.current || 900))
+      : undefined;
+    const cvFixed = cv && vp !== undefined ? { ...cv, bottom: vp } : cv;
     if (el) {
       const r = el.getBoundingClientRect();
       const cs = getComputedStyle(el);
@@ -430,7 +436,8 @@ export function finishAltDrag(d: AltDragState, ctx: AltDragCtx): void {
       // v0.4.5：Alt 拖动期间画布会临时加长（"无限画布"），元素很难真的"撞到"原来的下沿。
       // 所以贴边判定除了看元素自己的边，还看**手拖到哪儿了** ——
       // 鼠标落在（真实）画布边缘 12px 内，就认为用户是想贴那一边。
-      const nearBottom = (cv ? cv.bottom : Infinity) - Math.min(r.bottom, d.lastY) <= 12;
+      const nearBottom = (d.isFixed && cvFixed ? cvFixed.bottom : (cv ? cv.bottom : Infinity))
+        - Math.min(r.bottom, d.lastY) <= 12;
       const nearTop = Math.min(r.top, d.lastY) - (cv ? cv.top : -Infinity) <= 12;
       const nearRight = (cv ? cv.right : Infinity) - Math.min(r.right, d.lastX) <= 12;
       const nearLeft = Math.min(r.left, d.lastX) - (cv ? cv.left : -Infinity) <= 12;
@@ -444,11 +451,21 @@ export function finishAltDrag(d: AltDragState, ctx: AltDragCtx): void {
          *
          * 所以：**双边约束的轴不做贴边归一化**（那两边本来就是用户要的定位基准）。
          */
-        if (!d.stretchY) {
+        /**
+         * v0.4.6（R6-16）：**只有"页面不超过一屏"时才把贴边归一化成 bottom/right: 0**。
+         *
+         * 原因：画布自己就是 fixed 的包含块。`bottom: 0` 在这个包含块里解析成"画布底"，
+         * 而画布会随内容长到 3000px —— 于是长页面上松手的一瞬间，元素会从首屏线
+         * **跳到页面最底部**（用户看到的就是"一松手就飞走了"）。
+         * 短页面（画布高度 ≈ 基准视口）时 `bottom: 0` 恰好等于首屏底，这时才写它。
+         * 长页面上保留数值偏移：位置不跳，导出的 `top: Npx` 在 900px 窗口里也是同一处。
+         */
+        const canvasTall = (ctx.canvasRef.current?.offsetHeight ?? 0) > (ctx.viewportHeightRef.current || 900) + 4;
+        if (!d.stretchY && !canvasTall) {
           if (nearBottom) { patch.bottom = '0px'; patch.top = undefined; }
           else if (nearTop) { patch.top = '0px'; patch.bottom = undefined; }
         }
-        if (!d.stretchX) {
+        if (!d.stretchX && !canvasTall) {
           if (nearRight) { patch.right = '0px'; patch.left = undefined; }
           else if (nearLeft) { patch.left = '0px'; patch.right = undefined; }
         }
