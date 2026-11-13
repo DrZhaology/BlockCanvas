@@ -3,7 +3,7 @@
 import { createRequire } from 'module';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
-import { mkdirSync, rmSync, cpSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, rmSync, cpSync, existsSync, readFileSync, readdirSync } from 'fs';
 import { ensureEditor } from './ensure-editor.mjs';
 
 const require = createRequire(import.meta.url);
@@ -23,7 +23,19 @@ async function main() {
   // A. 静态：源码/CSS 层面的约定
   // ==========================================================================
   const updater = readFileSync(resolve(ROOT, 'src/main/updater.ts'), 'utf8');
-  const canvas = readFileSync(resolve(ROOT, 'src/renderer/components/Canvas.tsx'), 'utf8');
+  /**
+   * v0.4.6（R6-1）：画布拆成了 components/Canvas.tsx + components/canvas/*。
+   * 这里要断言的是"这些行为还在"，不是"它们还在某个文件里" —— 所以把两处拼起来匹配，
+   * 将来再拆细也不会让断言误报。
+   */
+  const canvasDir = resolve(ROOT, 'src/renderer/components/canvas');
+  const canvas = [
+    readFileSync(resolve(ROOT, 'src/renderer/components/Canvas.tsx'), 'utf8'),
+    ...(existsSync(canvasDir)
+      ? readdirSync(canvasDir).filter((f) => /\.tsx?$/.test(f)).sort()
+        .map((f) => readFileSync(resolve(canvasDir, f), 'utf8'))
+      : [])
+  ].join('\n');
   const css29 = readFileSync(resolve(ROOT, 'src/renderer/styles/29-v045-perf.css'), 'utf8');
   const css27 = readFileSync(resolve(ROOT, 'src/renderer/styles/27-v045-ui.css'), 'utf8');
   const layer = readFileSync(resolve(ROOT, 'src/renderer/components/LayerTree.tsx'), 'utf8');
