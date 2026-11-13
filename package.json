@@ -1,7 +1,7 @@
 {
   "name": "blockcanvas",
-  "version": "0.4.5",
-  "bcStage": "阶段 5 · 界面与交互全面打磨（测试版）",
+  "version": "0.4.6",
+  "bcStage": "阶段 6 · 架构重构与 Web 版上线（正式版）",
   "description": "BlockCanvas 积木画布 - 可视化静态网页构建工具",
   "main": "out/main/main.js",
   "author": "Dr.Zhaology",
@@ -10,8 +10,10 @@
   "scripts": {
     "version:sync": "node tools/sync-version.mjs",
     "version:check": "node tools/sync-version.mjs --check",
+    "icons:gen": "node tools/gen-icons.mjs",
+    "icons:check": "node tools/gen-icons.mjs --check",
     "git:doctor": "node tools/git-ignore-doctor.mjs",
-    "prebuild": "node tools/sync-version.mjs",
+    "prebuild": "node tools/sync-version.mjs && node tools/gen-icons.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",

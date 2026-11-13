@@ -47,6 +47,7 @@ const PROBES = [
   'probe-projectfile',
   'probe-update',
   'probe-uiaudit',
+  'probe-icons',
   'probe-v045b-cards',
   'probe-v045-tokens',
   'probe-v045-position',
