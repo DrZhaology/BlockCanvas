@@ -208,11 +208,86 @@ body.bc-drawer-track .right-pane-wrap {
 }
 
 /* ── 设置页：竖屏验收的四个按钮 ───────────────────────────────────────── */
+/* v0.4.6（用户："那几个按钮首先没有 css 样式"）：给它们正经的尺寸与换行规则，
+   否则窄的 ctrl 区会把「窄档 360×800」挤成两行、看着像坏了。 */
 .portrait-accept-ctrl {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   justify-content: flex-end;
+  max-width: 340px;
+}
+
+.portrait-accept-ctrl .fluent-btn {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  border-radius: var(--r-2);
+}
+
+/* 这一组只改「窗口尺寸」这件事 —— 加一行说明，别让人以为动了画布 */
+.fluent-group-note {
+  margin: -4px 0 10px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-3, #94a3b8);
+}
+
+/* ── 首页在窄屏下别挤爆（用户实测：348px 宽时文字溢出、页面设置面板出界） ── */
+.app[data-shell='narrow'] .empty-home {
+  padding: 16px 12px 24px;
+}
+
+.app[data-shell='narrow'] .eh-center {
+  width: 100%;
+  max-width: 100%;
+}
+
+.app[data-shell='narrow'] .eh-title {
+  font-size: clamp(22px, 8vw, 34px);
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.app[data-shell='narrow'] .eh-sub,
+.app[data-shell='narrow'] .eh-search input {
+  font-size: 12.5px;
+}
+
+/* 三个快捷入口按钮：放不下就换行，别横向撑出滚动条 */
+.app[data-shell='narrow'] .eh-actions {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* 页面设置面板：窄屏下贴住视口宽度
+   ⚠ 第一版只改了 .eh-panel 的 left/right/width，结果它塌成一条 40px 的竖条 ——
+   因为 .eh-panel 是 .eh-settings（position:absolute、无宽度）的子元素，
+   给父级一个"左右都贴边"的盒子，子元素才量得出可用宽度。 */
+.app[data-shell='narrow'] .eh-settings {
+  left: 12px;
+  right: 12px;
+  top: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.app[data-shell='narrow'] .eh-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 40px;
+  width: auto;
+  max-width: none;
+  max-height: calc(100vh - 140px);
+}
+
+/* 最近项目卡片：一行一个，别挤成两列窄条 */
+.app[data-shell='narrow'] .eh-recent-grid {
+  grid-template-columns: 1fr;
 }
 
 /* 窄屏下设置页本身也要能用（Fluent 侧边栏在窄屏会挤掉内容区） */

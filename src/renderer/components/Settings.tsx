@@ -483,6 +483,10 @@ export function Settings(props: Props) {
                   用户提到"电脑完全支持屏幕竖屏"，竖屏显示器就是现成的手机验收台；
                   但手动把窗口拖到 412×915 很难精确，所以给三个真机尺寸的按钮。 */}
               <div className="fluent-group-title">竖屏 / 手机尺寸验收</div>
+              {/* v0.4.6（用户："这个仅限窗口状态可以用要说明一下"） */}
+              <div className="fluent-group-note">
+                只改<strong>窗口大小</strong>（窗口状态），不动画布内容与断点；竖屏显示器可以当现成的手机验收台。
+              </div>
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="phone" /></div>
                 <div className="fluent-card-info">
