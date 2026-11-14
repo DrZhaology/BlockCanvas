@@ -529,6 +529,25 @@ html[data-bc-dark] .bc-osb-thumb.is-dragging {
 
 .pos-pin-row .pos-line-check { width: auto; }
 
+/* 粘性定位：吸附方向（二选一）+ 距边距离，两块分开排 */
+.pos-sticky-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pos-sticky-seg {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pos-sticky-seg .pos-corner-btn {
+  flex: 1;
+  min-width: 0;
+}
+
 .pos-corner-label {
   width: 96px;
   flex: none;

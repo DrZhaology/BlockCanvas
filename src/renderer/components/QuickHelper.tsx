@@ -173,6 +173,9 @@ export function QuickHelper(props: Props) {
    * 一旦钉住，那条轴的复选框禁用，Alt 拖动也不会去改它（否则 left≠right 就不居中了）。
    */
   const isAuto = (v?: string) => (v ?? '') === 'auto';
+  /** sticky 现在吸哪一边（写在哪条边上就以哪边为准） */
+  const stickySide: 'top' | 'bottom' =
+    !!eff.bottom && eff.bottom !== 'auto' && (!eff.top || eff.top === 'auto') ? 'bottom' : 'top';
   const pinX = !!eff.left && eff.left !== 'auto' && !!eff.right && eff.right !== 'auto'
     && isAuto(eff.marginLeft) && isAuto(eff.marginRight);
   const pinY = !!eff.top && eff.top !== 'auto' && !!eff.bottom && eff.bottom !== 'auto'
@@ -621,12 +624,47 @@ export function QuickHelper(props: Props) {
             <div className={'pos-edges' + (['absolute', 'fixed', 'relative', 'sticky'].includes(eff.position ?? '') ? '' : ' is-disabled')}>
               {relLike ? (
                 posNow === 'sticky' ? (
-                  /* sticky 的 top/bottom 不是"偏移量"，而是**吸附距离**（滚动到离边多少就挂住）。
-                     用户反馈"设置粘不粘的属性和定位混在一起、看不懂"，所以这里换成人话标签。 */
-                  <div className="pos-line">
-                    <label className="pos-line-check"><span>吸附距离</span></label>
-                    <NumberUnitInput elementId={elementId} schemaKey="top" unit="px" />
-                    <NumberUnitInput elementId={elementId} schemaKey="bottom" unit="px" />
+                  /**
+                   * 粘性定位（v0.4.6 重排）：用户原话"设置粘不粘的属性和定位混在一起，我不会用"。
+                   * 现在按"人怎么想"排：
+                   *   ① 吸哪一边（吸顶 / 吸底）—— 二选一，不再是两个数字框让人猜
+                   *   ② 距边多少（一个数字框，作用在选中的那一边）
+                   * 选一边时另一边自动置 auto，屏幕上永远只有一条吸附距离。
+                   */
+                  <div className="pos-sticky-box">
+                    <div className="pos-line">
+                      <label className="pos-line-check"><span>吸附方向</span></label>
+                      <div className="pos-sticky-seg">
+                        <button
+                          className={'pos-corner-btn' + (stickySide === 'top' ? ' is-on' : '')}
+                          onClick={() => {
+                            beginStyleEdit();
+                            updateStyle(elementId, {
+                              top: eff.top && eff.top !== 'auto' ? eff.top : '0px',
+                              bottom: 'auto'
+                            } as never);
+                            endStyleEdit();
+                          }}
+                          title="向下滚动时，元素碰到这条线就挂住"
+                        >吸顶</button>
+                        <button
+                          className={'pos-corner-btn' + (stickySide === 'bottom' ? ' is-on' : '')}
+                          onClick={() => {
+                            beginStyleEdit();
+                            updateStyle(elementId, {
+                              bottom: eff.bottom && eff.bottom !== 'auto' ? eff.bottom : '0px',
+                              top: 'auto'
+                            } as never);
+                            endStyleEdit();
+                          }}
+                          title="向上滚动时，元素碰到这条线就挂住"
+                        >吸底</button>
+                      </div>
+                    </div>
+                    <div className="pos-line">
+                      <label className="pos-line-check"><span>距边多少</span></label>
+                      <NumberUnitInput elementId={elementId} schemaKey={stickySide} unit="px" />
+                    </div>
                   </div>
                 ) : (
                   <div className="pos-line">
