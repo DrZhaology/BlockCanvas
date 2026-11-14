@@ -313,13 +313,13 @@ export function QuickHelper(props: Props) {
     <div className="quick-helper">
       {/* ——— 顶部：同步开关 ——— */}
       <div className="qh-sync-bar">
-        <label className="qh-sync-label" title="开启后，快捷助手生成的样式会同时出现在下方「CSS 样式属性」列表里（便于查看与微调）；关闭后下方列表不再显示这些属性，但样式依然生效。开关按选择器共用记忆。">
+        <label className="qh-sync-label" title="开启后，快捷助手生成的样式会同时出现在下方「CSS 样式属性」列表里（便于查看与微调）；关闭后下方列表不再显示这些属性，但样式依然生效。">
           <input
             type="checkbox"
             checked={showInCss}
             onChange={(e) => onShowInCssChange(e.target.checked)}
           />
-          是否显示到下方 CSS 属性
+          显示到下方 CSS 属性
         </label>
         <HelpButton
           title="「显示到下方 CSS 属性」是什么意思？"
@@ -328,8 +328,8 @@ export function QuickHelper(props: Props) {
             '· 弹性布局 = display + flex-direction + gap + …\n' +
             '· 文字渐变 = background-image + background-clip: text + -webkit-text-fill-color: transparent\n\n' +
             '开启本开关：这些属性会同步出现在下方「CSS 样式属性」列表，方便你逐条查看与微调。\n\n' +
-            '关闭本开关：下方列表不再显示它们，面板更清爽；样式本身完全不受影响，随时可在快捷助手里改。\n\n' +
-            '开关状态按「选择器」记住：同一类名 / 同一关系选择器的元素共享一份，不用反复设置。'
+            '关闭本开关（默认）：下方列表不再显示它们，面板更清爽；样式本身完全不受影响，随时可在快捷助手里改。\n' +
+            '关掉之后如果想临时改其中某一条，在画布上对该元素按**鼠标中键**搜这条属性即可。'
           }
         />
       </div>

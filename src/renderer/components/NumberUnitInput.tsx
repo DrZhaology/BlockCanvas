@@ -56,16 +56,33 @@ export function NumberUnitInput(props: Props) {
   const [num, setNum] = useState(parsed.num);
   const [u, setU] = useState(normalizeUnit(parsed, defaultUnit));
   const editingRef = useRef(false);
+  /**
+   * 最后一次由**本组件**写进 store 的值。
+   *
+   * v0.4.6：编辑中不跟 store 同步（否则"px 删不掉"），但这样一来**撤销/重做**
+   * 改了 store 也同步不进来 —— 用户看到的就是"画布变了，框里的数字不变，
+   * 一失焦又跳回改之前"。所以额外记一笔"我写过什么"：
+   * store 的值和它不一样 = 有外部变化（撤销/重做/切断点）→ 以 store 为准并退出编辑态。
+   */
+  const lastWriteRef = useRef(value);
 
-  // 外部变化（撤销/重做/切换元素）时同步显示；编辑中不打断用户输入
+  // 外部变化（撤销/重做/切换元素）时同步显示；编辑中只有"外部改过"才打断
   useEffect(() => {
-    if (editingRef.current) return;
     const p = parseValue(value);
+    if (editingRef.current) {
+      if (value !== lastWriteRef.current) {
+        editingRef.current = false;
+        setNum(p.num);
+        setU(normalizeUnit(p, defaultUnit));
+      }
+      return;
+    }
     setNum(p.num);
     setU(normalizeUnit(p, defaultUnit));
   }, [value]);
 
   const commit = (v: string) => {
+    lastWriteRef.current = v;
     if (isPseudo) {
       updatePseudoStyle(elementId, pseudo!, { [schemaKey]: v || undefined as any });
     } else {
@@ -82,6 +99,7 @@ export function NumberUnitInput(props: Props) {
       setU(currentUnit);
     }
     setNum(v);
+    lastWriteRef.current = compose(v, currentUnit);
     if (isPseudo) {
       updatePseudoStyle(elementId, pseudo!, { [schemaKey]: compose(v, currentUnit) });
     } else {
@@ -130,6 +148,7 @@ export function NumberUnitInput(props: Props) {
     onPreview: (v) => {
       const s = String(v);
       setNum(s);
+      lastWriteRef.current = compose(s, u);
       if (isPseudo) updatePseudoStyle(elementId, pseudo!, { [schemaKey]: compose(s, u) });
       else updateStyleTransient(elementId, { [schemaKey]: compose(s, u) } as any);
     },

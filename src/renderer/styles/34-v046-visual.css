@@ -1,0 +1,384 @@
+/* ============================================================================
+   BlockCanvas · v0.4.6 设计基线（视觉层第 1 片）
+   ----------------------------------------------------------------------------
+   这一片只放"全程序级"的视觉规则，不放任何单个组件的细节。顺序上它是最后
+   一个被 import 的分片，所以可以放心覆盖前面 34 片里的裸值。
+
+   内容：
+     1. 连续曲率圆角（用户规则 1）—— 靠 Chromium 的 `corner-shape`
+     2. 圆角尺度（新的代码请用 --r-*，不要再写裸 px）
+     3. 自绘窗口标题栏 + 窗口四周主题色描边
+
+   ⚠ 为什么 "连续曲率" 要走 `corner-shape` 而不是自己画遮罩：
+     · `border-radius` 画的是正圆弧（Apple 说的 "continuous curvature" 是超椭圆）；
+     · Chromium 139+ 原生支持 `corner-shape: squircle`，它改的是**边框盒的形状**，
+       于是背景、边框、box-shadow、overflow 裁切**全部自动跟着走**，一行搞定；
+     · 自己用 mask/clip-path 做超椭圆，会把这些全破坏掉（阴影被裁、边框变直线）。
+     · 低版本内核（网页版遇到的老浏览器）不认识这条属性 → 自动退回普通圆角，
+       不会报错、不会错位。这就是"向下兼容"的正确做法。
+   ========================================================================== */
+
+/* ── 1. 连续曲率圆角 ──────────────────────────────────────────────────────
+   全程序统一。只有两类例外：
+     · `.canvas` 及其子元素 —— 那是**用户设计的页面**，圆角必须和导出后一模一样，
+       不能被编辑器改掉（`corner-shape` 会影响渲染，等同于偷偷改了用户的稿子）；
+     · `.bc-round` —— 必须是正圆的那些（小圆点、开关滑块、色板），挂这个类即可。
+   ------------------------------------------------------------------------ */
+@supports (corner-shape: squircle) {
+  *,
+  *::before,
+  *::after {
+    corner-shape: squircle;
+  }
+
+  .canvas,
+  .canvas *,
+  .canvas *::before,
+  .canvas *::after,
+  .bc-round,
+  .bc-round::before,
+  .bc-round::after {
+    corner-shape: round;
+  }
+}
+
+/* ── 2. 圆角尺度 ──────────────────────────────────────────────────────────
+   连续曲率会把同样的半径"看得更收"，所以这套尺度比以前的裸值略大一点：
+     6 → 7 / 8 → 9 / 10 → 12 / 14 → 16
+   新代码请直接用变量；老分片里的裸值保留（一次性替换 594 处属于大改，见设计文档）。
+   ------------------------------------------------------------------------ */
+:root {
+  --r-1: 7px;    /* 徽标、复选框、小色块 */
+  --r-2: 9px;    /* 常规控件：按钮、输入框、行 */
+  --r-3: 12px;   /* 卡片 */
+  --r-4: 16px;   /* 面板、弹窗、抽屉 */
+  --r-5: 20px;   /* 首页的大卡片 */
+  --r-pill: 999px;
+
+  /* 窗口描边的主题色：优先用系统强调色（TitleBar 会写到 --bc-win-accent），
+     取不到就退回程序自己的主色 */
+  --bc-win-ring: var(--bc-win-accent, var(--accent, #1e88e5));
+}
+
+/* ── 3. 自绘窗口标题栏（v0.4.6） ───────────────────────────────────────────
+   主进程已经 frame:false，这条栏取代了系统标题栏：
+     左：产品标识 + 菜单（文件/编辑/视图/帮助/设置）
+     右：最小化 / 最大化 / 关闭
+   高度 36px 是 Windows 上"看得清又不浪费"的常见值（VS Code 35、Fluent 32~40）。
+   ------------------------------------------------------------------------ */
+.bc-titlebar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding-left: 10px;
+  background: var(--bg-panel, #fff);
+  border-bottom: 1px solid var(--line-soft, var(--border, #e5e5e5));
+  /* 整条栏都能拖动窗口；里面的按钮各自 no-drag */
+  -webkit-app-region: drag;
+  user-select: none;
+  /* v0.4.6：**永远在界面之上**
+     设置页 / 帮助中心 / 更新中心 / 模态都是 position:fixed; inset:0 的全屏层，
+     以前会把这条栏一起盖掉 —— 看起来像"窗口没有边框了"。
+     抬到 9990（高于 modal-top 960，低于 critical 9999 的启动/更新遮罩）之后，
+     全屏界面只盖到栏下面，窗口始终有自己的那条顶边。 */
+  position: relative;
+  z-index: 9990;
+}
+
+.bc-titlebar-lead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-right: 12px;
+  flex: none;
+}
+
+/* 产品标识：直接用应用自己的 logo（用户：左上方那个方块没用上，要用 logo） */
+.bc-titlebar-logo {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  pointer-events: none;
+}
+
+.bc-titlebar-name {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--text-2, var(--text-muted, #707070));
+}
+
+.bc-titlebar-menu {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
+/* 菜单按钮：**悬停就要看得出来**（用户："要求鼠标浮在上面就显示"），点一下同样有效 */
+.bc-titlebar-menu-btn {
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--text-2, var(--text-muted, #707070));
+  font-size: 12px;
+  font-family: inherit;
+  cursor: default;
+  transition: background var(--dur-fast, 110ms) var(--ease-out, ease),
+              color var(--dur-fast, 110ms) var(--ease-out, ease);
+}
+
+.bc-titlebar-menu-btn:hover {
+  background: var(--hover-accent, #f0f7ff);
+  color: var(--accent, #1e88e5);
+}
+
+.bc-titlebar-menu-btn:active {
+  background: var(--focus-accent, #e1f0ff);
+}
+
+.bc-titlebar-menu-btn.is-open,
+.bc-titlebar-menu-btn.is-open:hover {
+  background: var(--focus-accent, #e1f0ff);
+  color: var(--accent, #1e88e5);
+}
+
+.bc-titlebar-menu-btn:focus-visible {
+  outline: 2px solid var(--accent, #1e88e5);
+  outline-offset: -2px;
+}
+
+/* 拖动区：吃掉中间所有空白，双击最大化由系统原生负责 */
+.bc-titlebar-drag {
+  flex: 1;
+  align-self: stretch;
+  min-width: 24px;
+}
+
+.bc-titlebar-win {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+/* 窗口按钮：46×36（Windows 11 的标准尺寸），悬停填充，关闭键悬停变红 */
+.bc-win-btn {
+  width: 46px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-2, var(--text-muted, #707070));
+  cursor: default;
+  transition: background var(--dur-fast, 90ms) linear, color var(--dur-fast, 90ms) linear;
+}
+
+.bc-win-btn:hover {
+  background: var(--hover, #f0f0f0);
+  color: var(--text, #1f1f1f);
+}
+
+.bc-win-btn:active {
+  background: var(--panel-tint-2, #eef1f5);
+}
+
+.bc-win-btn.is-close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+
+.bc-win-btn.is-close:active {
+  background: #b02718;
+  color: #fff;
+}
+
+/* ── 4. 窗口四周 1px 主题色描边 ────────────────────────────────────────────
+   用这一层"贴在最上面的细线"来画描边，而不是给 .app 加 box-shadow：
+   inset 阴影会被铺满边缘的子元素盖住（标题栏、工具栏、画布都贴边），根本看不见。
+   pointer-events:none 保证它不挡任何点击。
+   ------------------------------------------------------------------------ */
+.bc-win-ring {
+  position: fixed;
+  inset: 0;
+  z-index: 9998; /* 压在所有界面之上、但在"必须无条件最上"的更新遮罩之下 */
+  pointer-events: none;
+  border: 1px solid var(--bc-win-ring);
+}
+
+/* 深色主题下强调色偏亮，描边降一点存在感，免得像刮花的边 */
+html[data-bc-dark] .bc-win-ring {
+  border-color: color-mix(in srgb, var(--bc-win-ring) 72%, transparent);
+}
+
+/* ── 4.5 全屏页面必须从标题栏**下面**开始（v0.4.6） ───────────────────────
+   用户验收：「全屏的页面例如项目页面，上面的按钮全部被覆盖了」。
+   根因：这些页面自己写着 `position:absolute; inset:0` 或 `height:100vh`，
+   而 `.app` 是 flex 列、标题栏占了 36px —— 于是页面的第一行（返回按钮、面包屑、
+   页签）正好顶到标题栏底下，被压住。
+
+   正确做法不是给标题栏抬 z-index 就完事（那只是"盖住"），而是**让页面自己让位**：
+   它们本来就是 `.app` 的直接子元素，交给 flex 分配剩余高度即可。
+   `inset: auto` 顺手把绝对定位收回成普通流，以后再加全屏页面只要 root 挂在这张表里。
+   ------------------------------------------------------------------------ */
+.app > .empty-home,
+.app > .update-page,
+.app > .help-page,
+.app > .fluent-settings-page,
+.app > .projects-page,
+.app > .pc-page,
+.app > .tbl-page,
+.app > .table-editor-page,
+.app > .pocket-page {
+  position: relative;
+  inset: auto;
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ── 5. 窄屏：标题栏只留窗口按钮 ────────────────────────────────────────
+   竖屏/窄屏下菜单与产品名收起（竖屏那点宽度要留给画布），
+   菜单的动作改由工具栏第二行提供。
+   ------------------------------------------------------------------------ */
+.app[data-shell='narrow'] .bc-titlebar-name,
+.app[data-shell='narrow'] .bc-titlebar-menu {
+  display: none;
+}
+
+.app[data-shell='narrow'] .bc-titlebar {
+  padding-left: 6px;
+}
+
+.app[data-shell='narrow'] .bc-win-btn {
+  width: 40px;
+}
+
+/* ── 6. 自绘滚动条（v0.4.6） ──────────────────────────────────────────────
+   实现见 lib/overlayScroll.ts。这里只管两件事：
+     ① 把原生滚动条**彻底藏起来**（它占布局宽度，是"抽搐"的根源）；
+     ② 给自绘的滑块上极简样式（3px 圆角长条，静止透明，滚起来才显形）。
+
+   ⚠ `:not(.canvas *)` 这个例外很重要：
+     `.canvas` 里是**用户设计的网页**，它的滚动条要和导出后一模一样，
+     不能被编辑器偷偷改掉（否则"画布上没滚动条、导出后有"）。
+   ------------------------------------------------------------------------ */
+.app *:not(.canvas *) {
+  scrollbar-width: none;
+}
+
+.app *:not(.canvas *)::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* 自绘层：整层不吃事件，只有滑块自己吃 */
+.bc-osb-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  pointer-events: none;
+  contain: strict;
+}
+
+.bc-osb-thumb {
+  position: fixed;
+  border-radius: var(--r-pill);
+  background: rgba(120, 128, 140, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease-out, width 90ms ease-out, height 90ms ease-out,
+              background 120ms ease-out;
+}
+
+.bc-osb-thumb.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.bc-osb-thumb:hover,
+.bc-osb-thumb.is-dragging {
+  background: rgba(96, 104, 118, 0.66);
+}
+
+.bc-osb-thumb.is-y:hover,
+.bc-osb-thumb.is-y.is-dragging {
+  width: 5px !important;
+}
+
+.bc-osb-thumb.is-x:hover,
+.bc-osb-thumb.is-x.is-dragging {
+  height: 5px !important;
+}
+
+html[data-bc-dark] .bc-osb-thumb {
+  background: rgba(190, 200, 215, 0.34);
+}
+
+html[data-bc-dark] .bc-osb-thumb:hover,
+html[data-bc-dark] .bc-osb-thumb.is-dragging {
+  background: rgba(210, 220, 235, 0.52);
+}
+
+/* ── 7. 幽灵属性卡片（v0.4.6） ────────────────────────────────────────────
+   「显示到下方 CSS 属性」关掉后，中键搜到的属性临时放这里改。
+   三条：颜色必须和正式卡片不一样（紫）、没有关闭按钮、里面不写说明文字。
+   ------------------------------------------------------------------------ */
+.ghost-prop-card {
+  margin: 8px 10px 4px;
+  padding: 8px 10px 10px;
+  border: 1px solid color-mix(in srgb, #7c3aed 32%, transparent);
+  border-radius: var(--r-4);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #7c3aed 9%, var(--bg-panel, #fff)) 0%,
+    var(--bg-panel, #fff) 62%
+  );
+  box-shadow: 0 6px 18px color-mix(in srgb, #7c3aed 14%, transparent);
+  animation: bcGhostIn 170ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes bcGhostIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.99); }
+  to   { opacity: 1; transform: none; }
+}
+
+.ghost-prop-card-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+  color: #7c3aed;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+/* 卡片里的属性行不要再套一层边框（"不要盒子套盒子"） */
+.ghost-prop-card .prop-row {
+  border: none;
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.ghost-prop-card .prop-row + .prop-row {
+  border-top: 1px dashed color-mix(in srgb, #7c3aed 18%, transparent);
+}
+
+html[data-bc-dark] .ghost-prop-card {
+  border-color: color-mix(in srgb, #a78bfa 34%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #7c3aed 16%, var(--bg-panel, #1b2231)) 0%,
+    var(--bg-panel, #1b2231) 62%
+  );
+}
+
+html[data-bc-dark] .ghost-prop-card-head { color: #b39bfb; }

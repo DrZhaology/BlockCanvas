@@ -78,6 +78,17 @@ declare global {
   }
   interface Window {
     bc: {
+      // ── v0.4.6：自绘窗口标题栏（网页版没有窗口概念 → 全部可选，缺了就不画那几个按钮）──
+      /** 最小化 / 最大化切换 / 关闭 */
+      winControl?: (action: 'minimize' | 'maximize-toggle' | 'close') => Promise<{ ok: boolean; maximized?: boolean }>;
+      /** 当前窗口状态（是否最大化） */
+      winState?: () => Promise<{ ok: boolean; maximized: boolean; focused: boolean }>;
+      /** 主进程主动推窗口状态（双击标题栏 / Win+↑ 也会触发） */
+      onWinState?: (cb: (s: { maximized: boolean; fullscreen: boolean }) => void) => () => void;
+      /** 系统强调色（"我设置的主题色"）—— 取不到返回 null，界面回退到 --accent */
+      accentColor?: () => Promise<{ ok: boolean; color: string | null }>;
+      /** 自绘标题栏点「文件/编辑/视图/帮助/设置」→ 弹原生子菜单（x/y 相对窗口内容区） */
+      menuPopup?: (id: string, x: number, y: number) => Promise<{ ok: boolean; error?: string }>;
       // 导出与网页管理
       exportHTML: (html: string, defaultName?: string) => Promise<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>;
       exportHTMLWithProject: (html: string, scene: unknown, defaultName?: string, projectName?: string) => Promise<{ ok: boolean; htmlPath?: string; projectPath?: string; error?: string; canceled?: boolean }>;

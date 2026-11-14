@@ -108,11 +108,19 @@ export function useInspectorSectionOpen(selected: SceneElement): { secOpen: SecO
  */
 export function useHelperInCss(): [boolean, (v: boolean) => void] {
   const [on, setOn] = useState<boolean>(() => {
-    try { return localStorage.getItem(HELPER_IN_CSS_KEY) !== '0'; } catch { return true; }
+    /**
+     * v0.4.6：**默认关闭**。
+     *
+     * 用户原话：「默认关闭，也就不把属性显示到下方 CSS」。
+     * 以前默认开：快捷助手写的那几条属性（display / gap / background-image…）会一起挤进
+     * 下方「CSS 样式属性」列表，一屏里全是"我没手动加过的东西"，反而看不清自己加的那些。
+     * 现在默认只管"快捷助手能改"，要查看/微调再手动打开。
+     */
+    try { return localStorage.getItem(HELPER_IN_CSS_KEY) === '1'; } catch { return false; }
   });
   useEffect(() => {
     const sync = () => {
-      try { setOn(localStorage.getItem(HELPER_IN_CSS_KEY) !== '0'); } catch { /* ignore */ }
+      try { setOn(localStorage.getItem(HELPER_IN_CSS_KEY) === '1'); } catch { /* ignore */ }
     };
     window.addEventListener('bc:helper-in-css-changed', sync);
     window.addEventListener('storage', sync);

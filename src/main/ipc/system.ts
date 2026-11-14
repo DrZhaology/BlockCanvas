@@ -12,12 +12,13 @@
 //   2. **预览文件写进 <data>/tmp/preview 并且只留最近 N 个** —— 以前散落系统 Temp 且无限增长；
 //      文件名带时间戳（浏览器按 URL 缓存，复用同名会显示上一次的内容）；
 //   3. **选文件只返回路径，不读内容** —— 读文件的地方各自校验（导出、素材导入）。
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, systemPreferences } from 'electron';
 import { join, dirname, relative } from 'node:path';
 import { writeFileSync, mkdirSync, readFileSync, existsSync, readdirSync, unlinkSync, statSync } from 'node:fs';
 import { readAppConfig, writeAppConfig } from '../userData';
 import { previewDir, toWebPath } from '../paths';
 import { DEFAULT_PREVIEW_KEEP } from '../storage';
+import { popupMenu } from '../menu';
 import { showOpenDialog } from './context';
 
 // ============ 帮助文档（项目介绍 / 使用手册 / 开发历程） ============
@@ -57,6 +58,69 @@ function pruneOldPreviews(dir: string, keep: number): number {
 // 首页背景：选择图片 / 视频文件（只返回路径，不复制；渲染层用 bc-img:// 预览）
 
 export function registerSystemIpc(): void {
+
+  // ============ 自绘窗口标题栏（v0.4.6） ============
+  //
+  // 窗口是 frame:false，最小化 / 最大化 / 关闭 / 拖动全由渲染层那条标题栏发起。
+  // 三个原则：
+  //   1. **一律操作"当前窗口"**（多窗口时按 sender 反查，不盲取 0 号窗口）；
+  //   2. 状态变化（最大化/还原）**主动推**给渲染层，界面才知道要不要换成"还原"图标；
+  //   3. 关闭走正常 close()，让 before-quit / 未保存提示照常生效。
+  const winOf = (evt: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent) => {
+    const w = BrowserWindow.fromWebContents(evt.sender);
+    return w && !w.isDestroyed() ? w : BrowserWindow.getAllWindows()[0];
+  };
+
+  ipcMain.handle('win:minimize', (evt) => {
+    winOf(evt)?.minimize();
+    return { ok: true };
+  });
+
+  ipcMain.handle('win:maximize-toggle', (evt) => {
+    const w = winOf(evt);
+    if (!w) return { ok: false };
+    if (w.isMaximized()) w.unmaximize();
+    else w.maximize();
+    return { ok: true, maximized: w.isMaximized() };
+  });
+
+  ipcMain.handle('win:close', (evt) => {
+    winOf(evt)?.close();
+    return { ok: true };
+  });
+
+  ipcMain.handle('win:state', (evt) => {
+    const w = winOf(evt);
+    return { ok: true, maximized: !!w?.isMaximized(), focused: !!w?.isFocused() };
+  });
+
+  /**
+   * 系统的强调色（Windows：设置 → 个性化 → 颜色）。
+   *
+   * 用户要的是「窗口描边用我设的主题色」——这条色不是程序里存的，而是系统里那一条。
+   * `getAccentColor()` 返回 RRGGBBAA，这里统一成 #rrggbb。
+   * 网页版没有这个概念 → adapter 里返回 null，界面回退到程序自己的 --accent。
+   */
+  ipcMain.handle('win:accent', () => {
+    try {
+      if (process.platform === 'win32' || process.platform === 'darwin') {
+        const raw = systemPreferences.getAccentColor() || '';
+        if (/^[0-9a-f]{6,8}$/i.test(raw)) return { ok: true, color: '#' + raw.slice(0, 6).toLowerCase() };
+      }
+    } catch { /* 取不到就算了 */ }
+    return { ok: false, color: null };
+  });
+
+  /** 自绘标题栏点「文件 / 编辑 / …」→ 在该坐标弹原生子菜单 */
+  ipcMain.handle('menu:popup', (evt, id: string, x: number, y: number) => {
+    const w = winOf(evt);
+    if (!w) return { ok: false };
+    try {
+      return { ok: popupMenu(w, String(id), Number(x) || 0, Number(y) || 0) };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  });
 
   /**
    * 「竖屏验收」（R6-9）：一键把窗口设成手机尺寸。

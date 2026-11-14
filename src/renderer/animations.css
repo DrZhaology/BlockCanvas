@@ -110,6 +110,15 @@
   100% { opacity: 0.55; }
 }
 
+/* ---------- 中键属性定位：整行底色闪两下（v0.4.6 取代原来的橙色边框） ---------- */
+@keyframes bcPropFlash {
+  0%   { background-color: transparent; }
+  26%  { background-color: rgba(30, 136, 229, 0.18); }
+  60%  { background-color: transparent; }
+  80%  { background-color: rgba(30, 136, 229, 0.12); }
+  100% { background-color: transparent; }
+}
+
 /* ---------- 放入预览脉冲（Alt 拿着元素悬停目标 1 秒后，目标橙色呼吸提示） ---------- */
 @keyframes bcDropPulse {
   0%, 100% { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.95), inset 0 0 0 2px rgba(245, 158, 11, 0.45); }

@@ -217,5 +217,27 @@ contextBridge.exposeInMainWorld('bc', {
     ipcRenderer.invoke('media:probe-codec', filePath),
   /** 首页背景：选择图片 / 视频文件（返回绝对路径） */
   pickMediaSrc: (kind: 'image' | 'video' | 'audio') =>
-    ipcRenderer.invoke('media:pick-src', kind)
+    ipcRenderer.invoke('media:pick-src', kind),
+
+  // ============ v0.4.6：自绘窗口标题栏 ============
+  //
+  // 窗口是 frame:false，系统那条"整条主题色"的标题栏已经没有了。
+  // 下面这几条是渲染层那条自绘栏唯一的原生通道：
+  //   · winControl  最小化 / 最大化切换 / 关闭
+  //   · winState    当前是不是最大化（决定按钮图标与描边样式）
+  //   · onWinState  主进程主动推（双击标题栏、Win+↑、拖到屏幕顶端都算最大化）
+  //   · accentColor 系统强调色 —— 用户要的"窗口描边用我设的主题色"就是这条
+  //   · menuPopup   自绘栏点「文件/编辑/…」时按 id 弹原生子菜单
+  winControl: (action: 'minimize' | 'maximize-toggle' | 'close') =>
+    ipcRenderer.invoke(
+      action === 'minimize' ? 'win:minimize' : action === 'maximize-toggle' ? 'win:maximize-toggle' : 'win:close'
+    ),
+  winState: () => ipcRenderer.invoke('win:state'),
+  onWinState: (cb: (s: { maximized: boolean; fullscreen: boolean }) => void) => {
+    const listener = (_e: IpcRendererEvent, s: { maximized: boolean; fullscreen: boolean }) => cb(s);
+    ipcRenderer.on('bc:win-state', listener);
+    return () => ipcRenderer.removeListener('bc:win-state', listener);
+  },
+  accentColor: () => ipcRenderer.invoke('win:accent'),
+  menuPopup: (id: string, x: number, y: number) => ipcRenderer.invoke('menu:popup', id, x, y)
 });

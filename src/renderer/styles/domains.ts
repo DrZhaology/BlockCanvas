@@ -66,7 +66,9 @@ export const DOMAIN_OF = {
   '30-v046-viewport.css': 'canvas',
   '31-v046-sticky.css': 'canvas',
   '32-v046-codec.css': 'canvas',
-  '33-v046-shell.css': 'shell'
+  '33-v046-shell.css': 'shell',
+  // v0.4.6：全程序级视觉基线（连续曲率圆角 / 圆角尺度 / 自绘标题栏 / 窗口描边）
+  '34-v046-visual.css': 'theme'
 } as const;
 
 export type CssDomain = typeof DOMAIN_OF[keyof typeof DOMAIN_OF];

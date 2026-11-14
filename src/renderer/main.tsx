@@ -5,6 +5,7 @@ import { ErrorBoundary } from '@comp/ErrorBoundary';
 import { startAnimGovernor } from '@lib/animGovernor';
 import { warmHomeBackground } from '@lib/preloadHomeBg';
 import { installHost } from '../adapter/index';
+import { installOverlayScrollbars } from '@lib/overlayScroll';
 import './styles/01-foundation.css';
 import './styles/02-tabbar.css';
 import './styles/03-toolbar.css';
@@ -44,6 +45,7 @@ import './styles/33-v046-shell.css'; // v0.4.6：窄屏外壳（左右面板抽�
 // 详见 docs/v0.4.5-待实施-多页与深色插件化.md
 import './styles/00-theme-tokens.css';
 import './animations.css'; // 统一动画体系：token + 全部 keyframes（分片里只写引用）
+import './styles/34-v046-visual.css'; // v0.4.6：连续曲率圆角 + 圆角尺度 + 自绘窗口标题栏 + 窗口描边
 
 // v0.4.5：动画性能总督（不可见即暂停 / 掉帧自动精简 / 尊重系统"减少动态效果"）。
 // 必须在渲染之前启动：它要往 <html> 上写 data-bc-anim，避免首帧先按完整动效画一遍。
@@ -65,6 +67,10 @@ installHost(__BC_VERSION__, __BC_STAGE__);
 // 否则"进首页 → 才开始下载背景图"会有明显的空白延迟（用户反馈过）。
 // 放在 render 之前：它只是发请求，不阻塞首帧。
 warmHomeBackground();
+
+// v0.4.6：自绘滚动条（脱离文档流，不占布局宽度）。
+// 必须在首帧之前装：原生滚动条一旦先画出来再藏掉，会先"抽"一次。
+installOverlayScrollbars();
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

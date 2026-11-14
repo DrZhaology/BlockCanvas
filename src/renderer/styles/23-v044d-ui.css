@@ -143,8 +143,12 @@ html[data-bc-dark] .bc-br-mark { color: #6b7280; }
 .bc-prop-search-empty { padding: 8px; font-size: 11px; color: var(--text-muted); text-align: center; }
 .bc-prop-search-hint { margin-top: 6px; font-size: 10px; color: var(--text-muted); text-align: center; }
 
-/* 中键定位到的那条属性行：橙色闪烁（复用撞墙动画） */
-.prop-row.flash { border-color: #f97316; box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.35); animation: bcWallFlash 0.9s ease-out 2; }
+/* 中键定位到的那条属性行：整行底色闪两下就够（v0.4.6）
+   ------------------------------------------------------------------
+   用户原话：「定位后会闪烁就够了，现在会上下橙色的框，有点丑，左右没覆盖。删除。」
+   —— 旧写法是给行加橙色 border + 橙色外发光，结果是「上下两条橙线、左右没包住」，
+   看着像没画完的框。现在只闪**整行底色**：天然左右都覆盖，也不会和行的边框打架。 */
+.prop-row.flash { animation: bcPropFlash 0.8s ease-out 2; }
 
 /* 「+ 添加属性」里按"属性值"命中的蓝色插入条目 */
 .add-prop-value-item {

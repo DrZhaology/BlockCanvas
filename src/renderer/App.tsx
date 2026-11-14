@@ -28,6 +28,7 @@ import { applySelHighlightClass } from '@lib/selHighlight';
 import { showToast, type ToastType } from '@lib/toast';
 import { requestPropFocus } from '@lib/propFocus';
 import { EmptyHome } from '@comp/EmptyHome';
+import { TitleBar } from '@comp/TitleBar';
 import { SnapshotInfoPanel } from '@comp/SnapshotBar';
 import { LoadingScreen } from '@comp/LoadingScreen';
 import { useLoadScreen } from '@store/loadStore';
@@ -584,7 +585,10 @@ export default function App() {
   if (!sessionReady) {
     return (
       <>
-        <div className="app bc-booting" />
+        <div className="app bc-booting">
+          <TitleBar />
+        </div>
+        <div className="bc-win-ring" aria-hidden="true" />
         <LoadingScreen />
       </>
     );
@@ -592,6 +596,9 @@ export default function App() {
 
   return (
     <div className="app" data-shell={shell.mode}>
+      {/* v0.4.6：自绘窗口标题栏（网页版没有窗口控件，组件内部自己返回 null） */}
+      <TitleBar />
+      <div className="bc-win-ring" aria-hidden="true" />
       {view === 'table' && tableEditId ? (
         <TableEditor tableId={tableEditId} onBack={() => switchView('editor')} />
       ) : view === 'update' ? (
@@ -1030,8 +1037,19 @@ function useKeyboardShortcuts(
       // 放在"输入框守卫"之前：否则在右侧属性面板的输入框里按 Ctrl+Z 会完全没反应
       //（用户反馈"选中元素后 Ctrl+Z / Ctrl+Y 用不了"就是被这个守卫吃掉的）。
       // 表格编辑页改的是同一棵场景树、走的是同一条撤销栈（applyTableOp → replaceSubtree）。
-      if (undoable && !inTextEditor && mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); triggerUndo(); return; }
-      if (undoable && !inTextEditor && mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); triggerRedo(); return; }
+      //
+      // v0.4.6（用户反馈："属性输入框里按 Ctrl+Z，画布变了但数值不变，最终又跳回改之前"）：
+      // 原因不是"撤销没生效"，而是**输入框里还压着一次未提交的编辑**：
+      //   数字框 focus 时 beginStyleEdit 压了检查点，输入过程中走 updateStyleTransient（画布实时变），
+      //   但输入框自己的本地 state 还停在新数字上；撤销把 store 恢复成旧值后，输入框
+      //   因为"编辑中不同步"而没跟着变，随后 blur 又把这个旧数字提交回去 —— 看起来就是"跳回去了"。
+      // 解法：**先让输入框失焦提交，再撤销**（提交算同一会话，不额外压栈），撤销就撤到编辑前那一步。
+      const blurField = () => {
+        const ae = document.activeElement as HTMLElement | null;
+        if (ae && ae !== document.body && inField) ae.blur();
+      };
+      if (undoable && !inTextEditor && mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); blurField(); triggerUndo(); return; }
+      if (undoable && !inTextEditor && mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); blurField(); triggerRedo(); return; }
 
       if (inField) return;
 

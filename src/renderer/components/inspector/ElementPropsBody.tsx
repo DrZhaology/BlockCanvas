@@ -4,7 +4,7 @@
 // 拆分前这 960 行全在一个函数里 —— 改一行要担心另外四个区块。
 // 行组件在 ./rows，折叠状态与顺序由本文件统一管。
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useScene } from '@store/sceneStore';
 import { TEXT_TAGS, CONTAINER_TAGS } from '@lib/types';
 import type { SceneElement } from '@lib/types';
@@ -20,7 +20,7 @@ import { planResponsiveFixes } from '@lib/responsiveAuto';
 import { appAlert, appConfirm } from '@lib/appConfirm';
 import { Icon } from '../Icon';
 import { MediaPropsCard } from '../MediaPropsCard';
-import { PositionGhostCard } from '../PositionGhostCard';
+import { GhostPropCard } from '../GhostPropCard';
 import { QuickHelper, HELPER_MANAGED_KEYS } from '../QuickHelper';
 import { Collapse } from '../Collapse';
 import { useCanvasWidth } from './useCanvasWidth';
@@ -240,14 +240,32 @@ export function ElementPropsBody(props: { selected: SceneElement; justAddedKey: 
    * 还额外弹出这张**临时**卡片 —— 因为 position 的可编辑项分散在快捷助手里，
    * 用户搜 position 却"点不进去"（反馈原话："对于定位 position 元素没有用"）。
    */
-  const [showPosGhost, setShowPosGhost] = useState(false);
+  /**
+   * 幽灵属性卡片（v0.4.6）
+   * ------------------------------------------------------------------
+   * 用户原话：「快捷助手关闭了显示到下方 CSS 属性的时候，中键搜索属性的时候，
+   *           临时做一个幽灵卡片，颜色做的不一样……中键每次搜索都弹出，
+   *           退出当前元素的面板幽灵卡片就没了。」
+   *
+   * 所以：
+   *   · 只有「显示到下方 CSS 属性」**关闭**时才需要它（开着的话下方列表里就有那一行）；
+   *   · 每次中键搜索都把搜中的属性放进来（最近的排最前，最多 3 条，避免卡片变成长列表）；
+   *   · **没有关闭按钮**：它是"当前这个元素"的临时物件，换元素/关面板自然消失。
+   */
+  const [ghostKeys, setGhostKeys] = useState<string[]>([]);
+  // 换元素 → 上一张幽灵卡片作废（用户要求"退出当前元素的面板幽灵卡片就没了"）
+  useEffect(() => { setGhostKeys([]); }, [elementId]);
+  // 用 ref 读开关：apply 回调挂在事件订阅里，不能因为它变化就重订阅
+  const showHelperInCssRef = useRef(showHelperInCss);
+  showHelperInCssRef.current = showHelperInCss;
   useEffect(() => {
     const apply = (req: PropFocusRequest) => {
       const key = req.key;
       if (!key) return;
-      // 定位相关属性 → 同时亮出临时卡片
-      const POS_KEYS = new Set(['position', 'left', 'right', 'top', 'bottom', 'zIndex', 'inset']);
-      if (POS_KEYS.has(key)) setShowPosGhost(true);
+      // 「显示到下方 CSS 属性」关着 → 下方列表里不会有这一行，改由幽灵卡片承载
+      if (!showHelperInCssRef.current) {
+        setGhostKeys((prev) => [key, ...prev.filter((k) => k !== key)].slice(0, 3));
+      }
       // add 默认 true（老行为）；中键搜索在"未添加"时按 Enter 会传 false —— 只提示、不偷偷加
       const shouldAdd = req.add !== false;
       setSecOpen((p) => ({ ...p, css: true }));
@@ -518,14 +536,10 @@ export function ElementPropsBody(props: { selected: SceneElement; justAddedKey: 
         applicableAttrs={applicableAttrs}
       />
 
-      {/* 0. 定位「幽灵卡片」（v0.4.5 第十六批）：中键搜 position / left / top… 时临时出现，
-             就地改定位，不用去快捷助手里翻。Esc 或 × 关闭。 */}
-      {showPosGhost && (
-        <PositionGhostCard
-          elementId={elementId}
-          elementType={elementType}
-          onClose={() => setShowPosGhost(false)}
-        />
+      {/* 0. 幽灵属性卡片（v0.4.6）：「显示到下方 CSS 属性」关闭时，中键搜中的属性临时放这里改。
+              颜色与常规卡片不同（紫），没有关闭按钮 —— 换元素/离开面板自然消失。 */}
+      {ghostKeys.length > 0 && (
+        <GhostPropCard elementId={elementId} elementType={elementType} keys={ghostKeys} />
       )}
 
       {/* 1.5 媒体属性卡（v0.4.5）：video / audio 专用，只有这几个属性，不该让人手填 src */}

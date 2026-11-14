@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, protocol, net, shell, nativeTheme, session, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, protocol, net, shell, nativeTheme, session } from 'electron';
 import { join, dirname } from 'node:path';
 import { mkdirSync, readFileSync, existsSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -21,6 +21,8 @@ import { probeCodec, codecAdvice } from './codecProbe';
 import { resolveCachedAsset, resolveThumbPath } from './assets';
 import { getLocalVersion, getAppStage, ulog } from './updater';
 import { flushTasksOnQuit } from './tasks';
+// v0.4.6：窗口改为无系统标题栏，菜单模板搬到 ./menu.ts（标题栏自绘，这里只负责快捷键）
+import { buildAppMenu } from './menu';
 
 // 启动最优先：初始化纯便携数据区 data/，隔离系统盘
 initDataDirectories();
@@ -167,107 +169,6 @@ export function emitLoad(id: string, label: string, percent: number) {
   } catch { /* 窗口没了就算了 */ }
 }
 
-// ============ 自定义中文菜单 ============
-function buildMenu(win: BrowserWindow): Menu {
-  const template: MenuItemConstructorOptions[] = [
-    {
-      label: '文件',
-      submenu: [
-        {
-          label: '新建项目标签 (New Tab)',
-          accelerator: 'CmdOrCtrl+N',
-          click: () => win.webContents.send('menu:new-tab')
-        },
-        {
-          label: '打开项目 (.bcproj)…',
-          accelerator: 'CmdOrCtrl+O',
-          click: () => win.webContents.send('menu:open-project')
-        },
-        {
-          label: '保存项目 (.bcproj)',
-          accelerator: 'CmdOrCtrl+S',
-          click: () => win.webContents.send('menu:save-project')
-        },
-        {
-          label: '项目另存为…',
-          accelerator: 'CmdOrCtrl+Shift+S',
-          click: () => win.webContents.send('menu:save-project-as')
-        },
-        { type: 'separator' },
-        {
-          label: '导出 HTML 网页…',
-          accelerator: 'CmdOrCtrl+E',
-          click: () => win.webContents.send('menu:export-html')
-        },
-        {
-          label: '在浏览器中预览',
-          accelerator: 'CmdOrCtrl+P',
-          click: () => win.webContents.send('menu:preview')
-        },
-        { type: 'separator' },
-        {
-          label: '浏览本地项目库 (data/projects/)',
-          click: () => shell.openPath(join(dataRoot(), 'projects'))
-        },
-        { type: 'separator' },
-        { label: '退出', accelerator: 'CmdOrCtrl+Q', role: 'quit' }
-      ]
-    },
-    {
-      label: '编辑',
-      submenu: [
-        { label: '撤销', accelerator: 'CmdOrCtrl+Z', click: () => win.webContents.send('menu:undo') },
-        { label: '重做', accelerator: 'CmdOrCtrl+Shift+Z', click: () => win.webContents.send('menu:redo') },
-        { type: 'separator' },
-        { label: '复制元素', accelerator: 'CmdOrCtrl+C', click: () => win.webContents.send('menu:copy') },
-        { label: '剪切元素', accelerator: 'CmdOrCtrl+X', click: () => win.webContents.send('menu:cut') },
-        { label: '粘贴元素', accelerator: 'CmdOrCtrl+V', click: () => win.webContents.send('menu:paste') },
-        { label: '原地副本', accelerator: 'CmdOrCtrl+D', click: () => win.webContents.send('menu:duplicate') },
-        { label: '删除元素', accelerator: 'Delete', click: () => win.webContents.send('menu:delete') }
-      ]
-    },
-    {
-      label: '视图',
-      submenu: [
-        { label: '放大', accelerator: 'CmdOrCtrl+=', role: 'zoomIn' },
-        { label: '缩小', accelerator: 'CmdOrCtrl+-', role: 'zoomOut' },
-        { label: '重置缩放', accelerator: 'CmdOrCtrl+0', role: 'resetZoom' },
-        { type: 'separator' },
-        { label: '全屏', accelerator: 'F11', role: 'togglefullscreen' },
-        { label: '开发者工具', accelerator: 'F12', role: 'toggleDevTools' }
-      ]
-    },
-    {
-      label: '帮助',
-      submenu: [
-        { label: '使用手册（帮助中心）', accelerator: 'F1', click: () => win.webContents.send('menu:help') },
-        { type: 'separator' },
-        { label: '键盘快捷键速查表', accelerator: 'Shift+/', click: () => win.webContents.send('menu:shortcuts') },
-        { label: '检测更新…', click: () => win.webContents.send('menu:check-update') },
-        { type: 'separator' },
-        { label: '关于 BlockCanvas', click: () => win.webContents.send('menu:about') }
-      ]
-    },
-    {
-      label: '设置',
-      submenu: [
-        { label: '偏好设置…', accelerator: 'CmdOrCtrl+,', click: () => win.webContents.send('menu:settings') },
-        { type: 'separator' },
-        { label: '左侧布局（元素面板在左）', click: () => win.webContents.send('menu:layout-left') },
-        { label: '底部布局（元素面板在下方）', click: () => win.webContents.send('menu:layout-bottom') },
-        { type: 'separator' },
-        { label: '插件与资源包…', click: () => win.webContents.send('menu:ext') },
-        { label: '打开便携数据文件夹 (data/)…', click: () => shell.openPath(dataRoot()) },
-        { label: '打开扩展文件夹 (extensions/)…', click: () => shell.openPath(extRoot()) },
-        { type: 'separator' },
-        { label: '检测更新…', click: () => win.webContents.send('menu:check-update') },
-        { type: 'separator' },
-        { label: '类名 / ID 总览…', click: () => win.webContents.send('menu:class-manager') }
-      ]
-    }
-  ];
-  return Menu.buildFromTemplate(template);
-}
 
 async function createWindow() {
   // 字体库需要 Local Font Access API（window.queryLocalFonts）：
@@ -321,6 +222,16 @@ async function createWindow() {
     title: 'BlockCanvas 积木画布',
     ...(iconPath ? { icon: iconPath } : {}),
     backgroundColor: '#f3f3f3',
+    /**
+     * v0.4.6：**去掉系统标题栏**（用户：上边那条整条都是主题色，很难看；
+     * 三个窗口按钮又小又丑，文件/编辑/视图应当放进自己画的那条栏里）。
+     *
+     * frame:false 之后：
+     *   · 系统不再画标题栏和菜单条 —— Windows 11 会把强调色铺满整条，这正是要消掉的；
+     *   · 窗口拖拽 / 双击最大化 / 边缘缩放由渲染层的 -webkit-app-region 与原生 thickframe 负责；
+     *   · 菜单仍然注册（见 ./menu.ts），只为保住 Ctrl+S / F1 / F12 这些 accelerator。
+     */
+    frame: false,
     // 自动化模式：先不显示（首帧就绪后再"不激活地显示 + 移到屏幕外"）
     ...(noFocus ? { show: false, skipTaskbar: false } : {}),
     webPreferences: {
@@ -335,7 +246,19 @@ async function createWindow() {
   // Windows 任务栏分组/图标缓存按 AppUserModelID 走，显式设成和 electron-builder 一致的 appId
   if (process.platform === 'win32') app.setAppUserModelId('com.blockcanvas.app');
 
-  Menu.setApplicationMenu(buildMenu(win));
+  Menu.setApplicationMenu(buildAppMenu(win));
+
+  // v0.4.6：自绘标题栏要知道"现在是不是最大化"（决定按钮图标与窗口圆角/描边）。
+  // 双击标题栏、Win+↑、拖到屏幕顶端都会最大化 —— 那些都不是从我们界面点的，
+  // 所以必须由主进程主动推，界面才跟得上。
+  const pushWinState = () => {
+    if (win.isDestroyed()) return;
+    win.webContents.send('bc:win-state', { maximized: win.isMaximized(), fullscreen: win.isFullScreen() });
+  };
+  win.on('maximize', pushWinState);
+  win.on('unmaximize', pushWinState);
+  win.on('enter-full-screen', pushWinState);
+  win.on('leave-full-screen', pushWinState);
 
   // —— 阻止"应用内导航"（v0.4.4e）——
   // 帮助文档里的超链接（相对路径 / 锚点）若交给浏览器默认行为，会真的把整个窗口导航走
