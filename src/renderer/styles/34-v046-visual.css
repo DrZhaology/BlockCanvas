@@ -504,6 +504,18 @@ html[data-bc-dark] .bc-osb-thumb.is-dragging {
   border-top: 1px dashed var(--line-soft, #f0f0f0);
 }
 
+/* 居中钉死：两个复选框一行，和四边解锁同一套视觉 */
+.pos-pin-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-soft, #f0f0f0);
+}
+
+.pos-pin-row .pos-line-check { width: auto; }
+
 .pos-corner-label {
   width: 96px;
   flex: none;

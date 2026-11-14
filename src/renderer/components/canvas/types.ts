@@ -52,6 +52,8 @@ export type AltDragState = {
    */
   startRight: number; startBottom: number;
   stretchX: boolean; stretchY: boolean;
+  /** 居中钉死（v0.4.6）：这条轴固定在中间，拖动不许改它 */
+  pinX?: boolean; pinY?: boolean;
   startLeft: number; startTop: number;
   startMarginL: number; startMarginT: number;
   /** 允许移动/缩放的 client 坐标范围（"墙"）+ 每面墙要画的整条边 + 吸附参考线 */

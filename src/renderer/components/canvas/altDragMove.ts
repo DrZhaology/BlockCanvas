@@ -141,20 +141,32 @@ export function applyAltDragMove(d: AltDragState, ev: PointerEvent, ctx: AltDrag
       const node0 = findNode(useScene.getState().scene.root, d.id);
       const st0 = (node0?.style ?? {}) as Record<string, string | undefined>;
       const on = (v?: string) => v !== undefined && v !== '' && v !== 'auto';
-      const sideCount = ['left', 'right', 'top', 'bottom'].filter((k) => on(st0[k])).length;
-      if (sideCount > 2) {
+      const auto = (v?: string) => (v ?? '') === 'auto';
+      /** 居中钉死 = 两侧都是 0 + 外边距 auto（面板里勾了「水平/垂直居中」） */
+      const pinX0 = on(st0.left) && on(st0.right) && auto(st0.marginLeft) && auto(st0.marginRight);
+      const pinY0 = on(st0.top) && on(st0.bottom) && auto(st0.marginTop) && auto(st0.marginBottom);
+      d.pinX = pinX0;
+      d.pinY = pinY0;
+      // 每个轴"多于一条"才收（钉住的那条轴**不能**收 —— 收了就不居中了）
+      const collapseX = !pinX0 && on(st0.left) && on(st0.right);
+      const collapseY = !pinY0 && on(st0.top) && on(st0.bottom);
+      if (collapseX || collapseY) {
         const fix: Record<string, string | undefined> = {};
-        const keepX: 'left' | 'right' = on(st0.left) ? 'left' : 'right';
-        const keepY: 'top' | 'bottom' = on(st0.top) ? 'top' : 'bottom';
-        // 尺寸先写死再清对边 —— 否则"被两边撑出来"的盒子会当场塌掉
-        if (!on(st0.width)) fix.width = Math.round(d.rect.width / z0) + 'px';
-        if (!on(st0.height)) fix.height = Math.round(d.rect.height / z0) + 'px';
-        fix[keepX === 'left' ? 'right' : 'left'] = 'auto';
-        fix[keepY === 'top' ? 'bottom' : 'top'] = 'auto';
+        if (collapseX) {
+          if (!on(st0.width)) fix.width = Math.round(d.rect.width / z0) + 'px';
+          fix[on(st0.left) ? 'right' : 'left'] = 'auto';
+        }
+        if (collapseY) {
+          if (!on(st0.height)) fix.height = Math.round(d.rect.height / z0) + 'px';
+          fix[on(st0.top) ? 'bottom' : 'top'] = 'auto';
+        }
         st.updateStyle(d.id, fix);
-        d.stretchX = false;
-        d.stretchY = false;
-        d.axisSide = { x: keepX, y: keepY };
+        if (collapseX) d.stretchX = false;
+        if (collapseY) d.stretchY = false;
+        d.axisSide = {
+          x: on(st0.left) ? 'left' : 'right',
+          y: on(st0.top) ? 'top' : 'bottom'
+        };
         d.startRight = 0;
         d.startBottom = 0;
       }
@@ -368,7 +380,9 @@ export function applyAltDragMove(d: AltDragState, ev: PointerEvent, ctx: AltDrag
          * 现在：**双边约束的轴改成"两边一起平移"**（left 加多少、right 就减多少），
          * 盒子尺寸完全不变，只是整体挪位置。这才是设计工具里"拉伸约束"的正确行为。
          */
-        if (d.stretchX) {
+        if (d.pinX) {
+          // 钉死的那条轴不动（动了就不居中了）
+        } else if (d.stretchX) {
           const nx = d.startLeft + axMove / zNow;
           const nr = d.startRight - axMove / zNow;
           patch.left = Math.round(nx) + 'px';
@@ -380,7 +394,9 @@ export function applyAltDragMove(d: AltDragState, ev: PointerEvent, ctx: AltDrag
           patch.left = Math.round(dL) + 'px';
           patch.right = undefined;
         }
-        if (d.stretchY) {
+        if (d.pinY) {
+          // 同上：钉死的轴保持不动
+        } else if (d.stretchY) {
           const ny = d.startTop + ayMove / zNow;
           const nb = d.startBottom - ayMove / zNow;
           patch.top = Math.round(ny) + 'px';

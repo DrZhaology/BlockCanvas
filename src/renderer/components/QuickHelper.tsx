@@ -164,9 +164,35 @@ export function QuickHelper(props: Props) {
     }
   };
 
+  /**
+   * 居中钉死（v0.4.6，用户 A3）：
+   *   「横向对齐和竖向对齐也做一下，是选择框，设置了这个对齐，上面的四个属性就不可以设置了。
+   *     设置了对齐就相当于钉死在 1 维，另一个方向上下/左右的移动还是照做。」
+   *
+   * 实现：钉死 = 两侧都写 0 + 外边距 auto（CSS 里这就是"居中"的标准写法）。
+   * 一旦钉住，那条轴的复选框禁用，Alt 拖动也不会去改它（否则 left≠right 就不居中了）。
+   */
+  const isAuto = (v?: string) => (v ?? '') === 'auto';
+  const pinX = !!eff.left && eff.left !== 'auto' && !!eff.right && eff.right !== 'auto'
+    && isAuto(eff.marginLeft) && isAuto(eff.marginRight);
+  const pinY = !!eff.top && eff.top !== 'auto' && !!eff.bottom && eff.bottom !== 'auto'
+    && isAuto(eff.marginTop) && isAuto(eff.marginBottom);
+
+  const togglePin = (axis: 'x' | 'y', on: boolean) => {
+    const patch: Record<string, string | undefined> = axis === 'x'
+      ? (on
+        ? { left: '0px', right: '0px', marginLeft: 'auto', marginRight: 'auto' }
+        : { right: 'auto', marginLeft: '0px', marginRight: '0px' })
+      : (on
+        ? { top: '0px', bottom: '0px', marginTop: 'auto', marginBottom: 'auto' }
+        : { bottom: 'auto', marginTop: '0px', marginBottom: '0px' });
+    beginStyleEdit();
+    updateStyle(elementId, patch as never);
+    endStyleEdit();
+  };
+
   /** 四角预设：一次把两边的解锁状态设好 */
-  const pickCorner = (x: 'left' | 'right', y: 'top' | 'bottom') => {
-    setUnlocked([x, y]);
+  const pickCorner = (x: 'left' | 'right', y: 'top' | 'bottom') => {    setUnlocked([x, y]);
     const patch: Record<string, string | undefined> = {};
     for (const s of OFFSET_SIDES) {
       const on = s === x || s === y;
@@ -620,7 +646,8 @@ export function QuickHelper(props: Props) {
                           <input
                             type="checkbox"
                             checked={on}
-                            disabled={!['absolute', 'fixed'].includes(eff.position ?? '')}
+                            disabled={!['absolute', 'fixed'].includes(eff.position ?? '')
+                              || ((k === 'left' || k === 'right') ? pinX : pinY)}
                             onChange={() => toggleSide(k)}
                           />
                           <span>{label}</span>
@@ -631,6 +658,28 @@ export function QuickHelper(props: Props) {
                       </div>
                     );
                   })}
+                  {/* 居中钉死：勾上就把这条轴固定在中间，另一条轴照样能拖 */}
+                  <div className="pos-pin-row">
+                    <label className="pos-line-check" title="钉住左右：两侧写 0 + 外边距 auto，只留上下能拖">
+                      <input
+                        type="checkbox"
+                        checked={pinX}
+                        disabled={!['absolute', 'fixed'].includes(eff.position ?? '')}
+                        onChange={(e) => togglePin('x', e.target.checked)}
+                      />
+                      <span>水平居中</span>
+                    </label>
+                    <label className="pos-line-check" title="钉住上下：两侧写 0 + 外边距 auto，只留左右能拖">
+                      <input
+                        type="checkbox"
+                        checked={pinY}
+                        disabled={!['absolute', 'fixed'].includes(eff.position ?? '')}
+                        onChange={(e) => togglePin('y', e.target.checked)}
+                      />
+                      <span>垂直居中</span>
+                    </label>
+                  </div>
+
                   {/* 四角预设：不懂"解锁哪两条"的话，点一下角就够了 */}
                   <div className="pos-corner-row">
                     <span className="pos-corner-label">对齐到角</span>

@@ -178,10 +178,29 @@ export function useAltDrag({ zoom, viewportHeight = 900, canvasRef, onZoomChange
     const patch: Record<string, string | undefined> = {
       marginLeft: '0', marginRight: '0', marginTop: '0', marginBottom: '0'
     };
-    if (d.axisSide.x === 'right') { patch.right = Math.round(offR) + 'px'; patch.left = undefined; }
-    else { patch.left = Math.round(offL) + 'px'; patch.right = undefined; }
-    if (d.axisSide.y === 'bottom') { patch.bottom = Math.round(offB) + 'px'; patch.top = undefined; }
-    else { patch.top = Math.round(offT) + 'px'; patch.bottom = undefined; }
+    /**
+     * v0.4.6：**钉住的轴不许归一化**。
+     *
+     * 「居中钉死」的写法是「两侧 0 + 外边距 auto」。这段归一化会把 margin 抹成 0、
+     * 只留一侧的偏移 —— 等于一拖动就把钉死拆了（实测：left:0/right:0/margin:auto
+     * 拖完变成 left:401/margin:0）。所以先认出钉住的轴，跳过它。
+     */
+    const on = (v?: string) => v !== undefined && v !== '' && v !== 'auto';
+    const auto = (v?: string) => (v ?? '') === 'auto';
+    const pinX = on(style.left) && on(style.right) && auto(style.marginLeft) && auto(style.marginRight);
+    const pinY = on(style.top) && on(style.bottom) && auto(style.marginTop) && auto(style.marginBottom);
+    d.pinX = pinX;
+    d.pinY = pinY;
+    if (pinX) { delete patch.marginLeft; delete patch.marginRight; }
+    if (pinY) { delete patch.marginTop; delete patch.marginBottom; }
+    if (!pinX) {
+      if (d.axisSide.x === 'right') { patch.right = Math.round(offR) + 'px'; patch.left = undefined; }
+      else { patch.left = Math.round(offL) + 'px'; patch.right = undefined; }
+    }
+    if (!pinY) {
+      if (d.axisSide.y === 'bottom') { patch.bottom = Math.round(offB) + 'px'; patch.top = undefined; }
+      else { patch.top = Math.round(offT) + 'px'; patch.bottom = undefined; }
+    }
     useScene.getState().updateStyle(d.id, patch as never);
     // 记录归一化后的基准，后续 resize / 方向判断都用它
     d.startLeft = d.axisSide.x === 'right' ? offR : offL;
@@ -368,6 +387,7 @@ export function useAltDrag({ zoom, viewportHeight = 900, canvasRef, onZoomChange
       positioned, isFixed, posKind,
       startLeft, startTop, startMarginL, startMarginT,
       startRight, startBottom, stretchX, stretchY,
+      pinX: false, pinY: false,
       bounds,
       walls: [bounds.barL, bounds.barR, bounds.barT, bounds.barB].filter(Boolean) as Bar[],
       reparent: false,

@@ -293,6 +293,46 @@ async function main() {
     Math.abs(afterQuad.w - quad.w) <= 2 && Math.abs(afterQuad.h - quad.h) <= 2,
     `${quad.w}×${quad.h} → ${afterQuad.w}×${afterQuad.h}`);
 
+  // ── ⑦.5 居中钉死：钉住的那条轴 Alt 拖不动（用户 A3："钉死在 1 维"）──
+  const pinSetup = await win.evaluate(async () => {
+    const st = window.__sceneStore.getState();
+    st.addElement('div');
+    const id = window.__sceneStore.getState().scene.selectedId;
+    window.__sceneStore.getState().updateStyle(id, {
+      position: 'fixed', left: '0px', right: '0px', marginLeft: 'auto', marginRight: 'auto',
+      top: '120px', bottom: 'auto', width: '120px', height: '60px', backgroundColor: '#bbf7d0'
+    });
+    window.__sceneStore.getState().selectElement(id);
+    await new Promise((r) => setTimeout(r, 500));
+    const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
+    const r = el.getBoundingClientRect();
+    return { id, cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2) };
+  });
+  await sleep(300);
+  await win.keyboard.down('Alt');
+  await win.mouse.move(pinSetup.cx, pinSetup.cy);
+  await win.mouse.move(pinSetup.cx + 1, pinSetup.cy + 1);
+  await sleep(260);
+  await win.mouse.down();
+  for (let i = 1; i <= 6; i++) { await win.mouse.move(pinSetup.cx + 8 * i, pinSetup.cy + 6 * i); await sleep(80); }
+  await win.mouse.up();
+  await win.keyboard.up('Alt');
+  await sleep(500);
+  const afterPin = await win.evaluate((id) => {
+    const n = (function find(node) {
+      if (node.id === id) return node;
+      for (const c of node.children) { const r = find(c); if (r) return r; }
+      return null;
+    })(window.__sceneStore.getState().scene.root);
+    const s = n?.style ?? {};
+    return { left: s.left, right: s.right, ml: s.marginLeft, mr: s.marginRight, top: s.top };
+  }, pinSetup.id);
+  check('钉住水平居中后：左右两条与 auto 外边距都没被拖动改掉',
+    afterPin.left === '0px' && afterPin.right === '0px' && afterPin.ml === 'auto' && afterPin.mr === 'auto',
+    JSON.stringify(afterPin));
+  check('钉住的水平轴不动，但另一条轴（上）照常能被拖',
+    afterPin.top !== '120px', `top=${afterPin.top}`);
+
   // ── ⑧ 持久化：viewportHeight 随工程文件保存 ──────────────────────
   const saved = await win.evaluate(() => {
     window.__sceneStore.getState().setViewportHeight(1080);
