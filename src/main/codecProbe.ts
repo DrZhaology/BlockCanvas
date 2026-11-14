@@ -245,8 +245,17 @@ export function probeCodec(filePath: string, ext: string): { result: CodecProbe;
 export function codecAdvice(codecs: string[]): string {
   const set = new Set(codecs.map((c) => c.toLowerCase()));
   if (set.has('hvc1') || set.has('hev1') || [...set].some((c) => c.includes('hevc'))) {
-    return '这个视频是 H.265 / HEVC 编码，Electron 自带的 Chromium 没有 HEVC 解码器（苹果设备导出常见）。'
-      + '用视频工具转成 H.264 即可：格式工厂 / HandBrake 选 "H.264"，或 ffmpeg -i 输入.mp4 -c:v libx264 -crf 20 输出.mp4。';
+    /**
+     * v0.4.6（用户实测）：别吓人。
+     *
+     * 「编辑器解不了」≠「你的视频是坏的」。导出的网页跑在**系统浏览器**里，
+     * Windows 装了「HEVC 视频扩展」就能播；只是编辑器用的 Chromium 内核没有这条解码器。
+     * 所以文案先讲清"导出后大概率能播"，再给"想在画布里预览就转码"的出路。
+     */
+    return '这个视频是 H.265 / HEVC 编码（苹果设备导出常见）。编辑器的内核没有这条解码器，'
+      + '所以画布里预览不了 —— 但**导出后的网页在系统浏览器里通常能正常播放**（Windows 需装「HEVC 视频扩展」）。'
+      + '想在画布里直接看到画面，再转成 H.264：格式工厂 / HandBrake 选 "H.264"，'
+      + '或 ffmpeg -i 输入.mp4 -c:v libx264 -crf 20 输出.mp4。';
   }
   if ([...set].some((c) => c === 'vvc1' || c === 'vvi1')) {
     return '这个视频是 H.266 / VVC 编码，目前没有播放器支持。转成 H.264 再插入。';

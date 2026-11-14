@@ -183,7 +183,23 @@ export function applyAltDragMove(d: AltDragState, ev: PointerEvent, ctx: AltDrag
     //   · **没有 src 的 img 占位元素** → 自由缩放（以前连占位框都锁比例，用户明确不要）
     //   · 音频没有"画面"，也不锁比例
     const hasSrc = String(node.attrs?.src ?? '').trim() !== '';
-    const ratioLocked = (node.type === 'img' && hasSrc) || (node.type === 'video' && hasSrc);
+    let ratioLocked = (node.type === 'img' && hasSrc) || (node.type === 'video' && hasSrc);
+    /**
+     * v0.4.6（用户反馈："视频的 Alt 调整宽度、高度和四个角的调整都基本坏了"）：
+     *
+     * 视频在**元数据还没加载**时没有真实尺寸 —— `<video>` 的默认高度是 150px 的占位，
+     * 拿它当 startH 去算比例，一拖就是"宽度对了、高度离谱"或者"直接缩成一条"。
+     * 所以比例锁只在这两种情况成立：
+     *   · 量到的起始尺寸是可信的（≥ 24px，排除 0 尺寸的占位/未挂载）；
+     *   · 视频已经吐出真实画面尺寸（videoWidth > 0）。
+     * 不满足就**退化成自由缩放**（只改拖的那条边），宁可"没锁比例"也不要"乱跳"。
+     */
+    if (ratioLocked && node.type === 'video') {
+      const vel = document.querySelector(`.canvas [data-bc-id="${CSS.escape(d.id)}"]`) as HTMLVideoElement | null;
+      const real = vel instanceof HTMLVideoElement ? vel.videoWidth > 0 : false;
+      if (!real) ratioLocked = false;
+    }
+    if (ratioLocked && (d.startW < 24 || d.startH < 24)) ratioLocked = false;
     if (ratioLocked && d.startW > 0 && d.startH > 0 && (hasL || hasR)) {
       const scale = nw / d.startW;
       nh = Math.max(8, d.startH * scale);

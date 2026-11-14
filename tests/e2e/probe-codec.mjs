@@ -112,6 +112,9 @@ async function main() {
 
   check('主进程挂上了编码探测钩子（__bcCodec）', probe.hooked === true, String(probe.hooked));
 
+  /** 本机能不能解 HEVC —— 后面几组断言都跟着它走（见下面那段说明） */
+  let canHevc = false;
+
   if (probe.hooked) {
     check('H.264（faststart）判为 supported',
       probe.h264.result === 'supported', `${probe.h264.result} · ${probe.h264.codecs.join(',')}`);
@@ -119,10 +122,24 @@ async function main() {
       probe.h264.codecs.some((c) => c === 'avc1' || c === 'avc3'), probe.h264.codecs.join(','));
     check('H.264（moov 在文件尾部）也能判为 supported（按盒大小跳读）',
       probe.h264b.result === 'supported', `${probe.h264b.result} · ${probe.h264b.codecs.join(',')}`);
-    check('HEVC (hvc1) 判为 unsupported —— 这就是"Unsupported pixel format"的真凶',
-      probe.hvc1.result === 'unsupported', `${probe.hvc1.result} · ${probe.hvc1.codecs.join(',')}`);
-    check('HEVC (hev1) 判为 unsupported',
-      probe.hev1.result === 'unsupported', `${probe.hev1.result} · ${probe.hev1.codecs.join(',')}`);
+    /**
+     * v0.4.6：HEVC 的结论**取决于这台机器**。
+     *
+     * 用户实测发现两边不一致：「canvas 里我能播 AV1 和 HEVC」「首页背景 HEVC 不行」——
+     * 说明静态白名单（hvc1 一律算坏）会误判装了 HEVC 扩展的 Windows。
+     * 现在的契约是：静态表说"不支持"→ 再问一次 `canPlayType`，浏览器说能解就放行。
+     * 所以这里不再写死 unsupported，而是**跟着本机能力走**，两种机器上都成立。
+     */
+    canHevc = await win.evaluate(() => {
+      const v = document.createElement('video');
+      return v.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') !== ''
+        || v.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"') !== '';
+    });
+    const wantHevc = canHevc ? 'supported' : 'unsupported';
+    check(`HEVC (hvc1) 的结论跟本机解码能力一致（本机${canHevc ? '能' : '不能'}解 → ${wantHevc}）`,
+      probe.hvc1.result === wantHevc, `${probe.hvc1.result} · ${probe.hvc1.codecs.join(',')}`);
+    check('HEVC (hev1) 同上（不写死，跟着本机走）',
+      probe.hev1.result === wantHevc, `${probe.hev1.result} · ${probe.hev1.codecs.join(',')}`);
     check('文件不存在 → unknown（不是 unsupported，绝不误杀）',
       probe.missing.result === 'unknown', probe.missing.result);
     check('非视频扩展名 → unknown（交给浏览器判断）',
@@ -164,12 +181,25 @@ async function main() {
         tag: el ? el.tagName.toLowerCase() : ''
       };
     }, hevcId);
-    check('HEVC 视频在画布上**不挂 <video>**（从根上不触发原生解码）',
-      hevcState.hasVideo === false, `tag=${hevcState.tag}`);
-    check('改成"编码不支持"占位块（用户看得见、可选中、能拖动）',
-      hevcState.hasBlocker === true, `class=bc-codec-blocked → ${hevcState.hasBlocker}`);
-    check('占位块写清楚编码与出路',
-      /H\.264/.test(hevcState.text) && /hvc1/i.test(hevcState.text), hevcState.text.slice(0, 60));
+    /**
+     * 这一步同样跟着本机能力走：
+     *   · 本机**不能**解 HEVC → 不挂 <video>、换成占位块、属性面板给警告卡；
+     *   · 本机**能**解 HEVC（装了 HEVC 扩展的 Windows）→ 正常挂 <video>、没有黄块。
+     * 用户实测就是后者：他那边 HEVC 能播，旧版却一律挡掉，属于误判。
+     */
+    if (canHevc) {
+      check('本机能解 HEVC → 正常挂 <video>（不再误挡）',
+        hevcState.hasVideo === true, `tag=${hevcState.tag}`);
+      check('本机能解 HEVC → 不出"编码不支持"占位块',
+        hevcState.hasBlocker === false, `blocked=${hevcState.hasBlocker}`);
+    } else {
+      check('HEVC 视频在画布上**不挂 <video>**（从根上不触发原生解码）',
+        hevcState.hasVideo === false, `tag=${hevcState.tag}`);
+      check('改成"编码不支持"占位块（用户看得见、可选中、能拖动）',
+        hevcState.hasBlocker === true, `class=bc-codec-blocked → ${hevcState.hasBlocker}`);
+      check('占位块写清楚编码与出路',
+        /H\.264/.test(hevcState.text) && /hvc1/i.test(hevcState.text), hevcState.text.slice(0, 60));
+    }
 
     // 选中它就应看到属性面板的编码警告卡
     await win.locator('.tab-btn', { hasText: '属性' }).click().catch(() => null);
@@ -178,8 +208,12 @@ async function main() {
       const w = document.querySelector('.media-codec-warn');
       return w ? (w.textContent || '').trim().replace(/\s+/g, ' ') : null;
     });
-    check('属性面板给出编码警告卡（不是让用户对着空白猜）',
-      !!card && /编码/.test(card), card ? card.slice(0, 60) : '没找到 .media-codec-warn');
+    check(
+      canHevc
+        ? '本机能解 HEVC → 属性面板不弹编码警告（不给用户制造焦虑）'
+        : '属性面板给出编码警告卡（不是让用户对着空白猜）',
+      canHevc ? card === null : (!!card && /编码/.test(card)),
+      card ? card.slice(0, 60) : '没有 .media-codec-warn');
   }
 
   if (have.h264) {
