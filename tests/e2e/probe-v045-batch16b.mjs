@@ -103,12 +103,13 @@ async function main() {
       readFileSync(resolve(ROOT, 'src/renderer/store/sceneStore.ts'), 'utf8')
     ), 'ok');
 
-  // —— 幽灵卡片 ——
+  // —— 幽灵卡片（v0.4.6 改版） ——
   check('旧「占位说明型」幽灵卡片已删除',
     !/prop-ghost-card/.test(css29) && !/prop-ghost-card/.test(inspector), 'ok');
-  check('新增 position「幽灵卡片」（中键搜 position 时临时出现）',
-    /PositionGhostCard/.test(inspector) && /POS_KEYS\.has\(key\)/.test(inspector)
-    && existsSync(resolve(ROOT, 'src/renderer/components/PositionGhostCard.tsx')), 'ok');
+  check('定位临时卡已并入通用「幽灵属性卡片」',
+    /GhostPropCard/.test(inspector)
+    && existsSync(resolve(ROOT, 'src/renderer/components/GhostPropCard.tsx'))
+    && !existsSync(resolve(ROOT, 'src/renderer/components/PositionGhostCard.tsx')), 'ok');
 
   // —— 图层 & 字体 ——
   // ⚠ "行的中线对齐容器中线" 这句话在注释里，stripComments 会把它删掉 →
@@ -212,59 +213,50 @@ async function main() {
         key: 'Enter', ctrlKey: !added, bubbles: true, cancelable: true
       }));
       await new Promise((r) => setTimeout(r, 700));
-      const card = document.querySelector('[data-bc-pos-ghost="1"]');
+      const card = document.querySelector('[data-bc-ghost-card="1"]');
       return {
         firstKey,
         added,
         closed: !document.querySelector('.bc-prop-search'),
         cardShown: !!card,
-        modes: [...(card?.querySelectorAll('.pos-ghost-mode') || [])].map((b) => (b.textContent || '').trim()),
-        axes: [...(card?.querySelectorAll('.pos-axis') || [])].length
+        // 新契约：卡片里出现的就是 position 那条属性行（不再是专用定位卡）
+        hasPosRow: !!card?.querySelector('[data-prop-key="position"]'),
+        options: [...(card?.querySelectorAll('[data-prop-key="position"] select option') || [])]
+          .map((o) => (o.textContent || '').trim()),
+        // 卡片里不许有"关闭 / ×"这类手动管理入口（用户明确要求删掉）
+        closeBtns: card ? card.querySelectorAll('.ghost-prop-card-head button, [title*="关闭"]').length : 0
       };
     });
     check('搜 position 命中第一条就是 position', ghost.firstKey === 'position', ghost.firstKey);
     check('Enter / Ctrl+Enter 后搜索框关闭', ghost.closed === true, String(ghost.closed));
-    check('右侧出现 position「幽灵卡片」（临时定位卡）', ghost.cardShown === true, String(ghost.cardShown));
-    check('幽灵卡片给出 5 种定位方式', ghost.modes.length === 5, ghost.modes.join(' / '));
-    check('幽灵卡片只给两根轴（不是四边）', ghost.axes === 2, `axes=${ghost.axes}`);
+    check('开关关闭时：出现通用「幽灵属性卡片」', ghost.cardShown === true, String(ghost.cardShown));
+    check('卡片里就是 position 这条属性（可直接改）', ghost.hasPosRow === true, String(ghost.hasPosRow));
+    // 下拉里有 5 种定位方式（外加一条"未指定"，用于把属性清空）
+    const POS5 = ['static', 'relative', 'absolute', 'fixed', 'sticky'];
+    check('position 下拉给出 5 种定位方式',
+      POS5.every((p) => ghost.options.some((o) => o.includes(p))), ghost.options.join(' / '));
+    check('幽灵卡片没有关闭按钮（用户要求删掉 ×）', ghost.closeBtns === 0, String(ghost.closeBtns));
 
-    // 切换定位方式 → 有 margin 时应弹"要不要清 margin"
-    const ask = await win.evaluate(async () => {
-      const id = window.__sceneStore.getState().scene.selectedId;
-      window.__sceneStore.getState().updateStyle(id, { marginTop: '20px', marginLeft: '12px' });
-      await new Promise((r) => setTimeout(r, 300));
-      const btn = [...document.querySelectorAll('.pos-ghost-mode')].find((b) => /绝对/.test(b.textContent || ''));
-      btn?.click();
-      await new Promise((r) => setTimeout(r, 400));
-      const confirm = document.querySelector('.pos-ghost .pos-confirm');
-      return {
-        asked: !!confirm,
-        text: (confirm?.textContent || '').replace(/\s+/g, ' ').slice(0, 50),
-        buttons: [...(confirm?.querySelectorAll('button') || [])].map((b) => (b.textContent || '').trim())
-      };
-    });
-    check('切换定位方式时提示"要不要清除 margin"',
-      ask.asked === true && ask.buttons.some((b) => /清掉 margin/.test(b)),
-      JSON.stringify(ask.buttons));
-
-    // 点"清掉 margin" → margin 归零、定位生效
-    const cleared = await win.evaluate(async () => {
-      const btn = [...document.querySelectorAll('.pos-ghost .pos-confirm button')].find((b) => /清掉 margin/.test(b.textContent || ''));
-      btn?.click();
+    // 在卡片里把 position 改成 absolute → store 里生效
+    const changed = await win.evaluate(async () => {
+      const sel = document.querySelector('[data-bc-ghost-card="1"] [data-prop-key="position"] select');
+      if (sel) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+        setter?.call(sel, 'absolute');
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
       await new Promise((r) => setTimeout(r, 500));
       const id = window.__sceneStore.getState().scene.selectedId;
       const bp = window.__sceneStore.getState().activeBreakpoint;
       const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === id);
-      const m = { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) };
-      return m;
+      return { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) };
     });
-    check('点「清掉 margin」后 margin 归零、position 变成 absolute',
-      String(cleared.marginTop) === '0px' && String(cleared.marginLeft) === '0px' && cleared.position === 'absolute',
-      JSON.stringify({ pos: cleared.position, mt: cleared.marginTop, ml: cleared.marginLeft }));
+    check('在卡片里改定位立即生效（position=absolute）',
+      changed.position === 'absolute', JSON.stringify({ pos: changed.position }));
     check('同一根轴只留一边（另一边是 auto）',
-      (cleared.left === 'auto' || cleared.left === undefined || cleared.right === 'auto' || cleared.right === undefined)
-      && (cleared.top === 'auto' || cleared.top === undefined || cleared.bottom === 'auto' || cleared.bottom === undefined),
-      JSON.stringify({ left: cleared.left, right: cleared.right, top: cleared.top, bottom: cleared.bottom }));
+      (changed.left === 'auto' || changed.left === undefined || changed.right === 'auto' || changed.right === undefined)
+      && (changed.top === 'auto' || changed.top === undefined || changed.bottom === 'auto' || changed.bottom === undefined),
+      JSON.stringify({ left: changed.left, right: changed.right, top: changed.top, bottom: changed.bottom }));
   }
 
   // —— Alt + 滚轮：精准微调，且不弹盒模型 ——
