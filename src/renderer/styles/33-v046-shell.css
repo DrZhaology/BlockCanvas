@@ -199,12 +199,28 @@ body.bc-drawer-track .right-pane-wrap {
   min-width: 44px;
 }
 
-/* 工具栏在窄屏下横向滚动（放不下就滚，不要换行把高度顶起来） */
+/* 工具栏在窄屏下**改成两行**（用户："竖屏的竖向空间反而大，菜单从一条改成两条；
+   原来右侧菜单的部分放到第一条"）。
+   以前是横向滚（放不下就滚），后果是"最常用的导出被滚出屏幕"，手指根本找不到。
+   现在：右侧那组（设备/缩放/更多）用 order:-1 提到第一行，主按钮组折到第二行。 */
+.app[data-shell='narrow'] .toolbar {
+  flex-wrap: wrap;
+  height: auto;
+  row-gap: 4px;
+  padding-bottom: 6px;
+}
+
 .app[data-shell='narrow'] .tb-main {
-  overflow-x: auto;
-  overflow-y: hidden;
-  flex-wrap: nowrap;
-  scrollbar-width: thin;
+  overflow-x: visible;
+  overflow-y: visible;
+  flex-wrap: wrap;
+  flex: 1 1 100%;
+  order: 2;
+}
+
+.app[data-shell='narrow'] .tb-right {
+  order: 1;
+  margin-left: auto;
 }
 
 /* ── 设置页：竖屏验收的四个按钮 ───────────────────────────────────────── */

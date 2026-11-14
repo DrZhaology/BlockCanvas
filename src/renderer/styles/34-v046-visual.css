@@ -352,7 +352,32 @@ html[data-bc-dark] .bc-osb-thumb.is-dragging {
   background: rgba(210, 220, 235, 0.52);
 }
 
-/* ── 10. 快捷助手：把"盒子套盒子"拆平（设计规则 2） ──────────────────────
+/* ── 12. 右侧面板缺失的过渡（v0.4.6，设计规则 6） ─────────────────────────
+   用户："一些部分没动画，比如右侧元素菜单有些部分没有，需要做一下。"
+
+   缺的三处：① 页签切换（元素/类名/页面/变量）② 新增的属性行 ③ 板块内容首帧。
+   用 `@starting-style` 做"入场过渡"——它只在新元素**第一次**出现在 DOM 时生效，
+   已有的行不会每次重渲染都抖一下（这正是我们以前不敢加动画的原因）。
+   `transition-behavior: allow-discrete` 让 display 也能参与过渡，收场才不会"啪"地消失。
+   ------------------------------------------------------------------------ */
+@supports (transition-behavior: allow-discrete) {
+  .tab-body,
+  .props-list > .prop-row,
+  .inspector-sec-body > *,
+  .ghost-prop-card {
+    transition: opacity 150ms var(--ease-out, ease-out),
+                translate 150ms var(--ease-out, ease-out);
+  }
+
+  @starting-style {
+    .tab-body { opacity: 0; translate: 0 4px; }
+    .props-list > .prop-row { opacity: 0; translate: 0 3px; }
+    .inspector-sec-body > * { opacity: 0; translate: 0 3px; }
+    .ghost-prop-card { opacity: 0; translate: 0 3px; }
+  }
+}
+
+/* ── 13. 快捷助手：把"盒子套盒子"拆平（设计规则 2） ──────────────────────
    用户原话：「不要盒子套盒子，比如快捷助手这里套了很多层，边框又多，很花眼睛」。
 
    以前的面板是四层框：面板 → 板块框 → 定位区框 → 每组输入框。

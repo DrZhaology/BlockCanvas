@@ -305,6 +305,26 @@ async function main() {
   const afterVertical = await win.evaluate(() => document.querySelector('.workspace')?.getAttribute('data-drawer') ?? null);
   check('竖滑（滚动手势）不会误开抽屉', afterVertical === 'none', `drawer=${afterVertical}`);
 
+  // v0.4.6：竖屏工具栏改两行（竖向空间大，横向别把按钮滚出屏幕）
+  const tb = await win.evaluate(() => {
+    const t = document.querySelector('.toolbar');
+    const main = document.querySelector('.tb-main');
+    const right = document.querySelector('.tb-right');
+    if (!t) return null;
+    const tr = t.getBoundingClientRect();
+    return {
+      h: Math.round(tr.height),
+      mainTop: main ? Math.round(main.getBoundingClientRect().top) : -1,
+      rightTop: right ? Math.round(right.getBoundingClientRect().top) : -1,
+      mainScroll: main ? main.scrollWidth > main.clientWidth + 2 : null
+    };
+  });
+  check('竖屏工具栏折成两行（右侧那组在第一行）',
+    !!tb && tb.h >= 60 && tb.rightTop < tb.mainTop,
+    tb ? JSON.stringify(tb) : 'no toolbar');
+  check('竖屏工具栏不再横向滚（不会把按钮滚出屏幕）',
+    !!tb && tb.mainScroll === false, tb ? String(tb.mainScroll) : 'no toolbar');
+
   check('无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));
 
   await app.close();
