@@ -291,10 +291,36 @@ html[data-bc-dark] .bc-win-ring {
   position: fixed;
   border-radius: var(--r-pill);
   background: rgba(120, 128, 140, 0.45);
-  opacity: 0;
-  pointer-events: none;
+  /* v0.4.6：**常显**（0.32），滚动/悬停时加深。
+     用户反馈"竖向的滚动条直接消失了" —— 因为我把原生那条藏了、自己那条又只在滚动时出现，
+     结果静止时一条都没有。现在静止也有一条很淡的，滚起来变实。 */
+  opacity: 0.32;
+  pointer-events: auto;
+  cursor: default;
   transition: opacity 160ms ease-out, width 90ms ease-out, height 90ms ease-out,
               background 120ms ease-out;
+}
+
+/* 老分片里给工具栏 / 页签条 / 图层树单独写过 ::-webkit-scrollbar 的粗样式，
+   优先级比那条全局隐藏更高 —— 这里点名摁掉，否则"上方菜单还冒一条横条"。 */
+.app .toolbar .tb-main,
+.app .toolbar .tb-right,
+.app .tab-strip,
+.app .tbman-preview,
+.app .layer-tree,
+.app .element-body {
+  scrollbar-width: none;
+}
+
+.app .toolbar .tb-main::-webkit-scrollbar,
+.app .toolbar .tb-right::-webkit-scrollbar,
+.app .tab-strip::-webkit-scrollbar,
+.app .tbman-preview::-webkit-scrollbar,
+.app .layer-tree::-webkit-scrollbar,
+.app .element-body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .bc-osb-thumb.is-visible {

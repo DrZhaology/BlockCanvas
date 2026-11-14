@@ -234,6 +234,15 @@ export function installOverlayScrollbars(): () => void {
   const onScroll = (ev: Event) => {
     const t = ev.target;
     if (t instanceof HTMLElement) {
+      /**
+       * v0.4.6 修正（用户："竖向的滚动条直接消失了，你没有重做一个"）：
+       *
+       * 原生的已经全局藏掉，而"只按初始扫描 + 新增节点"去发现滚动容器靠不住 ——
+       * 面板内容在加载后才变长、抽屉/弹层后插进来的容器，都会漏掉，于是**一条滚动条都没有**。
+       * 现在改成：**谁滚就当场接管谁**（滚动事件是唯一可靠的"这里真的能滚"的信号），
+       * 顺带 markScrolled 让它立刻显形。
+       */
+      if (!tracks.has(t)) observe(t);
       const track = tracks.get(t);
       if (track) markScrolled(track);
     }
