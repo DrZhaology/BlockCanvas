@@ -343,6 +343,40 @@ async function main() {
     };
   }, mode);
 
+  // v0.4.6：长按把手 → 上下调位置（短按仍是开关抽屉）；双击复位
+  const handle = await win.evaluate(async () => {
+    localStorage.removeItem('bc-drawer-handle-y');
+    const btn = document.querySelector('.shell-drawer-btn.is-left');
+    if (!btn) return { ok: false };
+    const r = btn.getBoundingClientRect();
+    const fire = (type, y) => btn.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, cancelable: true, pointerId: 3, pointerType: 'touch',
+      isPrimary: true, button: 0, buttons: 1, clientX: r.left + 10, clientY: y
+    }));
+    fire('pointerdown', r.top + 10);
+    await new Promise((res) => setTimeout(res, 520));      // 等长按成立
+    fire('pointermove', window.innerHeight * 0.8);
+    fire('pointerup', window.innerHeight * 0.8);
+    await new Promise((res) => setTimeout(res, 260));
+    const drawner = document.querySelector('.workspace')?.getAttribute('data-drawer');
+    const topAfter = btn.style.top;
+    const saved = localStorage.getItem('bc-drawer-handle-y');
+    return { ok: true, topAfter, saved, drawer: drawner };
+  });
+  check('长按把手后上下拖动 → 位置改变并存下来',
+    !!handle.ok && handle.topAfter !== '50%' && !!handle.saved,
+    JSON.stringify(handle));
+  check('长按调位置那一次不会顺手把抽屉打开',
+    handle.drawer === 'none', `drawer=${handle.drawer}`);
+
+  const reset = await win.evaluate(async () => {
+    const btn = document.querySelector('.shell-drawer-btn.is-left');
+    btn?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+    await new Promise((res) => setTimeout(res, 240));
+    return btn?.style.top ?? null;
+  });
+  check('双击把手 → 复位到 50%', reset === '50%', String(reset));
+
   const dSplit = await dockOf('split');
   check('方位=左右分布：元素面板贴左、属性面板贴右',
     dSplit.attr === 'split' && dSplit.elemLeft === '0px' && dSplit.rightRight === '0px',

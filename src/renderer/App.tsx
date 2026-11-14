@@ -36,7 +36,8 @@ import { useLoadScreen } from '@store/loadStore';
 import { useShellMode } from '@lib/shellMode';
 import { useEdgeSwipe } from '@lib/useEdgeSwipe';
 import { useDrawerSide } from '@lib/drawerSide';
-import { Icon } from '@comp/Icon';
+import { DrawerHandle } from '@comp/DrawerHandle';
+// v0.4.6：抽屉把手已抽成 <DrawerHandle>（它自带长按调位置的三个状态），App 不再直接用 Icon
 
 // BlockCanvas · 主界面
 // - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
@@ -683,19 +684,21 @@ export default function App() {
                 {shell.mode === 'narrow' && (
                   <>
                     {!readonly && (
-                      <button
-                        className={'shell-drawer-btn is-left' + (drawer === 'left' ? ' is-on' : '')}
-                        onClick={() => setDrawer((d) => (d === 'left' ? null : 'left'))}
-                        title="元素面板：插入元素 / 模板"
-                        aria-expanded={drawer === 'left'}
-                      ><Icon name="grid" size={16} /></button>
+                      <DrawerHandle
+                        side="left"
+                        icon="grid"
+                        title="元素面板：插入元素 / 模板（长按可上下挪）"
+                        opened={drawer === 'left'}
+                        onToggle={() => setDrawer((d) => (d === 'left' ? null : 'left'))}
+                      />
                     )}
-                    <button
-                      className={'shell-drawer-btn is-right' + (drawer === 'right' ? ' is-on' : '')}
-                      onClick={() => setDrawer((d) => (d === 'right' ? null : 'right'))}
-                      title={rightTab === 'layers' ? '图层' : '属性'}
-                      aria-expanded={drawer === 'right'}
-                    ><Icon name={rightTab === 'layers' ? 'layers' : 'sliders'} size={16} /></button>
+                    <DrawerHandle
+                      side="right"
+                      icon={rightTab === 'layers' ? 'layers' : 'sliders'}
+                      title={(rightTab === 'layers' ? '图层' : '属性') + '（长按可上下挪）'}
+                      opened={drawer === 'right'}
+                      onToggle={() => setDrawer((d) => (d === 'right' ? null : 'right'))}
+                    />
                     {/* 抽屉打开时的遮罩：点它就关，符合手机上"点外面关闭"的习惯 */}
                     {drawer !== null && (
                       <div className="shell-drawer-scrim" onClick={() => setDrawer(null)} />

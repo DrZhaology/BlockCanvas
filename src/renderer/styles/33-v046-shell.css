@@ -223,6 +223,30 @@ body.bc-drawer-track .right-pane-wrap {
   margin-left: auto;
 }
 
+/* 长按调位置后的把手用行内 top（百分比）；拖动时给一点强调，别让它像"卡住了" */
+.shell-drawer-btn[data-dragging='1'] {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.shell-drawer-btn[data-dragging='1']::after {
+  width: 32px;
+  background: var(--bg-panel);
+  border-color: var(--accent);
+}
+
+/* 调位置时的横向参考线（铺满窗口，1px，很淡） */
+.bc-handle-guide {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 0;
+  z-index: 9997;
+  pointer-events: none;
+  border-top: 1px dashed var(--accent, #1e88e5);
+  opacity: 0.6;
+}
+
 /* ── 抽屉方位（v0.4.6 · 设置 → 竖屏 → 抽屉方位） ────────────────────────
    四种：左右分布（默认）/ 左右反向 / 都收在左 / 都收在右。
    两种"都收在同一边"时，两个把手垂直错开（38% / 62%），
