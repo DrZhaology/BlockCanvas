@@ -15,41 +15,86 @@
    ========================================================================== */
 
 /* ── 抽屉入口按钮（只在窄屏渲染，DOM 里宽屏不出现） ───────────────────── */
+/* v0.4.6：视觉上是"极小的抽屉把手"，但**手指能点的范围仍然 ≥44px**。
+   做法：按钮本体 44×48 透明（保住触摸目标与无障碍），可见的把手用 ::after 画在贴边一侧。
+   用户要的是"别挡住画布"，不是"让我点不准"——这两件事可以同时满足。 */
 .shell-drawer-btn {
   position: absolute;
   top: 50%;
   z-index: 60;
   display: flex;
   align-items: center;
-  justify-content: center;
-  /* 触摸目标 ≥44×44（R6-10 的硬指标） */
   width: 44px;
-  height: 44px;
+  height: 48px;
   padding: 0;
   transform: translateY(-50%);
-  border: 1px solid var(--border);
-  background: var(--bg-panel);
-  color: var(--text);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  opacity: 0.7;
   cursor: pointer;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
-  transition: background var(--dur-fast, 120ms) var(--ease-out, ease),
+  transition: opacity var(--dur-fast, 120ms) var(--ease-out, ease),
               color var(--dur-fast, 120ms) var(--ease-out, ease);
 }
 
+/* 可见的把手：26px 宽、48 高，贴在屏幕内边 */
+.shell-drawer-btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 26px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.1);
+  transition: width var(--dur-fast, 120ms) var(--ease-out, ease),
+              background var(--dur-fast, 120ms) var(--ease-out, ease);
+}
+
+.shell-drawer-btn:hover,
+.shell-drawer-btn:focus-visible {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.shell-drawer-btn:hover::after {
+  width: 32px;
+  background: var(--bg-panel);
+}
+
+/* 抽屉开着的时候把手**不显示**（关闭已经有"往边缘滑 / 点遮罩"两条路） */
+.workspace[data-drawer='left'] .shell-drawer-btn.is-left,
+.workspace[data-drawer='right'] .shell-drawer-btn.is-right {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .shell-drawer-btn.is-left {
+  left: 0;
+  justify-content: flex-start;
+  padding-left: 7px;
+}
+
+.shell-drawer-btn.is-right {
+  right: 0;
+  justify-content: flex-end;
+  padding-right: 7px;
+}
+
+.shell-drawer-btn.is-left::after {
   left: 0;
   border-left: none;
   border-radius: 0 8px 8px 0;
 }
 
-.shell-drawer-btn.is-right {
+.shell-drawer-btn.is-right::after {
   right: 0;
   border-right: none;
   border-radius: 8px 0 0 8px;
 }
 
-.shell-drawer-btn:hover { background: var(--panel-tint); }
-.shell-drawer-btn.is-on { background: var(--accent, #2563eb); color: #fff; border-color: var(--accent, #2563eb); }
+.shell-drawer-btn.is-on { color: #fff; }
+.shell-drawer-btn.is-on::after { background: var(--accent, #2563eb); border-color: var(--accent, #2563eb); }
 
 /* 遮罩：点一下就收起（手机上"点外面关闭"的习惯） */
 .shell-drawer-scrim {
@@ -97,7 +142,8 @@
 
 .app[data-shell='narrow'] .elem-pane-wrap {
   left: 0;
-  transform: translateX(-102%);
+  /* v0.4.6：位移里带上"跟手量"，手指拖多少走多少；松手后 var 归零 → transition 自然收尾 */
+  transform: translateX(calc(-102% + var(--bc-drawer-follow, 0px)));
 }
 
 .app[data-shell='narrow'] .right-pane-wrap {
@@ -105,12 +151,19 @@
   /* 窄屏下右侧面板不再需要"固定 456"，直接吃满抽屉宽度 */
   width: min(92vw, 420px);
   max-width: 92vw;
-  transform: translateX(102%);
+  transform: translateX(calc(102% + var(--bc-drawer-follow, 0px)));
 }
 
+/* 跟手期间关掉过渡 —— 否则面板永远比手指慢 180ms（用户说的"不跟手"） */
+body.bc-drawer-track .elem-pane-wrap,
+body.bc-drawer-track .right-pane-wrap {
+  transition: none;
+}
+
+/* 已经打开的那一侧，跟手量直接叠加在 0 上（往边缘滑关闭） */
 .app[data-shell='narrow'] .workspace[data-drawer='left'] .elem-pane-wrap,
 .app[data-shell='narrow'] .workspace[data-drawer='right'] .right-pane-wrap {
-  transform: translateX(0);
+  transform: translateX(var(--bc-drawer-follow, 0px));
   opacity: 1;
   visibility: visible;
   transition: transform var(--dur-mid, 180ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),

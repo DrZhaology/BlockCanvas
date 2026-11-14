@@ -34,6 +34,7 @@ import { SnapshotInfoPanel } from '@comp/SnapshotBar';
 import { LoadingScreen } from '@comp/LoadingScreen';
 import { useLoadScreen } from '@store/loadStore';
 import { useShellMode } from '@lib/shellMode';
+import { useEdgeSwipe } from '@lib/useEdgeSwipe';
 import { Icon } from '@comp/Icon';
 
 // BlockCanvas · 主界面
@@ -77,6 +78,13 @@ export default function App() {
   useEffect(() => {
     if (shell.mode === 'wide' && drawer !== null) setDrawer(null);
   }, [shell.mode, drawer]);
+  // v0.4.6：窄屏抽屉的边缘滑动手势（往内滑打开 / 往边缘滑关闭，含方向判定与打断）
+  useEdgeSwipe({
+    enabled: shell.mode === 'narrow',
+    drawer,
+    setDrawer,
+    paneWidth: () => Math.round(window.innerWidth * 0.86)
+  });
   const [rightTab, setRightTabRaw] = usePersistentState<RightTab>(RIGHT_TAB_KEY, 'inspector');
   // v0.4.4：页签切换不再走 View Transition —— VT 的旧帧快照会让文字"停一会儿"。
   // 改为内容重挂载 + 轻量入场动画（见 .tab-body 的 bcSwapIn）。

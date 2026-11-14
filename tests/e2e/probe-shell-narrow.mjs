@@ -253,6 +253,58 @@ async function main() {
     backWide.drawerBtn === 0 && backWide.drawer === 'none',
     `btn=${backWide.drawerBtn} drawer=${backWide.drawer}`);
 
+  /**
+   * v0.4.6：抽屉的**边缘滑动手势**（用户："往屏幕内部滑动打开，往屏幕边缘滑动关闭，
+   * 热区要大，按钮之外的地方滑动也能打开，还要能打断、要防误触"）。
+   * 这里用合成 PointerEvent（pointerType: touch）直接驱动 hook，不依赖真机。
+   */
+  await win.evaluate(() => window.bc.setAcceptanceSize('android'));
+  await sleep(900);
+  const swipe = async (fromX, fromY, toX, toY) => {
+    await win.evaluate(([fx, fy, tx, ty]) => {
+      const fire = (type, x, y) => {
+        const ev = new PointerEvent(type, {
+          bubbles: true, cancelable: true, pointerId: 1, pointerType: 'touch',
+          isPrimary: true, button: 0, buttons: 1, clientX: x, clientY: y
+        });
+        (document.elementFromPoint(x, y) || document.body).dispatchEvent(ev);
+      };
+      fire('pointerdown', fx, fy);
+      const steps = 8;
+      for (let i = 1; i <= steps; i++) {
+        fire('pointermove', fx + ((tx - fx) * i) / steps, fy + ((ty - fy) * i) / steps);
+      }
+      fire('pointerup', tx, ty);
+    }, [fromX, fromY, toX, toY]);
+    await sleep(500);
+  };
+
+  const w0 = await win.evaluate(() => window.innerWidth);
+  // 从左边缘（按钮之外、屏幕边缘 10px 处）往右滑 → 打开左侧抽屉
+  await swipe(10, 400, Math.min(w0 - 40, 200), 404);
+  const afterOpen = await win.evaluate(() => ({
+    drawer: document.querySelector('.workspace')?.getAttribute('data-drawer') ?? null,
+    handleOpacity: (() => {
+      const b = document.querySelector('.shell-drawer-btn.is-left');
+      return b ? getComputedStyle(b).opacity : null;
+    })()
+  }));
+  check('从屏幕左边缘往内滑 → 打开左侧抽屉（热区不止按钮本身）',
+    afterOpen.drawer === 'left', `drawer=${afterOpen.drawer}`);
+  check('抽屉打开时把手隐藏（关闭方向已有手势）',
+    afterOpen.handleOpacity !== null && Number(afterOpen.handleOpacity) < 0.1,
+    `opacity=${afterOpen.handleOpacity}`);
+
+  // 在抽屉里往左边缘滑 → 关闭
+  await swipe(Math.min(w0 - 40, 200), 400, 4, 404);
+  const afterClose = await win.evaluate(() => document.querySelector('.workspace')?.getAttribute('data-drawer') ?? null);
+  check('往屏幕边缘滑 → 关闭抽屉', afterClose === 'none', `drawer=${afterClose}`);
+
+  // 防误触：竖着划一下（起手在边缘）不应该打开抽屉
+  await swipe(10, 300, 14, 520);
+  const afterVertical = await win.evaluate(() => document.querySelector('.workspace')?.getAttribute('data-drawer') ?? null);
+  check('竖滑（滚动手势）不会误开抽屉', afterVertical === 'none', `drawer=${afterVertical}`);
+
   check('无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));
 
   await app.close();
