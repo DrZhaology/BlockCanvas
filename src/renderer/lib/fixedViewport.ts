@@ -36,13 +36,46 @@ export function measureFixedViewport(canvasEl: HTMLElement | null): FixedViewpor
   const cr = canvasEl.getBoundingClientRect();
   if (!wrap) return { left: cr.left, top: cr.top, right: cr.right, bottom: cr.bottom };
   const wr = wrap.getBoundingClientRect();
-  return {
-    left: cr.left,
-    right: cr.right,
-    // 上下取可见带：内容滚到 wrap 的 padding 下面时也不会算进去
-    top: Math.max(wr.top, 0),
-    bottom: Math.min(wr.bottom, window.innerHeight)
-  };
+  let left = cr.left;
+  let right = cr.right;
+  let top = Math.max(wr.top, 0);
+  let bottom = Math.min(wr.bottom, window.innerHeight);
+
+  /**
+   * ⚠ 用户反馈（实测图）："底部的边界墙不太对，bottom 的时候就会跑到最底部菜单下面，
+   * 注意底部菜单上面算作浏览器视口；定位到左下/右下角时有部分跑到视口外。"
+   *
+   * 原因是布局是「底部元素面板」时，画布容器**伸到面板下面**（grid 里那块是被盖住的），
+   * 于是 `.canvas-wrap` 的 rect 底边比"真正能看见的底"更低。这里把视口带
+   * 和**周围面板的真实矩形**求交：
+   *   · 面板在视口带下方 → 视口底下移到面板顶；
+   *   · 面板在视口带上方 → 视口顶上移到面板底；
+   *   · 面板在左右两侧且纵向穿过视口带 → 视口左右边界收进来。
+   * 这样"底部菜单上面"才真的等于浏览器视口底。
+   */
+  const panels = Array.from(document.querySelectorAll('.toolbar, .project-tab-bar, .elem-pane-wrap, .right-pane-wrap, .snapshot-info-panel'));
+  for (const p of panels) {
+    const el = p as HTMLElement;
+    if (!el || el === wrap) continue;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    const overlapX = Math.min(right, r.right) - Math.max(left, r.left) > 1;
+    const overlapY = Math.min(bottom, r.top) - Math.max(top, r.bottom) > 1;
+    // 面板压在视口带的下方（底部元素面板）
+    if (overlapX && r.top >= top + 1 && r.top < bottom) bottom = Math.min(bottom, r.top);
+    // 面板压在视口带的上方（工具栏 / 页签栏）
+    if (overlapX && r.bottom > top && r.bottom <= bottom) top = Math.max(top, r.bottom);
+    // 侧边面板纵向穿过视口带 → 收左右
+    if (overlapY || (r.top <= top && r.bottom >= bottom)) {
+      if (r.left > left && r.left < right) right = Math.min(right, r.left);
+      if (r.right > left && r.right <= right) left = Math.max(left, r.right);
+    }
+  }
+  if (bottom < top) bottom = top;
+  if (right < left) right = left;
+  return { left, right, top, bottom };
 }
 
 /**

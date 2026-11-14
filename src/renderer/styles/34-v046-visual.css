@@ -612,16 +612,14 @@ html[data-bc-dark] .bc-osb-thumb.is-dragging {
    三条：颜色必须和正式卡片不一样（紫）、没有关闭按钮、里面不写说明文字。
    ------------------------------------------------------------------------ */
 .ghost-prop-card {
-  margin: 8px 10px 4px;
-  padding: 8px 10px 10px;
-  border: 1px solid color-mix(in srgb, #7c3aed 32%, transparent);
-  border-radius: var(--r-4);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, #7c3aed 9%, var(--bg-panel, #fff)) 0%,
-    var(--bg-panel, #fff) 62%
-  );
-  box-shadow: 0 6px 18px color-mix(in srgb, #7c3aed 14%, transparent);
+  /* v0.4.6（用户）："放到 CSS 属性里面，并且淡紫色，文字，现在还有阴影和边框和别的卡片不匹配"
+     → 去掉阴影与边框，只留一层很淡的紫底；它现在就是列表里的一段，而不是"另一张卡片"。 */
+  margin: 0 0 6px;
+  padding: 6px 8px 8px;
+  border: none;
+  border-radius: var(--r-2);
+  background: color-mix(in srgb, #7c3aed 7%, transparent);
+  box-shadow: none;
   animation: bcGhostIn 170ms cubic-bezier(0.2, 0, 0, 1);
 }
 
@@ -654,12 +652,8 @@ html[data-bc-dark] .bc-osb-thumb.is-dragging {
 }
 
 html[data-bc-dark] .ghost-prop-card {
-  border-color: color-mix(in srgb, #a78bfa 34%, transparent);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, #7c3aed 16%, var(--bg-panel, #1b2231)) 0%,
-    var(--bg-panel, #1b2231) 62%
-  );
+  border-color: transparent;
+  background: color-mix(in srgb, #a78bfa 12%, transparent);
 }
 
 html[data-bc-dark] .ghost-prop-card-head { color: #b39bfb; }

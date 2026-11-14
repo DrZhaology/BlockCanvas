@@ -41,7 +41,7 @@ export function GhostPropCard(props: {
     <div className="ghost-prop-card" data-bc-ghost-card="1">
       <div className="ghost-prop-card-head">
         <Icon name="target" size={12} />
-        <span>临时属性</span>
+        <span>临时卡片</span>
       </div>
       <div className="ghost-prop-card-body">
         {items.map((it) => (

@@ -125,6 +125,40 @@ export function applyAltDragMove(d: AltDragState, ev: PointerEvent, ctx: AltDrag
     if (d.mode !== 'font') ctx.setWallHints(d.walls);
     st.selectElement(d.id);
     st.beginStyleEdit(); // 单条撤销：整个拖动 = 一步 Ctrl+Z
+    /**
+     * v0.4.6（用户："Alt 还是会 4 边一起改 4 个属性值"）：
+     *
+     * **右侧定位助手是最高权限 —— 同时只能有两条偏移。**
+     * 老元素/旧逻辑可能留下 left+right+top+bottom 四值齐全，这种元素尺寸是被两边撑出来的
+     * （stretchX/stretchY），一拖就要"两边一起平移"，于是四值齐飞、还会被墙夹出错位。
+     *
+     * 这里在**真正开始拖的第一帧**把四值收成两值：
+     *   把当前尺寸写死成 width/height（视觉零变化），再把远侧那条（right/bottom）置 auto。
+     * 之后本趟拖动只写 left/top，和面板显示的两条完全一致。
+     */
+    if (d.positioned) {
+      const z0 = ctx.zoomRef.current || 1;
+      const node0 = findNode(useScene.getState().scene.root, d.id);
+      const st0 = (node0?.style ?? {}) as Record<string, string | undefined>;
+      const on = (v?: string) => v !== undefined && v !== '' && v !== 'auto';
+      const sideCount = ['left', 'right', 'top', 'bottom'].filter((k) => on(st0[k])).length;
+      if (sideCount > 2) {
+        const fix: Record<string, string | undefined> = {};
+        const keepX: 'left' | 'right' = on(st0.left) ? 'left' : 'right';
+        const keepY: 'top' | 'bottom' = on(st0.top) ? 'top' : 'bottom';
+        // 尺寸先写死再清对边 —— 否则"被两边撑出来"的盒子会当场塌掉
+        if (!on(st0.width)) fix.width = Math.round(d.rect.width / z0) + 'px';
+        if (!on(st0.height)) fix.height = Math.round(d.rect.height / z0) + 'px';
+        fix[keepX === 'left' ? 'right' : 'left'] = 'auto';
+        fix[keepY === 'top' ? 'bottom' : 'top'] = 'auto';
+        st.updateStyle(d.id, fix);
+        d.stretchX = false;
+        d.stretchY = false;
+        d.axisSide = { x: keepX, y: keepY };
+        d.startRight = 0;
+        d.startBottom = 0;
+      }
+    }
     // v0.4.5：定位元素的 margin 归一化（用户反馈"margin 被锁死了，拖不动"）。
     // 必须放在 beginStyleEdit 之后 —— 归一化要和拖动同属一条撤销记录。
     if (d.mode === 'move') ctx.normalizePositionedMargin(d);

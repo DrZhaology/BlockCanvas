@@ -245,7 +245,55 @@ async function main() {
   }, fixedId);
   check('准备：fixed 元素仍在 DOM 里（隐藏只是 visibility）', hidden.hasEl === true, String(hidden.hasEl));
 
-  // ── ⑦ 持久化：viewportHeight 随工程文件保存 ──────────────────────
+  // ── ⑦ 四值归一：面板是最高权限（用户："Alt 还是会 4 边一起改 4 个属性值"）──
+  const quad = await win.evaluate(async () => {
+    const st = window.__sceneStore.getState();
+    st.addElement('div');
+    const id = window.__sceneStore.getState().scene.selectedId;
+    // 故意造一个"四值齐全"的历史脏数据（有明确宽高，模拟用户实测截图里那种元素）
+    window.__sceneStore.getState().updateStyle(id, {
+      position: 'fixed', left: '60px', right: '120px', top: '80px', bottom: '140px',
+      width: '200px', height: '120px', backgroundColor: '#fde68a'
+    });
+    window.__sceneStore.getState().selectElement(id);
+    await new Promise((r) => setTimeout(r, 500));
+    const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
+    const r = el.getBoundingClientRect();
+    return { id, w: Math.round(r.width), h: Math.round(r.height), cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2) };
+  });
+  await sleep(300);
+  // Alt 拖一小段（触发"开始拖动"那一帧的归一化）
+  await win.keyboard.down('Alt');
+  await win.mouse.move(quad.cx, quad.cy);
+  await win.mouse.move(quad.cx + 1, quad.cy + 1);
+  await sleep(260);
+  await win.mouse.down();
+  for (let i = 1; i <= 6; i++) { await win.mouse.move(quad.cx + 6 * i, quad.cy + 4 * i); await sleep(80); }
+  await win.mouse.up();
+  await win.keyboard.up('Alt');
+  await sleep(500);
+  const afterQuad = await win.evaluate((id) => {
+    const n = (function find(node) {
+      if (node.id === id) return node;
+      for (const c of node.children) { const r = find(c); if (r) return r; }
+      return null;
+    })(window.__sceneStore.getState().scene.root);
+    const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
+    const r = el.getBoundingClientRect();
+    return {
+      style: n?.style ?? {},
+      w: Math.round(r.width), h: Math.round(r.height)
+    };
+  }, quad.id);
+  const sideCount = ['left', 'right', 'top', 'bottom']
+    .filter((k) => { const v = afterQuad.style[k]; return v !== undefined && v !== '' && v !== 'auto'; }).length;
+  check('拖动开始时把"四值齐全"收成两值（面板最高权限）',
+    sideCount === 2, JSON.stringify({ sides: sideCount, style: afterQuad.style }));
+  check('收成两值后尺寸不变（视觉零变化）',
+    Math.abs(afterQuad.w - quad.w) <= 2 && Math.abs(afterQuad.h - quad.h) <= 2,
+    `${quad.w}×${quad.h} → ${afterQuad.w}×${afterQuad.h}`);
+
+  // ── ⑧ 持久化：viewportHeight 随工程文件保存 ──────────────────────
   const saved = await win.evaluate(() => {
     window.__sceneStore.getState().setViewportHeight(1080);
     const sc = window.__sceneStore.getState().scene;

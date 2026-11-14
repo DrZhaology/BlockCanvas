@@ -24,12 +24,17 @@ export type CssPropsSectionProps = {
   onAdd: (key: string, value?: string) => void;
   onRemove: (key: string) => void;
   onEdited: () => void;
+  /**
+   * 「临时卡片」（v0.4.6）：中键搜到的属性如果不在这个列表里，就临时插在最上面。
+   * 用户要求它**长在 CSS 属性里面**（而不是另起一张卡），所以做成插槽。
+   */
+  ghostSlot?: React.ReactNode;
 };
 
 export function CssPropsSection(props: CssPropsSectionProps) {
   const {
     open, onToggle, elementId, elementType, visibleSchema, elementStyle,
-    justAddedKey, flashKey, onAdd, onRemove, onEdited
+    justAddedKey, flashKey, onAdd, onRemove, onEdited, ghostSlot
   } = props;
 
   return (
@@ -63,6 +68,7 @@ export function CssPropsSection(props: CssPropsSectionProps) {
             </div>
           )}
           <div className="props-list">
+            {ghostSlot}
             {visibleSchema.map((s) => (
               <PropertyRow
                 key={s.key}

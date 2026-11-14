@@ -536,12 +536,6 @@ export function ElementPropsBody(props: { selected: SceneElement; justAddedKey: 
         applicableAttrs={applicableAttrs}
       />
 
-      {/* 0. 幽灵属性卡片（v0.4.6）：「显示到下方 CSS 属性」关闭时，中键搜中的属性临时放这里改。
-              颜色与常规卡片不同（紫），没有关闭按钮 —— 换元素/离开面板自然消失。 */}
-      {ghostKeys.length > 0 && (
-        <GhostPropCard elementId={elementId} elementType={elementType} keys={ghostKeys} />
-      )}
-
       {/* 1.5 媒体属性卡（v0.4.5）：video / audio 专用，只有这几个属性，不该让人手填 src */}
       {(elementType === 'video' || elementType === 'audio') && (
         <MediaPropsCard elementId={elementId} elementType={elementType} />
@@ -597,6 +591,9 @@ export function ElementPropsBody(props: { selected: SceneElement; justAddedKey: 
         onAdd={onAddProperty}
         onRemove={onRemoveProperty}
         onEdited={() => onJustAdded(null)}
+        ghostSlot={ghostKeys.length > 0
+          ? <GhostPropCard elementId={elementId} elementType={elementType} keys={ghostKeys} />
+          : undefined}
       />
     </>
   );
