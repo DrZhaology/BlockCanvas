@@ -88,6 +88,8 @@ const PROBES = [
   'probe-shell-narrow',
   // v0.4.6 Web 版（R6-12/13/14）：需要先 `pnpm build:web` 产出 dist-web/index.html
   'probe-web',
+  // v0.4.6 R6-3：CSS 域约束（主域登记 / 前缀归位 / 重复不超基线）
+  'probe-css-domains',
   'probe-ui-overflow'
 ];
 

@@ -637,8 +637,3 @@ html[data-bc-dark] .help-doc mark.hc-hit {
   min-height: 0;
 }
 
-/* 首页「页面设置」四个板块（预设/渐变/图片/视频）—— 同样是条件渲染 */
-.eh-panel-tabbody {
-  animation: bcSwapIn var(--dur-pop) var(--ease-standard);
-  min-width: 0;
-}

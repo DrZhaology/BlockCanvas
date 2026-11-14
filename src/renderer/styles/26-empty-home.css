@@ -558,3 +558,59 @@ html[data-bc-dark] .eh-tab.is-active { background: var(--bg-panel); }
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ===== v0.4.6（R6-3）：从 27-v045-ui.css 搬回本域（.eh- 是空首页专属类名）===== */
+.empty-home .eh-center { max-height: 100%; }
+
+.eh-panel {
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.empty-home .eh-center { animation: none; }
+
+.empty-home .eh-center > * {
+  animation: ehRiseIn 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.empty-home .eh-center > *:nth-child(1) { animation-delay: 0.02s; }
+
+.empty-home .eh-center > *:nth-child(2) { animation-delay: 0.06s; }
+
+.empty-home .eh-center > *:nth-child(3) { animation-delay: 0.10s; }
+
+.empty-home .eh-center > *:nth-child(4) { animation-delay: 0.14s; }
+
+.empty-home .eh-center > *:nth-child(5) { animation-delay: 0.18s; }
+
+.empty-home .eh-center > *:nth-child(6) { animation-delay: 0.22s; }
+
+.empty-home .eh-center > *:nth-child(n + 7) { animation-delay: 0.26s; }
+
+.eh-search input { position: relative; z-index: 1; }
+
+.eh-results {
+  max-height: min(340px, 46vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.eh-empty-hit { cursor: default; }
+
+.eh-panel { animation: ehPanelIn 0.18s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+.eh-panel.is-closing {
+  animation: ehPanelOut 0.16s cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+}
+
+.eh-settings { max-height: calc(100vh - 28px); display: flex; flex-direction: column; }
+.eh-search { position: relative; z-index: 4; }
+.eh-panel, .eh-panel.is-closing { animation: none; }
+
+/* v0.4.6（R6-3）：从 29-v045-perf.css 搬回本域 */
+.eh-panel-tabbody {
+  animation: bcSwapIn var(--dur-pop) var(--ease-standard);
+  min-width: 0;
+}

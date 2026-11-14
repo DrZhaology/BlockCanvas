@@ -437,14 +437,7 @@
      这里整体裁切，超出的部分交给右侧设置面板自己滚。 */
   overflow: hidden;
 }
-.empty-home .eh-center { max-height: 100%; }
 /* 设置面板自己限高 + 内部滚动，不再把整页撑开 */
-.eh-settings { max-height: calc(100vh - 28px); display: flex; flex-direction: column; }
-.eh-panel {
-  max-height: calc(100vh - 64px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
 /* 矮窗口仍然从上往下排，避免内容被压出屏幕 */
 @media (max-height: 760px) {
   .empty-home { align-items: flex-start; padding-top: 6vh; }
@@ -464,17 +457,6 @@
     transform: none;
   }
 }
-.empty-home .eh-center { animation: none; }
-.empty-home .eh-center > * {
-  animation: ehRiseIn 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-.empty-home .eh-center > *:nth-child(1) { animation-delay: 0.02s; }
-.empty-home .eh-center > *:nth-child(2) { animation-delay: 0.06s; }
-.empty-home .eh-center > *:nth-child(3) { animation-delay: 0.10s; }
-.empty-home .eh-center > *:nth-child(4) { animation-delay: 0.14s; }
-.empty-home .eh-center > *:nth-child(5) { animation-delay: 0.18s; }
-.empty-home .eh-center > *:nth-child(6) { animation-delay: 0.22s; }
-.empty-home .eh-center > *:nth-child(n + 7) { animation-delay: 0.26s; }
 /* 右上角齿轮稍晚一点出现，不跟标题抢注意力 */
 .empty-home .eh-settings { animation: ehRiseIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) 0.16s both; }
 /* 离场仍然整块淡出（点击"打开工程"的瞬间要干脆） */
@@ -702,14 +684,6 @@
    点按钮的 mousedown 落在面板上 → 面板不关、按钮也点不到。
    这里做三件事：输入框提到最上层；面板自身可滚动但不拦截空白区域；
    面板高度受视口限制，不会盖住整页。 */
-.eh-search { position: relative; z-index: 4; }
-.eh-search input { position: relative; z-index: 1; }
-.eh-results {
-  max-height: min(340px, 46vh);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.eh-empty-hit { cursor: default; }
 
 /* ---------- 16. 添加属性菜单：↑↓ 键盘导航的高亮 ---------- */
 .add-prop-item.is-active,
@@ -1376,14 +1350,8 @@
   from { opacity: 1; transform: none; }
   to   { opacity: 0; transform: translateY(-6px) scale(0.98); }
 }
-.eh-panel { animation: ehPanelIn 0.18s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.eh-panel.is-closing {
-  animation: ehPanelOut 0.16s cubic-bezier(0.4, 0, 1, 1) both;
-  pointer-events: none;
-}
 @media (prefers-reduced-motion: reduce) {
-  .eh-panel, .eh-panel.is-closing { animation: none; }
-}
+  }
 
 /* —— C1：左侧页签不要上下跳动 ——
    三个页签的激活态内边距不一致，切换时整行会"弹"一下。
