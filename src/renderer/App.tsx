@@ -35,6 +35,7 @@ import { LoadingScreen } from '@comp/LoadingScreen';
 import { useLoadScreen } from '@store/loadStore';
 import { useShellMode } from '@lib/shellMode';
 import { useEdgeSwipe } from '@lib/useEdgeSwipe';
+import { useDrawerSide } from '@lib/drawerSide';
 import { Icon } from '@comp/Icon';
 
 // BlockCanvas · 主界面
@@ -85,6 +86,8 @@ export default function App() {
     setDrawer,
     paneWidth: () => Math.round(window.innerWidth * 0.86)
   });
+  // v0.4.6：抽屉方位（左右分布 / 反向 / 都收一边）—— 只影响窄屏外壳
+  const [drawerSide] = useDrawerSide();
   const [rightTab, setRightTabRaw] = usePersistentState<RightTab>(RIGHT_TAB_KEY, 'inspector');
   // v0.4.4：页签切换不再走 View Transition —— VT 的旧帧快照会让文字"停一会儿"。
   // 改为内容重挂载 + 轻量入场动画（见 .tab-body 的 bcSwapIn）。
@@ -604,7 +607,7 @@ export default function App() {
   }
 
   return (
-    <div className="app" data-shell={shell.mode}>
+    <div className="app" data-shell={shell.mode} data-drawer-side={drawerSide}>
       {/* v0.4.6：自绘窗口标题栏（网页版没有窗口控件，组件内部自己返回 null） */}
       <TitleBar />
       <div className="bc-win-ring" aria-hidden="true" />

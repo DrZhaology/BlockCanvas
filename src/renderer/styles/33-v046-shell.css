@@ -223,6 +223,110 @@ body.bc-drawer-track .right-pane-wrap {
   margin-left: auto;
 }
 
+/* ── 抽屉方位（v0.4.6 · 设置 → 竖屏 → 抽屉方位） ────────────────────────
+   四种：左右分布（默认）/ 左右反向 / 都收在左 / 都收在右。
+   两种"都收在同一边"时，两个把手垂直错开（38% / 62%），
+   否则它们会叠在一起、只能点到上面那个。
+   ------------------------------------------------------------------------ */
+
+/* 左右反向：元素面板去右，属性面板去左 */
+.app[data-shell='narrow'][data-drawer-side='split-reverse'] .elem-pane-wrap {
+  left: auto;
+  right: 0;
+  transform: translateX(calc(102% + var(--bc-drawer-follow, 0px)));
+}
+.app[data-shell='narrow'][data-drawer-side='split-reverse'] .workspace[data-drawer='left'] .elem-pane-wrap {
+  transform: translateX(var(--bc-drawer-follow, 0px));
+}
+.app[data-shell='narrow'][data-drawer-side='split-reverse'] .right-pane-wrap {
+  right: auto;
+  left: 0;
+  transform: translateX(calc(-102% + var(--bc-drawer-follow, 0px)));
+}
+.app[data-shell='narrow'][data-drawer-side='split-reverse'] .workspace[data-drawer='right'] .right-pane-wrap {
+  transform: translateX(var(--bc-drawer-follow, 0px));
+}
+.app[data-drawer-side='split-reverse'] .shell-drawer-btn.is-left {
+  left: auto;
+  right: 0;
+  justify-content: flex-end;
+  padding-left: 0;
+  padding-right: 7px;
+}
+.app[data-drawer-side='split-reverse'] .shell-drawer-btn.is-left::after {
+  left: auto;
+  right: 0;
+  border-left: 1px solid var(--border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+}
+.app[data-drawer-side='split-reverse'] .shell-drawer-btn.is-right {
+  right: auto;
+  left: 0;
+  justify-content: flex-start;
+  padding-right: 0;
+  padding-left: 7px;
+}
+.app[data-drawer-side='split-reverse'] .shell-drawer-btn.is-right::after {
+  right: auto;
+  left: 0;
+  border-right: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+}
+
+/* 都收在左：属性面板也停左边，两个把手上下错开 */
+.app[data-shell='narrow'][data-drawer-side='both-left'] .right-pane-wrap {
+  right: auto;
+  left: 0;
+  transform: translateX(calc(-102% + var(--bc-drawer-follow, 0px)));
+}
+.app[data-shell='narrow'][data-drawer-side='both-left'] .workspace[data-drawer='right'] .right-pane-wrap {
+  transform: translateX(var(--bc-drawer-follow, 0px));
+}
+.app[data-drawer-side='both-left'] .shell-drawer-btn.is-right {
+  right: auto;
+  left: 0;
+  top: 62%;
+  justify-content: flex-start;
+  padding-right: 0;
+  padding-left: 7px;
+}
+.app[data-drawer-side='both-left'] .shell-drawer-btn.is-right::after {
+  right: auto;
+  left: 0;
+  border-right: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 8px 8px 0;
+}
+.app[data-drawer-side='both-left'] .shell-drawer-btn.is-left { top: 38%; }
+
+/* 都收在右：元素面板也停右边 */
+.app[data-shell='narrow'][data-drawer-side='both-right'] .elem-pane-wrap {
+  left: auto;
+  right: 0;
+  transform: translateX(calc(102% + var(--bc-drawer-follow, 0px)));
+}
+.app[data-shell='narrow'][data-drawer-side='both-right'] .workspace[data-drawer='left'] .elem-pane-wrap {
+  transform: translateX(var(--bc-drawer-follow, 0px));
+}
+.app[data-drawer-side='both-right'] .shell-drawer-btn.is-left {
+  left: auto;
+  right: 0;
+  top: 38%;
+  justify-content: flex-end;
+  padding-left: 0;
+  padding-right: 7px;
+}
+.app[data-drawer-side='both-right'] .shell-drawer-btn.is-left::after {
+  left: auto;
+  right: 0;
+  border-left: 1px solid var(--border);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+}
+.app[data-drawer-side='both-right'] .shell-drawer-btn.is-right { top: 62%; }
+
 /* ── 设置页：竖屏验收的四个按钮 ───────────────────────────────────────── */
 /* v0.4.6（用户："那几个按钮首先没有 css 样式"）：给它们正经的尺寸与换行规则，
    否则窄的 ctrl 区会把「窄档 360×800」挤成两行、看着像坏了。 */

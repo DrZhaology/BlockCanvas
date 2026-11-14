@@ -325,6 +325,42 @@ async function main() {
   check('竖屏工具栏不再横向滚（不会把按钮滚出屏幕）',
     !!tb && tb.mainScroll === false, tb ? String(tb.mainScroll) : 'no toolbar');
 
+  // v0.4.6：抽屉方位（设置 → 竖屏 → 抽屉方位）
+  const dockOf = async (mode) => win.evaluate(async (m) => {
+    localStorage.setItem('bc-drawer-side', m);
+    window.dispatchEvent(new CustomEvent('bc:drawer-side-changed'));
+    await new Promise((r) => setTimeout(r, 260));
+    const app = document.querySelector('.app');
+    const elem = document.querySelector('.elem-pane-wrap');
+    const right = document.querySelector('.right-pane-wrap');
+    const cs = (el) => (el ? getComputedStyle(el) : null);
+    return {
+      attr: app?.getAttribute('data-drawer-side') ?? null,
+      elemRight: cs(elem)?.right ?? null,
+      elemLeft: cs(elem)?.left ?? null,
+      rightRight: cs(right)?.right ?? null,
+      rightLeft: cs(right)?.left ?? null
+    };
+  }, mode);
+
+  const dSplit = await dockOf('split');
+  check('方位=左右分布：元素面板贴左、属性面板贴右',
+    dSplit.attr === 'split' && dSplit.elemLeft === '0px' && dSplit.rightRight === '0px',
+    JSON.stringify(dSplit));
+  const dRev = await dockOf('split-reverse');
+  check('方位=左右反向：元素面板贴右、属性面板贴左',
+    dRev.attr === 'split-reverse' && dRev.elemRight === '0px' && dRev.rightLeft === '0px',
+    JSON.stringify(dRev));
+  const dBL = await dockOf('both-left');
+  check('方位=都靠左：属性面板也贴左',
+    dBL.attr === 'both-left' && dBL.rightLeft === '0px',
+    JSON.stringify(dBL));
+  const dBR = await dockOf('both-right');
+  check('方位=都靠右：元素面板也贴右',
+    dBR.attr === 'both-right' && dBR.elemRight === '0px',
+    JSON.stringify(dBR));
+  await dockOf('split');
+
   check('无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));
 
   await app.close();

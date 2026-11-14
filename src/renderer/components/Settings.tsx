@@ -10,6 +10,7 @@ import logoUrl from '@renderer/assets/logo.svg';
 import { Collapse } from './Collapse';
 import { TIPS, TIPS_KEY, setTipsEnabled } from './CanvasOverlays';
 import { readSelHighlight, writeSelHighlight } from '@lib/selHighlight';
+import { useDrawerSide, DRAWER_SIDE_LABELS } from '@lib/drawerSide';
 import { appAlert, appConfirm } from '@lib/appConfirm';
 import type { DataPathsInfo, StorageStatsInfo, StorageBreakdownInfo, StorageCategoryId } from '../global';
 
@@ -164,6 +165,8 @@ export function Settings(props: Props) {
 
   // 选中高亮样式（v0.4.4）：橙色光晕闪烁（默认·最醒目）/ 蓝色细线（原始）
   const [selStyle, setSelStyle] = useState<'glow' | 'plain'>(() => readSelHighlight());
+  // v0.4.6：窄屏抽屉方位（竖屏专属）
+  const [drawerSide, setDrawerSide] = useDrawerSide();
   const changeSelStyle = (v: 'glow' | 'plain') => {
     setSelStyle(v);
     writeSelHighlight(v);
@@ -209,8 +212,7 @@ export function Settings(props: Props) {
   };
 
   // 深色模式状态
-  const [darkMode, setDarkMode] = useState<'auto' | 'dark' | 'light'>(() => {
-    try {
+  const [darkMode, setDarkMode] = useState<'auto' | 'dark' | 'light'>(() => {    try {
       const m = localStorage.getItem('bc-dm:mode');
       return m === 'dark' || m === 'light' ? m : 'auto';
     } catch { return 'auto'; }
@@ -509,6 +511,28 @@ export function Settings(props: Props) {
                   <button className="fluent-btn is-ghost" onClick={() => void window.bc.setAcceptanceSize('reset')} title="恢复 1280 × 800 编辑尺寸">
                     恢复编辑尺寸
                   </button>
+                </div>
+              </div>
+
+              {/* v0.4.6：抽屉方位 —— 竖屏专属的访问性项（左手/右手、单手拇指） */}
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="layout" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">抽屉方位（竖屏）</div>
+                  <div className="fluent-card-desc">
+                    窄屏/竖屏时两个抽屉从哪一侧滑出。宽屏（≥900px）下左右面板是并排的，不受影响。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <select
+                    className="fluent-select"
+                    value={drawerSide}
+                    onChange={(e) => setDrawerSide(e.target.value as never)}
+                  >
+                    {DRAWER_SIDE_LABELS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
