@@ -86,6 +86,8 @@ const PROBES = [
   'probe-codec',
   'probe-plugin-perms',
   'probe-shell-narrow',
+  // v0.4.6 Web 版（R6-12/13/14）：需要先 `pnpm build:web` 产出 dist-web/index.html
+  'probe-web',
   'probe-ui-overflow'
 ];
 

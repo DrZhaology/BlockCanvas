@@ -7,6 +7,9 @@ node_modules/
 # ---- 构建输出（electron-vite 产物，可随时重新生成）----
 out/
 
+# ---- Web 版单文件产物（v0.4.6 / R6-13：`pnpm build:web` 生成，约 2MB）----
+dist-web/
+
 # ---- 打包输出（electron-builder 生成的 exe / 安装包 / 便携版）----
 dist/
 
