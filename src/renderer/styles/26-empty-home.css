@@ -607,7 +607,10 @@ html[data-bc-dark] .eh-tab.is-active { background: var(--bg-panel); }
 
 .eh-settings { max-height: calc(100vh - 28px); display: flex; flex-direction: column; }
 .eh-search { position: relative; z-index: 4; }
-.eh-panel, .eh-panel.is-closing { animation: none; }
+/* v0.4.6（修正）：这里原本有一条 `.eh-panel, .eh-panel.is-closing { animation: none; }`
+   （早期为了"面板别抖"临时关掉的），结果是**首页的页面设置面板完全没有进退场动画**——
+   probe-v045-batch5 一直红着，正是用户说的"界面有些地方没动画、割裂"。
+   0.18s 的淡入淡出在短窗口上也不掉帧，恢复它。 */
 
 /* v0.4.6（R6-3）：从 29-v045-perf.css 搬回本域 */
 .eh-panel-tabbody {

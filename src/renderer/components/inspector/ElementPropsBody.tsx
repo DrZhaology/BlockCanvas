@@ -591,7 +591,7 @@ export function ElementPropsBody(props: { selected: SceneElement; justAddedKey: 
         onRemove={onRemoveProperty}
         onEdited={() => onJustAdded(null)}
         ghostSlot={ghostKeys.length > 0
-          ? <GhostPropCard elementId={elementId} elementType={elementType} keys={ghostKeys} />
+          ? <GhostPropCard elementId={elementId} elementType={elementType} keys={ghostKeys} flashKey={flashKey} />
           : undefined}
       />
     </>

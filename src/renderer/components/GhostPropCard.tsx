@@ -28,8 +28,10 @@ export function GhostPropCard(props: {
   elementType: ElementType;
   /** 中键搜中的属性 key（最近的在前，最多几条） */
   keys: string[];
+  /** 中键定位时要闪一下的那个 key（和列表里的行同一套闪烁） */
+  flashKey?: string | null;
 }) {
-  const { elementId, elementType, keys } = props;
+  const { elementId, elementType, keys, flashKey } = props;
   if (keys.length === 0) return null;
   const all = [...SCHEMA, ...getPluginProperties()];
   const items = keys
@@ -50,6 +52,7 @@ export function GhostPropCard(props: {
             schemaItem={it as never}
             elementId={elementId}
             elementType={elementType}
+            flash={flashKey === it.key}
             // 幽灵卡片不提供"删除这条属性"：它不是列表里的一行，删什么删
             onRemove={() => { /* 无操作 */ }}
           />
