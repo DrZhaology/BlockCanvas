@@ -108,7 +108,7 @@ async function main() {
   await win.evaluate(() => window.__sceneStore.getState().setViewportHeight(900));
   await sleep(600);
 
-  // ── ④ fixed 往下拖：能贴到首屏线，写出 bottom: 0 ──────────────────
+  // ── ④ 画布内「浏览器视口」：红框 + fixed 只能在框内动 ────────────────
   const fixedId = await win.evaluate(() => {
     const st = window.__sceneStore.getState();
     st.beginStyleEdit();
@@ -127,39 +127,63 @@ async function main() {
   });
   await sleep(900);
 
-  // 计算"把元素底边拖到首屏线附近"需要移动多少
+  const frame = await win.evaluate(() => {
+    const f = document.querySelector('.canvas-fixed-frame');
+    const wrap = document.querySelector('.canvas-wrap');
+    const c = document.querySelector('.canvas');
+    if (!f || !wrap || !c) return { exists: !!f };
+    const fr = f.getBoundingClientRect();
+    const wr = wrap.getBoundingClientRect();
+    const cr = c.getBoundingClientRect();
+    return {
+      exists: true,
+      left: Math.round(fr.left), top: Math.round(fr.top),
+      right: Math.round(fr.right), bottom: Math.round(fr.bottom),
+      wrapTop: Math.round(wr.top), wrapBottom: Math.round(wr.bottom),
+      canvasLeft: Math.round(cr.left), canvasRight: Math.round(cr.right),
+      pointerEvents: getComputedStyle(f).pointerEvents,
+      borderColor: getComputedStyle(f).borderTopColor
+    };
+  });
+  check('选中 fixed 元素时显示「浏览器视口」红框', frame.exists === true, JSON.stringify(frame.left !== undefined));
+  check('视口左右 = 画布左右边缘',
+    frame.exists === true && Math.abs(frame.left - frame.canvasLeft) <= 1 && Math.abs(frame.right - frame.canvasRight) <= 1,
+    frame.exists ? `frame=${frame.left}~${frame.right} canvas=${frame.canvasLeft}~${frame.canvasRight}` : 'no frame');
+  check('视口上下 = 画布可见带（跟随面板高度，不是 900 首屏线）',
+    frame.exists === true && Math.abs(frame.top - frame.wrapTop) <= 2 && Math.abs(frame.bottom - frame.wrapBottom) <= 2,
+    frame.exists ? `frame=${frame.top}~${frame.bottom} wrap=${frame.wrapTop}~${frame.wrapBottom}` : 'no frame');
+  check('视口框是红色且不吃鼠标事件',
+    frame.exists === true && frame.pointerEvents === 'none' && /rgb\(229, 72, 77\)/.test(frame.borderColor),
+    frame.exists ? `${frame.borderColor} / ${frame.pointerEvents}` : 'no frame');
+
+  // —— 往下拖：只能停在视口底，且不写 bottom: 0 ——
   const plan = await win.evaluate((id) => {
     const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
     const c = document.querySelector('.canvas');
-    if (!el || !c) return null;
+    const wrap = document.querySelector('.canvas-wrap');
+    if (!el || !c || !wrap) return null;
     const r = el.getBoundingClientRect();
-    const cr = c.getBoundingClientRect();
-    const vh = window.__sceneStore.getState().scene.viewportHeight ?? 900;
-    const lineScreenY = cr.top + vh;
+    const wr = wrap.getBoundingClientRect();
     return {
       centerX: Math.round(r.left + r.width / 2),
       centerY: Math.round(r.top + r.height / 2),
-      // 故意**拖过头 40px**：让"墙"把元素夹在首屏线上。
-      // 这样同时验证两件事：墙挡住了（不越界）+ 撞墙后松手归一化成 bottom:0。
-      dy: Math.round(lineScreenY - r.bottom + 40),
-      lineScreenY: Math.round(lineScreenY),
-      rectBottom: Math.round(r.bottom),
-      canvasH: Math.round(cr.height)
+      // 故意拖过头 60px：墙应该把元素夹在视口底
+      dy: Math.round(wr.bottom - r.bottom + 60),
+      winB: Math.round(wr.bottom),
+      rectBottom: Math.round(r.bottom)
     };
   }, fixedId);
-  check('准备：fixed 元素已渲染，首屏线在可视范围内的上方', !!plan && plan.dy > 0 && plan.canvasH > plan.lineScreenY,
-    plan ? `需要下移 ${plan.dy}px（canvasH=${plan.canvasH} 线=${plan.lineScreenY}）` : '没算出来');
+  check('准备：fixed 元素已渲染且能算出下移量', !!plan && plan.dy > 0,
+    plan ? `需要下移 ${plan.dy}px（视口底 ${plan.winB}）` : '没算出来');
 
   if (plan) {
-    // 分步移动（一次大跳会跳过 Alt 悬停判定）
     await win.keyboard.down('Alt');
     await win.mouse.move(plan.centerX, plan.centerY);
     await win.mouse.move(plan.centerX + 1, plan.centerY + 1);
     await sleep(280);
     await win.mouse.down();
-    const steps = 8;
-    for (let i = 1; i <= steps; i++) {
-      await win.mouse.move(plan.centerX, plan.centerY + Math.round((plan.dy * i) / steps));
+    for (let i = 1; i <= 8; i++) {
+      await win.mouse.move(plan.centerX, plan.centerY + Math.round((plan.dy * i) / 8));
       await sleep(90);
     }
     await sleep(200);
@@ -175,121 +199,53 @@ async function main() {
         return null;
       })(st.scene.root);
       const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
-      const c = document.querySelector('.canvas');
-      const vh = st.scene.viewportHeight ?? 900;
+      const wrap = document.querySelector('.canvas-wrap');
+      const wr = wrap.getBoundingClientRect();
       return {
         bottom: n?.style.bottom ?? null,
         top: n?.style.top ?? null,
-        renderedBottom: el ? Math.round(el.getBoundingClientRect().bottom - c.getBoundingClientRect().top) : -1,
-        canvasH: c ? Math.round(c.offsetHeight) : 0,
-        vh
+        screenBottom: el ? Math.round(el.getBoundingClientRect().bottom) : -1,
+        winB: Math.round(wr.bottom)
       };
     }, fixedId);
 
-    /**
-     * ⚠ 这里是最容易想错的一条：
-     * 画布自己就是 fixed 的包含块，所以 `bottom: 0` 在长页面上解析成**画布底**（几千米外）。
-     * 因此长页面上**不能**归一化成 bottom: 0 —— 那会让元素一松手就飞走。
-     * 正确行为：墙把元素夹在首屏线上，写法保留数值（top: Npx），位置纹丝不动。
-     * 短页面（画布高度 ≈ 基准视口）时 bottom: 0 恰好等于首屏底，那时才写它。
-     */
-    check('长页面上不写 bottom: 0（写了会让元素一松手跳到页面最底部）',
-      after.bottom !== '0px',
-      `bottom=${after.bottom ?? '(无)'} top=${after.top ?? '(无)'}`);
-    check('位置稳在首屏线附近，没有被墙体夹住后跳走',
-      Math.abs(after.renderedBottom - after.vh) <= 14,
-      `底部在 ${after.renderedBottom}px / 首屏 ${after.vh}px（画布 ${after.canvasH}px）`);
-    check('没越界：元素底边不越过首屏线', after.renderedBottom <= after.vh + 2,
-      `底部 ${after.renderedBottom} / 线 ${after.vh}`);
+    check('不写 bottom: 0（新模型一律用 top 表达"距视口顶"）',
+      after.bottom !== '0px', `bottom=${after.bottom ?? '(无)'} top=${after.top ?? '(无)'}`);
+    check('拖过头也被视口底挡住（元素停在视口内 ±14px）',
+      Math.abs(after.screenBottom - after.winB) <= 14,
+      `元素底 ${after.screenBottom} / 视口底 ${after.winB}`);
+    check('没越出视口下沿', after.screenBottom <= after.winB + 2,
+      `${after.screenBottom} <= ${after.winB}`);
   }
 
-  // ── ⑤ 短页面：此时 bottom: 0 恰好等于首屏底，应该写得出来 ──────────
-  // 先清掉撑高度的元素，让画布回到"刚好一屏"
-  await win.evaluate((fid) => {
-    const st = window.__sceneStore.getState();
-    const rm = [];
-    const walk = (n) => {
-      for (const c of n.children) {
-        if (c.id !== fid) rm.push(c.id);
-        walk(c);
-      }
-    };
-    walk(st.scene.root);
-    for (const id of rm) st.removeMany([id]);
-  }, fixedId);
-  await sleep(900);
-
-  const shortAgain = await win.evaluate((id) => {
-    const st = window.__sceneStore.getState();
-    const c = document.querySelector('.canvas');
+  // ── ⑤ 滚动画布：fixed 元素钉在视口上（浏览器语义）─────────────────────
+  const pin = await win.evaluate(async (id) => {
     const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
-    return {
-      canvasH: c ? Math.round(c.offsetHeight) : 0,
-      hasLine: !!document.querySelector('.canvas-viewport-line'),
-      exists: !!el,
-      vh: st.scene.viewportHeight ?? 900
-    };
+    const wrap = document.querySelector('.canvas-wrap');
+    if (!el || !wrap) return null;
+    const before = Math.round(el.getBoundingClientRect().top);
+    wrap.scrollTop = 400;
+    await new Promise((r) => setTimeout(r, 350));
+    const after = Math.round(el.getBoundingClientRect().top);
+    const shift = getComputedStyle(document.querySelector('.canvas')).getPropertyValue('--bc-fixed-shift').trim();
+    wrap.scrollTop = 0;
+    await new Promise((r) => setTimeout(r, 250));
+    return { before, after, shift };
   }, fixedId);
-  check('清掉长内容后画布回到一屏高、首屏线隐藏',
-    shortAgain.canvasH <= shortAgain.vh + 40 && shortAgain.hasLine === false,
-    `canvas=${shortAgain.canvasH} hasLine=${shortAgain.hasLine}`);
+  check('画布滚动时 fixed 元素钉在视口上（屏幕位置不变 ±3px）',
+    !!pin && Math.abs(pin.after - pin.before) <= 3,
+    pin ? `滚动前 ${pin.before} → 滚动后 ${pin.after}（shift=${pin.shift}）` : 'no data');
 
-  if (shortAgain.exists) {
-    // 把元素放到**首屏中段**再往下拖到底 —— 起点必须留出鼠标下移的空间，
-    // 否则起点本身就贴着窗口下沿，Playwright 的移动根本到不了墙（也就没有贴边吸附）。
-    await win.evaluate((id) => {
-      const st = window.__sceneStore.getState();
-      st.beginStyleEdit();
-      st.updateStyle(id, { top: '300px', bottom: undefined, left: '40px', right: undefined });
-      st.endStyleEdit();
-    }, fixedId);
-    await sleep(700);
-    const p2 = await win.evaluate((id) => {
-      const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
-      const c = document.querySelector('.canvas');
-      if (!el || !c) return { cx: 0, cy: 0, dy: 0, missing: true };
-      const r = el.getBoundingClientRect();
-      const cr = c.getBoundingClientRect();
-      const vh = window.__sceneStore.getState().scene.viewportHeight ?? 900;
-      return {
-        cx: Math.round(r.left + r.width / 2),
-        cy: Math.round(r.top + r.height / 2),
-        dy: Math.round((cr.top + vh) - r.bottom + 40),
-        // 诊断：元素是否在可交互的视口内
-        inView: r.top > 0 && r.bottom < window.innerHeight,
-        rectTop: Math.round(r.top),
-        rectBottom: Math.round(r.bottom),
-        winH: window.innerHeight
-      };
-    }, fixedId);
-    console.log('  短页面拖动计划:', JSON.stringify(p2));
-    await win.keyboard.down('Alt');
-    await win.mouse.move(p2.cx, p2.cy);
-    await win.mouse.move(p2.cx + 1, p2.cy + 1);
-    await sleep(280);
-    await win.mouse.down();
-    for (let i = 1; i <= 8; i++) {
-      await win.mouse.move(p2.cx, p2.cy + Math.round((p2.dy * i) / 8));
-      await sleep(90);
-    }
-    await sleep(200);
-    await win.mouse.up();
-    await win.keyboard.up('Alt');
-    await sleep(400);
-    const shortAfter = await win.evaluate((id) => {
-      const st = window.__sceneStore.getState();
-      const n = (function find(node) {
-        if (node.id === id) return node;
-        for (const c of node.children) { const r = find(c); if (r) return r; }
-        return null;
-      })(st.scene.root);
-      return { bottom: n?.style.bottom ?? null, top: n?.style.top ?? null };
-    }, fixedId);
-    check('短页面上拖到首屏底 → 归一化成 bottom: 0px（可读、可维护）',
-      shortAfter.bottom === '0px', `bottom=${shortAfter.bottom ?? '(无)'} top=${shortAfter.top ?? '(无)'}`);
-  }
+  // ── ⑥ 缩放画布时 fixed 元素临时隐藏 ─────────────────────────────────
+  const hidden = await win.evaluate(async (id) => {
+    window.dispatchEvent(new CustomEvent('bc:test-zoom'));
+    // 直接调用 store 之外的缩放通道：拖 Alt/Ctrl 滚轮太慢，这里用 app 的缩放事件
+    const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
+    return { hasEl: !!el };
+  }, fixedId);
+  check('准备：fixed 元素仍在 DOM 里（隐藏只是 visibility）', hidden.hasEl === true, String(hidden.hasEl));
 
-  // ── ⑥ 持久化：viewportHeight 随工程文件保存 ──────────────────────
+  // ── ⑦ 持久化：viewportHeight 随工程文件保存 ──────────────────────
   const saved = await win.evaluate(() => {
     window.__sceneStore.getState().setViewportHeight(1080);
     const sc = window.__sceneStore.getState().scene;

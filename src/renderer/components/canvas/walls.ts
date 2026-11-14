@@ -4,6 +4,7 @@
 // 拆成纯函数后规则可以单独推敲，也方便以后给"手机窄屏"复用同一套边界。
 import { SELF_CLOSING_TAGS } from '@lib/types';
 import { findNode } from '@store/sceneStore';
+import { measureFixedViewport } from '@lib/fixedViewport';
 import type { SceneElement } from '@lib/types';
 import type { Bar, Bounds } from './types';
 
@@ -106,11 +107,19 @@ export function boundsFor(el: HTMLElement, rect: DOMRect, viewportHeight = 900):
   // 画布比它矮时（内容很少），仍以画布底为下限，免得墙跑到画布外面。
   if (isFixed && canvasEl) {
     const vb = boxOf(canvasEl);
-    const vp = Math.min(vb.bottom, vb.top + viewportHeight);
-    wallLeft = vb.left + m.left;
-    wallRight = vb.right - m.right;
-    wallTop = vb.top + m.top;
-    wallBottom = vp - m.bottom;
+    // v0.4.6：fixed 的参照面就是「画布内的浏览器视口」（lib/fixedViewport.ts）——
+    // 左右贴画布边缘，上下取 .canvas-wrap 的**可见带**（工具栏下面、元素面板上面）。
+    // 面板高度一改，这条带子跟着变，fixed 的可动范围也随之变，不会再出现
+    // "在 2400px 长页面里拖到看不见的地方"。
+    const fv = measureFixedViewport(canvasEl);
+    const vLeft = fv ? fv.left : vb.left;
+    const vRight = fv ? fv.right : vb.right;
+    const vTop = fv ? fv.top : vb.top;
+    const vBottom = fv ? fv.bottom : Math.min(vb.bottom, vb.top + viewportHeight);
+    wallLeft = vLeft + m.left;
+    wallRight = vRight - m.right;
+    wallTop = vTop + m.top;
+    wallBottom = vBottom - m.bottom;
   }
   // 每面墙要画的"整面"（默认铺满父容器内容盒；被兄弟元素挡住时改成画在那个兄弟的边上）
   let barL: Bar | null = vBar(wallLeft, pb.top, pb.bottom);
@@ -119,11 +128,15 @@ export function boundsFor(el: HTMLElement, rect: DOMRect, viewportHeight = 900):
   let barB: Bar | null = Number.isFinite(wallBottom) ? hBar(wallBottom, pb.left, pb.right) : null;
   if (isFixed && canvasEl) {
     const vb = boxOf(canvasEl);
-    const vp = Math.min(vb.bottom, vb.top + viewportHeight);
-    barL = vBar(wallLeft, vb.top, vp);
-    barR = vBar(wallRight, vb.top, vp);
-    barT = hBar(wallTop, vb.left, vb.right);
-    barB = hBar(wallBottom, vb.left, vb.right);
+    const fv = measureFixedViewport(canvasEl);
+    const vTop = fv ? fv.top : vb.top;
+    const vBottom = fv ? fv.bottom : Math.min(vb.bottom, vb.top + viewportHeight);
+    const vLeft = fv ? fv.left : vb.left;
+    const vRight = fv ? fv.right : vb.right;
+    barL = vBar(wallLeft, vTop, vBottom);
+    barR = vBar(wallRight, vTop, vBottom);
+    barT = hBar(wallTop, vLeft, vRight);
+    barB = hBar(wallBottom, vLeft, vRight);
   }
 
   // 元素与元素的碰撞：

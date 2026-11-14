@@ -1,5 +1,5 @@
 import { useRef, useState, useMemo, useEffect } from 'react';
-import { useScene, findNode, findParent } from '@store/sceneStore';
+import { useScene, findNode, findParent, getEffectiveStyle } from '@store/sceneStore';
 import type { SceneElement } from '@lib/types';
 import { createStyleClassSet, collectStyleClasses, buildStyleBlock, quickCssToCss } from '@lib/styleClass';
 import { classColor } from '@lib/classColor';
@@ -12,6 +12,7 @@ import { AltOverlays } from './canvas/AltOverlays';
 import { useAltDrag } from './canvas/useAltDrag';
 import { useMarquee } from './canvas/useMarquee';
 import { useStickyMarks } from './canvas/sticky';
+import { measureFixedViewport, applyFixedShift, hideFixedTemporarily, type FixedViewport } from '@lib/fixedViewport';
 
 // BlockCanvas · 画布（组装层）
 //
@@ -128,6 +129,56 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     ro.observe(el);
     setCanvasHeight(el.offsetHeight);
     return () => ro.disconnect();
+  }, [zoom, canvasWidth]);
+
+  // ── 画布内「浏览器视口」（v0.4.6 · fixed 的参照面）────────────────────────
+  // 用户要的是"画布里也有一块像浏览器那样的视口，fixed 只能在里面动"，见 lib/fixedViewport.ts。
+  // 这里只负责三件事：① 滚动/尺寸变化时把视口矩形量出来（画红色框）② 把 fixed 元素钉在视口上
+  // ③ 缩放/改宽度期间临时藏掉 fixed 元素。
+  const [fixedFrame, setFixedFrame] = useState<FixedViewport | null>(null);
+  const selectedIdForFrame = useScene((s) => s.scene.selectedId);
+  const selectedPos = (() => {
+    if (!selectedIdForFrame) return '';
+    const n = findNode(root, selectedIdForFrame);
+    if (!n) return '';
+    const eff = getEffectiveStyle(n, activeBreakpoint) as Record<string, string | undefined>;
+    return eff.position ?? '';
+  })();
+  const showFixedFrame = selectedPos === 'fixed';
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    let raf = 0;
+    const update = () => {
+      applyFixedShift(el);
+      if (!showFixedFrame) { setFixedFrame((cur) => (cur ? null : cur)); return; }
+      const vp = measureFixedViewport(el);
+      setFixedFrame((cur) => (
+        cur && vp && cur.left === vp.left && cur.top === vp.top && cur.right === vp.right && cur.bottom === vp.bottom
+          ? cur : vp
+      ));
+    };
+    update();
+    const onAny = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(update); };
+    window.addEventListener('scroll', onAny, true);
+    window.addEventListener('resize', onAny);
+    const wrap = el.closest('.canvas-wrap') as HTMLElement | null;
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onAny) : null;
+    if (ro && wrap) ro.observe(wrap);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', onAny, true);
+      window.removeEventListener('resize', onAny);
+      ro?.disconnect();
+    };
+  }, [showFixedFrame, zoom, canvasWidth, selectedIds, root, activeBreakpoint]);
+
+  // 缩放 / 改画布宽度时 fixed 元素暂时隐藏（用户："缩放、改宽度时显示了反麻烦"）
+  const firstZoomRef = useRef(true);
+  useEffect(() => {
+    if (firstZoomRef.current) { firstZoomRef.current = false; return; }
+    hideFixedTemporarily();
   }, [zoom, canvasWidth]);
 
   // 中键属性搜索 / 右键文字菜单 的浮层状态
@@ -351,6 +402,22 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
         <span className="canvas-resize-handle canvas-resize-handle-l" onPointerDown={(e) => onResizeStart(e, 'l')} title="拖动调整画布宽度" />
         <span className="canvas-resize-handle canvas-resize-handle-r" onPointerDown={(e) => onResizeStart(e, 'r')} title="拖动调整画布宽度" />
       </div>
+      {/* 画布内「浏览器视口」（v0.4.6）：选中 fixed 元素时显示，红色 1px 框。
+          它就是 fixed 元素的参照面 —— 上下跟着工具栏/元素面板的高度走，左右贴着画布。 */}
+      {fixedFrame && (
+        <div
+          className="canvas-fixed-frame"
+          style={{
+            left: fixedFrame.left,
+            top: fixedFrame.top,
+            width: Math.max(0, fixedFrame.right - fixedFrame.left),
+            height: Math.max(0, fixedFrame.bottom - fixedFrame.top)
+          }}
+          title="浏览器视口：fixed 元素只在框内活动，导出后也以这块区域为参照"
+        >
+          <span>浏览器视口</span>
+        </div>
+      )}
       {/* 框选矩形：fixed 覆盖层（client 坐标），可自由延伸到画布外的条纹区 */}
       {mq.marquee && (
         <div

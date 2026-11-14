@@ -1,15 +1,64 @@
 /* ============================================================================
-   v0.4.6 · 画布「首屏线」(R6-16)
+   v0.4.6 · 画布内「浏览器视口」+「首屏线」
    ----------------------------------------------------------------------------
-   问题：`position: fixed` 在浏览器里相对**视口**定位，但画布高度是随内容长的。
-   于是 `bottom: 0` 在画布上永远贴不到"首屏底部"，用户拖到底也写不出 bottom:0；
-   反之写死的 bottom 值在长页面上又跑到看不见的地方。
+   用户原话：
+     「把浏览器的视口，在画布内部做成一个也是固定的像浏览器一样的视口：画布的左右就是
+       左边缘和右边缘，上下边缘根据工具栏的变化始终变化……呈现矩形，固定红色。
+       Alt 的时候，fixed 的元素就只能在这个视口内部移动，同时不会触发画布的上下滚动。」
 
-   解决：场景里记住一个「基准视口高度」(默认 900)，画布至少撑到这么高，
-   并在该高度画一条首屏线 —— fixed 元素的拖动墙止步于此。
+   于是这里有两样东西：
+     1. `.canvas-fixed-frame` —— 那块红色矩形。选中 fixed 元素时出现，它就是参照面本身；
+     2. `[data-bc-fixed="1"]` —— 真正的 fixed 元素：滚动时用 translate 抵消位移，
+        钉在视口上（浏览器里 fixed 就是这样）；缩放/改宽度时临时隐藏。
 
-   这条线必须 pointer-events: none（纯参考，不能挡拖动/框选）。
+   「首屏线」保留：它标的是**场景里记的基准视口高度**（导出后浏览器一屏多高），
+   和上面那块"当前窗口里真实可见的带子"不是一回事 —— 前者是设计参数，后者是当前可视区。
    ========================================================================== */
+
+/* ── 画布内「浏览器视口」：红色 1px 框（固定色，不跟主题走 —— 它是尺子，不是装饰）── */
+.canvas-fixed-frame {
+  position: fixed;
+  z-index: 41;
+  pointer-events: none;
+  border: 1px solid #e5484d;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(229, 72, 77, 0.18);
+}
+
+.canvas-fixed-frame > span {
+  position: absolute;
+  right: -1px;
+  top: 0;
+  transform: translateY(-100%);
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  color: #fff;
+  background: #e5484d;
+  border-radius: 3px 3px 0 0;
+  letter-spacing: 0.02em;
+}
+
+/* Alt 拖动时别让框抢视觉（那时屏幕上辅助线已经很多） */
+body.bc-alt-dragging .canvas-fixed-frame {
+  opacity: 0.45;
+}
+
+/* ── fixed 元素钉在视口上 ──────────────────────────────────────────────────
+   `.canvas` 有 transform: scale(zoom)，所以它是 fixed 后代的包含块，
+   元素写 top:100px 其实是"距画布顶 100px"。滚动时画布顶跑到视口顶上面，
+   这里补一段 translate 把它拉回原位 —— 视觉上就是"浏览器里 fixed 不动"。
+   用独立的 `translate` 属性（不是 transform），这样用户自己的 transform 不会被覆盖。
+   ------------------------------------------------------------------------ */
+.canvas [data-bc-fixed='1'] {
+  translate: 0 var(--bc-fixed-shift, 0px);
+}
+
+/* 缩放画布 / 拖画布宽度期间：fixed 元素暂时隐藏（用户："显示了反麻烦"） */
+body.bc-fixed-hidden .canvas [data-bc-fixed='1'] {
+  visibility: hidden;
+}
 
 .canvas-viewport-line {
   position: absolute;
