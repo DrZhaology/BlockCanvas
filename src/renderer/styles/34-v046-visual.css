@@ -326,7 +326,104 @@ html[data-bc-dark] .bc-osb-thumb.is-dragging {
   background: rgba(210, 220, 235, 0.52);
 }
 
-/* ── 9. 定位助手：四边解锁 + 四角预设（v0.4.6） ──────────────────────────
+/* ── 10. 快捷助手：把"盒子套盒子"拆平（设计规则 2） ──────────────────────
+   用户原话：「不要盒子套盒子，比如快捷助手这里套了很多层，边框又多，很花眼睛」。
+
+   以前的面板是四层框：面板 → 板块框 → 定位区框 → 每组输入框。
+   现在只保留最后一层（输入框自己的边框，它是"可编辑"的信号），
+   其余层级交给**留白 + 一条细分隔线**表达。一眼只看得到内容，看不到格子。
+   ------------------------------------------------------------------------ */
+.quick-helper {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.quick-helper .qh-block {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.quick-helper .qh-block + .qh-block {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft, #f0f0f0);
+}
+
+.quick-helper .qh-block-head {
+  background: transparent;
+  padding: 4px 0;
+}
+
+.quick-helper .qh-block-body {
+  padding: 2px 0 4px;
+  background: transparent;
+}
+
+/* 顶部那个开关条：不再是一条带底色的横条，就是一行文字 + 复选框 */
+.quick-helper .qh-sync-bar {
+  border: none;
+  background: transparent;
+  padding: 0 0 6px;
+  margin: 0;
+}
+
+/* 定位区：原来是"带边框 + 浅底"的小盒子，现在是纯留白 */
+.quick-helper .pos-edges {
+  border: none;
+  background: transparent;
+  padding: 0;
+  gap: 2px;
+}
+
+.quick-helper .pos-helper {
+  padding: 4px 0 0;
+  gap: 8px;
+}
+
+/* 说明文字：不要底色块（一大片灰底最"花眼睛"），只要小字 */
+.quick-helper .pos-hint,
+.quick-helper .flex-helper-hint-row,
+.quick-helper .pos-static-note,
+.quick-helper .pos-clamp-note,
+.quick-helper .pos-rel-note {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--text-3, #94a3b8);
+}
+
+/* sticky 的两种状态提示保留"一条竖线 + 小字"，不放底色块 */
+.quick-helper .pos-sticky-warn,
+.quick-helper .pos-sticky-ok {
+  background: transparent;
+  border: none;
+  border-left: 2px solid currentColor;
+  border-radius: 0;
+  padding: 1px 0 1px 8px;
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+
+/* 分组内的"预设格子"（网格预设等）：只留描边，不填底色 */
+.quick-helper .grid-preset-btn,
+.quick-helper .flex-mini-btn,
+.quick-helper .seg-btn {
+  background: var(--bg-panel, #fff);
+}
+
+.quick-helper .grid-preset-btn.active,
+.quick-helper .flex-mini-btn.active,
+.quick-helper .seg-btn.active {
+  background: var(--hover-accent, #f0f7ff);
+  border-color: var(--accent, #1e88e5);
+  color: var(--accent, #1e88e5);
+}
+
+/* ── 11. 定位助手：四边解锁 + 四角预设（v0.4.6） ──────────────────────────
    一条边一行：前面是复选框（解锁才有资格拖 / 改数值），后面是数字框。
    锁着的边不画输入框，只写「未解锁」—— 因为那时候输入也没有意义（会被 auto 覆盖）。
    ------------------------------------------------------------------------ */

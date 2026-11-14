@@ -594,11 +594,21 @@ export function QuickHelper(props: Props) {
             {/* 四边解锁（v0.4.6）：勾上哪条边，才能拖/能改那条边的数值；最多一条 X + 一条 Y */}
             <div className={'pos-edges' + (['absolute', 'fixed', 'relative', 'sticky'].includes(eff.position ?? '') ? '' : ' is-disabled')}>
               {relLike ? (
-                <div className="pos-axis">
-                  <span className="pos-axis-label">偏移量</span>
-                  <NumberUnitInput elementId={elementId} schemaKey="left" unit="px" />
-                  <NumberUnitInput elementId={elementId} schemaKey="top" unit="px" />
-                </div>
+                posNow === 'sticky' ? (
+                  /* sticky 的 top/bottom 不是"偏移量"，而是**吸附距离**（滚动到离边多少就挂住）。
+                     用户反馈"设置粘不粘的属性和定位混在一起、看不懂"，所以这里换成人话标签。 */
+                  <div className="pos-line">
+                    <label className="pos-line-check"><span>吸附距离</span></label>
+                    <NumberUnitInput elementId={elementId} schemaKey="top" unit="px" />
+                    <NumberUnitInput elementId={elementId} schemaKey="bottom" unit="px" />
+                  </div>
+                ) : (
+                  <div className="pos-line">
+                    <label className="pos-line-check"><span>偏移量</span></label>
+                    <NumberUnitInput elementId={elementId} schemaKey="left" unit="px" />
+                    <NumberUnitInput elementId={elementId} schemaKey="top" unit="px" />
+                  </div>
+                )
               ) : (
                 <>
                   {OFFSET_SIDES.map((k) => {
@@ -743,10 +753,8 @@ export function QuickHelper(props: Props) {
             )}
 
             <div className="pos-hint">
-              居中生效需要元素有<strong>明确宽/高</strong>（或由内容撑开）。
-              <strong>fixed</strong> 定位在导出后相对<strong>浏览器视口</strong>，所以这里的居中是
-              百分比（<code>calc(50% - 一半)</code>）—— 只动一条边，换任何屏幕宽度都居中；
-              画布上的位置只是预览，实际以浏览器视口为准。
+              居中需要元素有<strong>明确宽/高</strong>。<strong>fixed</strong> 导出后相对浏览器视口 ——
+              画布上那个<strong>红色框</strong>就是它的参照面。
             </div>
           </div>
         )}
