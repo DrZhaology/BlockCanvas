@@ -125,17 +125,9 @@ export function applyAltDragMove(d: AltDragState, ev: PointerEvent, ctx: AltDrag
     if (d.mode !== 'font') ctx.setWallHints(d.walls);
     st.selectElement(d.id);
     st.beginStyleEdit(); // 单条撤销：整个拖动 = 一步 Ctrl+Z
-    /**
-     * v0.4.6（用户："Alt 还是会 4 边一起改 4 个属性值"）：
-     *
-     * **右侧定位助手是最高权限 —— 同时只能有两条偏移。**
-     * 老元素/旧逻辑可能留下 left+right+top+bottom 四值齐全，这种元素尺寸是被两边撑出来的
-     * （stretchX/stretchY），一拖就要"两边一起平移"，于是四值齐飞、还会被墙夹出错位。
-     *
-     * 这里在**真正开始拖的第一帧**把四值收成两值：
-     *   把当前尺寸写死成 width/height（视觉零变化），再把远侧那条（right/bottom）置 auto。
-     * 之后本趟拖动只写 left/top，和面板显示的两条完全一致。
-     */
+    /* v0.4.6：定位元素只允许两条偏移（面板最高权限）。
+       四值齐全的历史元素，拖第一帧就把多余那条收成 auto（先写死 width/height，视觉零变化）；
+       钉住的轴（两侧 0 + 外边距 auto）不收，否则一拖就不居中了。 */
     if (d.positioned) {
       const z0 = ctx.zoomRef.current || 1;
       const node0 = findNode(useScene.getState().scene.root, d.id);

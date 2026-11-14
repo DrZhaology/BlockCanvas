@@ -12,7 +12,8 @@ import { AltOverlays } from './canvas/AltOverlays';
 import { useAltDrag } from './canvas/useAltDrag';
 import { useMarquee } from './canvas/useMarquee';
 import { useStickyMarks } from './canvas/sticky';
-import { measureFixedViewport, applyFixedShift, hideFixedTemporarily, type FixedViewport } from '@lib/fixedViewport';
+import { useFixedFrame } from './canvas/useFixedFrame';
+import { useInlineSel } from './canvas/useInlineSel';
 
 // BlockCanvas · 画布（组装层）
 //
@@ -131,56 +132,21 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     return () => ro.disconnect();
   }, [zoom, canvasWidth]);
 
-  // ── 画布内「浏览器视口」（v0.4.6 · fixed 的参照面）────────────────────────
-  // 用户要的是"画布里也有一块像浏览器那样的视口，fixed 只能在里面动"，见 lib/fixedViewport.ts。
-  // 这里只负责三件事：① 滚动/尺寸变化时把视口矩形量出来（画红色框）② 把 fixed 元素钉在视口上
-  // ③ 缩放/改宽度期间临时藏掉 fixed 元素。
-  const [fixedFrame, setFixedFrame] = useState<FixedViewport | null>(null);
+  // 画布内「浏览器视口」（v0.4.6）：选中 fixed 元素时画红框 + 把 fixed 元素钉在视口上。
+  // 几何与语义在 lib/fixedViewport.ts，React 接线在 canvas/useFixedFrame.ts。
   const selectedIdForFrame = useScene((s) => s.scene.selectedId);
   const selectedPos = (() => {
     if (!selectedIdForFrame) return '';
     const n = findNode(root, selectedIdForFrame);
     if (!n) return '';
-    const eff = getEffectiveStyle(n, activeBreakpoint) as Record<string, string | undefined>;
-    return eff.position ?? '';
+    return (getEffectiveStyle(n, activeBreakpoint) as Record<string, string | undefined>).position ?? '';
   })();
-  const showFixedFrame = selectedPos === 'fixed';
-
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    let raf = 0;
-    const update = () => {
-      applyFixedShift(el);
-      if (!showFixedFrame) { setFixedFrame((cur) => (cur ? null : cur)); return; }
-      const vp = measureFixedViewport(el);
-      setFixedFrame((cur) => (
-        cur && vp && cur.left === vp.left && cur.top === vp.top && cur.right === vp.right && cur.bottom === vp.bottom
-          ? cur : vp
-      ));
-    };
-    update();
-    const onAny = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(update); };
-    window.addEventListener('scroll', onAny, true);
-    window.addEventListener('resize', onAny);
-    const wrap = el.closest('.canvas-wrap') as HTMLElement | null;
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onAny) : null;
-    if (ro && wrap) ro.observe(wrap);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('scroll', onAny, true);
-      window.removeEventListener('resize', onAny);
-      ro?.disconnect();
-    };
-  }, [showFixedFrame, zoom, canvasWidth, selectedIds, root, activeBreakpoint]);
-
-  // 缩放 / 改画布宽度时 fixed 元素暂时隐藏（用户："缩放、改宽度时显示了反麻烦"）
-  const firstZoomRef = useRef(true);
-  useEffect(() => {
-    if (firstZoomRef.current) { firstZoomRef.current = false; return; }
-    hideFixedTemporarily();
-  }, [zoom, canvasWidth]);
-
+  const fixedFrame = useFixedFrame({
+    canvasRef,
+    show: selectedPos === 'fixed',
+    zoom,
+    canvasWidth
+  });
   // 中键属性搜索 / 右键文字菜单 的浮层状态
   const [textMenu, setTextMenu] = useState<TextMenuPayload | null>(null);
   const [propSearch, setPropSearch] = useState<{ x: number; y: number } | null>(null);
@@ -212,38 +178,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
    * display:inline 的元素（span/a/strong…）跨行时，CSS outline 会围着**每个行盒**各画一个框，
    * 看起来像"选中了多个"。这里改成画一个并集大框（getBoundingClientRect 天然返回并集）。
    */
-  const [inlineSel, setInlineSel] = useState<Array<{ key: string; x: number; y: number; w: number; h: number }>>([]);
-  useEffect(() => {
-    if (selectedIds.length === 0) { setInlineSel([]); return; }
-    let alive = true;
-    const measure = () => {
-      if (!alive) return;
-      const out: Array<{ key: string; x: number; y: number; w: number; h: number }> = [];
-      for (const id of selectedIds) {
-        const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(id)}"]`);
-        if (!el) continue;
-        try {
-          if (getComputedStyle(el).display !== 'inline') continue;
-          const r = el.getBoundingClientRect();
-          if (r.width === 0 && r.height === 0) continue;
-          out.push({ key: id, x: r.left, y: r.top, w: r.width, h: r.height });
-        } catch { /* ignore */ }
-      }
-      setInlineSel(out);
-    };
-    measure();
-    // 类名样式（display 可能来自自动类规则）落地后再量一次
-    const raf = requestAnimationFrame(measure);
-    const onScrollOrResize = () => measure();
-    window.addEventListener('scroll', onScrollOrResize, true);
-    window.addEventListener('resize', onScrollOrResize);
-    return () => {
-      alive = false;
-      cancelAnimationFrame(raf);
-      window.removeEventListener('scroll', onScrollOrResize, true);
-      window.removeEventListener('resize', onScrollOrResize);
-    };
-  }, [selectedIds, root, zoom, canvasWidth]);
+  // 行内选中元素的合并外框（实现见 canvas/useInlineSel.ts）
+  const inlineSel = useInlineSel(selectedIds, { root, zoom, canvasWidth });
 
   // 松开 Alt / 组件卸载 → 清掉 Alt 悬停高亮与光标标记
   useEffect(() => {

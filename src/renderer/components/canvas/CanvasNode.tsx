@@ -364,8 +364,7 @@ export const CanvasNode = React.memo(function CanvasNode(props: CanvasNodeProps)
   const commonProps = {
     'data-bc-id': node.id,
     'data-bc-locked': node.locked ? '1' : '0',
-    // v0.4.6：fixed 元素钉在「画布内浏览器视口」上（见 lib/fixedViewport.ts）。
-    // 标记挂在这里，CSS 用 translate 抵消滚动位移，缩放/改宽度时整体隐藏。
+    // v0.4.6：fixed 元素钉在「画布内浏览器视口」上（见 lib/fixedViewport.ts）
     'data-bc-fixed': (getEffectiveStyle(node, activeBreakpoint) as Record<string, string | undefined>).position === 'fixed'
       ? '1' : undefined,
     // 选中高亮（v0.4.4）：用 data 属性 + CSS 画，不再写内联 outline ——

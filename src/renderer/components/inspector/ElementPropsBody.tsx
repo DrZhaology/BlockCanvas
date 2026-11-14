@@ -286,7 +286,6 @@ export function ElementPropsBody(props: { selected: SceneElement; justAddedKey: 
           if (attempt < 6) window.setTimeout(() => scrollToRow(attempt + 1), 90);
           return;
         }
-        // 右侧是嵌套滚动：`.tab-body` 与 `.panel` 都可能滚，真正能滚的是"内容超出"的那一层
         const findScroller = (start: HTMLElement | null): HTMLElement | null => {
           let cur = start?.parentElement ?? null;
           while (cur) {
