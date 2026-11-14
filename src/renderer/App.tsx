@@ -14,6 +14,7 @@ import { ProjectTabBar } from '@comp/ProjectTabBar';
 import { AboutModal } from '@comp/About';
 import { HelpCenter, type DocKey } from '@comp/HelpCenter';
 import { ShortcutsModal } from '@comp/ShortcutsModal';
+import { PositionSwitchHost } from '@lib/posSwitch';
 import { useScene, findNode } from '@store/sceneStore';
 import { useTabStore, isSnapshotTab } from '@store/tabStore';
 import { useUpdateBusy } from '@store/updateStore';
@@ -774,6 +775,8 @@ export default function App() {
       )}
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
       <ShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      {/* v0.4.6：切换定位方式前问"要不要清外边距"（全程序唯一通道） */}
+      <PositionSwitchHost />
       <UpdateBusyOverlay />
       <AppToasts />
       {/* v0.4.5：打开工程 / 恢复会话期间的加载页（在主界面之后挂载 → 盖在最上层） */}

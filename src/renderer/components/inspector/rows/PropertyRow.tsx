@@ -27,6 +27,7 @@ import { OpacityInput } from '../../OpacityInput';
 import { LineHeightInput } from '../../LineHeightInput';
 import { BackgroundInput } from '../../BackgroundInput';
 import { animateRemove } from '../shared';
+import { askPositionSwitch, marginSummaryOf } from '@lib/posSwitch';
 
 export function PropertyRow(props: {
   schemaItem: typeof SCHEMA[number];
@@ -75,6 +76,33 @@ export function PropertyRow(props: {
   useEffect(() => {
     setLocalValue(storeValue);
   }, [storeValue]);
+
+  /**
+   * 下拉型属性的提交（v0.4.6：position 走统一的外边距确认）。
+   *
+   * 用户原话：「发现有些地方做了，但是有些时候改的时候不会有提示，比如卡片 position 直接改，
+   * 这次做统一。」所以这里和快捷助手走**同一个**全屏模态（lib/posSwitch），
+   * 三选项：先不设置定位 / 保留外边距并切换 / 清除外边距并切换（绿色推荐）。
+   */
+  const commitSelect = async (v: string) => {
+    if (schemaItem.key === 'position' && v && v !== 'static') {
+      const ms = marginSummaryOf(effStyle as Record<string, string | undefined>);
+      if (ms.dirty) {
+        const choice = await askPositionSwitch({ next: v, margins: ms.text, elementTag: String(elementType) });
+        if (choice === 'cancel') { setLocalValue(storeValue); return; }
+        beginStyleEdit();
+        updateStyle(elementId, {
+          position: v,
+          ...(choice === 'clear'
+            ? { marginTop: '0px', marginRight: '0px', marginBottom: '0px', marginLeft: '0px' }
+            : {})
+        } as never);
+        endStyleEdit();
+        return;
+      }
+    }
+    updateStyle(elementId, { [schemaItem.key]: v } as never);
+  };
 
   const help = schemaItem.help ? (
     <HelpButton
@@ -204,7 +232,7 @@ export function PropertyRow(props: {
         {schemaItem.input === 'select' && schemaItem.options && (
           <select
             value={storeValue}
-            onChange={(e) => updateStyle(elementId, { [schemaItem.key]: e.target.value } as any)}
+            onChange={(e) => { void commitSelect(e.target.value); }}
           >
             <option value="">— 未指定 —</option>
             {schemaItem.options.map((o) => (

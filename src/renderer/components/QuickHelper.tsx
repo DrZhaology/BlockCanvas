@@ -8,6 +8,7 @@ import { Collapse } from './Collapse';
 import { Icon } from './Icon';
 import { useEffect, useRef, useState } from 'react';
 import { usePersistedBool } from '@lib/usePersisted';
+import { askPositionSwitch } from '@lib/posSwitch';
 import { readSticky } from './canvas/sticky';
 import {
   isGradient,
@@ -116,57 +117,91 @@ export function QuickHelper(props: Props) {
   const marginDirty = marginVals.some((v) => !!v && v !== '0' && v !== '0px' && v !== 'auto');
   const marginIrregular = new Set(marginVals.map((v) => v || '0px')).size > 1;
 
-  // —— 定位：锚定哪两边 + 切换定位时的 margin 提示（v0.4.5 第十六批）——
+  // —— 定位：四边解锁（v0.4.6 · 用户定的模型）——
+  //
+  // 用户原话：
+  //   「定位助手 fixed 的时候，单独显示 top right left bottom 四个元素，前面是选择框，
+  //     没有选中的话，Alt 不能拖动，也不能直接改数值。点击后这个属性就解锁了……
+  //     4 个属性可以单独解锁，但是最多只能解锁两个，并且只能解锁对角组合：
+  //     left top / left bottom / right top / right bottom。Alt 能在视口内自由拖动的时候，
+  //     用两边的定位最稳。用户不懂怎么选就做四个角的预选框：左上/左下/右上/右下。」
+  //
+  // 所以界面是：4 个带复选框的边 + 4 个角快捷按钮。规则只有一条——
+  // **最多一边 X + 一边 Y**（点同轴的另一个就是替换，不是叠加）。
+  const OFFSET_SIDES = ['top', 'right', 'bottom', 'left'] as const;
+  type Side = typeof OFFSET_SIDES[number];
   const posNow = (eff.position ?? 'static') as PosKind;
   const relLike = posNow === 'relative' || posNow === 'sticky';
   // v0.4.6（R6-17）：sticky 是否真的会吸附（没写 top/bottom 就永远不会）
   const stickyInfo = readSticky(eff as Record<string, string | undefined>);
-  /** 横向/纵向锚定边。relative/sticky 固定 left+top（偏移是相对自身原位的位移） */
-  const [anchorX, setAnchorX] = useState<'left' | 'right'>('left');
-  const [anchorY, setAnchorY] = useState<'top' | 'bottom'>('top');
-  /** 切换定位方式时，若原 margin 不干净 → 先问一句要不要清掉（用户反复要求） */
-  const [posSwitchAsk, setPosSwitchAsk] = useState<{ next: PosKind } | null>(null);
-
+  const [unlocked, setUnlocked] = useState<Side[]>(() => {
+    const on = OFFSET_SIDES.filter((k) => !!eff[k] && eff[k] !== 'auto');
+    return on.length ? on.slice(0, 2) : ['left', 'top'];
+  });
   useEffect(() => {
     if (relLike) return;
-    // 跟随元素当前实际写法（用户手改过 left/right 时界面要跟着走）
-    const hasL = !!eff.left && eff.left !== 'auto';
-    const hasR = !!eff.right && eff.right !== 'auto';
-    if (hasR && !hasL) setAnchorX('right');
-    else if (hasL && !hasR) setAnchorX('left');
-    const hasT = !!eff.top && eff.top !== 'auto';
-    const hasB = !!eff.bottom && eff.bottom !== 'auto';
-    if (hasB && !hasT) setAnchorY('bottom');
-    else if (hasT && !hasB) setAnchorY('top');
+    const on = OFFSET_SIDES.filter((k) => !!eff[k] && eff[k] !== 'auto');
+    if (on.length) setUnlocked(on.slice(0, 2));
   }, [relLike, eff.left, eff.right, eff.top, eff.bottom]);
+
+  /** 解锁/锁定一条边：同轴的另一条会被替换（保证"最多一边 X + 一边 Y"） */
+  const toggleSide = (k: Side) => {
+    const isX = k === 'left' || k === 'right';
+    const cur = unlocked.includes(k)
+      ? unlocked.filter((s) => s !== k)
+      : [...unlocked.filter((s) => (isX ? s !== 'left' && s !== 'right' : s !== 'top' && s !== 'bottom')), k];
+    setUnlocked(cur);
+    // 锁上的边写回 auto；解锁的边给个 0px 起点，用户马上能改
+    const patch: Record<string, string | undefined> = {};
+    for (const s of OFFSET_SIDES) {
+      if (cur.includes(s)) { if (!eff[s] || eff[s] === 'auto') patch[s] = '0px'; }
+      else if (eff[s] && eff[s] !== 'auto') patch[s] = 'auto';
+    }
+    if (Object.keys(patch).length) {
+      beginStyleEdit();
+      updateStyle(elementId, patch as never);
+      endStyleEdit();
+    }
+  };
+
+  /** 四角预设：一次把两边的解锁状态设好 */
+  const pickCorner = (x: 'left' | 'right', y: 'top' | 'bottom') => {
+    setUnlocked([x, y]);
+    const patch: Record<string, string | undefined> = {};
+    for (const s of OFFSET_SIDES) {
+      const on = s === x || s === y;
+      if (on) { if (!eff[s] || eff[s] === 'auto') patch[s] = '0px'; }
+      else if (eff[s] && eff[s] !== 'auto') patch[s] = 'auto';
+    }
+    beginStyleEdit();
+    updateStyle(elementId, patch as never);
+    endStyleEdit();
+  };
 
   /**
    * 真正写定位方式。
    *
-   * 两条用户反复提的规则：
-   *  ① **同一根轴只留一边**：写 left 就把 right 置成 auto（反之亦然）；
-   *     用户原话「不要同时给 top right bottom left 同时给数值，画布上就用两个」。
-   *  ② **切换定位时问一句要不要清 margin**：老 margin 会把元素"顶住"，
-   *     表现是"改了定位却拖不动/位置不对"。
+   * v0.4.6：**统一走 askPositionSwitch**（全屏模态，三选项，第三个绿色）——
+   * 以前只有快捷助手里有内联确认条，从 CSS 属性行的下拉直接改 position 就完全不提示，
+   * 用户的原话是"有些地方做了，有些时候改的时候不会有提示，这次做统一"。
    */
   const applyPosition = (next: PosKind, clearMargin: boolean) => {
     const patch: Record<string, string | undefined> = { position: next };
     if (next === 'static') {
       patch.left = 'auto'; patch.right = 'auto'; patch.top = 'auto'; patch.bottom = 'auto';
     } else if (next === 'relative' || next === 'sticky') {
-      // 相对定位只用 left/top（另一侧清成 auto，避免 over-constrained 后失效）
+      // 相对/粘性：偏移是"相对自身原位的位移"，固定用 left+top（另一边清成 auto）
       patch.right = 'auto';
       patch.bottom = 'auto';
       if (eff.left === undefined || eff.left === 'auto') patch.left = '0px';
       if (eff.top === undefined || eff.top === 'auto') patch.top = '0px';
     } else {
-      // absolute / fixed：按当前锚定只留两边
-      const xs = anchorX;
-      const ys = anchorY;
-      patch[xs === 'left' ? 'right' : 'left'] = 'auto';
-      patch[ys === 'top' ? 'bottom' : 'top'] = 'auto';
-      if (eff[xs] === undefined || eff[xs] === 'auto') patch[xs] = '0px';
-      if (eff[ys] === undefined || eff[ys] === 'auto') patch[ys] = '0px';
+      // absolute / fixed：按当前解锁的组合只留两边，其余置 auto
+      for (const s of OFFSET_SIDES) {
+        const on = unlocked.includes(s);
+        if (!on) patch[s] = 'auto';
+        else if (eff[s] === undefined || eff[s] === 'auto') patch[s] = '0px';
+      }
     }
     if (clearMargin) {
       patch.marginTop = '0px'; patch.marginRight = '0px';
@@ -176,14 +211,19 @@ export function QuickHelper(props: Props) {
     updateStyle(elementId, patch as never);
     endStyleEdit();
     setMarginConfirm(null);
-    setPosSwitchAsk(null);
   };
 
-  /** 切换定位方式：margin 不干净就先确认 */
-  const changePosition = (next: PosKind) => {
+  /** 切换定位方式：margin 不干净 → 先全屏确认（三选项，第三个绿色推荐） */
+  const changePosition = async (next: PosKind) => {
     if (next === posNow) return;
     if ((marginDirty || marginIrregular) && next !== 'static') {
-      setPosSwitchAsk({ next });
+      const choice = await askPositionSwitch({
+        next: next === 'fixed' ? '固定定位 (fixed)' : next === 'absolute' ? '绝对定位 (absolute)' : next,
+        margins: marginSummary,
+        elementTag: String(elementType)
+      });
+      if (choice === 'cancel') return;
+      applyPosition(next, choice === 'clear');
       return;
     }
     applyPosition(next, false);
@@ -551,41 +591,58 @@ export function QuickHelper(props: Props) {
               所以界面上**只暴露两根轴各一边**，另一边自动写 `auto`（而不是留个空框让人误会）。
               relative / sticky 的偏移是"相对自身原位"的位移，两边同写没有意义，固定用 left/top。
             */}
+            {/* 四边解锁（v0.4.6）：勾上哪条边，才能拖/能改那条边的数值；最多一条 X + 一条 Y */}
             <div className={'pos-edges' + (['absolute', 'fixed', 'relative', 'sticky'].includes(eff.position ?? '') ? '' : ' is-disabled')}>
-              <div className="pos-axis">
-                <span className="pos-axis-label">横向锚定</span>
-                <div className="pos-axis-seg">
-                  {([['left', '左 left'], ['right', '右 right']] as const).map(([k, label]) => (
-                    <button
-                      key={k}
-                      className={'pos-axis-btn' + (anchorX === k ? ' is-on' : '')}
-                      disabled={relLike}
-                      title={relLike
-                        ? '相对定位的偏移是相对自身原位的位移，横向固定用 left'
-                        : `横向以 ${k} 为基准（另一边自动置为 auto）`}
-                      onClick={() => setAnchorX(k)}
-                    >{label}</button>
-                  ))}
+              {relLike ? (
+                <div className="pos-axis">
+                  <span className="pos-axis-label">偏移量</span>
+                  <NumberUnitInput elementId={elementId} schemaKey="left" unit="px" />
+                  <NumberUnitInput elementId={elementId} schemaKey="top" unit="px" />
                 </div>
-                <NumberUnitInput elementId={elementId} schemaKey={anchorX} unit="px" />
-              </div>
-              <div className="pos-axis">
-                <span className="pos-axis-label">纵向锚定</span>
-                <div className="pos-axis-seg">
-                  {([['top', '上 top'], ['bottom', '下 bottom']] as const).map(([k, label]) => (
-                    <button
-                      key={k}
-                      className={'pos-axis-btn' + (anchorY === k ? ' is-on' : '')}
-                      disabled={relLike}
-                      title={relLike
-                        ? '相对定位的偏移是相对自身原位的位移，纵向固定用 top'
-                        : `纵向以 ${k} 为基准（另一边自动置为 auto）`}
-                      onClick={() => setAnchorY(k)}
-                    >{label}</button>
-                  ))}
-                </div>
-                <NumberUnitInput elementId={elementId} schemaKey={anchorY} unit="px" />
-              </div>
+              ) : (
+                <>
+                  {OFFSET_SIDES.map((k) => {
+                    const on = unlocked.includes(k);
+                    const label = k === 'top' ? '上 top' : k === 'right' ? '右 right' : k === 'bottom' ? '下 bottom' : '左 left';
+                    return (
+                      <div key={k} className={'pos-line' + (on ? ' is-on' : '')}>
+                        <label className="pos-line-check">
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            disabled={!['absolute', 'fixed'].includes(eff.position ?? '')}
+                            onChange={() => toggleSide(k)}
+                          />
+                          <span>{label}</span>
+                        </label>
+                        {on
+                          ? <NumberUnitInput elementId={elementId} schemaKey={k} unit="px" />
+                          : <span className="pos-line-locked">未解锁</span>}
+                      </div>
+                    );
+                  })}
+                  {/* 四角预设：不懂"解锁哪两条"的话，点一下角就够了 */}
+                  <div className="pos-corner-row">
+                    <span className="pos-corner-label">对齐到角</span>
+                    <div className="pos-corner-btns">
+                      {([
+                        ['left', 'top', '左上'],
+                        ['right', 'top', '右上'],
+                        ['left', 'bottom', '左下'],
+                        ['right', 'bottom', '右下']
+                      ] as const).map(([x, y, text]) => (
+                        <button
+                          key={text}
+                          className={'pos-corner-btn' + (unlocked.includes(x) && unlocked.includes(y) ? ' is-on' : '')}
+                          disabled={!['absolute', 'fixed'].includes(eff.position ?? '')}
+                          onClick={() => pickCorner(x, y)}
+                          title={`解锁 ${x === 'left' ? '左' : '右'} + ${y === 'top' ? '上' : '下'}（对角两边最稳）`}
+                        >{text}</button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
             {/* relative / sticky：把"原文档流位置"写清楚（用户反馈这行字跑到框外面了） */}
             {relLike && (
@@ -661,27 +718,8 @@ export function QuickHelper(props: Props) {
               ><Icon name="undo" size={13} /> 清除定位</button>
             </div>
 
-            {/* 切换定位方式时的 margin 确认（用户反复要求："切换定位后要提示选择要不要清除 margin"） */}
-            {posSwitchAsk && (
-              <div className="pos-confirm">
-                <div className="pos-confirm-text">
-                  这个元素已有<strong>非零或不对称</strong>的外边距（{marginSummary}）。
-                  定位元素靠 left/top 之类的偏移排位置，原来的 margin 会把它「顶住」——
-                  常见表现是"改了定位却拖不动 / 位置差一截"。
-                </div>
-                <div className="pos-confirm-actions">
-                  <button className="pos-confirm-btn is-primary" onClick={() => applyPosition(posSwitchAsk.next, true)}>
-                    清掉 margin 再切换
-                  </button>
-                  <button className="pos-confirm-btn" onClick={() => applyPosition(posSwitchAsk.next, false)}>
-                    保留原 margin
-                  </button>
-                  <button className="pos-confirm-btn is-ghost" onClick={() => setPosSwitchAsk(null)}>
-                    取消
-                  </button>
-                </div>
-              </div>
-            )}
+            {/* 切换定位方式的 margin 确认：v0.4.6 起统一走全屏模态（lib/posSwitch.tsx），
+                不再在这里写内联确认条 —— 否则"有些地方提示、有些地方不提示"。 */}
 
             {/* 内联确认条（不是全屏弹窗）：原 margin 不对称/非零时，先问一句再清零 */}
             {marginConfirm && (

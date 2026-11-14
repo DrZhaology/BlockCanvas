@@ -326,6 +326,190 @@ html[data-bc-dark] .bc-osb-thumb.is-dragging {
   background: rgba(210, 220, 235, 0.52);
 }
 
+/* ── 9. 定位助手：四边解锁 + 四角预设（v0.4.6） ──────────────────────────
+   一条边一行：前面是复选框（解锁才有资格拖 / 改数值），后面是数字框。
+   锁着的边不画输入框，只写「未解锁」—— 因为那时候输入也没有意义（会被 auto 覆盖）。
+   ------------------------------------------------------------------------ */
+.pos-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.pos-line + .pos-line {
+  margin-top: 2px;
+}
+
+.pos-line-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 96px;
+  flex: none;
+  font-size: 12px;
+  color: var(--text-2, #475569);
+  cursor: pointer;
+  user-select: none;
+}
+
+.pos-line-check input {
+  margin: 0;
+  accent-color: var(--accent, #1e88e5);
+  cursor: pointer;
+}
+
+.pos-line.is-on .pos-line-check { color: var(--text, #1f1f1f); }
+
+.pos-line-locked {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  padding-left: 2px;
+  font-size: 11.5px;
+  color: var(--text-3, #94a3b8);
+}
+
+.pos-corner-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-soft, #f0f0f0);
+}
+
+.pos-corner-label {
+  width: 96px;
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-3, #94a3b8);
+}
+
+.pos-corner-btns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pos-corner-btn {
+  height: 26px;
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: var(--r-2);
+  background: var(--bg-panel, #fff);
+  color: var(--text-2, #475569);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color 110ms ease-out, color 110ms ease-out, background 110ms ease-out;
+}
+
+.pos-corner-btn:hover:not(:disabled) {
+  border-color: var(--accent, #1e88e5);
+  color: var(--accent, #1e88e5);
+}
+
+.pos-corner-btn.is-on {
+  border-color: var(--accent, #1e88e5);
+  background: var(--hover-accent, #f0f7ff);
+  color: var(--accent, #1e88e5);
+}
+
+.pos-corner-btn:disabled { opacity: 0.42; cursor: default; }
+
+/* ── 8. 切换定位方式的「清外边距」模态（v0.4.6） ──────────────────────────
+   用户要求：全屏模态、说清为什么、三个选项、第三个绿色（推荐）。
+   它是"用户必须做决定"的模态：点遮罩不关（防误触），Esc = 先不设置定位。
+   ------------------------------------------------------------------------ */
+.bc-posswitch-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 900);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 20, 30, 0.5);
+  backdrop-filter: blur(2px);
+  animation: bcScrimIn 130ms ease-out;
+}
+
+.bc-posswitch-card {
+  width: min(480px, 92vw);
+  padding: 18px 20px 16px;
+  border-radius: var(--r-4);
+  background: var(--bg-panel, #fff);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.26);
+  animation: bcGhostIn 170ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.bc-posswitch-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text, #1f1f1f);
+  margin-bottom: 10px;
+}
+
+.bc-posswitch-body { font-size: 12.5px; line-height: 1.75; color: var(--text-2, #475569); }
+.bc-posswitch-body p { margin: 0 0 8px; }
+.bc-posswitch-body code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--surface-sunken, #f1f5f9);
+  font-family: Consolas, monospace;
+  font-size: 11.5px;
+}
+.bc-posswitch-tip {
+  padding: 8px 10px;
+  border-radius: var(--r-2);
+  background: var(--hover-accent, #f0f7ff);
+  color: var(--text-2, #475569);
+}
+
+.bc-posswitch-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.bc-posswitch-btn {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: var(--r-2);
+  background: var(--bg-panel, #fff);
+  color: var(--text, #1f1f1f);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+
+.bc-posswitch-btn:hover { border-color: var(--accent, #1e88e5); color: var(--accent, #1e88e5); }
+
+.bc-posswitch-btn.is-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted, #707070);
+}
+.bc-posswitch-btn.is-ghost:hover { background: var(--hover, #f0f0f0); color: var(--text, #1f1f1f); }
+
+/* 推荐项：绿色实心（用户："最后的第三个按钮用绿色"） */
+.bc-posswitch-btn.is-recommend {
+  border-color: #16a34a;
+  background: #16a34a;
+  color: #fff;
+  font-weight: 600;
+}
+.bc-posswitch-btn.is-recommend:hover {
+  border-color: #15803d;
+  background: #15803d;
+  color: #fff;
+}
+
 /* ── 7. 幽灵属性卡片（v0.4.6） ────────────────────────────────────────────
    「显示到下方 CSS 属性」关掉后，中键搜到的属性临时放这里改。
    三条：颜色必须和正式卡片不一样（紫）、没有关闭按钮、里面不写说明文字。

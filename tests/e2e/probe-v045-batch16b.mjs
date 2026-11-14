@@ -93,11 +93,16 @@ async function main() {
   const inspectorCode = stripComments(inspector);
   const layerCode = stripComments(layer);
   const quickCode = stripComments(readFileSync(resolve(ROOT, 'src/renderer/components/QuickHelper.tsx'), 'utf8'));
-  check('定位偏移界面只暴露"两根轴各一边"（不再四边都给）',
-    /pos-axis/.test(css27) && /\.pos-axis-seg/.test(css27)
-    && /anchorX/.test(quickCode) && /setAnchorX/.test(quickCode), 'ok');
-  check('切换定位方式时会先问"要不要清 margin"',
-    /posSwitchAsk/.test(quickCode) && /清掉 margin 再切换/.test(quickCode), 'ok');
+  check('定位偏移界面改成"四边复选框解锁"（最多一条 X + 一条 Y）',
+    /OFFSET_SIDES/.test(quickCode) && /toggleSide/.test(quickCode) && /pickCorner/.test(quickCode)
+    && /pos-line-check/.test(quickCode), 'ok');
+  check('切换定位方式统一走全屏模态（三选项，第三个绿色推荐）',
+    /askPositionSwitch/.test(quickCode)
+    && /is-recommend/.test(readFileSync(resolve(ROOT, 'src/renderer/styles/34-v046-visual.css'), 'utf8'))
+    && /清除外边距并切换/.test(readFileSync(resolve(ROOT, 'src/renderer/lib/posSwitch.tsx'), 'utf8')), 'ok');
+  check('CSS 属性行里直接改 position 也走同一个模态（做统一）',
+    /askPositionSwitch/.test(stripComments(readFileSync(resolve(ROOT, 'src/renderer/components/inspector/rows/PropertyRow.tsx'), 'utf8'))),
+    'ok');
   check('绝对/固定定位的负偏移被钳到 0（relative/sticky 不受影响）',
     /const clampOffsets = posAfter === 'absolute' \|\| posAfter === 'fixed'/.test(
       readFileSync(resolve(ROOT, 'src/renderer/store/sceneStore.ts'), 'utf8')
