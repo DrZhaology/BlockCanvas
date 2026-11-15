@@ -103,13 +103,40 @@ const main = async () => {
   /* ⑥ 竖屏：画布铺满 + 两个小把手 */
   await app.evaluate(({ BrowserWindow }) => {
     const w = BrowserWindow.getAllWindows()[0];
-    w.setMinimumSize(320, 400); w.setResizable(true); w.setSize(412, 860);
+    w.setMinimumSize(320, 400); w.setResizable(true);
+    // ⚠ 先取消最大化：窗口处于最大化状态时 setSize 会被忽略（实测偶发"竖屏那张图其实是宽屏"）
+    if (w.isMaximized()) w.unmaximize();
+    w.setSize(412, 860); w.center();
   });
   await sleep(900);
   const narrow = await win.evaluate(() => {
     const g = (s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { y: Math.round(r.top), h: Math.round(r.height), w: Math.round(r.width) }; };
     const b = document.querySelector('.shell-drawer-btn.is-left');
-    return { workspace: g('.workspace'), wrap: g('.canvas-wrap'), btn: b ? g('.shell-drawer-btn.is-left') : null, tabs: document.querySelectorAll('.tab-add-btn').length };
+    return { workspace: g('.workspace'), wrap: g('.canvas-wrap'), btn: b ? g('.shell-drawer-btn.is-left') : null, tabs: document.querySelectorAll('.tab-add-btn').length,
+      // 诊断：画布右侧那块红色实心区域到底是谁
+      // 诊断：第二条操作栏按钮的**视觉顺序**（按 x 排，DOM 顺序会被 flex order 打乱）
+      bar2: [...document.querySelectorAll('.pt-bar2 .toolbar button')]
+        .map((b) => ({
+          t: (b.getAttribute('title') || b.textContent || '').trim().slice(0, 8),
+          x: Math.round(b.getBoundingClientRect().left)
+        }))
+        .sort((a, b) => a.x - b.x)
+        .map((b) => `${b.x}:${b.t}`),
+      frame: (() => {
+        const f = document.querySelector('.canvas-fixed-frame');
+        if (!f) return null;
+        const r = f.getBoundingClientRect();
+        const cs = getComputedStyle(f);
+        return { w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.left), y: Math.round(r.top), bg: cs.backgroundColor, border: cs.borderTopWidth, z: cs.zIndex };
+      })(),
+      wide: [...document.querySelectorAll('.app *')].filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.height > 600 && r.left > 320;
+      }).slice(0, 6).map((el) => {
+        const r = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        return { cls: String(el.className || el.tagName).slice(0, 28), w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.left), bg: cs.backgroundColor };
+      }) };
   });
   console.log('⑥ 竖屏几何', JSON.stringify(narrow));
   await shot('05-narrow-closed');

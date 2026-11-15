@@ -145,8 +145,10 @@ export function PortraitBar1(props: PortraitBar1Props) {
             onClick={() => useScene.getState().undo()}
           >
             <svg width="24" height="24" viewBox="0 0 22 22" aria-hidden="true">
-              <path d="M8 6.5 4 10.5l4 4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M4 10.5h9.5a4.5 4.5 0 0 1 0 9H10" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              <g transform="translate(0,-1.6)">
+                <path d="M8 6.5 4 10.5l4 4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M4 10.5h9.5a4.5 4.5 0 0 1 0 9H10" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              </g>
             </svg>
           </button>
           <button
@@ -155,8 +157,10 @@ export function PortraitBar1(props: PortraitBar1Props) {
             onClick={() => useScene.getState().redo()}
           >
             <svg width="24" height="24" viewBox="0 0 22 22" aria-hidden="true">
-              <path d="M14 6.5l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M18 10.5H8.5a4.5 4.5 0 0 0 0 9H12" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              <g transform="translate(0,-1.6)">
+                <path d="M14 6.5l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M18 10.5H8.5a4.5 4.5 0 0 0 0 9H12" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              </g>
             </svg>
           </button>
         </>
@@ -268,7 +272,7 @@ export function PortraitBar2({ zoom, setZoom, canvasWidth, setCanvasWidth }: {
           aria-pressed={altMode}
           title={altMode ? 'Alt 模式已开启：画布按电脑端方式操作' : '开启 Alt 模式（等同于一直按住 Alt）'}
           onClick={() => setAltMode(!altMode)}
-        >Alt</button>
+        >Alt 模式</button>
         <div className="pt-bar2-grip" aria-hidden="true" />
       </div>
       <div className="pt-bar2-inner">
@@ -277,6 +281,7 @@ export function PortraitBar2({ zoom, setZoom, canvasWidth, setCanvasWidth }: {
           onCanvasWidthChange={setCanvasWidth}
           zoom={zoom}
           onZoomChange={setZoom}
+          portrait
         />
       </div>
     </div>

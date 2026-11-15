@@ -42,6 +42,25 @@ export function measureFixedViewport(canvasEl: HTMLElement | null): FixedViewpor
   let bottom = Math.min(wr.bottom, window.innerHeight);
 
   /**
+   * v0.4.6 竖屏（data-shell='stack'）：**不要**和面板求交。
+   *
+   * 竖屏下左右面板是 `position: absolute` 的覆盖层、并且靠 translateX 收到屏幕外，
+   * 它们的 getBoundingClientRect 落在画布外面（实测 right-pane-wrap x=420、w=379）。
+   * 拿这些矩形去和视口带求交，会把红框收成一条 48px 的窄条
+   * （截图里画布右侧那块莫名其妙的红色竖条就是它）。
+   *
+   * 而竖屏根本不需要这段逻辑：
+   *   · 顶部没有任何栏（标题栏与多标签页条都不渲染）；
+   *   · 底部两条操作栏是 `.app` 的**普通 flex 子项**，不在 `.canvas-wrap` 里，
+   *     wrap 的矩形本身就是"真正能看见的那块"。
+   * 所以直接用 wrap 的矩形。
+   */
+  const shell = document.querySelector('.app')?.getAttribute('data-shell');
+  if (shell === 'stack') {
+    return { left, right, top, bottom };
+  }
+
+  /**
    * ⚠ 用户反馈（实测图）："底部的边界墙不太对，bottom 的时候就会跑到最底部菜单下面，
    * 注意底部菜单上面算作浏览器视口；定位到左下/右下角时有部分跑到视口外。"
    *

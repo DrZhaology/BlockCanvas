@@ -1,7 +1,7 @@
 // v0.4.6 · 竖屏底部两条操作栏契约（第二条的展开/折叠 + 入口菜单层级）
 //
 // 用户在意的四件事，逐条量：
-//   ① 折叠态：第二条栏高度 ≤70，里面工具栏是**单行**（不换行）
+//   ① 折叠态：第二条栏高度 ≤72，里面工具栏是**单行**（不换行）
 //   ② 长按 380ms 后向上滑 ≥24px → 展开（栏变高、按钮换行铺开）
 //   ③ 展开后向下滑 ≥24px → 收回去（高度回到折叠态）
 //   ④ 入口「三」的菜单：fixed 定位、整块在第二条栏**上方**、点旁边会关
@@ -68,10 +68,10 @@ async function main() {
   });
 
   const collapsed = await m();
-  check('① 折叠态：第二条栏高度 ≤70（不被工具栏 padding 撑高）',
-    collapsed.bar2H > 0 && collapsed.bar2H <= 70, `bar2=${collapsed.bar2H}`);
-  check('① 折叠态：工具栏是单行（主按钮区高度 ≤ 46）',
-    collapsed.mainH > 0 && collapsed.mainH <= 46, `mainH=${collapsed.mainH} toolbar=${collapsed.toolbarH}`);
+  check('① 折叠态：第二条栏高度 ≤72（Alt 开关抬高了一行抓手）',
+    collapsed.bar2H > 0 && collapsed.bar2H <= 72, `bar2=${collapsed.bar2H}`);
+  check('① 折叠态：工具栏是单行（主按钮区高度 ≤ 52）',
+    collapsed.mainH > 0 && collapsed.mainH <= 52, `mainH=${collapsed.mainH} toolbar=${collapsed.toolbarH}`);
 
   /** 在第二条栏上做一次"长按 + 纵向滑动" */
   const holdSwipe = async (dy) => {
@@ -106,7 +106,7 @@ async function main() {
   await holdSwipe(70);
   const back = await m();
   check('③ 展开后下滑 → 收回折叠态',
-    back.expanded === false && back.bar2H <= 70,
+    back.expanded === false && back.bar2H <= 72,
     `expanded=${back.expanded} bar2=${back.bar2H}`);
 
   // ④ 入口菜单：层级与位置

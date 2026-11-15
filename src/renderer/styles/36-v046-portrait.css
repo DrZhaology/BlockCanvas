@@ -41,15 +41,24 @@
    这里把它往下多伸一条栏的高度，正好压住第二条、在第一条之前停下
    （第一条必须始终可点，否则抽屉一开就没法关）。
    用 --pt-bar2-h 而不是写死 58px：展开态那条栏会变高，后面调这里就行。 */
-.app[data-shell='stack'] { --pt-bar2-h: 58px; }
+.app[data-shell='stack'] { --pt-bar2-h: 72px; }
 .app[data-shell='stack'] .elem-pane-wrap,
 .app[data-shell='stack'] .right-pane-wrap {
-  bottom: calc(-1 * var(--pt-bar2-h, 58px));
+  bottom: calc(-1 * var(--pt-bar2-h, 72px));
+}
+/* ⚠ 光把 bottom 撑下来不够：第二条栏里装着 <Toolbar>，而 28 号分片给了
+   `.app .toolbar { position: relative; z-index: var(--z-toolbar) }`（560）。
+   560 > 面板的 58 → **面板背景盖住了栏体，栏里的按钮却仍然浮在面板之上**，
+   用户看到的就是"这个菜单还会飘在左右两根面板的上面"。
+   竖屏里工具栏不需要自己的层叠层级（它的下拉都是 Portal 到 body 的），归零。 */
+.app[data-shell='stack'] .pt-bar2 .toolbar {
+  position: static;
+  z-index: auto;
 }
 /* 遮罩同样盖住第二条栏，否则抽屉开着时点第二条栏不会关（观感像"点外面没反应"） */
 .app[data-shell='stack'] .shell-drawer-scrim {
   top: 0;
-  bottom: calc(-1 * var(--pt-bar2-h, 58px));
+  bottom: calc(-1 * var(--pt-bar2-h, 72px));
 }
 
 /* ── 通用：栏体 ─────────────────────────────────────────────────────────── */
@@ -88,6 +97,9 @@
   background: transparent;
   color: var(--text);
   cursor: pointer;
+  /* ⚠ line-height 必须归零：去掉文字标签后行高会留一行空白，
+     把撤销/重做两个图标整体往下推 4px（用户截图里就是这两个比别的低）*/
+  line-height: 0;
   transition: background var(--dur-fast, 120ms) var(--ease-out, ease),
               transform var(--dur-fast, 120ms) var(--ease-out, ease);
 }
@@ -168,53 +180,60 @@
   touch-action: pan-x;
   transition: height var(--dur-mid, 200ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
 }
-/* 抓握提示条：告诉用户"这条能长按拖动"，左端再挂一个 Alt 模式开关 */
+/* 抓握提示条：告诉用户"这条能长按拖动"，左端再挂一个 Alt 模式开关。
+   ⚠ 抓手条不能写 width:100%：这一行还有 Alt 按钮 + padding + gap，
+   100% 会把它顶出右边界 35px（probe-shell-widths 的"没有元素越过右边界"报了 4 档）。 */
 .pt-bar2-head {
   width: 100%;
-  height: 18px;
+  height: 28px;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 0 8px;
   flex: 0 0 auto;
+  box-sizing: border-box;
+  overflow: hidden;
 }
-/* Alt 开关：用户反馈"按钮那么小，手势完全用不了" ——
-   最小 44×44 热区（视觉上仍是一条小胶囊，用负 margin + padding 撑开命中区）。 */
+.pt-bar2-grip {
+  flex: 1 1 auto;
+  min-width: 24px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Alt 开关：用户两轮都说"这个按钮这么小给谁点" ——
+   现在它是 26px 高的胶囊 + 完整文字「Alt 模式」，命中区再外扩到 44px。 */
 .pt-alt-btn {
   position: relative;
-  height: 18px;
-  padding: 0 10px;
-  border-radius: 9px;
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 13px;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.3px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
   line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
 }
-/* 命中区外扩到 44×44（视觉不变，手指点得到） */
+/* 命中区外扩到 44px 高（视觉不变，手指点得到） */
 .pt-alt-btn::after {
   content: '';
   position: absolute;
-  left: 50%;
+  left: 0;
+  right: 0;
   top: 50%;
-  width: 44px;
   height: 44px;
-  transform: translate(-50%, -50%);
+  transform: translateY(-50%);
 }
 .pt-alt-btn.is-on {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
-}
-.pt-bar2-grip {
-  width: 100%;
-  height: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
 }
 .pt-bar2-grip::after {
   content: '';
@@ -234,7 +253,7 @@
    （那是顶部工具栏时代的要求，现在顶栏没了，改由这里接管）。
    高度锁死在 58px：不锁的话里面工具栏的 padding/行高会把这条栏撑到 100px+，
    画布白掉半个屏幕。 */
-.pt-bar2:not(.is-expanded) { height: 58px; }
+.pt-bar2:not(.is-expanded) { height: var(--pt-bar2-h, 72px); }
 .pt-bar2:not(.is-expanded) .pt-bar2-inner {
   overflow-x: auto;
   overflow-y: hidden;
@@ -246,7 +265,7 @@
 .pt-bar2:not(.is-expanded) .pt-bar2-inner::-webkit-scrollbar { width: 0; height: 0; }
 .pt-bar2:not(.is-expanded) .toolbar {
   flex-wrap: nowrap;
-  height: 40px;
+  height: 44px;
   row-gap: 0;
   padding: 0 6px;
   width: max-content;
@@ -254,9 +273,122 @@
   align-items: center;
 }
 .pt-bar2:not(.is-expanded) .tb-main { flex-wrap: nowrap; overflow: visible; flex: 0 0 auto; }
-.pt-bar2:not(.is-expanded) .tb-right { order: 0; margin-left: 0; }
+/* v0.4.6：更多按钮排到**最左**（用户："最左为「更多」"）。
+   ⚠ 特异性要压过 33 号分片的 `.app[data-shell='stack'] .tb-right { order: 1 }`，
+   否则写了也白写（第一版就踩了这个坑：更多仍然排在最后）。
+   竖屏档位下 tb-right 里只有「更多」+ 后台任务按钮，所以这条只影响它俩。 */
+.app[data-shell='stack'] .pt-bar2:not(.is-expanded) .tb-right {
+  order: -1;
+  margin-left: 0;
+  margin-right: 4px;
+}
+.app[data-shell='stack'] .pt-bar2:not(.is-expanded) .tb-main { order: 0; }
 
-/* 展开态：全部按钮换行铺开，超过 4 行内部滚（不把画布挤没） */
+/* ── 竖屏按钮：图标在上、文字在下（用户："为什么你不给按钮 SVG 下面加文字，
+      这样能看出来这个按钮是用来干什么的。而且这个菜单的按钮现在又被你改的特别窄"）
+   ---------------------------------------------------------------------------
+   上一版我为了省宽度把文字用 font-size:0 全抹了 —— 这是错的：省了宽度丢了可读性。
+   正确做法是**竖排**：图标 16px + 下方 9.5px 文字，宽度只要 ~52px，
+   比"图标+右侧文字"（60~100px）省得多，而且一眼看得懂。 */
+.pt-bar2 .toolbar .tb-btn-ghost,
+.pt-bar2 .toolbar .tb-btn-primary,
+.pt-bar2 .toolbar .tb-grp-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 52px;
+  min-height: 44px;
+  padding: 3px 6px;
+  font-size: 9.5px;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+.pt-bar2 .toolbar .tb-btn-ghost .tb-icon,
+.pt-bar2 .toolbar .tb-btn-primary .tb-icon,
+.pt-bar2 .toolbar .tb-grp-btn .tb-icon { margin: 0; }
+/* 设备分段按钮也竖排（自适应/电脑/平板/手机） */
+.pt-bar2 .toolbar .tb-bp-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 46px;
+  min-height: 44px;
+  padding: 2px 4px;
+  font-size: 9px;
+  line-height: 1.1;
+}
+
+/* ── 竖屏二级菜单（「更多」与「设备」共用）────────────────────────────────
+   菜单是 Portal 到 body 的，所以这里**不能**加 `.app[data-shell='stack']` 前缀
+   （body 不是 .app 的后代）。只有竖屏工具栏会给面板挂 .pt-menu-panel，不会串到桌面端。
+   桌面端那套 .tb-more-item 是给鼠标的 28px 行高，手指按不准 → 一律 44px。 */
+.pt-menu-panel {
+  min-width: 176px;
+  padding: 6px;
+  border-radius: 14px;
+}
+.pt-menu-panel .tb-more-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  text-align: left;
+}
+.pt-menu-panel .tb-more-item.active { color: var(--accent); font-weight: 600; }
+.pt-menu-panel .tb-more-item .tb-icon { flex: 0 0 auto; }
+.pt-device-custom,
+.pt-menu-panel .tb-device-custom {
+  padding: 6px 12px 4px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+/* 「设备」按钮本身跟别的按钮一样宽（不许比别人窄 —— 用户抱怨过按钮太窄）
+   ⚠ 类名不要叫 .tb-device-btn：12 号分片里那个是**已废弃**的旧分段按钮样式
+     （22px 高 + transparent 边框），撞名后新按钮被画成一个小边框方块。 */
+.pt-bar2 .toolbar .tb-device-pt { display: flex; flex: 0 0 auto; }
+/* 「更多」与「体检」在竖屏也得有文字（用户："为什么你不给按钮 SVG 下面加文字"）。 */
+.pt-bar2 .toolbar .tb-more-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-width: 52px;
+  min-height: 44px;
+  padding: 3px 6px;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 0;
+  font-weight: 700;
+}
+.pt-bar2 .toolbar .tb-health-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 52px;
+  min-height: 44px;
+  padding: 3px 6px;
+}
+/* 竖排按钮下面那行小字（更多 / 体检 这种"图标不是按钮"的补充说明） */
+.pt-bar2 .toolbar .tb-pt-label {
+  font-size: 9.5px;
+  line-height: 1.15;
+  font-weight: 400;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+/* ── 展开态：全部按钮换行铺开，超过 4 行内部滚（不把画布挤没） */
 .pt-bar2.is-expanded { max-height: 52vh; }
 .pt-bar2.is-expanded .pt-bar2-inner { overflow-y: auto; }
 .pt-bar2.is-expanded .toolbar {
@@ -485,6 +617,41 @@
 }
 @keyframes bcFadeIn { from { opacity: 0; } to { opacity: 1; } }
 
+/* ── 贴着 × 的「要不要保存」二级菜单（用户第五轮第 ⑧ 点）────────────────
+   以前是一个全屏遮罩 + 居中大卡片，用户的原话是"点叉叉先退出去、又突然弹出
+   全屏弹窗，交互非常奇怪"。现在改成贴着那颗 × 的二级菜单：
+   透明遮罩（点旁边就取消）+ 一张小卡，锚点坐标由调用方从 getBoundingClientRect 传进来。 */
+.bc-pop-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9997;
+  background: transparent;
+}
+.bc-pop {
+  position: fixed;
+  z-index: 9998;
+  padding: 10px 10px 8px;
+  border-radius: 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.26);
+  animation: bcConfirmIn 140ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+}
+.bc-confirm-pop-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  padding: 0 4px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+/* 二级菜单里的三个按钮排成竖列、44px 一行（和 .pt-menu-panel 一个语言） */
+.bc-confirm-pop .bc-confirm-actions { margin-top: 0; gap: 6px; }
+.bc-confirm-pop .bc-confirm-btn { min-height: 42px; font-size: 13px; border-radius: 10px; }
+
 /* ── 会话管理页（背景跟随主题）──────────────────────────────────────────
    布局照 Edge 手机版：每行两张卡片，上面缩略图，下面项目名 + 大一点的 ×。
    ⚠ 缩略图是**实时渲染**（把会话的场景树自然尺寸画一遍再整体缩小），
@@ -513,7 +680,8 @@
   border-radius: 14px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  overflow: visible;
+  /* 圆角 + 裁切：缩略图是块不透明区域，只有裁在卡片上边框才会整圈完整 */
+  overflow: hidden;
   transition: transform var(--dur-fast, 120ms) var(--ease-out, ease);
 }
 .sess-card:active { transform: scale(0.975); }
@@ -536,22 +704,29 @@
 .sess-thumb {
   position: relative;
   height: 112px;
-  border-radius: 13px 13px 0 0;
+  /* ⚠ 圆角交给卡片裁（卡片 overflow:hidden），缩略图自己不要再切角：
+     以前这里写 13px 13px 0 0 且卡片 overflow:visible → 缩略图是块不透明白底，
+     正好把卡片左右两条边框盖住，用户看到的就是"缩略图上面的边框不完整"。 */
+  border-radius: 0;
   overflow: hidden;
   background: #fff;
   border-bottom: 1px solid var(--border);
 }
-.sess-thumb-stage {
-  position: absolute;
-  top: 0;
-  left: 0;
-  padding: 12px 14px;
-  transform-origin: top left;
-  transform: scale(0.145);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+/* 缩略图本体：exporter 生成的整页 HTML，按卡片宽整体缩小 */
+.sess-thumb-frame {
+  display: block;
+  border: 0;
   pointer-events: none;
+  background: #fff;
+}
+/* 首帧量宽用的隐藏 iframe（尺寸给个大值，只为拿到 scrollWidth） */
+.sess-thumb-frame.is-measuring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1100px;
+  height: 900px;
+  visibility: hidden;
 }
 
 .sess-meta { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 10px; }

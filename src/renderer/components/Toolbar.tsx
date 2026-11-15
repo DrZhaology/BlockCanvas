@@ -33,11 +33,32 @@ import { Icon, resolveIconName, type IconName } from './Icon';
 const ZOOM_MIN = 50;   // % 最小
 const ZOOM_MAX = 200;  // % 最大
 
-export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }: {
+/**
+ * v0.4.6 竖屏第二条操作栏的按钮顺序（用户逐字指定）：
+ *   更多 / 设备 / 导出前体检 / 操作（删除+副本）/ 预览 / 轮廓 /
+ *   导出 HTML / 全部项目 / 导出元素模板
+ * 「更多」不在这里 —— 它是 `moreItems` 的入口按钮，由 CSS 排到最左。
+ * 不在这个表里的按钮（撤销/重做/复制/剪切/粘贴/取消选中/缩放）全部进「更多」。
+ */
+const PORTRAIT_MAIN = [
+  'blk.device',
+  'blk.clsid',
+  'duplicate',
+  'delete',
+  'preview',
+  'outline',
+  'export-html',
+  'projects-center',
+  'export-template'
+];
+
+export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange, portrait = false }: {
   canvasWidth: string;
   onCanvasWidthChange: (v: string) => void;
   zoom: number;
   onZoomChange: (z: number) => void;
+  /** v0.4.6 竖屏档位：按用户指定的 9 个按钮排序，其余收进「更多」 */
+  portrait?: boolean;
 }) {
   const scene = useScene((s) => s.scene);
   // ⚠ 剪贴板 / 历史的「是否可用」一律在渲染时用 useScene.getState() 现取：
@@ -55,6 +76,8 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   const [zoomEditVal, setZoomEditVal] = useState('');
   // 「⋯ 更多」下拉开合
   const [moreOpen, setMoreOpen] = useState(false);
+  // 竖屏「设备」二级菜单（自适应 / 电脑 / 平板 / 手机 收进一个按钮里）
+  const [deviceOpen, setDeviceOpen] = useState(false);
   // 「导出前体检」向导：点 ⚠ 直接打开；导出/预览前若存在严重问题会先拦一道
   const [healthOpen, setHealthOpen] = useState(false);
   const pendingAfterHealth = useRef<(() => void) | null>(null);
@@ -92,8 +115,10 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   // 「设备」按钮的图标要按**画布实际宽度**实时显示：自适应时窗口一变窄，
   // 画布跟着变窄 → 图标应变成平板 / 手机（而不是永远显示电脑）。
   const liveDevice = useEffectiveDevice(canvasWidth);
+  const liveDeviceDef = DEVICE_LIST.find((d) => d.id === liveDevice) ?? DEVICE_LIST[0];
   // 「⋯ 更多」按钮锚点（弹出面板走 Portal，不会被工具栏横向滚动区裁切）
   const moreWrapRef = useRef<HTMLDivElement>(null);
+  const deviceWrapRef = useRef<HTMLDivElement>(null);
 
   // ⚠ 角标：只统计"问题条数"，具体清单由「导出前体检」向导展示（同一套 healthCheck 逻辑）
   const issueCount = useMemo(
@@ -346,7 +371,41 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   // —— 块级渲染 ——
   const widgetMap: Record<string, React.ReactNode> = {
     // 设备切换：无外框分段（纯胶囊高亮，不再框中框）
-    'blk.device': (
+    // v0.4.6 竖屏档位：四个按钮**收进一个**「设备」按钮，点开是贴上方的二级菜单。
+    // 用户："你为什么把四个按钮全部放出来了，你应该放到二级菜单里"。
+    'blk.device': portrait ? (
+      <div className="tb-block tb-device-pt" ref={deviceWrapRef}>
+        <button
+          className={'tb-btn-ghost tb-device-pt-btn' + (deviceOpen ? ' is-open' : '')}
+          title="设备断点：自适应 / 电脑 / 平板 / 手机（切换会同时改变画布宽度与编辑断点）"
+          onClick={() => setDeviceOpen((o) => !o)}
+        >
+          <span className="tb-icon"><Icon name={canvasWidth === 'auto' ? 'responsive' : liveDeviceDef.iconName} size={16} /></span>
+          {canvasWidth === 'auto' ? '自适应' : liveDeviceDef.label}
+        </button>
+        <AnchoredPanel
+          open={deviceOpen}
+          anchorRef={deviceWrapRef}
+          onClose={() => setDeviceOpen(false)}
+          className="tb-device-panel pt-menu-panel"
+          align="left"
+        >
+          <button
+            className={'tb-more-item' + (canvasWidth === 'auto' ? ' active' : '')}
+            onClick={() => { onCanvasWidthChange('auto'); setDeviceOpen(false); }}
+          >自适应</button>
+          {DEVICE_LIST.map((d) => (
+            <button
+              key={d.id}
+              className={'tb-more-item' + (canvasWidth !== 'auto' && device === d.id ? ' active' : '')}
+              title={d.hint}
+              onClick={() => { requestDevice(d.id); setDeviceOpen(false); }}
+            ><span className="tb-icon"><Icon name={d.iconName} size={15} /></span>{d.label}</button>
+          ))}
+          {customWidth && <div className="tb-device-custom">当前：自定义 {widthLabel(customWidth)}</div>}
+        </AnchoredPanel>
+      </div>
+    ) : (
       <div className="tb-block tb-device" title="设备断点：切换会同时改变画布宽度与编辑断点（也可拖动画布左右边缘自定义宽度）">
         <div className="tb-bp-seg">
           <button
@@ -404,7 +463,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
         className={"tb-health-btn" + (issueCount > 0 ? ' has-issue' : '')}
         onClick={() => setHealthOpen(true)}
         title="导出前体检：未命名元素、重复 ID、伪类失效、同名样式不统一……按严重度列出并支持一键修复"
-      ><Icon name="warning" size={16} />{issueCount > 0 && <span className="tb-health-badge">{issueCount}</span>}</button>
+      ><Icon name="warning" size={16} />{portrait ? <span className="tb-pt-label">体检</span> : null}{issueCount > 0 && <span className="tb-health-badge">{issueCount}</span>}</button>
     )
   };
 
@@ -436,15 +495,34 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   };
 
   // —— 分组查找表 + 三区分配 ——
-  const sorted = useMemo(() => getSortedItems(items, userOrder), [items, userOrder]);
+  const sorted = useMemo(() => {
+    const base = getSortedItems(items, userOrder);
+    if (!portrait) return base;
+    // 竖屏：主区按用户指定顺序，其余保持原排序（进「更多」菜单）
+    const idx = (id: string) => {
+      const i = PORTRAIT_MAIN.indexOf(id);
+      return i >= 0 ? i : 900 + base.findIndex((x) => x.id === id);
+    };
+    return [...base].sort((a, b) => idx(a.id) - idx(b.id));
+  }, [items, userOrder, portrait]);
   const groupByItem = useMemo(() => {
+    // v0.4.6 竖屏：把「副本 + 删除」并成**一个「操作」组按钮**
+    // （用户："操作（把删除和副本塞里面）"）。桌面端的组来自设置，竖屏用固定合成组。
+    const src = portrait
+      ? [{ id: 'pt-ops', label: '操作', dock: 'main' as const, itemIds: ['duplicate', 'delete'] }]
+      : groups;
     const m = new Map<string, ToolbarGroup>();
-    for (const g of groups) for (const id of g.itemIds) m.set(id, g);
+    for (const g of src as ToolbarGroup[]) for (const id of g.itemIds) m.set(id, g);
     return m;
-  }, [groups]);
+  }, [groups, portrait]);
 
   // 组内成员的最终停靠跟随「组」；独立按钮用自身 dock
   const placementOf = (it: ToolbarItem): ToolbarDock => {
+    // v0.4.6 竖屏档位：按用户指定的顺序把 9 个按钮排进主区，其余全部收进「更多」。
+    // 复用同一套 OPS / handler，只换"谁在哪"，桌面端一条不受影响。
+    if (portrait) {
+      return PORTRAIT_MAIN.includes(it.id) ? 'main' : 'more';
+    }
     const g = groupByItem.get(it.id);
     return g ? g.dock : dockOf(it, docks);
   };
@@ -500,14 +578,14 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
         {moreItems.length > 0 && (
           <div className="tb-more-wrap" ref={moreWrapRef}>
             <button className="tb-more-btn" title={`还有 ${moreItems.length} 个按钮收在这里`} onClick={() => setMoreOpen((o) => !o)}>
-              ⋯
+              ⋯{portrait ? <span className="tb-pt-label">更多</span> : null}
             </button>
             <AnchoredPanel
               open={moreOpen}
               anchorRef={moreWrapRef}
               onClose={() => setMoreOpen(false)}
-              className="tb-more-panel"
-              align="right"
+              className={'tb-more-panel' + (portrait ? ' pt-menu-panel' : '')}
+              align={portrait ? 'left' : 'right'}
             >
               {moreItems.map((it) => (
                 <button

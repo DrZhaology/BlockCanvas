@@ -5,6 +5,7 @@
 // 绘制（fixed 覆盖层）与命中判定共用同一份换算结果，不会出现"看着框住了但没选中"。
 import { useRef, useState } from 'react';
 import { useScene } from '@store/sceneStore';
+import { altHeld } from '@lib/altMode';
 import type { MarqueeDrag } from './types';
 
 export function useMarquee(canvasRef: React.RefObject<HTMLDivElement | null>) {
@@ -139,7 +140,10 @@ export function useMarquee(canvasRef: React.RefObject<HTMLDivElement | null>) {
   /** 画布空白处按下 → 起框（元素上的按下由元素自己处理） */
   const onCanvasPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
-    if (e.altKey) return; // 按住 Alt = 画布交互模式（缩放 / 移动 / 改字号），空白处不起框
+    // 按住 Alt（**或**开着竖屏的一键 Alt 模式）= 画布交互模式，空白处不起框。
+    // 竖屏那个开关以前只改了 altMode 状态，这里仍旧只认 e.altKey ——
+    // 于是用户开了 Alt 模式在空白画布上长按/拖，还是被打成范围选中，把上下平移带坏了。
+    if (altHeld(e)) return;
     // 起点允许：条纹背景（wrap 自身）或画布空白处（canvas 自身）
     const t = e.target as HTMLElement;
     if (t !== e.currentTarget && t !== canvasRef.current) return;

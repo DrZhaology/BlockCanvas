@@ -45,7 +45,12 @@ export function AnchoredPanel(props: {
       const rawLeft = align === 'right' ? r.right - w : r.left;
       const left = Math.min(Math.max(margin, rawLeft), Math.max(margin, window.innerWidth - w - margin));
       const below = r.bottom + gap + h <= window.innerHeight - margin;
-      const top = below ? r.bottom + gap : Math.max(margin, r.top - gap - h);
+      // ⚠ 向上翻的时候只能写锚点顶边（r.top - gap），**不能**再减一个 h：
+      //   CSS 那边 `.tb-anchor-pos.above { transform: translateY(-100%) }` 已经
+      //   把面板整体抬到自己高度那么高。以前两处都减了 h → 菜单实际位置比按钮
+      //   高出整整一个面板高度，看起来就是"这个菜单又飘到上面去了"
+      //   （用户第五轮第 ④⑦ 点）。
+      const top = below ? r.bottom + gap : Math.max(margin, r.top - gap);
       setPos((cur) => (cur && cur.left === left && cur.top === top && cur.below === below ? cur : { left, top, below }));
     };
     place();
@@ -55,7 +60,12 @@ export function AnchoredPanel(props: {
       closeRef.current();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current(); };
-    const onScroll = () => closeRef.current();
+    // ⚠ 打开后的前 200ms 不收"滚动"信号：按钮一被聚焦，浏览器会把
+    //   `.pt-bar2-inner`（竖屏那条可横滑的工具栏）scrollIntoView 一下，
+    //   这不是用户滚页面 —— 但会让面板刚挂上就被自己关掉
+    //   （实测「设备」二级菜单点了没反应就是这个）。
+    const t0 = Date.now();
+    const onScroll = () => { if (Date.now() - t0 < 200) return; closeRef.current(); };
     window.addEventListener('mousedown', onDoc);
     window.addEventListener('keydown', onKey);
     window.addEventListener('scroll', onScroll, true);
