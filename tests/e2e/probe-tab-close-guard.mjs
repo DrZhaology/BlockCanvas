@@ -77,6 +77,17 @@ async function main() {
   await sleep(500);
   check('准备：两个标签，A 已标记未保存', ids.tabs === 2, JSON.stringify(ids));
 
+  // ⓪ 新建页面要有入场动画（用户："新建页面的时候没有动画"）
+  //    新建一个标签后立刻量 .canvas-area 上有没有正在跑的动画。
+  await win.evaluate(() => { window.__tabStore.getState().newTab('动画验证页'); });
+  await sleep(60);
+  const anim = await win.evaluate(() => {
+    const el = document.querySelector('.canvas-area');
+    return el ? el.getAnimations().length : -1;
+  });
+  check('⓪ 新建页面时有入场动画在跑（.canvas-area 上有活动动画）',
+    anim > 0, `animations=${anim}`);
+
   const dirtyOf = (id) => win.evaluate((x) => {
     const t = window.__tabStore.getState().tabs.find((k) => k.id === x);
     return t ? { exists: true, dirty: !!t.isDirty } : { exists: false };

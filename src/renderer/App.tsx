@@ -139,6 +139,23 @@ export default function App() {
   // 否则切到"表格编辑器/设置"等视图时这个 hook 不执行，hooks 数量前后不一致，
   // React 直接抛 #300 把整个视图渲染崩掉（踩过一次，表格编辑器打不开就是它）。
   const tabCount = useTabStore((s) => s.tabs.length);
+  /**
+   * v0.4.6：新建页面要有入场动画（用户："新建页面的时候没有动画"）。
+   * 判定用"标签数变多"而不是"activeTabId 变了"——切标签不该每次都重放动画，
+   * 只有真的多出一页才播。播 320ms 后把标记摘掉，动画只走一次。
+   */
+  const [newPageAnim, setNewPageAnim] = useState(false);
+  const prevTabCount = useRef(tabCount);
+  useEffect(() => {
+    if (tabCount > prevTabCount.current) {
+      setNewPageAnim(true);
+      const t = window.setTimeout(() => setNewPageAnim(false), 320);
+      prevTabCount.current = tabCount;
+      return () => window.clearTimeout(t);
+    }
+    prevTabCount.current = tabCount;
+    return undefined;
+  }, [tabCount]);
   // 当前激活标签 + 是否"只读快照预览"（v0.4.5）
   const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
   const readonly = isSnapshotTab(activeTab);
@@ -643,7 +660,7 @@ export default function App() {
   }
 
   return (
-    <div className="app" data-shell={shell.layout} data-input={inputMode} data-drawer-side={drawerSide}>
+    <div className="app" data-shell={shell.layout} data-input={inputMode} data-drawer-side={drawerSide} data-newpage={newPageAnim ? '1' : undefined}>
       {/* v0.4.6 竖屏重做：竖屏**顶部完全清空**（用户："把整个上方的所有东西全部删除"）。
           自绘标题栏（Logo / 菜单 / 三个窗口按钮）只在并排形态渲染，DOM 里也不留。 */}
       {shell.layout === 'split' && <TitleBar />}

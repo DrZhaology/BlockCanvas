@@ -421,6 +421,19 @@
   flex: 1 1 auto;
 }
 
+/* ── 新建页面入场动画（用户："新建页面的时候没有动画"）────────────────────
+   只做 opacity：画布本身带 transform: scale(zoom)，再叠位移/缩放会和
+   fixed 覆盖层的坐标换算打架（--bc-fl-* 那套数学假设只有 zoom 一个变换）。
+   320ms 与 App 里摘标记的定时器对齐。 */
+.app[data-newpage='1'] .canvas-area {
+  animation: bcNewPageIn 320ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+}
+@keyframes bcNewPageIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* 宽屏下也播（新建页面在任何形态都该有反馈） */
+
 /* ── 关闭标签确认弹窗（v0.4.6）────────────────────────────────────────────
    用户："多标签页的页面关闭都没有保存不保存的提示。"
    三个选项：保存并关闭 / 不保存 / 取消。竖屏下按钮竖排（一行放三个 44px 会挤）。 */
