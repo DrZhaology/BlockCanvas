@@ -93,6 +93,8 @@ const PROBES = [
   'probe-portrait-input',
   // v0.4.6 竖屏画布手势：长按选中 / 长按加选 / 单指平移 / 双指缩放 / 空白滑动不选中
   'probe-touch-canvas',
+  // v0.4.6 竖屏底部两条操作栏：折叠单行 / 长按上滑展开 / 下滑折叠 / 入口菜单层级
+  'probe-portrait-bars',
   // v0.4.6 Web 版（R6-12/13/14）：需要先 `pnpm build:web` 产出 dist-web/index.html
   'probe-web',
   // v0.4.6 R6-3：CSS 域约束（主域登记 / 前缀归位 / 重复不超基线）

@@ -92,11 +92,15 @@ export function PortraitBar1(props: PortraitBar1Props) {
   const tabCount = useTabStore((s) => s.tabs.length);
 
   const openEntryMenu = () => {
+    // 用户：「二级菜单出现的位置就在第二层操作栏的上面」——
+    // 所以锚点取**第二条栏的顶边**，不是按钮顶边（按钮在第一条栏里，
+    // 按按钮算会让菜单压在第二条栏上，实测压掉 54px）。
+    const bar2 = document.querySelector('.pt-bar2')?.getBoundingClientRect();
     const r = entryBtnRef.current?.getBoundingClientRect();
     if (r) {
       setEntryPos({
         right: Math.max(8, Math.round(window.innerWidth - r.right)),
-        bottom: Math.round(window.innerHeight - r.top + 8)
+        bottom: Math.round(window.innerHeight - (bar2 ? bar2.top : r.top) + 8)
       });
     }
     setEntryOpen(true);

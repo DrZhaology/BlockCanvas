@@ -178,17 +178,30 @@
   padding: 0 8px;
   flex: 0 0 auto;
 }
+/* Alt 开关：用户反馈"按钮那么小，手势完全用不了" ——
+   最小 44×44 热区（视觉上仍是一条小胶囊，用负 margin + padding 撑开命中区）。 */
 .pt-alt-btn {
-  height: 16px;
-  padding: 0 8px;
-  border-radius: 8px;
+  position: relative;
+  height: 18px;
+  padding: 0 10px;
+  border-radius: 9px;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.3px;
   line-height: 1;
   cursor: pointer;
+}
+/* 命中区外扩到 44×44（视觉不变，手指点得到） */
+.pt-alt-btn::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
 }
 .pt-alt-btn.is-on {
   background: var(--accent);
