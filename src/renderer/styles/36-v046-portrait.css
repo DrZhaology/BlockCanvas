@@ -387,6 +387,16 @@
   letter-spacing: 0;
   white-space: nowrap;
 }
+/* 体检的角标：宽屏那是 top/right:-6px（挂到按钮外面），竖屏里第二条栏
+   overflow:hidden，角标会被切掉一半（截图里就是个缺口）。收进按钮里。 */
+.pt-bar2 .toolbar .tb-health-btn .tb-health-badge {
+  top: 1px;
+  right: 2px;
+  min-width: 13px;
+  height: 13px;
+  line-height: 13px;
+  font-size: 9px;
+}
 
 /* ── 展开态：全部按钮换行铺开，超过 4 行内部滚（不把画布挤没） */
 .pt-bar2.is-expanded { max-height: 52vh; }
