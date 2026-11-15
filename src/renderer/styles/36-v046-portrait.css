@@ -1293,14 +1293,18 @@
   background: #fff;
   transform-origin: top center;
 }
-/* 首帧量宽用的隐藏 iframe（尺寸给个大值，只为拿到 scrollWidth） */
-.sess-thumb-frame.is-measuring {
+/* 缩略图生成失败/加载中：宁可显示一句话，也不要"一片空白"（用户会以为功能没做） */
+.sess-thumb-fallback {
   position: absolute;
-  left: 0;
-  top: 0;
-  width: 1100px;
-  height: 900px;
-  visibility: hidden;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  text-align: center;
 }
 
 .sess-meta {

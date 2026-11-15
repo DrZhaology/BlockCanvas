@@ -97,6 +97,9 @@ const PROBES = [
   'probe-portrait-bars',
   // v0.4.6 关闭标签的保存确认（保存并关闭 / 不保存 / 取消）
   'probe-tab-close-guard',
+  // v0.4.6 会话缩略图保真度：iframe 里必须有"有底色/边框且有尺寸"的 div，
+  // 且设计变量（scene.tokens）要解析出来（曾经因为只传 root，缩略图里只剩文字）
+  'probe-session-thumb',
   // v0.4.6 Web 版（R6-12/13/14）：需要先 `pnpm build:web` 产出 dist-web/index.html
   'probe-web',
   // v0.4.6 R6-3：CSS 域约束（主域登记 / 前缀归位 / 重复不超基线）

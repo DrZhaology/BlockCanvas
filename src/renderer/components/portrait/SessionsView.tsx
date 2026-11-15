@@ -33,6 +33,7 @@ const parseIntPx = (v?: string) => {
   const n = v ? parseInt(String(v), 10) : NaN;
   return Number.isFinite(n) && n > 0 ? n : 0;
 };
+void parseIntPx; // 保留工具函数（导出宽度兜底时曾用过，避免 tree-shake 争议）
 
 // ── 缩略图：exporter 出的真 HTML + 缩放到卡片宽 ──────────────────────────────
 function SessThumb({ scene }: { scene?: SceneGraph }) {
@@ -40,26 +41,18 @@ function SessThumb({ scene }: { scene?: SceneGraph }) {
   const [boxW, setBoxW] = useState(0);
   const [contentW, setContentW] = useState(0);
 
-  // 真实 HTML（和「导出 HTML」「预览」同一份），按 scene 引用记忆，切回来才重算
+  // 真实 HTML（和「导出 HTML」「预览」**完全相同的一份**），按 scene 引用记忆
+  //
+  // ⚠ 不要把 scene 拆成 `{root: 包一层的壳}` 再导出（v0.4.6 踩过）：
+  //   exportHTML 不只看 root —— 它还要 `scene.tokens`（设计变量）、`scene.globalCss`、
+  //   `scene.quickCss`、`scene.bodyExtra`。只传 root 的结果是：**元素的颜色/尺寸只要用了
+  //   变量就全丢**，div 没有底色也没有宽高（塌成 0），最后缩略图里只剩文字。
+  //   用户反馈"缩略图只有文字、没有 div"就是这个原因。
   const srcdoc = useMemo(() => {
     if (!scene?.root) return '';
     try {
-      const rootW = parseIntPx((scene.root.style as Record<string, string> | undefined)?.width);
-      const shell = {
-        id: 'sess-shell',
-        type: 'div',
-        text: undefined,
-        children: [scene.root],
-        style: {
-          width: (rootW || FALLBACK_W) + 'px',
-          boxSizing: 'border-box',
-          overflow: 'hidden',
-          padding: '0px',
-          backgroundColor:
-            ((scene.root.style as Record<string, string> | undefined)?.backgroundColor) || '#ffffff'
-        }
-      };
-      return exportHTML({ root: shell as never, selectedId: null, selectedIds: [] }).html;
+      const html = exportHTML({ ...scene, selectedId: null, selectedIds: [] }).html || '';
+      return html.includes('<body') ? html : '';
     } catch {
       return '';
     }
@@ -82,7 +75,7 @@ function SessThumb({ scene }: { scene?: SceneGraph }) {
     st.textContent = 'html,body{margin:0;padding:0;overflow:hidden;}';
     doc.head.appendChild(st);
     const w = Math.max(doc.documentElement.scrollWidth, FALLBACK_W);
-    setContentW(w);
+    if (w > 100) setContentW(w);
   };
 
   // 缩放：铺满卡片宽再放大 1.6 倍，取**页面中间**那一块（用户："缩略图只有文字没样式"）
@@ -91,7 +84,10 @@ function SessThumb({ scene }: { scene?: SceneGraph }) {
   // 纯文字页面看上去就是"一片小字"，色块、标题全糊掉。放大到 0.27 倍左右、只取中间
   // 那一段，卡片里能看清版式与配色（和浏览器标签页缩略图相比更"像预览"）。
   const ZOOM = 1.6;
-  const scale = boxW > 0 && contentW > 0 ? (boxW / contentW) * ZOOM : 0;
+  // ⚠ 量不到宽度也要有个默认值：以前量不到就渲染一个 visibility:hidden 的测量用 iframe，
+  //   结果卡片里是**一片空白**（用户看到的就是"缩略图没有"）。现在永远渲染看得见的那一个。
+  const cw = contentW > 0 ? contentW : FALLBACK_W;
+  const scale = boxW > 0 ? (boxW / cw) * ZOOM : 0;
   const frameH = scale > 0 ? Math.ceil(THUMB_H / scale) : 0;
 
   return (
@@ -104,12 +100,11 @@ function SessThumb({ scene }: { scene?: SceneGraph }) {
           scrolling="no"
           tabIndex={-1}
           onLoad={onLoad}
-          style={{ width: contentW, height: frameH, transform: `translateX(-50%) scale(${scale})` }}
+          style={{ width: cw, height: frameH, transform: `translateX(-50%) scale(${scale})` }}
         />
-      ) : srcdoc ? (
-        /* 首帧还没量出来：先放一个同样 srcDoc 的隐藏 iframe 去量，避免"闪一下空白" */
-        <iframe className="sess-thumb-frame is-measuring" title="会话缩略图" srcDoc={srcdoc} scrolling="no" tabIndex={-1} onLoad={onLoad} />
-      ) : null}
+      ) : (
+        <div className="sess-thumb-fallback">{srcdoc ? '正在生成预览…' : '这个页面的预览生成失败'}</div>
+      )}
     </div>
   );
 }
