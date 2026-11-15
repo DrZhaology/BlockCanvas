@@ -17,6 +17,7 @@
 //      只是左端从"撤销+重做"换成"返回"（用户确认：「左端换成返回，只保留第一条栏」）。
 // ============================================================================
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Toolbar } from '../Toolbar';
 import { useScene } from '@store/sceneStore';
 import { useTabStore } from '@store/tabStore';
@@ -84,13 +85,30 @@ export function PortraitBar1(props: PortraitBar1Props) {
   const { view, editorish, onBack, onOpenSessions, onOpenSettings, onOpenHelp, onOpenPlugins } = props;
   const [entryOpen, setEntryOpen] = useState(false);
   const entryRef = useRef<HTMLDivElement | null>(null);
+  const entryBtnRef = useRef<HTMLButtonElement | null>(null);
+  /** 二级菜单的位置：贴着按钮往上弹（用户："二级菜单不要固定位置，要求在按钮附近打开"） */
+  const [entryPos, setEntryPos] = useState<{ right: number; bottom: number } | null>(null);
   const tabCount = useTabStore((s) => s.tabs.length);
 
-  // 点旁边关闭「三」的二级菜单
+  const openEntryMenu = () => {
+    const r = entryBtnRef.current?.getBoundingClientRect();
+    if (r) {
+      setEntryPos({
+        right: Math.max(8, Math.round(window.innerWidth - r.right)),
+        bottom: Math.round(window.innerHeight - r.top + 8)
+      });
+    }
+    setEntryOpen(true);
+  };
+
+  // 点旁边关闭「三」的二级菜单。菜单已经 Portal 到 body，所以要同时排除菜单本体
   useEffect(() => {
     if (!entryOpen) return;
     const onDown = (e: PointerEvent) => {
-      if (!entryRef.current?.contains(e.target as Node)) setEntryOpen(false);
+      const t = e.target as Node;
+      if (entryRef.current?.contains(t)) return;
+      if ((t as HTMLElement)?.closest?.('.pt-entry-menu')) return;
+      setEntryOpen(false);
     };
     window.addEventListener('pointerdown', onDown, true);
     return () => window.removeEventListener('pointerdown', onDown, true);
@@ -151,21 +169,30 @@ export function PortraitBar1(props: PortraitBar1Props) {
 
       <div className="pt-entry" ref={entryRef}>
         <button
+          ref={entryBtnRef}
           className={'pt-btn' + (entryOpen ? ' is-open' : '')}
           type="button" aria-label="更多入口" aria-haspopup="menu" aria-expanded={entryOpen}
           title="更多入口"
-          onClick={() => setEntryOpen((v) => !v)}
+          onClick={() => (entryOpen ? setEntryOpen(false) : openEntryMenu())}
         >
           <GlyphMenu />
         </button>
-        {entryOpen && (
-          <div className="pt-entry-menu" role="menu">
-            <button role="menuitem" type="button" onClick={() => { setEntryOpen(false); onOpenSettings(); }}>偏好设置</button>
-            <button role="menuitem" type="button" onClick={() => { setEntryOpen(false); onOpenHelp(); }}>使用手册</button>
-            <button role="menuitem" type="button" onClick={() => { setEntryOpen(false); onOpenPlugins(); }}>扩展与插件</button>
-          </div>
-        )}
       </div>
+
+      {/* 菜单 Portal 到 body：留在栏体里会被工具栏条（同级后渲染 + overflow）盖住，
+          层级怎么调都在同一层里打转。Portal 之后它是 body 的直接子节点，谁也盖不住。 */}
+      {entryOpen && entryPos && createPortal(
+        <div
+          className="pt-entry-menu"
+          role="menu"
+          style={{ right: entryPos.right, bottom: entryPos.bottom }}
+        >
+          <button role="menuitem" type="button" onClick={() => { setEntryOpen(false); onOpenSettings(); }}>偏好设置</button>
+          <button role="menuitem" type="button" onClick={() => { setEntryOpen(false); onOpenHelp(); }}>使用手册</button>
+          <button role="menuitem" type="button" onClick={() => { setEntryOpen(false); onOpenPlugins(); }}>扩展与插件</button>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

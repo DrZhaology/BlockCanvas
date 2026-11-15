@@ -115,14 +115,16 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 「三」的二级菜单：从栏里往上弹，不遮住这一栏本身 */
-.pt-entry { position: relative; flex: 1 1 0; display: flex; min-width: 0; }
+/* 入口按钮的包裹层：和别的 .pt-btn 一样均分一条栏 */
+.pt-entry { flex: 1 1 0; display: flex; min-width: 0; }
 .pt-entry > .pt-btn { flex: 1; }
 
+/* 「三」的二级菜单：Portal 到 body，fixed 定位、贴着按钮往上弹。
+   以前它挂在栏体里（position:absolute + z-index:62），但它是**第一条栏**的子节点，
+   而第二条栏虽然 DOM 在前、却因为 overflow/层序把菜单下半截盖住了 —— 在同一个
+   层叠上下文里怎么调 z-index 都绕不出去，所以改成 Portal + fixed。 */
 .pt-entry-menu {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  right: 0;
+  position: fixed;
   min-width: 152px;
   padding: 5px;
   display: flex;
@@ -134,7 +136,7 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
   transform-origin: bottom right;
   animation: ptMenuIn 140ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
-  z-index: 62;
+  z-index: 9999;
 }
 @keyframes ptMenuIn {
   from { opacity: 0; transform: translateY(6px) scale(0.97); }
@@ -234,7 +236,52 @@
   box-shadow: none;
 }
 
-/* ── 会话管理页（用户：黑色背景 → 确认改为「跟随当前主题」）────────────────
+/* ── 竖屏子页面适配：设置页 / 使用手册 ─────────────────────────────────────
+   实测（412×860，shots-portrait-pages.mjs）：
+     设置页有 4 个控件横向溢出，最多 130px（.fluent-card-ctrl / .fluent-select）
+     手册页有 18 个元素溢出，最多 185px（.help-search 撑出右边界）
+   根因是这些页面在宽屏上默认"一行放标 + 右侧控件铺满剩余宽度"，
+   竖屏一行放不下就顶出去。竖屏的正确做法是**行内换行**：
+   标签一行、控件下一行并吃满宽度，而不是硬挤在一行里。 */
+.app[data-shell='stack'] .fluent-settings-page .fluent-card-ctrl,
+.app[data-shell='stack'] .fluent-settings-page .fluent-select,
+.app[data-shell='stack'] .fluent-settings-page .fluent-input {
+  max-width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+/* 设置行允许换行（标在上、控件在下） */
+.app[data-shell='stack'] .fluent-settings-page [class*='fluent-row'],
+.app[data-shell='stack'] .fluent-settings-page [class*='fluent-field'],
+.app[data-shell='stack'] .fluent-settings-page [class*='fluent-item'] {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+/* 手册页：搜索框吃满一行，文档页签可换行 */
+.app[data-shell='stack'] .help-search {
+  width: auto !important;
+  max-width: 100% !important;
+  min-width: 0;
+  flex: 1 1 100%;
+}
+/* 手册页里所有 help-* 元素统一封顶：这一页的宽屏布局是"左目录 + 右正文 + 顶部搜索"，
+   竖屏下目录和搜索会一起把右边顶出去（实测溢出 185px → 28px），
+   逐个修太脆，直接给这一整族元素加 max-width 兜住。 */
+.app[data-shell='stack'] [class^='help-'],
+.app[data-shell='stack'] [class*=' help-'] {
+  max-width: 100%;
+}
+.app[data-shell='stack'] .help-doc-tabs { flex-wrap: wrap; row-gap: 6px; }
+.app[data-shell='stack'] .help-doc-tab { flex: 0 0 auto; }
+/* 两个页面统一兜一道：任何 flex/grid 子项都不许把父级撑破 */
+.app[data-shell='stack'] .fluent-settings-page *,
+.app[data-shell='stack'] .help-page *,
+.app[data-shell='stack'] .help-center * {
+  min-width: 0;
+}
+
+/* ── 会话管理页（背景跟随主题）──────────────────────────────────────────
    布局照 Edge 手机版：每行两张卡片，上面缩略图，下面项目名 + 大一点的 ×。
    ⚠ 缩略图是**实时渲染**（把会话的场景树自然尺寸画一遍再整体缩小），
      不是静态截图 —— 切回来看到的永远是最新状态。 */

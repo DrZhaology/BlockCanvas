@@ -422,11 +422,18 @@ async function main() {
 
   // ② 宽起手区：离屏幕边 120px 起手往内滑也能打开（不是只有按钮那一小块）
   await ensureClosed();
-  await drag({ x0: 120, y0: 400, steps: stepsOf(120, 400, 330, 404) });
+  // v0.4.6：起手区收紧成「把手附近一小块」（横向 56px 边带 + 把手中心 ±96px）。
+  // 用户原话：「左右两侧的面板只有抽屉按钮附近一块区域可以打开，现在整条左右边都可以开启，
+  // 下方的工具栏根本左右滑动不了。」—— 所以这条从"离边 120px 也能开"改成"必须贴着把手"。
+  const nubY = await win.evaluate(() => {
+    const b = document.querySelector('.shell-drawer-btn.is-left');
+    return b ? Math.round(b.getBoundingClientRect().top + b.getBoundingClientRect().height / 2) : 430;
+  });
+  await drag({ x0: 10, y0: nubY, steps: stepsOf(10, nubY, 330, nubY + 4) });
   await sleep(420);
   const wideZone = await drawerNow();
-  check('离边缘 120px 处起手往内滑也能打开抽屉（起手区 = 外侧 25%）',
-    wideZone === 'left', `drawer=${wideZone}`);
+  check('贴着把手（横向 10px / 把手中心高度）往内滑能打开抽屉',
+    wideZone === 'left', `drawer=${wideZone} nubY=${nubY}`);
 
   // ③ 关闭防误触死区：20px 外出 = 面板纹丝不动；120px 外出 = 面板跟着走
   await ensureOpened();
@@ -450,7 +457,7 @@ async function main() {
 
   // ④ 鼠标指针也算（用户："不按 pointerType 分流"）
   await ensureClosed();
-  await drag({ x0: 96, y0: 430, steps: stepsOf(96, 430, 320, 432), pointerType: 'mouse', id: 24 });
+  await drag({ x0: 10, y0: nubY, steps: stepsOf(10, nubY, 320, nubY + 2), pointerType: 'mouse', id: 24 });
   await sleep(420);
   check('鼠标拖动同样能打开抽屉（没有按 pointerType 分流）',
     (await drawerNow()) === 'left', `drawer=${await drawerNow()}`);

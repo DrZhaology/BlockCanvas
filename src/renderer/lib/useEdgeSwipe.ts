@@ -34,6 +34,15 @@ type Logical = 'left' | 'right';
 
 const ZONE_RATIO = 0.25;   // 起手区 = 视口宽的 25%
 const ZONE_MIN = 140;      // 但不小于 140px（412px 手机上就是这档，够"按钮外面也能滑"）
+/**
+ * v0.4.6：**打开**抽屉的起手区收紧成"把手附近一小块"。
+ * 以前打开也用上面那条 25%（≥140px）的宽带 —— 等于左右各 140px 内任何横滑都被吃掉，
+ * 底部工具栏、画布横向滑动全都滑不动（用户："整条左右边都可以开启"）。
+ * 关闭方向仍用宽带（从面板里任意位置往外滑都能关，符合直觉）。
+ */
+const OPEN_ZONE_PX = 56;
+/** 把手中心上下这么高的范围算"把手附近" */
+const NUB_BAND = 96;
 const DIR_LOCK = 14;       // 判方向所需的最小位移
 const DEAD_BAND = 28;      // 关闭方向的死区（这段时间面板一动不动）
 const OPEN_TRIGGER = 60;   // 往内滑够多远算"打开"
@@ -181,8 +190,14 @@ export function useEdgeSwipe(opts: {
         logical = open;
         intent = 'close';
       } else {
-        // 开：起手点在哪条边的宽起手区，就往那条边对应的抽屉走
-        const phys: Phys | null = x <= zone ? 'left' : x >= vw - zone ? 'right' : null;
+        /* 开：起手点必须**贴着屏幕边**、而且**靠近那个把手**。
+           用户原话：「左右两侧的面板只有抽屉按钮附近一块区域可以打开，
+           现在整条左右边都可以开启，下方的工具栏根本左右滑动不了。」
+           —— 以前起手区是视口宽 25%，等于整条边都能开抽屉，
+           屏幕上任何横向滑动都被它抢走，底部工具栏自然滑不动。
+           现在：横向 56px 窄带 + 纵向把手中心 ±96px，只留把手附近一小块。 */
+        const openZone = OPEN_ZONE_PX;
+        const phys: Phys | null = x <= openZone ? 'left' : x >= vw - openZone ? 'right' : null;
         if (!phys) return;
         // 同边模式（both-left / both-right）两个抽屉都从这条边进出 →
         // 挑把手离手指最近的那个（默认 38% / 62%，不会挑错）
@@ -192,6 +207,8 @@ export function useEdgeSwipe(opts: {
         logical = cand.length === 1
           ? cand[0]
           : cand.reduce((a, b) => (Math.abs(nubCenterY(a) - y) <= Math.abs(nubCenterY(b) - y) ? a : b));
+        // 纵向再收一道：必须在把手上下 NUB_BAND 之内，否则这一下是想滚画布/滑工具栏
+        if (Math.abs(y - nubCenterY(logical)) > NUB_BAND) return;
         intent = 'open';
       }
 
