@@ -21,6 +21,7 @@ import { createPortal } from 'react-dom';
 import { Toolbar } from '../Toolbar';
 import { useScene } from '@store/sceneStore';
 import { useTabStore } from '@store/tabStore';
+import { useAltMode, setAltMode } from '@lib/altMode';
 
 /** 会话数角标：圆角正方形 + 中间数字（用户指定：「svg 做成一个圆角正方形，中间数字」） */
 function GlyphSessions({ n }: { n: number }) {
@@ -214,6 +215,7 @@ export function PortraitBar2({ zoom, setZoom, canvasWidth, setCanvasWidth }: {
   setCanvasWidth: (v: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const altMode = useAltMode();
   const holdRef = useRef<{ t: number | null; y: number; active: boolean }>({ t: null, y: 0, active: false });
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -246,7 +248,19 @@ export function PortraitBar2({ zoom, setZoom, canvasWidth, setCanvasWidth }: {
       onPointerUp={endHold}
       onPointerCancel={endHold}
     >
-      <div className="pt-bar2-grip" aria-hidden="true" />
+      <div className="pt-bar2-head">
+        {/* v0.4.6：Alt 模式开关（用户："下方工具栏的加入一个按钮，开启 Alt 模式"）——
+            触摸屏没有 Alt 键，开了它就把"按住 Alt"这个状态锁住，
+            后面画布走桌面那套定位助手逻辑。 */}
+        <button
+          type="button"
+          className={'pt-alt-btn' + (altMode ? ' is-on' : '')}
+          aria-pressed={altMode}
+          title={altMode ? 'Alt 模式已开启：画布按电脑端方式操作' : '开启 Alt 模式（等同于一直按住 Alt）'}
+          onClick={() => setAltMode(!altMode)}
+        >Alt</button>
+        <div className="pt-bar2-grip" aria-hidden="true" />
+      </div>
       <div className="pt-bar2-inner">
         <Toolbar
           canvasWidth={canvasWidth}

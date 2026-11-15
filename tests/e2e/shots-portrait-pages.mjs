@@ -49,7 +49,7 @@ async function main() {
       const b = el.getBoundingClientRect();
       if (b.width === 0 && b.height === 0) continue;
       if (el.closest('.bc-hscroll, .tb-main, .bc-portal, .tb-more-panel, .bc-varmenu, [data-bc-avoid], .elem-pane-wrap, .right-pane-wrap, .pt-bar2-inner')) continue;
-      if (b.right > vw + 1.5) bad.push({ cls: String(el.className || '').slice(0, 32), over: Math.round(b.right - vw) });
+      if (b.right > vw + 1.5) bad.push({ tag: el.tagName.toLowerCase(), cls: String(el.className || '').slice(0, 32), over: Math.round(b.right - vw), w: Math.round(b.width) });
     }
     return {
       vw,

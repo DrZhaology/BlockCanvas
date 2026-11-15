@@ -10,6 +10,7 @@ import { useRef, useState } from 'react';
 import { findNode, useScene } from '@store/sceneStore';
 import { MEDIA_TAGS, TEXT_TAGS } from '@lib/types';
 import { boundsFor, ALT_REPARENT_ENABLED } from './walls';
+import { altHeld } from '@lib/altMode';
 import { measureFixedViewport } from '@lib/fixedViewport';
 import { contentBoxOf, hasSideValue, pickAxisSide, readBoxModel, edgeAt } from './geometry';
 import { applyAltDragMove, finishAltDrag, type AltDragCtx } from './altDragMove';
@@ -256,7 +257,7 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
 
   // Alt 悬停：算出"鼠标下面是谁、贴着哪条边、该进入哪种模式"，并给出对应的光标
   const onWrapPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!e.altKey || altDragRef.current) {
+    if (!altHeld(e) || altDragRef.current) {
       if (altHover) setAltHover(null);
       tagAltCursor(null, '');
       return;
@@ -325,7 +326,7 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
       if (el) onMiddlePress?.(el.getAttribute('data-bc-id')!, e.clientX, e.clientY);
       return;
     }
-    if (!e.altKey || e.button !== 0) return;
+    if (!altHeld(e) || e.button !== 0) return;
     // 已经有一次 Alt 拖拽在跑：不要用新的锚点覆盖它（会造成"闪一下又回弹"）
     if (altDragRef.current) return;
     const h = altHoverRef.current;
@@ -460,7 +461,7 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
     // 画布滚动 S 像素后，元素在屏幕上的位置整体上移了 S，但基准 `d.rect` 还是旧的
     // —— 下一帧算出来的目标位置就凭空多了 S 的偏差，看起来就是"瞬移"。
     // 修法：把基准 rect（以及纵向墙）一起平移 S，元素才会**跟着内容走**。
-    if (e.altKey && drag?.engaged && drag.mode === 'move') {
+    if (altHeld(e) && drag?.engaged && drag.mode === 'move') {
       e.preventDefault();
       const wrapEl = canvasRef.current?.parentElement;
       const before = wrapEl?.scrollTop ?? 0;
@@ -482,7 +483,7 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
     // ② Alt + 滚轮（没在拖动）= 精准微调位置。
     // 用户原话：「Alt + 滚轮不要触发页面上的盒模型显示；只有 Alt + 鼠标放到一个元素上
     //            但不按住，可以显示盒模型和定位等；Alt + 滚轮是精准定位。」
-    if (e.altKey && !drag) {
+    if (altHeld(e) && !drag) {
       e.preventDefault();
       // 滚轮期间不弹盒模型（用户明确要求），并且挡掉随后 pointermove 立刻又把它带出来
       wheelNoBoxUntil.current = Date.now() + 800;

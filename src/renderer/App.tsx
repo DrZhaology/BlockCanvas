@@ -36,6 +36,7 @@ import { useLoadScreen } from '@store/loadStore';
 import { useShellLayout } from '@lib/shellMode';
 import { useInputMode } from '@lib/inputMode';
 import { useTouchCanvas } from '@lib/useTouchCanvas';
+import { useAltMode } from '@lib/altMode';
 import { PortraitBar1, PortraitBar2 } from '@comp/portrait/PortraitBars';
 import { SessionsView } from '@comp/portrait/SessionsView';
 import { useEdgeSwipe } from '@lib/useEdgeSwipe';
@@ -128,8 +129,10 @@ export default function App() {
   const [leftWidth, setLeftWidth] = usePersistentState<number>(LEFT_WIDTH_KEY, LEFT_WIDTH_DEFAULT);
   const [zoom, setZoom] = useState(1);
   /* v0.4.6 竖屏：画布触屏手势层 —— 长按选中 / 长按加选 / 单指平移 / 双指缩放。
-     只在 stack 形态挂上；宽屏一条老逻辑都不动（见 lib/useTouchCanvas.ts 顶部说明）。 */
-  useTouchCanvas({ enabled: shell.layout === 'stack', zoom, onZoomChange: setZoom });
+     只在 stack 形态挂上；宽屏一条老逻辑都不动（见 lib/useTouchCanvas.ts 顶部说明）。
+     ⚠ Alt 模式打开时要**关掉手势层**：否则画布指针全被它吃掉，桌面那套 Alt 拖拽收不到事件。 */
+  const altOn = useAltMode();
+  useTouchCanvas({ enabled: shell.layout === 'stack' && !altOn, zoom, onZoomChange: setZoom });
   const [view, setView] = useState<AppView>('editor');
   // 标签数（用于空页面判断）。⚠ 必须在组件顶部调用 —— 不能放进 JSX 的 view 分支里，
   // 否则切到"表格编辑器/设置"等视图时这个 hook 不执行，hooks 数量前后不一致，

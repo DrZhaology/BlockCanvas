@@ -168,7 +168,33 @@
   touch-action: pan-x;
   transition: height var(--dur-mid, 200ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
 }
-/* 抓握提示条：告诉用户"这条能长按拖动" */
+/* 抓握提示条：告诉用户"这条能长按拖动"，左端再挂一个 Alt 模式开关 */
+.pt-bar2-head {
+  width: 100%;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  flex: 0 0 auto;
+}
+.pt-alt-btn {
+  height: 16px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pt-alt-btn.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 .pt-bar2-grip {
   width: 100%;
   height: 10px;
@@ -258,12 +284,18 @@
   row-gap: 6px;
 }
 
-/* 手册页：搜索框吃满一行，文档页签可换行 */
+/* 手册页：顶部那条是"品牌 + 搜索 + 文档页签"一行 flex，竖屏塞不下就顶出去。
+   正确做法是**换行**：搜索框单独占一整行，页签再换一行。 */
+.app[data-shell='stack'] .help-topbar {
+  flex-wrap: wrap;
+  row-gap: 8px;
+  padding: 8px 10px;
+}
 .app[data-shell='stack'] .help-search {
+  flex: 1 1 100%;
   width: auto !important;
   max-width: 100% !important;
   min-width: 0;
-  flex: 1 1 100%;
 }
 /* 手册页里所有 help-* 元素统一封顶：这一页的宽屏布局是"左目录 + 右正文 + 顶部搜索"，
    竖屏下目录和搜索会一起把右边顶出去（实测溢出 185px → 28px），
@@ -315,6 +347,31 @@
   max-width: none;
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* 手册正文里剩下的溢出是**长串**：代码块、行内 code、表格、超长 URL。
+   这些没有类名（就是 markdown 渲染出来的 pre/code/table），
+   统一让它们在容器内自己横滚，并且允许长词断行 —— 否则一条长路径就能把整页顶出去。 */
+.app[data-shell='stack'] .help-page pre,
+.app[data-shell='stack'] .help-page code,
+.app[data-shell='stack'] .help-page table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+/* 行内 code 是最后两条溢出的元凶（实测宽 443px，撑出右边界 311px）：
+   主题给行内 code 设了 nowrap，长路径/长选择器就直接顶出去。
+   竖屏下改成可断行 —— 宁可难看一点，也不许把整页顶出去。 */
+.app[data-shell='stack'] .help-page code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.app[data-shell='stack'] .help-page table { display: block; }
+.app[data-shell='stack'] .help-page { overflow-wrap: anywhere; }
+/* 文档里还会贴截图（README 那些 <img>）：竖屏下必须等比缩到容器宽 */
+.app[data-shell='stack'] .help-page img {
+  max-width: 100%;
+  height: auto;
 }
 
 /* ── 会话管理页（背景跟随主题）──────────────────────────────────────────
