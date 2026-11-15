@@ -36,6 +36,33 @@ export function isTabDirty(id: string): boolean {
   return Boolean(useTabStore.getState().tabs.find((t) => t.id === id)?.isDirty);
 }
 
+/**
+ * 「保存并关闭」这条路**不自己写盘**：切到那个标签 → 走现有保存通道
+ * （menu:save-project / menu:save-project-as，保留路径校验/覆盖提示/最近项目）
+ * → 轮询 isDirty，清掉才关。返回 true 表示已经关掉了。
+ *
+ * 抽成独立函数是因为会话管理页要把确认面板画在**卡片内部**（用户：
+ * "关闭会话的保存提示放到会话卡片的下面"），不能再用那个全局浮层。
+ */
+export async function saveTabThenClose(id: string): Promise<boolean> {
+  const st = useTabStore.getState();
+  const tab = st.tabs.find((t) => t.id === id);
+  if (!tab) return true;
+  const hasFile = Boolean(tab.filePath);
+  // 保存通道只作用于**当前活动标签**，所以先切过去（切过去不丢任何东西）
+  if (st.activeTabId !== id) st.switchTab(id);
+  await sleep(120);
+  window.dispatchEvent(new CustomEvent(hasFile ? 'menu:save-project' : 'menu:save-project-as'));
+  // 轮询到"不再脏"为止：保存是异步的（写盘 + 更新最近项目）
+  for (let i = 0; i < 20; i++) {
+    await sleep(100);
+    const t = useTabStore.getState().tabs.find((x) => x.id === id);
+    if (!t) return true;
+    if (!t.isDirty) { useTabStore.getState().closeTab(id); return true; }
+  }
+  return false;
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** 二级菜单大概尺寸（只用于贴边翻转，不必精确） */
@@ -75,20 +102,10 @@ export function TabCloseGuard() {
   };
 
   const saveThenClose = async () => {
-    const st = useTabStore.getState();
-    // 保存通道只作用于**当前活动标签**，所以先切过去（切过去不丢任何东西）
-    if (st.activeTabId !== pending.id) st.switchTab(pending.id);
-    await sleep(120);
-    window.dispatchEvent(new CustomEvent(pending.hasFile ? 'menu:save-project' : 'menu:save-project-as'));
     setBusy(true);
-    // 轮询到"不再脏"为止：保存是异步的（写盘 + 更新最近项目）
-    for (let i = 0; i < 20; i++) {
-      await sleep(100);
-      const t = useTabStore.getState().tabs.find((x) => x.id === pending.id);
-      if (!t) { setBusy(false); setPending(null); return; }
-      if (!t.isDirty) { useTabStore.getState().closeTab(pending.id); setBusy(false); setPending(null); return; }
-    }
+    const done = await saveTabThenClose(pending.id);
     setBusy(false);
+    if (done) setPending(null);
   };
 
   const actions = (

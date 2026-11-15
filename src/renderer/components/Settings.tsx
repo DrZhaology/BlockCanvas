@@ -12,6 +12,7 @@ import { TIPS, TIPS_KEY, setTipsEnabled } from './CanvasOverlays';
 import { readSelHighlight, writeSelHighlight } from '@lib/selHighlight';
 import { useDrawerSide, DRAWER_SIDE_LABELS } from '@lib/drawerSide';
 import { usePortraitPrefs, setPortraitPrefs } from '@lib/portraitPrefs';
+import { useShellLayout } from '@lib/shellMode';
 import { appAlert, appConfirm } from '@lib/appConfirm';
 import type { DataPathsInfo, StorageStatsInfo, StorageBreakdownInfo, StorageCategoryId } from '../global';
 
@@ -44,11 +45,27 @@ interface Props {
   onCanvasWidthChange: (w: string) => void;
   /** 打开软件内更新中心页（v0.4.1：更新不再走弹窗） */
   onOpenUpdateCenter?: () => void;
+  /**
+   * v0.4.6 竖屏两级导航：`section === null` = 停在「分类列表」页，
+   * 有值 = 站在某一个具体设置页里。状态由 App 持有，因为**下方第一条栏的返回**
+   * 要按层级回退（用户："左下角的菜单定位是返回上一层……相当于 Alt+左键"）。
+   */
+  section?: SettingsSection | null;
+  onSectionChange?: (s: SettingsSection | null) => void;
 }
 
 export function Settings(props: Props) {
-  const { onBack, onOpenWebManager, layout, onLayoutChange, canvasWidth, onCanvasWidthChange, initialSection, onOpenUpdateCenter } = props;
-  const [section, setSection] = useState<SettingsSection>(initialSection || 'personalization');
+  const { onOpenWebManager, layout, onLayoutChange, canvasWidth, onCanvasWidthChange, initialSection, onOpenUpdateCenter } = props;
+  const shell = useShellLayout();
+  const stacked = shell.layout === 'stack';
+  const [sectionLocal, setSection] = useState<SettingsSection>(initialSection || 'personalization');
+  /** 受控值优先（App 拿着它做"返回上一层"）；宽屏没传就是本组件自己的状态 */
+  const section = props.section !== undefined ? props.section : sectionLocal;
+  const active: SettingsSection = section ?? 'personalization';
+  const chooseSection = (s: SettingsSection | null) => {
+    setSection(s ?? 'personalization');
+    props.onSectionChange?.(s);
+  };
   // 竖屏那三条开关（显示第二条栏 / 长按判定 / 图层面板高度）—— 真实生效，不是摆设
   const ptPrefs = usePortraitPrefs();
   const [paths, setPaths] = useState<DataPathsInfo | null>(null);
@@ -327,11 +344,14 @@ export function Settings(props: Props) {
   const NAV_ITEMS = NAV_GROUPS.flatMap((g) => g.items);
 
   return (
-    <div className="fluent-settings-page">
-      {/* 左侧 Fluent 导航栏 */}
+    <div className="fluent-settings-page" data-level={stacked ? (section ? 'detail' : 'list') : 'split'}>
+      {/* 宽屏：左侧 Fluent 导航栏常驻。
+          竖屏：导航整条不渲染 —— 改成"一级 = 分类列表页，二级 = 具体设置页"（用户要求），
+          页面内也不再放「返回编辑器」，回退交给下方第一条栏。 */}
+      {!stacked && (
       <div className="fluent-sidebar">
         <div className="fluent-sidebar-top">
-          <button className="fluent-back-btn" onClick={onBack} title="返回画布编辑器">
+          <button className="fluent-back-btn" onClick={props.onBack} title="返回画布编辑器">
             <Icon name="chevronLeft" size={13} /> 返回编辑器
           </button>
           <div className="fluent-app-brand">
@@ -347,8 +367,8 @@ export function Settings(props: Props) {
               {g.items.map((item) => (
                 <button
                   key={item.id}
-                  className={"fluent-nav-item" + (section === item.id ? " active" : "")}
-                  onClick={() => setSection(item.id)}
+                  className={"fluent-nav-item" + (active === item.id ? " active" : "")}
+                  onClick={() => chooseSection(item.id)}
                 >
                   <span className="fluent-nav-icon"><Icon name={item.svg} /></span>
                   <div className="fluent-nav-meta">
@@ -361,22 +381,61 @@ export function Settings(props: Props) {
           ))}
         </div>
       </div>
+      )}
 
-      {/* 右侧主设置内容区 */}
-      <div className="fluent-content">
-        <div className="fluent-content-header">
-          <div className="fluent-breadcrumb">
-            <span>设置</span>
-            <span className="fluent-slash">/</span>
-            <span className="fluent-current">{NAV_ITEMS.find((n) => n.id === section)?.label}</span>
+      {/* 竖屏一级：分类列表（点一张卡片进具体设置页） */}
+      {stacked && !section && (
+        <div className="set-list">
+          <div className="set-list-head">
+            <div className="set-list-brand">
+              <img className="fluent-brand-logo" src={logoUrl} alt="BlockCanvas" />
+              <span>设置</span>
+            </div>
           </div>
-          <h2 className="fluent-page-title">{NAV_ITEMS.find((n) => n.id === section)?.label}</h2>
+          {NAV_GROUPS.map((g) => (
+            <div className="set-list-group" key={g.title}>
+              <div className="set-list-group-title">{g.title}</div>
+              {g.items.map((item) => (
+                <button key={item.id} className="set-list-card" onClick={() => chooseSection(item.id)}>
+                  <span className="set-list-icon"><Icon name={item.svg} size={18} /></span>
+                  <span className="set-list-meta">
+                    <span className="set-list-title">{item.label}</span>
+                    <span className="set-list-desc">{item.desc}</span>
+                  </span>
+                  <Icon name="chevronRight" size={14} />
+                </button>
+              ))}
+            </div>
+          ))}
         </div>
+      )}
+
+      {/* 内容区：宽屏一直在；竖屏只在"进了某一项"之后出现 */}
+      {(!stacked || section) && (
+      <div className="fluent-content">
+        {stacked ? (
+          <div className="set-detail-head">
+            <span className="set-detail-icon"><Icon name={NAV_ITEMS.find((n) => n.id === active)?.svg ?? 'sliders'} size={18} /></span>
+            <span className="set-detail-text">
+              <span className="set-detail-title">{NAV_ITEMS.find((n) => n.id === active)?.label}</span>
+              <span className="set-detail-desc">{NAV_ITEMS.find((n) => n.id === active)?.desc}</span>
+            </span>
+          </div>
+        ) : (
+          <div className="fluent-content-header">
+            <div className="fluent-breadcrumb">
+              <span>设置</span>
+              <span className="fluent-slash">/</span>
+              <span className="fluent-current">{NAV_ITEMS.find((n) => n.id === active)?.label}</span>
+            </div>
+            <h2 className="fluent-page-title">{NAV_ITEMS.find((n) => n.id === active)?.label}</h2>
+          </div>
+        )}
 
         {/* v0.4.4：分区切换不再瞬变 —— key 变化重挂载 + 轻量入场动画（bcSwapIn） */}
-        <div className="fluent-cards-container" key={section}>
+        <div className="fluent-cards-container" key={active}>
           {/* ——— 0. 竖屏与触摸（v0.4.6 新增，三条都真的生效）——— */}
-          {section === 'portrait' && (
+          {active === 'portrait' && (
             <>
               <div className="fluent-group-title">底部操作栏</div>
               <div className="fluent-card">
@@ -440,7 +499,7 @@ export function Settings(props: Props) {
           )}
 
           {/* ——— 1. 个性化与外观 ——— */}
-          {section === 'personalization' && (
+          {active === 'personalization' && (
             <>
               <div className="fluent-group-title">主题与界面色彩</div>
               <div className="fluent-card">
@@ -572,7 +631,7 @@ export function Settings(props: Props) {
           )}
 
           {/* ——— 2. 编辑器与画布 ——— */}
-          {section === 'editor' && (
+          {active === 'editor' && (
             <>
               {/* v0.4.6（R6-9）：竖屏验收 —— 把窗口一键设成手机尺寸。
                   用户提到"电脑完全支持屏幕竖屏"，竖屏显示器就是现成的手机验收台；
@@ -809,7 +868,7 @@ export function Settings(props: Props) {
           )}
 
           {/* ——— 3. 存储与自动备份 + 更新 ——— */}
-          {section === 'storage' && (
+          {active === 'storage' && (
             <>
               {/* 分组 1：运行缓存与自动清洁 */}
               <div className="fluent-group-title">
@@ -1046,7 +1105,7 @@ export function Settings(props: Props) {
           )}
 
           {/* ——— 3b. 自动更新（紧接存储区块内） ——— */}
-          {section === 'storage' && (
+          {active === 'storage' && (
             <>
               <div className="fluent-group-title" style={{ marginTop: 16 }}>自动更新</div>
               <div className="fluent-card">
@@ -1069,17 +1128,17 @@ export function Settings(props: Props) {
           )}
 
           {/* ——— 4. 工具栏管理（v0.4.3 重写：真实样式预览 + 拖拽排序 + 独立开关） ——— */}
-          {section === 'toolbar' && <ToolbarManagerSection
+          {active === 'toolbar' && <ToolbarManagerSection
             resetToolbar={resetToolbar}
           />}
 
           {/* ——— 5. 扩展与插件 (完全内嵌) ——— */}
-          {section === 'extensions' && (
+          {active === 'extensions' && (
             <EmbeddedExtensionsSection onOpenDir={() => window.bc.openExtensionsDir()} />
           )}
 
           {/* ——— 6. 关于与系统 ——— */}
-          {section === 'about' && (
+          {active === 'about' && (
             <>
               <div className="fluent-group-title">软件信息</div>
               <div className="fluent-about-box">
@@ -1108,6 +1167,7 @@ export function Settings(props: Props) {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

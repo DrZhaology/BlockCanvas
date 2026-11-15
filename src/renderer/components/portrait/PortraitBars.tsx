@@ -74,6 +74,8 @@ export type PortraitBar1Props = {
   onOpenSettings: () => void;
   onOpenHelp: () => void;
   onOpenPlugins: () => void;
+  /** 手册页专属：最左边那颗「侧边栏」（切换文档 / 搜索 / 目录）。其它页面不传 */
+  onOpenHelpSidebar?: () => void;
 };
 
 /**
@@ -83,7 +85,7 @@ export type PortraitBar1Props = {
  * 否则会读到首次渲染的旧值（这个坑在工具栏 `opMap` 上踩过）。
  */
 export function PortraitBar1(props: PortraitBar1Props) {
-  const { view, editorish, onBack, onOpenSessions, onOpenSettings, onOpenHelp, onOpenPlugins } = props;
+  const { view, editorish, onBack, onOpenSessions, onOpenSettings, onOpenHelp, onOpenPlugins, onOpenHelpSidebar } = props;
   const [entryOpen, setEntryOpen] = useState(false);
   const entryRef = useRef<HTMLDivElement | null>(null);
   const entryBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -129,7 +131,8 @@ export function PortraitBar1(props: PortraitBar1Props) {
   const newPageBtn = (
     <button
       className="pt-btn" type="button" aria-label="新建页面" title="新建页面"
-      onClick={() => useTabStore.getState().newTab()}
+      /* 交给 App 做两段式动画（旧画布左移出 → 新画布从右进），不再直接 newTab() */
+      onClick={() => window.dispatchEvent(new CustomEvent('bc:new-page'))}
     >
       <GlyphNewPage />
     </button>
@@ -137,6 +140,20 @@ export function PortraitBar1(props: PortraitBar1Props) {
 
   return (
     <div className="pt-bar pt-bar1" data-view={view} role="toolbar" aria-label="核心操作">
+      {/* 竖屏手册页：最左边一颗「侧边栏」（用户："下方第一层工具栏加一个侧边栏按钮，
+          放到最左边，可以打开侧边栏，切换文档，搜索"）。它排在「返回」之前。 */}
+      {onOpenHelpSidebar && (
+        <button
+          className="pt-btn" type="button" aria-label="侧边栏" title="侧边栏：切换文档 / 搜索 / 目录"
+          onClick={onOpenHelpSidebar}
+        >
+          <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+            <rect x="3.2" y="4.2" width="15.6" height="13.6" rx="2.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
+            <path d="M9 4.6v12.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            <path d="M5.4 8.2h1.8M5.4 11h1.8M5.4 13.8h1.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+        </button>
+      )}
       {editorish ? (
         <>
           <button

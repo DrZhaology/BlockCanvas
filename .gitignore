@@ -53,3 +53,4 @@ release/
 .idea/
 .DS_Store
 Thumbs.db
+tests/e2e/sweep*.txt

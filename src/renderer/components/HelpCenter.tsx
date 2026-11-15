@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
 import { Icon } from './Icon';
+import { useShellLayout } from '@lib/shellMode';
 import {
   DOCS,
   headingId,
@@ -197,6 +198,19 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
   const [hits, setHits] = useState(0);
   const [showResults, setShowResults] = useState(false);
   const [closing, setClosing] = useState(false);
+  /**
+   * v0.4.6 竖屏：手册页的顶栏（文档页签 + 搜索）和左侧目录在 412px 里太挤，
+   * 用户要求「下方第一层工具栏加一个侧边栏按钮，放到最左边，可以打开侧边栏，
+   * 切换文档，搜索」。所以竖屏把这三样收进一个抽屉，由第一条栏最左那颗按钮开合。
+   */
+  const shell = useShellLayout();
+  const stacked = shell.layout === 'stack';
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  useEffect(() => {
+    const onToggle = () => setSidebarOpen((o) => !o);
+    window.addEventListener('bc:help-sidebar', onToggle);
+    return () => window.removeEventListener('bc:help-sidebar', onToggle);
+  }, []);
   const docRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -475,6 +489,7 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
   }, [toc, docKey]);
 
   const jumpTo = (id: string) => {
+    setSidebarOpen(false); // 竖屏抽屉里点了目录就收起来，别挡正文
     const el = docRef.current?.querySelector('#' + CSS.escape(id)) as HTMLElement | null;
     const scroller = scrollRef.current;
     if (!el || !scroller) return;
@@ -484,6 +499,7 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
   /** 点搜索结果：切到对应文档 + 跳到段落 + 高亮 */
   const goHit = (h: Hit) => {
     setShowResults(false);
+    setSidebarOpen(false);
     setQueryInput(h.title);
     setQuery(h.title);
     if (h.doc !== docKey) {
@@ -497,6 +513,7 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
 
   const switchDoc = (k: DocKey) => {
     if (k === docKey) return;
+    setSidebarOpen(false);
     tocJson.current = '';
     setToc([]);
     setActiveId('');
@@ -505,81 +522,116 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
     if (sc) sc.scrollTo({ top: 0 });
   };
 
-  return (
-    <div className={'help-page' + (closing ? ' is-closing' : '')}>
-      <div className="help-topbar">
-        <button className="fluent-back-btn" onClick={close} title="返回编辑器 (Esc)">
-          <Icon name="chevronLeft" size={14} /> 返回编辑器
+  // —— 三块可复用的小部件（宽屏放顶栏/左栏，竖屏全收进抽屉）——
+  const brandBlock = (
+    <div className="help-brand">
+      <span className="help-brand-logo"><Icon name={docDef.icon} size={18} /></span>
+      <span className="help-brand-text">{docDef.label}</span>
+    </div>
+  );
+  const tabsBlock = (
+    <div className="help-doc-tabs">
+      {DOCS.map((d) => (
+        <button
+          key={d.key}
+          className={'help-doc-tab' + (d.key === docKey ? ' active' : '')}
+          onClick={() => switchDoc(d.key)}
+          title={`查看《${d.label}》`}
+        >
+          <span className="help-doc-tab-ico"><Icon name={d.icon} size={15} /></span>{d.label}
         </button>
-        <div className="help-brand">
-          <span className="help-brand-logo"><Icon name={docDef.icon} size={18} /></span>
-          <span className="help-brand-text">{docDef.label}</span>
-        </div>
-        <div className="help-doc-tabs">
-          {DOCS.map((d) => (
-            <button
-              key={d.key}
-              className={'help-doc-tab' + (d.key === docKey ? ' active' : '')}
-              onClick={() => switchDoc(d.key)}
-              title={`查看《${d.label}》`}
-            >
-              <span className="help-doc-tab-ico"><Icon name={d.icon} size={15} /></span>{d.label}
+      ))}
+    </div>
+  );
+  const searchBlock = (
+    <div className="help-search" ref={searchRef}>
+      <span className="help-search-ico" aria-hidden="true"><Icon name="search" size={15} /></span>
+      <input
+        className="help-search-input"
+        type="text"
+        value={queryInput}
+        placeholder="搜索三份文档（回车/点结果跳转）"
+        onChange={(e) => { setQueryInput(e.target.value); setShowResults(true); }}
+        onFocus={() => { if (queryInput.trim()) setShowResults(true); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { setQueryInput(''); setQuery(''); setShowResults(false); (e.target as HTMLInputElement).blur(); }
+          if (e.key === 'Enter' && results[0]) goHit(results[0]);
+        }}
+      />
+      {queryInput.trim() && (
+        <span
+          className={'help-search-count' + (hits === 0 ? ' is-empty' : '')}
+          title={hits === 0 ? '当前文档没有匹配' : `当前文档命中 ${hits} 处`}
+        >
+          {hits === 0 ? '没有匹配' : `${hits} 处`}
+        </span>
+      )}
+      {/* 搜索结果下拉框（按权重排序） */}
+      {showResults && queryInput.trim() && (
+        <div className="help-results bc-scroll">
+          {results.length === 0 && <div className="help-results-empty">没有找到「{queryInput.trim()}」相关内容</div>}
+          {results.map((h) => (
+            <button key={h.doc + h.id} className="help-result" onClick={() => goHit(h)}>
+              <div className="help-result-top">
+                <span className="help-result-doc">{h.docLabel}</span>
+                <span className={'help-result-title lv' + h.level}>{h.title}</span>
+              </div>
+              <div className="help-result-snippet">{h.snippet}</div>
             </button>
           ))}
         </div>
-        <div className="help-search" ref={searchRef}>
-          <span className="help-search-ico" aria-hidden="true"><Icon name="search" size={15} /></span>
-          <input
-            className="help-search-input"
-            type="text"
-            value={queryInput}
-            placeholder="搜索三份文档（回车/点结果跳转）"
-            onChange={(e) => { setQueryInput(e.target.value); setShowResults(true); }}
-            onFocus={() => { if (queryInput.trim()) setShowResults(true); }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') { setQueryInput(''); setQuery(''); setShowResults(false); (e.target as HTMLInputElement).blur(); }
-              if (e.key === 'Enter' && results[0]) goHit(results[0]);
-            }}
-          />
-          {queryInput.trim() && (
-            <span
-              className={'help-search-count' + (hits === 0 ? ' is-empty' : '')}
-              title={hits === 0 ? '当前文档没有匹配' : `当前文档命中 ${hits} 处`}
-            >
-              {hits === 0 ? '没有匹配' : `${hits} 处`}
-            </span>
-          )}
-          {/* 搜索结果下拉框（按权重排序） */}
-          {showResults && queryInput.trim() && (
-            <div className="help-results bc-scroll">
-              {results.length === 0 && <div className="help-results-empty">没有找到「{queryInput.trim()}」相关内容</div>}
-              {results.map((h) => (
-                <button key={h.doc + h.id} className="help-result" onClick={() => goHit(h)}>
-                  <div className="help-result-top">
-                    <span className="help-result-doc">{h.docLabel}</span>
-                    <span className={'help-result-title lv' + h.level}>{h.title}</span>
-                  </div>
-                  <div className="help-result-snippet">{h.snippet}</div>
-                </button>
-              ))}
-            </div>
-          )}
+      )}
+    </div>
+  );
+  const tocBlock = (
+    <aside className="help-toc bc-hscroll">
+      <div className="help-toc-title">目录（{toc.length} 节）</div>
+      {toc.map((t) => (
+        <button
+          key={t.id}
+          className={'help-toc-item lv' + t.level + (activeId === t.id ? ' active' : '')}
+          onClick={() => jumpTo(t.id)}
+          title={t.text}
+        >{t.text}</button>
+      ))}
+      {toc.length === 0 && <div className="help-toc-empty">正在解析文档…</div>}
+    </aside>
+  );
+
+  return (
+    <div className={'help-page' + (closing ? ' is-closing' : '')}>
+      {/* 竖屏不渲染顶栏：品牌/页签/搜索都在抽屉里（见下） */}
+      {!stacked && (
+        <div className="help-topbar">
+          <button className="fluent-back-btn" onClick={close} title="返回编辑器 (Esc)">
+            <Icon name="chevronLeft" size={14} /> 返回编辑器
+          </button>
+          {brandBlock}
+          {tabsBlock}
+          {searchBlock}
         </div>
-      </div>
+      )}
+
+      {/* 竖屏侧边栏抽屉：切换文档 / 搜索 / 目录（用户要求收在这里） */}
+      {stacked && sidebarOpen && (
+        <>
+          <div className="help-drawer-scrim" onClick={() => setSidebarOpen(false)} />
+          <aside className="help-drawer" role="dialog" aria-label="手册侧边栏">
+            <div className="help-drawer-head">
+              {brandBlock}
+              <button className="help-drawer-close" onClick={() => setSidebarOpen(false)} aria-label="关闭侧边栏">
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+            {tabsBlock}
+            {searchBlock}
+            <div className="help-drawer-toc">{tocBlock}</div>
+          </aside>
+        </>
+      )}
 
       <div className="help-body">
-        <aside className="help-toc bc-hscroll">
-          <div className="help-toc-title">目录（{toc.length} 节）</div>
-          {toc.map((t) => (
-            <button
-              key={t.id}
-              className={'help-toc-item lv' + t.level + (activeId === t.id ? ' active' : '')}
-              onClick={() => jumpTo(t.id)}
-              title={t.text}
-            >{t.text}</button>
-          ))}
-          {toc.length === 0 && <div className="help-toc-empty">正在解析文档…</div>}
-        </aside>
+        {!stacked && tocBlock}
 
         <div className="help-scroll bc-scroll" ref={scrollRef}>
           <div className="help-doc" ref={docRef} dangerouslySetInnerHTML={{ __html: html }} />

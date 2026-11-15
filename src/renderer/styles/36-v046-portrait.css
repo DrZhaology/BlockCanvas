@@ -703,6 +703,272 @@
 /* 卡片一列（两张并排时缩略图只剩 160px，标题全被挤成省略号） */
 .app[data-shell='stack'] .pc-grid { grid-template-columns: 1fr; }
 
+/* ── 竖屏设置：两级导航（用户："把菜单和具体的设置项分开，进入设置显示所有的设置项，
+      例如个性化与外观，然后进去是具体的设置项"）────────────────────────────
+   骨架在 Settings.tsx：data-level='list' 渲染 .set-list（一级），
+   data-level='detail' 渲染 .set-detail-head + 原有卡片流（二级）。
+   页面内不再有「返回编辑器」—— 下方第一条栏的左键就是"返回上一层"。 */
+.fluent-settings-page[data-level='list'],
+.fluent-settings-page[data-level='detail'] {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.set-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 12px 20px;
+  animation: bcViewIn 220ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+}
+.set-list-head { display: flex; align-items: center; padding: 2px 2px 0; }
+.set-list-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+.set-list-group { display: flex; flex-direction: column; gap: 8px; }
+.set-list-group-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  padding-left: 2px;
+}
+.set-list-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform var(--dur-fast, 120ms) var(--ease-out, ease),
+              background var(--dur-fast, 120ms) var(--ease-out, ease);
+}
+.set-list-card:active { transform: scale(0.99); background: var(--bg-hover, rgba(0, 0, 0, 0.05)); }
+.set-list-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  background: var(--accent-tint, rgba(0, 120, 212, 0.12));
+  color: var(--accent);
+}
+.set-list-meta { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.set-list-title { font-size: 14px; font-weight: 600; }
+.set-list-desc {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 二级详情页头部（没有返回按钮：返回交给第一条栏） */
+.set-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  align-self: stretch;
+  box-sizing: border-box;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.set-detail-icon {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  background: var(--accent-tint, rgba(0, 120, 212, 0.12));
+  color: var(--accent);
+}
+.set-detail-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.set-detail-title { font-size: 15.5px; font-weight: 600; }
+.set-detail-desc { font-size: 11.5px; color: var(--text-muted); }
+
+/* 竖屏内容区吃满宽度（宽屏那套是"左导航 + 右正文"两栏） */
+.app[data-shell='stack'] .fluent-content {
+  width: 100%;
+  max-width: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+
+/* ── 竖屏的设置卡片：改成"图标 + 标题/说明"一行、控件单独一行的两段式 ────────
+   原来一行放「图标 | 说明 | 控件」，412px 里说明被挤成三四个字一行
+   （用户第三张截图那种"竖排文字"就是这么来的）。 */
+.app[data-shell='stack'] .fluent-settings-page .fluent-card {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-areas:
+    'icon info'
+    'ctrl ctrl';
+  align-items: start;
+  gap: 8px 10px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+.app[data-shell='stack'] .fluent-settings-page .fluent-card-icon { grid-area: icon; }
+.app[data-shell='stack'] .fluent-settings-page .fluent-card-info { grid-area: info; min-width: 0; }
+.app[data-shell='stack'] .fluent-settings-page .fluent-card-ctrl {
+  grid-area: ctrl;
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.app[data-shell='stack'] .fluent-settings-page .fluent-card-desc { white-space: normal; }
+.app[data-shell='stack'] .fluent-settings-page .fluent-select { min-width: 0; max-width: 100%; }
+
+/* 页面内的「返回编辑器」按钮一律不要（用户："不需要任何返回编辑器的按钮了，
+   因为下方第一个操作栏够了"） */
+.app[data-shell='stack'] .fluent-back-btn,
+.app[data-shell='stack'] .pc-back-btn,
+.app[data-shell='stack'] .hc-back-btn,
+.app[data-shell='stack'] .help-back-btn { display: none !important; }
+
+/* ── 页面跳转动画（用户："做好各个页面的跳转动画"）──────────────────────
+   竖屏每个页面都是整屏替换，直接换会"啪"一下。统一给页面根节点一个
+   淡入 + 轻微上移，220ms，够快不挡手。 */
+@keyframes bcViewIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.app[data-shell='stack'] .fluent-settings-page,
+.app[data-shell='stack'] .pc-page,
+.app[data-shell='stack'] .help-center,
+.app[data-shell='stack'] .help-page,
+.app[data-shell='stack'] .bc-preview-view {
+  animation: bcViewIn 220ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+}
+
+/* ── 竖屏手册页：侧边栏抽屉（用户："下方第一层工具栏加一个侧边栏按钮，放到最左边，
+      可以打开侧边栏，切换文档，搜索"）────────────────────────────────────
+   宽屏那套是"顶栏（品牌+页签+搜索）+ 左侧目录"，412px 里塞不下；
+   竖屏改成顶栏与目录都收进这个抽屉，抽屉由第一条栏最左那颗按钮开合。 */
+.help-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 78;
+  background: rgba(10, 16, 26, 0.34);
+  animation: bcFadeIn 140ms var(--ease-out, ease);
+}
+.help-drawer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  /* 只到第一条栏上沿：抽屉不能把返回键盖掉，否则关不掉 */
+  bottom: var(--pt-bar1-h, 56px);
+  z-index: 79;
+  width: min(84vw, 330px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 12px 14px;
+  box-sizing: border-box;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  box-shadow: 10px 0 32px rgba(0, 0, 0, 0.22);
+  animation: helpDrawerIn 220ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+}
+@keyframes helpDrawerIn {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+.help-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.help-drawer-close {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.help-drawer-close:active { background: var(--bg-hover, rgba(0, 0, 0, 0.08)); color: var(--text); }
+/* 抽屉里的文档页签：竖着排、每个 44px，比横滑好点
+   ⚠ 下面几条都带 `.app[data-shell='stack']` 前缀：36 号分片前面那条
+   `.app[data-shell='stack'] .help-search { flex: 1 1 100% }` 权重更高，
+   不带前缀会被它压住 —— 实测抽屉里搜索框被拉成一整列、目录被挤没了。 */
+.app[data-shell='stack'] .help-drawer .help-doc-tabs {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+.app[data-shell='stack'] .help-drawer .help-doc-tab {
+  justify-content: flex-start;
+  min-height: 44px;
+  border-radius: 10px;
+}
+.app[data-shell='stack'] .help-drawer .help-search {
+  flex: 0 0 auto;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+.app[data-shell='stack'] .help-drawer .help-results { max-height: 42vh; }
+/* 目录在抽屉里是一列竖排，可上下滚 */
+.help-drawer-toc {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.app[data-shell='stack'] .help-drawer .help-toc {
+  flex-direction: column;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0 0;
+  border-bottom: 0;
+  white-space: normal;
+  gap: 2px;
+}
+.app[data-shell='stack'] .help-drawer .help-toc-title { display: block; padding: 4px 6px 6px; }
+.app[data-shell='stack'] .help-drawer .help-toc-item {
+  min-height: 38px;
+  text-align: left;
+  border-radius: 8px;
+  padding: 6px 8px;
+  white-space: normal;
+  flex: 0 0 auto;
+}
+.app[data-shell='stack'] .help-drawer .help-toc-item.active { background: var(--bg-hover, rgba(0, 0, 0, 0.06)); color: var(--accent); }
+
 /* ── 设置页：竖屏要**换布局**，不是把东西压窄 ─────────────────────────────
    实测（10-settings.png）：宽屏那套是"左导航 + 右正文"两栏；
    竖屏照搬的结果是导航占掉 2/3 宽、正文被挤成一条竖排文字（每行一个词）。
@@ -810,18 +1076,27 @@
   flex: 1 1 auto;
 }
 
-/* ── 新建页面入场动画（用户："新建页面的时候没有动画"）────────────────────
-   只做 opacity：画布本身带 transform: scale(zoom)，再叠位移/缩放会和
-   fixed 覆盖层的坐标换算打架（--bc-fl-* 那套数学假设只有 zoom 一个变换）。
-   320ms 与 App 里摘标记的定时器对齐。 */
-.app[data-newpage='1'] .canvas-area {
-  animation: bcNewPageIn 320ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+/* ── 新建页面动画（用户："原来的画布往左移动，右边进来一个新的"）──────────
+   App 里分两段打标记：data-newpage='out' → 旧画布左移淡出（160ms），
+   然后 newTab()，data-newpage='in' → 新画布从右侧滑入（280ms）。
+   只动 transform + opacity：画布本身带 transform: scale(zoom)，
+   在 `.canvas-area` 这个外壳上做位移不干扰里面的 fixed 层坐标换算。 */
+.app[data-newpage='out'] .canvas-area {
+  animation: bcPageOut 160ms var(--ease-in, ease-in) both;
 }
-@keyframes bcNewPageIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+.app[data-newpage='in'] .canvas-area {
+  animation: bcPageIn 280ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
 }
-/* 宽屏下也播（新建页面在任何形态都该有反馈） */
+@keyframes bcPageOut {
+  from { transform: translateX(0); opacity: 1; }
+  to   { transform: translateX(-26%); opacity: 0; }
+}
+@keyframes bcPageIn {
+  from { transform: translateX(30%); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+/* 窄屏里画布区被上面的动画盒子裁一下，滑动时不会在屏幕外露白 */
+.app[data-shell='stack'] .canvas-area { overflow: hidden; }
 
 /* ── 关闭标签确认弹窗（v0.4.6）────────────────────────────────────────────
    用户："多标签页的页面关闭都没有保存不保存的提示。"
@@ -922,7 +1197,10 @@
   -webkit-overflow-scrolling: touch;
   background: var(--bg);
   padding: 14px 12px 20px;
+  /* 进场容器本身也淡一下，避免"啪"地换成另一页 */
+  animation: sessPageIn 220ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
 }
+@keyframes sessPageIn { from { opacity: 0; } to { opacity: 1; } }
 
 .sess-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 12px; }
 .sess-title { font-size: 20px; font-weight: 600; }
@@ -939,13 +1217,35 @@
   border: 1px solid var(--border);
   /* 圆角 + 裁切：缩略图是块不透明区域，只有裁在卡片上边框才会整圈完整 */
   overflow: hidden;
-  transition: transform var(--dur-fast, 120ms) var(--ease-out, ease);
+  transition: transform var(--dur-fast, 120ms) var(--ease-out, ease),
+              border-color var(--dur-fast, 120ms) var(--ease-out, ease);
 }
 .sess-card:active { transform: scale(0.975); }
-/* ⚠ 用 outline 而不是 inset box-shadow：inset 阴影画在**子元素背景之下**，
-   而缩略图是一块不透明底 → 只有卡片下半边（信息行）能看见蓝框，
-   上半边的缩略图把它盖住了。outline 画在子元素之上，整圈都在。 */
-.sess-card.is-active { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 进场动画（用户："当前的画布缩小到多标签页的缩略图"）：
+   当前这张从"整屏大小"缩回卡片位置，其余卡片错峰从下方浮上来。
+   ⚠ 用 animation 而不是 transition：卡片是刚挂载的，没有起始态可过渡。 */
+.sess-card.enter-active {
+  animation: sessCardInActive 420ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+  transform-origin: center center;
+}
+.sess-card.enter {
+  animation: sessCardIn 300ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+@keyframes sessCardInActive {
+  0%   { opacity: 0.15; transform: scale(1.55) translateY(6%); filter: blur(1px); }
+  55%  { opacity: 1; }
+  100% { opacity: 1; transform: scale(1) translateY(0); filter: none; }
+}
+@keyframes sessCardIn {
+  0%   { opacity: 0; transform: translateY(26px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* 当前会话：边框直接换成强调色（以前是外面再套一圈 2px outline，
+   在圆角处和卡片自己的 1px 边框叠成"下边框特别粗"）。 */
+.sess-card.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
 
 /* 关闭动画：缩一下 + 淡出 + 收高（让后面的卡片自然补位，不是"啪"地消失） */
 .sess-card.is-leaving {
@@ -960,21 +1260,28 @@
 
 .sess-thumb {
   position: relative;
-  height: 112px;
+  height: 132px;
   /* ⚠ 圆角交给卡片裁（卡片 overflow:hidden），缩略图自己不要再切角：
      以前这里写 13px 13px 0 0 且卡片 overflow:visible → 缩略图是块不透明白底，
      正好把卡片左右两条边框盖住，用户看到的就是"缩略图上面的边框不完整"。 */
   border-radius: 0;
   overflow: hidden;
   background: #fff;
-  border-bottom: 1px solid var(--border);
+  /* ⚠ 这里以前还有一条 border-bottom: 1px —— 它和卡片自己的 1px 底边紧挨着，
+     在圆角处看着就是"卡片下边框明显更粗"。分隔交给 .sess-meta 的上边框。 */
 }
-/* 缩略图本体：exporter 生成的整页 HTML，按卡片宽整体缩小 */
+/* 缩略图本体：exporter 生成的整页 HTML，放大 1.6 倍后只露出**页面中间**那一块
+   （left:50% + translateX(-50%) + transform-origin: top center 三者配合，
+    缩放锚在中间 → 不会只看到页面最左边那条边距） */
 .sess-thumb-frame {
+  position: absolute;
+  left: 50%;
+  top: 0;
   display: block;
   border: 0;
   pointer-events: none;
   background: #fff;
+  transform-origin: top center;
 }
 /* 首帧量宽用的隐藏 iframe（尺寸给个大值，只为拿到 scrollWidth） */
 .sess-thumb-frame.is-measuring {
@@ -986,7 +1293,80 @@
   visibility: hidden;
 }
 
-.sess-meta { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 10px; }
+.sess-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 6px 6px 10px;
+  /* 缩略图与名字之间的分隔线只保留这一条（1px） */
+  border-top: 1px solid var(--border);
+}
+/* ── 「有未保存的修改」确认面板：画在卡片内部（用户："放到会话卡片的下面"）──
+   两个卡片是 grid 同一行，所以打开面板会把整行撑高 —— 这是有意的：
+   面板属于这张卡片，不该飘在页面中央。 */
+.sess-confirm {
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel-2, var(--bg));
+  animation: sessConfirmIn 180ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+.sess-confirm.is-closing {
+  animation: sessConfirmOut 150ms var(--ease-in, ease-in) both;
+}
+@keyframes sessConfirmIn {
+  from { opacity: 0; transform: translateY(-8px); max-height: 0; }
+  to   { opacity: 1; transform: translateY(0); max-height: 260px; }
+}
+@keyframes sessConfirmOut {
+  from { opacity: 1; transform: translateY(0); max-height: 260px; }
+  to   { opacity: 0; transform: translateY(-8px); max-height: 0; }
+}
+.sess-confirm-title {
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--text);
+  padding: 0 2px 8px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.sess-confirm-actions { display: flex; flex-direction: column; gap: 6px; }
+.sess-cbtn {
+  min-height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.sess-cbtn:active:not(:disabled) { transform: scale(0.985); }
+.sess-cbtn.is-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sess-cbtn.is-danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+.sess-cbtn:disabled { opacity: 0.55; cursor: default; }
+
+/* 页面底部「新建页面」（用户："多标签页下面加入新增页面的按钮"） */
+.sess-addnew {
+  flex: 0 0 auto;
+  margin-top: 14px;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 14px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.sess-addnew:active { background: var(--bg-hover, rgba(0, 0, 0, 0.05)); color: var(--text); }
 .sess-name {
   flex: 1;
   min-width: 0;

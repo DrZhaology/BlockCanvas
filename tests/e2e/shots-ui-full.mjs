@@ -36,7 +36,7 @@ const main = async () => {
   const win = await app.firstWindow();
   const errs = [];
   win.on('pageerror', (e) => errs.push(String(e.message)));
-  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(1440, 900); w.center(); });
+  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(1440, 900); w.center(); w.blur(); });
   await win.waitForSelector('.empty-home', { timeout: 20000 });
   await win.waitForFunction(() => !document.querySelector('.bc-loading'), { timeout: 15000 }).catch(() => {});
   await sleep(700);
@@ -85,7 +85,7 @@ const main = async () => {
   /* 竖屏：unmaximize 再 setSize（最大化时 setSize 会被忽略） */
   await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; if (w.isMaximized()) w.unmaximize(); });
   await sleep(200);
-  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(412, 860); w.center(); });
+  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(412, 860); w.center(); w.blur(); });
   await sleep(900);
 
   /* 再造两个标签页（竖屏第一条栏的真按钮，会话页才有卡片可看） */
@@ -235,14 +235,23 @@ const main = async () => {
   await closers.nth(dirtyIdx).click();
   await sleep(500);
   const pop = await win.evaluate(() => {
-    const p = document.querySelector('.bc-confirm-pop');
+    // v0.4.6 第三十九批之后：确认面板画在**卡片内部**（.sess-confirm），不再是浮层
+    const p = document.querySelector('.sess-confirm');
     if (!p) return null;
     const r = p.getBoundingClientRect();
-    return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), bottom: Math.round(r.bottom) };
+    const card = p.closest('.sess-card')?.getBoundingClientRect();
+    return {
+      x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height),
+      innerCard: Boolean(card) && r.bottom <= card.bottom + 1
+    };
   });
-  console.log('12-session-confirm  ' + JSON.stringify({ dirtyIdx, pop, fullscreen: await win.evaluate(() => !!document.querySelector('.bc-confirm-scrim')) }));
+  console.log('12-session-confirm  ' + JSON.stringify({
+    dirtyIdx,
+    pop,
+    fullscreen: await win.evaluate(() => !!document.querySelector('.bc-confirm-scrim, .bc-confirm-pop'))
+  }));
   await shot('12-session-confirm');
-  await win.locator('.bc-confirm-pop .bc-confirm-btn', { hasText: '取消' }).click();
+  await win.locator('.sess-confirm .sess-cbtn', { hasText: '取消' }).click();
   await sleep(300);
 
   /* ⑬ 宽屏回归：并排形态不能被动坏（点一张会话卡回到编辑器） */
@@ -267,7 +276,7 @@ const main = async () => {
   await win.locator('.pt-bar1 .pt-btn[aria-label="返回"]').click();
   await sleep(600);
 
-  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(1440, 900); w.center(); });
+  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(1440, 900); w.center(); w.blur(); });
   await sleep(900);
   const wide = await win.evaluate(() => ({
     shell: document.querySelector('.app')?.getAttribute('data-shell'),
@@ -279,18 +288,54 @@ const main = async () => {
   await shot('13-wide');
 
   /* 回到竖屏，继续子页面 */
-  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(412, 860); w.center(); });
+  await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(412, 860); w.center(); w.blur(); });
   await sleep(900);
 
-  /* ⑭ 设置页（默认分组）+ 竖屏设置页 */
+  /* ⑭ 设置：一级分类列表 → 二级具体设置页（v0.4.6 两级导航） */
   await win.evaluate(() => window.dispatchEvent(new CustomEvent('menu:settings')));
-  await stop('14-settings', '.fluent-settings-page');
-  await win.locator('.fluent-nav-item', { hasText: '竖屏与触摸' }).click();
-  await stop('15-settings-portrait', '.fluent-settings-page');
+  await stop('14-settings-list', '.set-list');
+  await win.locator('.set-list-card', { hasText: '竖屏与触摸' }).click();
+  await sleep(400);
+  const setDetail = await win.evaluate(() => ({
+    listGone: !document.querySelector('.set-list'),
+    head: document.querySelector('.set-detail-title')?.textContent ?? null,
+    backBtn: !!document.querySelector('.fluent-back-btn')
+  }));
+  console.log('15a-settings-detail  ' + JSON.stringify(setDetail));
+  await stop('15-settings-detail', '.fluent-content');
+  // 官方返回路径：第一条栏的「返回」应该回到分类列表（不是直接回编辑器）
+  await win.locator('.pt-bar1 .pt-btn[aria-label="返回"]').click();
+  await sleep(500);
+  const backTo = await win.evaluate(() => ({
+    listBack: !!document.querySelector('.set-list'),
+    page: !!document.querySelector('.fluent-settings-page')
+  }));
+  console.log('15b-settings-back  ' + JSON.stringify(backTo));
 
-  /* ⑯ 使用手册 */
+  /* ⑯ 使用手册 + 侧边栏抽屉（v0.4.6：第一条栏最左多一颗「侧边栏」） */
   await win.evaluate(() => window.dispatchEvent(new CustomEvent('menu:help')));
   await stop('16-help', '.help-center, .help-page, .hc-page');
+  const helpBar1 = await win.evaluate(() => [...document.querySelectorAll('.pt-bar1 .pt-btn')].map((b) => b.getAttribute('aria-label')));
+  console.log('16a-help-bar1  ' + JSON.stringify(helpBar1));
+  await win.locator('.pt-bar1 .pt-btn[aria-label="侧边栏"]').click();
+  await sleep(520);
+  const drawer = await win.evaluate(() => {
+    const d = document.querySelector('.help-drawer');
+    if (!d) return null;
+    const r = d.getBoundingClientRect();
+    return {
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+      tabs: d.querySelectorAll('.help-doc-tab').length,
+      toc: d.querySelectorAll('.help-toc-item').length,
+      hasSearch: !!d.querySelector('.help-search-input'),
+      bottom: Math.round(r.bottom)
+    };
+  });
+  console.log('16b-help-drawer  ' + JSON.stringify(drawer));
+  await shot('16a-help-drawer');
+  await win.locator('.help-drawer-close').click();
+  await sleep(320);
 
   /* ⑰ 项目中心：先从手册页返回编辑器，再点第二条栏的「全部项目」 */
   await win.locator('.pt-bar1 .pt-btn[aria-label="返回"]').click();
@@ -306,6 +351,19 @@ const main = async () => {
     await win.locator('.pt-bar2 .tb-main button', { hasText: '项目' }).first().click();
   });
   await stop('17-projects', '.pc-page');
+
+  /* ⑱ 新建页面两段式动画取证：out（旧画布左移）→ in（新画布右进）→ null（收尾） */
+  await win.locator('.pt-bar1 .pt-btn[aria-label="返回"]').click();
+  await sleep(900);
+  const animNow = () => win.evaluate(() => document.querySelector('.app')?.getAttribute('data-newpage'));
+  await win.locator('.pt-bar1 .pt-btn[aria-label="新建页面"]').click();
+  await sleep(70);
+  const phase1 = await animNow();
+  await sleep(240);
+  const phase2 = await animNow();
+  await sleep(500);
+  const phase3 = await animNow();
+  console.log('18-newpage-anim  ' + JSON.stringify({ out: phase1, in: phase2, end: phase3 }));
 
   console.log('页面错误 ' + (errs.length ? errs.join(' | ') : 'none'));
   await app.close();

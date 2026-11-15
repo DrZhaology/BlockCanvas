@@ -118,6 +118,13 @@ export default function App() {
     return () => window.removeEventListener('bc:inapp-preview', onPreview);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 「新建页面」统一入口：第一条栏的加号、会话页底部的按钮都发这个事件
+  useEffect(() => {
+    const onNew = () => { void requestNewPage(); };
+    window.addEventListener('bc:new-page', onNew);
+    return () => window.removeEventListener('bc:new-page', onNew);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * v0.4.7 · 竖屏标签页策略（用户原话）：
@@ -168,16 +175,33 @@ export default function App() {
   // React 直接抛 #300 把整个视图渲染崩掉（踩过一次，表格编辑器打不开就是它）。
   const tabCount = useTabStore((s) => s.tabs.length);
   /**
-   * v0.4.6：新建页面要有入场动画（用户："新建页面的时候没有动画"）。
-   * 判定用"标签数变多"而不是"activeTabId 变了"——切标签不该每次都重放动画，
-   * 只有真的多出一页才播。播 320ms 后把标记摘掉，动画只走一次。
+   * v0.4.6：新建页面动画（用户："原来的画布往左移动，右边进来一个新的"）。
+   * 两段式：先让**旧画布**左移淡出 160ms，再 newTab()，再让**新画布**从右侧滑入 260ms。
+   * 只在"真的多出一页"时播；切标签不播。宽屏同样播（这个动画在桌面也不难看）。
    */
-  const [newPageAnim, setNewPageAnim] = useState(false);
+  const [pageAnim, setPageAnim] = useState<'out' | 'in' | null>(null);
+  const pageAnimBusy = useRef(false);
+  const requestNewPage = async () => {
+    if (pageAnimBusy.current) return;
+    pageAnimBusy.current = true;
+    setPageAnim('out');
+    await new Promise((r) => window.setTimeout(r, 160));
+    useTabStore.getState().newTab();
+    setPageAnim('in');
+    await new Promise((r) => window.setTimeout(r, 280));
+    setPageAnim(null);
+    pageAnimBusy.current = false;
+  };
+  /**
+   * 兜底：有些入口（Ctrl+N、首页的"新建"、插件的 newTab）不经过 requestNewPage，
+   * 直接往 store 里加一页。这里按"标签数变多"补播**右进**那半段，
+   * 保证任何路径新建页面都有反馈（probe-tab-close-guard ⓪ 就是查这个）。
+   */
   const prevTabCount = useRef(tabCount);
   useEffect(() => {
-    if (tabCount > prevTabCount.current) {
-      setNewPageAnim(true);
-      const t = window.setTimeout(() => setNewPageAnim(false), 320);
+    if (tabCount > prevTabCount.current && !pageAnimBusy.current) {
+      setPageAnim('in');
+      const t = window.setTimeout(() => setPageAnim(null), 280);
       prevTabCount.current = tabCount;
       return () => window.clearTimeout(t);
     }
@@ -207,7 +231,7 @@ export default function App() {
     if (useUpdateBusy.getState().busy) return;
     withViewTransition(() => setView((cur) => (cur === next ? cur : next)));
   }, []);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>('personalization');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [pocketExpanded, setPocketExpanded] = useState(() => {
@@ -456,7 +480,8 @@ export default function App() {
     const toBottom = () => setLayout('bottom');
     const openProjects = () => switchView('projects');
     const openSettings = (sec?: SettingsSection) => {
-      setSettingsSection(sec || 'personalization');
+      // 竖屏两级导航：不带参数 = 停在分类列表页（一级）
+      setSettingsSection(sec ?? null);
       switchView('settings');
     };
     const openClass = () => {
@@ -688,13 +713,16 @@ export default function App() {
   }
 
   return (
-    <div className="app" data-shell={shell.layout} data-input={inputMode} data-drawer-side={drawerSide} data-newpage={newPageAnim ? '1' : undefined}>
+    <div className="app" data-shell={shell.layout} data-input={inputMode} data-drawer-side={drawerSide} data-newpage={pageAnim ?? undefined}>
       {/* v0.4.6 竖屏重做：竖屏**顶部完全清空**（用户："把整个上方的所有东西全部删除"）。
           自绘标题栏（Logo / 菜单 / 三个窗口按钮）只在并排形态渲染，DOM 里也不留。 */}
       {shell.layout === 'split' && <TitleBar />}
       <div className="bc-win-ring" aria-hidden="true" />
       {view === 'sessions' ? (
-        <SessionsView onBack={() => switchView('editor')} />
+        <SessionsView
+          onBack={() => switchView('editor')}
+          onNewPage={() => { void requestNewPage().then(() => switchView('editor')); }}
+        />
       ) : view === 'table' && tableEditId ? (
         <TableEditor tableId={tableEditId} onBack={() => switchView('editor')} />
       ) : view === 'update' ? (
@@ -715,7 +743,8 @@ export default function App() {
           onBack={() => switchView('editor')}
           onOpenWebManager={() => switchView('projects')}
           onOpenUpdateCenter={openUpdateCenter}
-          initialSection={settingsSection}
+          section={shell.layout === 'stack' ? settingsSection : (settingsSection ?? 'personalization')}
+          onSectionChange={(s) => setSettingsSection(s)}
           layout={layout}
           onLayoutChange={setLayout}
           canvasWidth={canvasWidth}
@@ -898,11 +927,18 @@ export default function App() {
           <PortraitBar1
             view={view}
             editorish={view === 'editor' && tabCount > 0}
-            onBack={() => switchView('editor')}
+            /* 左下角 = **返回上一层**（用户："相当于 Alt + 左键"）：
+               设置页停在某个具体设置项时先回分类列表，再回编辑器。 */
+            onBack={() => {
+              if (view === 'settings' && settingsSection) { setSettingsSection(null); return; }
+              switchView('editor');
+            }}
             onOpenSessions={() => switchView('sessions')}
             onOpenSettings={() => window.dispatchEvent(new CustomEvent('menu:settings'))}
             onOpenHelp={() => window.dispatchEvent(new CustomEvent('menu:help'))}
             onOpenPlugins={() => window.dispatchEvent(new CustomEvent('menu:settings'))}
+            /* 手册页：第一条栏最左边多一颗「侧边栏」（切换文档 / 搜索 / 目录） */
+            onOpenHelpSidebar={view === 'help' ? () => window.dispatchEvent(new CustomEvent('bc:help-sidebar')) : undefined}
           />
           {/* 下方图层面板：只能从「属性」离开（用户要求防误触） */}
           {view === 'editor' && tabCount > 0 && (

@@ -6,31 +6,26 @@
 //     卡片上方是缩略图，上方显示项目名称和×，这个×的按钮稍微大一点不要太小。
 //     然后每行显示两个缩略图，可以上下滑动，就非常类似 Edge 手机版。
 //     长按每个会话项目的卡片打开右键菜单，可以重命名，关闭等。」
-//   补充反馈：「蓝色的边框只有下半边有，缩略图上面没有」「做一下关闭动画」
-//   「缩略图貌似只有文字，没有样式」「点了叉叉先退出去、又弹全屏弹窗问保存」
 //
-// 缩略图（v0.4.6 第二次返工）：**不再自己拼 inline style 画迷你盒**。
-//   第一版用 MiniNode 只还原内联样式，结果用户看到的是"只有文字没有样式"——
-//   因为这套编辑器的观感八成来自预设 / childStyles / 全局规则，不在元素的 style 上。
-//   现在直接走 exporter：`exportHTML(scene)` 生成**和导出/预览同一份** HTML，
-//   塞进 iframe.srcdoc 再整体 scale 到卡片宽度 —— 保真度和导出完全一致。
-//   代价是每个会话要跑一次导出，所以只在会话页挂载时算（useMemo 按 scene 引用记忆）。
-//
-// × 的关闭交互（v0.4.6 第三次返工）：
-//   · 干净标签 → 播 190ms 退场动画再真的关（有反馈）；
-//   · 脏标签 → **不先退场**，就在 × 旁边弹出「保存并关闭 / 不保存 / 取消」二级菜单
-//     （由 TabCloseGuard 统一渲染，这里只把 × 的矩形传过去）。
+// 第五轮反馈（本文件这一版就是照它改的）：
+//   ① 进入要有高级动画：当前的画布缩小到多标签页的缩略图；
+//   ② 卡片下边框明显偏粗 → 缩略图那条 border-bottom 叠在卡片边框上，去了；
+//   ③ 缩略图只有文字没样式 → 走 exporter 出**和导出一模一样**的 HTML 再缩放；
+//   ④ 页面底部要有「新建页面」按钮；
+//   ⑤ 关闭动画以前只有第一张有 → 因为其余页是"脏"的，走的是确认浮层、根本没进动画。
+//      现在确认面板就画在**卡片内部**，确认完照样播退场动画；
+//   ⑥ 关闭保存提示放到卡片下面，进入 / 关闭都给动画。
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTabStore } from '@store/tabStore';
-import { requestTabClose, isTabDirty } from '../TabCloseGuard';
+import { isTabDirty, saveTabThenClose } from '../TabCloseGuard';
 import { exportHTML } from '@lib/exporter';
 import type { SceneGraph } from '@lib/types';
 
 /** 关闭动画时长（与 CSS 的 sessOut 保持一致） */
 const CLOSE_MS = 190;
 /** 缩略图高度（与 .sess-thumb 的 CSS 高度一致） */
-const THUMB_H = 112;
+const THUMB_H = 132;
 /** 没有显式宽度时按这个宽度当基准（与导出的桌面画布量级一致） */
 const FALLBACK_W = 1100;
 
@@ -86,11 +81,17 @@ function SessThumb({ scene }: { scene?: SceneGraph }) {
     // 缩略图里不要滚动条、不要留白（量宽度时也靠这条把 body margin 清掉）
     st.textContent = 'html,body{margin:0;padding:0;overflow:hidden;}';
     doc.head.appendChild(st);
-    const w = Math.max(doc.documentElement.scrollWidth, parseIntPx(String(FALLBACK_W)));
+    const w = Math.max(doc.documentElement.scrollWidth, FALLBACK_W);
     setContentW(w);
   };
 
-  const scale = boxW > 0 && contentW > 0 ? boxW / contentW : 0;
+  // 缩放：铺满卡片宽再放大 1.6 倍，取**页面中间**那一块（用户："缩略图只有文字没样式"）
+  //
+  // 为什么不是 1:1 整页缩放：桌面画布 1100~1920 宽缩到 188px 的卡片里只有 0.17 倍，
+  // 纯文字页面看上去就是"一片小字"，色块、标题全糊掉。放大到 0.27 倍左右、只取中间
+  // 那一段，卡片里能看清版式与配色（和浏览器标签页缩略图相比更"像预览"）。
+  const ZOOM = 1.6;
+  const scale = boxW > 0 && contentW > 0 ? (boxW / contentW) * ZOOM : 0;
   const frameH = scale > 0 ? Math.ceil(THUMB_H / scale) : 0;
 
   return (
@@ -103,7 +104,7 @@ function SessThumb({ scene }: { scene?: SceneGraph }) {
           scrolling="no"
           tabIndex={-1}
           onLoad={onLoad}
-          style={{ width: contentW, height: frameH, transform: `scale(${scale})`, transformOrigin: 'left top' }}
+          style={{ width: contentW, height: frameH, transform: `translateX(-50%) scale(${scale})` }}
         />
       ) : srcdoc ? (
         /* 首帧还没量出来：先放一个同样 srcDoc 的隐藏 iframe 去量，避免"闪一下空白" */
@@ -113,7 +114,7 @@ function SessThumb({ scene }: { scene?: SceneGraph }) {
   );
 }
 
-export function SessionsView({ onBack }: { onBack: () => void }) {
+export function SessionsView({ onBack, onNewPage }: { onBack: () => void; onNewPage: () => void }) {
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
   const switchTab = useTabStore((s) => s.switchTab);
@@ -124,6 +125,17 @@ export function SessionsView({ onBack }: { onBack: () => void }) {
   const [draft, setDraft] = useState('');
   /** 正在播关闭动画的卡片：动画放完才真的删 */
   const [leaving, setLeaving] = useState<string | null>(null);
+  /** 「有未保存的修改」确认面板：画在**这张卡片内部**（用户要求下沉） */
+  const [confirmFor, setConfirmFor] = useState<string | null>(null);
+  const [confirmClosing, setConfirmClosing] = useState<string | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+  /** 进场动画：播完就摘标记（只播一次） */
+  const [entering, setEntering] = useState(true);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setEntering(false), 700);
+    return () => window.clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     if (!menuFor) return;
@@ -132,7 +144,7 @@ export function SessionsView({ onBack }: { onBack: () => void }) {
     return () => window.removeEventListener('pointerdown', close, true);
   }, [menuFor]);
 
-  /** 干净标签：先播 190ms 退场动画再删（用户："做一下关闭动画"） */
+  /** 干净标签（或已确认）：播 190ms 退场动画再删 */
   const animateOut = (id: string) => {
     if (leaving === id) return;
     setLeaving(id);
@@ -142,20 +154,33 @@ export function SessionsView({ onBack }: { onBack: () => void }) {
     }, CLOSE_MS);
   };
 
-  /**
-   * × 的关闭：脏标签不先退场，就地弹二级菜单问「保存 / 不保存 / 取消」。
-   * 干净标签没什么可丢的，直接播退场。
-   */
-  const closeFromX = (id: string, el: HTMLElement) => {
-    if (!isTabDirty(id)) { animateOut(id); return; }
-    const r = el.getBoundingClientRect();
-    requestTabClose(id, { x: r.x, y: r.y, w: r.width, h: r.height });
+  /** 关掉卡片里的确认面板（带退场动画） */
+  const closeConfirm = (id: string) => {
+    setConfirmClosing(id);
+    window.setTimeout(() => {
+      setConfirmFor((cur) => (cur === id ? null : cur));
+      setConfirmClosing((cur) => (cur === id ? null : cur));
+    }, 150);
   };
 
-  /** 长按菜单里的「关闭」也走同一条：脏的会弹确认 */
-  const closeFromMenu = (id: string) => {
+  const askOrClose = (id: string) => {
     if (!isTabDirty(id)) { animateOut(id); return; }
-    requestTabClose(id);
+    setConfirmClosing(null);
+    setConfirmFor(id);
+  };
+
+  const doSaveAndClose = async (id: string) => {
+    if (saving) return;
+    setSaving(id);
+    const ok = await saveTabThenClose(id);
+    setSaving(null);
+    if (ok) { setConfirmFor(null); setConfirmClosing(null); }
+  };
+
+  const doDiscardAndClose = (id: string) => {
+    setConfirmFor(null);
+    setConfirmClosing(null);
+    animateOut(id);
   };
 
   /** 每张卡片：长按 450ms 出菜单；短按=切到该会话 */
@@ -173,84 +198,123 @@ export function SessionsView({ onBack }: { onBack: () => void }) {
   };
   const onCardClick = (id: string) => {
     if (holdRef.current.fired) { holdRef.current.fired = false; return; }
+    if (confirmFor === id) return; // 确认面板开着时点卡片不要切走
     switchTab(id);
     onBack();
   };
 
+  let order = -1;
+
   return (
-    <div className="sess-page" role="region" aria-label="会话管理">
+    <div className={'sess-page' + (entering ? ' is-entering' : '')} role="region" aria-label="会话管理">
       <div className="sess-head">
         <span className="sess-title">会话</span>
         <span className="sess-sub">{tabs.length} 个</span>
       </div>
 
       <div className="sess-grid">
-        {tabs.map((t) => (
-          <div
-            key={t.id}
-            className={
-              'sess-card'
-              + (t.id === activeTabId ? ' is-active' : '')
-              + (leaving === t.id ? ' is-leaving' : '')
-            }
-            onPointerDown={() => startHold(t.id)}
-            onPointerUp={endHold}
-            onPointerCancel={endHold}
-            onClick={() => onCardClick(t.id)}
-          >
-            <SessThumb scene={t.scene} />
-            <div className="sess-meta">
-              {renaming === t.id ? (
-                <input
-                  className="sess-rename"
-                  value={draft}
-                  autoFocus
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={() => { setRenaming(null); }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const next = draft.trim();
-                      if (next) {
-                        useTabStore.setState((st) => ({
-                          tabs: st.tabs.map((x) => (x.id === t.id ? { ...x, name: next } : x))
-                        }));
+        {tabs.map((t) => {
+          order += 1;
+          const idx = order;
+          const isActive = t.id === activeTabId;
+          return (
+            <div
+              key={t.id}
+              className={
+                'sess-card'
+                + (isActive ? ' is-active' : '')
+                + (leaving === t.id ? ' is-leaving' : '')
+                + (entering ? (isActive ? ' enter-active' : ' enter') : '')
+              }
+              style={{ animationDelay: `${isActive ? 0 : 60 + idx * 55}ms` }}
+              onPointerDown={() => startHold(t.id)}
+              onPointerUp={endHold}
+              onPointerCancel={endHold}
+              onClick={() => onCardClick(t.id)}
+            >
+              <SessThumb scene={t.scene} />
+              <div className="sess-meta">
+                {renaming === t.id ? (
+                  <input
+                    className="sess-rename"
+                    value={draft}
+                    autoFocus
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={() => { setRenaming(null); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const next = draft.trim();
+                        if (next) {
+                          useTabStore.setState((st) => ({
+                            tabs: st.tabs.map((x) => (x.id === t.id ? { ...x, name: next } : x))
+                          }));
+                        }
+                        setRenaming(null);
                       }
-                      setRenaming(null);
-                    }
-                    if (e.key === 'Escape') setRenaming(null);
-                  }}
-                />
-              ) : (
-                <span className="sess-name" title={t.name}>{t.name}</span>
-              )}
-              <button
-                className="sess-close"
-                type="button"
-                aria-label={`关闭 ${t.name}`}
-                title="关闭"
-                onClick={(e) => { e.stopPropagation(); closeFromX(t.id, e.currentTarget); }}
-              >
-                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-                  <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
-
-            {menuFor === t.id && (
-              <div className="sess-menu" role="menu" onPointerDown={(e) => e.stopPropagation()}>
+                      if (e.key === 'Escape') setRenaming(null);
+                    }}
+                  />
+                ) : (
+                  <span className="sess-name" title={t.name}>{t.name}</span>
+                )}
                 <button
-                  role="menuitem" type="button"
-                  onClick={() => { setRenaming(t.id); setDraft(t.name); setMenuFor(null); }}
-                >重命名</button>
-                <button
-                  role="menuitem" type="button"
-                  onClick={() => { setMenuFor(null); closeFromMenu(t.id); }}
-                >关闭</button>
+                  className="sess-close"
+                  type="button"
+                  aria-label={`关闭 ${t.name}`}
+                  title="关闭"
+                  onClick={(e) => { e.stopPropagation(); askOrClose(t.id); }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                </button>
               </div>
-            )}
-          </div>
-        ))}
+
+              {/* 「有未保存的修改」确认面板：就画在这张卡片里（用户："放到会话卡片的下面"），
+                  进 / 退都有动画（sessConfirmIn / sessConfirmOut）。 */}
+              {confirmFor === t.id && (
+                <div
+                  className={'sess-confirm' + (confirmClosing === t.id ? ' is-closing' : '')}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="sess-confirm-title">「{t.name}」有未保存的修改</div>
+                  <div className="sess-confirm-actions">
+                    <button
+                      className="sess-cbtn is-primary"
+                      disabled={Boolean(saving)}
+                      onClick={() => void doSaveAndClose(t.id)}
+                    >{saving === t.id ? '保存中…' : '保存并关闭'}</button>
+                    <button className="sess-cbtn is-danger" disabled={Boolean(saving)} onClick={() => doDiscardAndClose(t.id)}>不保存</button>
+                    <button className="sess-cbtn" disabled={Boolean(saving)} onClick={() => closeConfirm(t.id)}>取消</button>
+                  </div>
+                </div>
+              )}
+
+              {menuFor === t.id && (
+                <div className="sess-menu" role="menu" onPointerDown={(e) => e.stopPropagation()}>
+                  <button
+                    role="menuitem" type="button"
+                    onClick={() => { setRenaming(t.id); setDraft(t.name); setMenuFor(null); }}
+                  >重命名</button>
+                  <button
+                    role="menuitem" type="button"
+                    onClick={() => { setMenuFor(null); askOrClose(t.id); }}
+                  >关闭</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
+
+      {/* 用户："多标签页下面加入新增页面的按钮" */}
+      <button className="sess-addnew" type="button" onClick={onNewPage}>
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+        新建页面
+      </button>
     </div>
   );
 }
