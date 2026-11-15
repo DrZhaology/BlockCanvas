@@ -374,6 +374,40 @@
   height: auto;
 }
 
+/* 手册页正文布局：真的是两栏挤压，不是溢出。
+   「溢出=0」是假绿：目录占了 58% 宽，正文被压成每行两三个字（"BlockCanv/as · 使用手/册"）。
+   竖屏做法：目录从左侧竖向列改成**顶部一条可横滑的索引条**，正文吃满宽度。 */
+.app[data-shell='stack'] .help-body {
+  flex-direction: column;
+  min-height: 0;
+}
+.app[data-shell='stack'] .help-toc {
+  width: 100%;
+  max-width: none;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  border-right: 0;
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: none;
+}
+.app[data-shell='stack'] .help-toc::-webkit-scrollbar { width: 0; height: 0; }
+.app[data-shell='stack'] .help-toc-title { display: none; }
+.app[data-shell='stack'] .help-toc-item { flex: 0 0 auto; padding-left: 10px; }
+/* 正文（.help-toc 之外那一个子元素）吃满宽度 */
+.app[data-shell='stack'] .help-body > :not(.help-toc) {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 /* ── 会话管理页（背景跟随主题）──────────────────────────────────────────
    布局照 Edge 手机版：每行两张卡片，上面缩略图，下面项目名 + 大一点的 ×。
    ⚠ 缩略图是**实时渲染**（把会话的场景树自然尺寸画一遍再整体缩小），
