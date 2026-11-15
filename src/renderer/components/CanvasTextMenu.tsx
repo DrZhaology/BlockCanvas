@@ -61,14 +61,22 @@ export function CanvasTextMenu({ payload, onClose }: { payload: TextMenuPayload;
   const updateStyle = useScene((s) => s.updateStyle);
   const applyTextRunStyle = useScene((s) => s.applyTextRunStyle);
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number }>({ left: x, top: y });
+  /**
+   * 用户（v0.4.6 竖屏）："长按调用的右键菜单不要直接出现在手指的地方，
+   * 不然刚打开菜单直接操作了。"
+   *
+   * 所以菜单整体从触发点往右下挪 18px —— 手指/指针落在菜单外的空白处，
+   * 抬手不会误触第一项。仍然跟原来一样做视口内钳制（贴边时自动翻到内侧）。
+   */
+  const MENU_OFFSET = 18;
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: x + MENU_OFFSET, top: y + MENU_OFFSET });
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const w = el.offsetWidth, h = el.offsetHeight;
-    const left = Math.min(Math.max(6, x), Math.max(6, window.innerWidth - w - 6));
-    const top = Math.min(Math.max(6, y), Math.max(6, window.innerHeight - h - 6));
+    const left = Math.min(Math.max(6, x + MENU_OFFSET), Math.max(6, window.innerWidth - w - 6));
+    const top = Math.min(Math.max(6, y + MENU_OFFSET), Math.max(6, window.innerHeight - h - 6));
     setPos({ left, top });
   }, [x, y]);
 
