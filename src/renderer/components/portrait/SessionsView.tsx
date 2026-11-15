@@ -20,6 +20,7 @@
 // ============================================================================
 import { useEffect, useRef, useState } from 'react';
 import { useTabStore } from '@store/tabStore';
+import { requestTabClose } from '../TabCloseGuard';
 import type { SceneElement } from '@lib/types';
 
 /** 缩略图舞台的自然宽度：按桌面画布量级取，整体再缩放塞进卡片 */
@@ -89,7 +90,8 @@ export function SessionsView({ onBack }: { onBack: () => void }) {
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
   const switchTab = useTabStore((s) => s.switchTab);
-  const closeTab = useTabStore((s) => s.closeTab);
+  /** 关闭走统一闸门：未保存的会弹「保存 / 不保存 / 取消」（干净的直接关） */
+  const closeTab = (id: string) => requestTabClose(id);
 
   /** 长按卡片 = 右键菜单（Windows 上长按等价于右键，用户就是这么叫的） */
   const [menuFor, setMenuFor] = useState<string | null>(null);

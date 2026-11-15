@@ -95,6 +95,8 @@ const PROBES = [
   'probe-touch-canvas',
   // v0.4.6 竖屏底部两条操作栏：折叠单行 / 长按上滑展开 / 下滑折叠 / 入口菜单层级
   'probe-portrait-bars',
+  // v0.4.6 关闭标签的保存确认（保存并关闭 / 不保存 / 取消）
+  'probe-tab-close-guard',
   // v0.4.6 Web 版（R6-12/13/14）：需要先 `pnpm build:web` 产出 dist-web/index.html
   'probe-web',
   // v0.4.6 R6-3：CSS 域约束（主域登记 / 前缀归位 / 重复不超基线）

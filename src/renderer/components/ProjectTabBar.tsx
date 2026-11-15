@@ -4,6 +4,7 @@ import { useScene } from '@store/sceneStore';
 import { TipsTicker } from './TipsTicker';
 import { Icon } from './Icon';
 import { appConfirm } from '@lib/appConfirm';
+import { requestTabClose } from './TabCloseGuard';
 
 // BlockCanvas · Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
 // 遵循《设计语言规范》与 VS Code 标准交互：
@@ -18,10 +19,13 @@ export function ProjectTabBar() {
   const tabs = useTabStore((s) => s.tabs);
   const activeTabId = useTabStore((s) => s.activeTabId);
   const switchTab = useTabStore((s) => s.switchTab);
-  const closeTab = useTabStore((s) => s.closeTab);
-  /** v0.4.4：关标签直接关。View Transition 在无 GPU / 软件渲染环境里会让 GPU 进程崩，
-   *  关标签的过渡交给首页内容自带的淡入（打开工程仍保留视图过渡）。 */
-  const closeTabAnimated = (id: string) => closeTab(id);
+  /**
+   * v0.4.6：关闭标签改走**关闭闸门**（有未保存修改会弹「保存 / 不保存 / 取消」）。
+   * 以前直接 closeTab，脏标签被关掉等于默默丢一整段编辑（用户反馈）。
+   * 干净标签由闸门内部直接关，行为与以前一致。
+   * View Transition 在无 GPU / 软件渲染环境里会让 GPU 进程崩，所以这里仍然不做过渡。
+   */
+  const closeTabAnimated = (id: string) => requestTabClose(id);
   const newTab = useTabStore((s) => s.newTab);
 
   // 双击/点击铅笔重命名状态

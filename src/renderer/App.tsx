@@ -39,6 +39,7 @@ import { useTouchCanvas } from '@lib/useTouchCanvas';
 import { useAltMode } from '@lib/altMode';
 import { PortraitBar1, PortraitBar2 } from '@comp/portrait/PortraitBars';
 import { SessionsView } from '@comp/portrait/SessionsView';
+import { TabCloseGuard } from '@comp/TabCloseGuard';
 import { useEdgeSwipe } from '@lib/useEdgeSwipe';
 import { useDrawerSide } from '@lib/drawerSide';
 import { DrawerHandle } from '@comp/DrawerHandle';
@@ -854,6 +855,8 @@ export default function App() {
       {/* v0.4.6：切换定位方式前问"要不要清外边距"（全程序唯一通道） */}
       <PositionSwitchHost />
       <UpdateBusyOverlay />
+      {/* v0.4.6：关闭标签的统一闸门（未保存 → 保存 / 不保存 / 取消） */}
+      <TabCloseGuard />
       <AppToasts />
       {/* v0.4.5：打开工程 / 恢复会话期间的加载页（在主界面之后挂载 → 盖在最上层） */}
       <LoadingScreen />

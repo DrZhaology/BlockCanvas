@@ -256,7 +256,11 @@ export const useTabStore = create<TabState>((set, get) => ({
     if (st.activeTabId === tabId) {
       const nextTab = remaining[Math.max(0, idx - 1)] || remaining[0];
       nextActive = nextTab.id;
-      useScene.getState().setScene(nextTab.scene);
+      // ⚠ v0.4.6 修：这里以前直接 `setScene(nextTab.scene)`，会被 sceneStore 的订阅
+      // 判成"内容被修改" → **把刚接管的那个标签标成未保存**（用户看到的是
+      // "关掉一个页面，旁边那个突然多了未保存圆点"，紧接着关它又弹保存提示）。
+      // 走 loadSceneSilently：它带 isSwitchingTab 标记，切换场景不算修改。
+      st.loadSceneSilently(nextTab.scene);
     }
 
     set({
