@@ -281,6 +281,42 @@
   min-width: 0;
 }
 
+/* ── 设置页：竖屏要**换布局**，不是把东西压窄 ─────────────────────────────
+   实测（10-settings.png）：宽屏那套是"左导航 + 右正文"两栏；
+   竖屏照搬的结果是导航占掉 2/3 宽、正文被挤成一条竖排文字（每行一个词）。
+   正确做法：整页改列向，导航条变成顶部横向可滑的分段条，正文吃满宽度。 */
+.app[data-shell='stack'] .fluent-settings-page {
+  flex-direction: column;
+  align-items: stretch;
+}
+.app[data-shell='stack'] .fluent-settings-page .fluent-sidebar {
+  width: 100%;
+  max-width: none;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  border-right: 0;
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: none;
+}
+.app[data-shell='stack'] .fluent-settings-page .fluent-sidebar::-webkit-scrollbar { width: 0; height: 0; }
+.app[data-shell='stack'] .fluent-settings-page .fluent-nav-item {
+  flex: 0 0 auto;
+  width: auto;
+}
+.app[data-shell='stack'] .fluent-settings-page .fluent-main {
+  width: 100%;
+  max-width: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 /* ── 会话管理页（背景跟随主题）──────────────────────────────────────────
    布局照 Edge 手机版：每行两张卡片，上面缩略图，下面项目名 + 大一点的 ×。
    ⚠ 缩略图是**实时渲染**（把会话的场景树自然尺寸画一遍再整体缩小），
