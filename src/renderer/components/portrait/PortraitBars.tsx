@@ -121,6 +121,19 @@ export function PortraitBar1(props: PortraitBar1Props) {
 
   const past = useScene((s) => s.history.past.length);
   const future = useScene((s) => s.history.future.length);
+  /** 首页 = 编辑器视图但一个会话都没有（"新建项目"那张空首页）。
+   *  用户："不同页面的下方第一条菜单要适配一下，不要总是那三个按钮" ——
+   *  首页上"返回编辑器"是空操作，换成真正有用的「新建」。 */
+  const isHome = view === 'editor' && !editorish;
+
+  const newPageBtn = (
+    <button
+      className="pt-btn" type="button" aria-label="新建页面" title="新建页面"
+      onClick={() => useTabStore.getState().newTab()}
+    >
+      <GlyphNewPage />
+    </button>
+  );
 
   return (
     <div className="pt-bar pt-bar1" data-view={view} role="toolbar" aria-label="核心操作">
@@ -147,7 +160,7 @@ export function PortraitBar1(props: PortraitBar1Props) {
             </svg>
           </button>
         </>
-      ) : (
+      ) : isHome ? newPageBtn : (
         <button className="pt-btn" type="button" aria-label="返回" title="返回" onClick={onBack}>
           <GlyphBack />
         </button>
@@ -162,15 +175,8 @@ export function PortraitBar1(props: PortraitBar1Props) {
         <GlyphSessions n={tabCount} />
       </button>
 
-      {/* 新建在右边第二个（用户指定） */}
-      {editorish && (
-        <button
-          className="pt-btn" type="button" aria-label="新建页面" title="新建页面"
-          onClick={() => useTabStore.getState().newTab()}
-        >
-          <GlyphNewPage />
-        </button>
-      )}
+      {/* 新建在右边第二个（用户指定）；首页已经在左端给了它，这里不重复 */}
+      {editorish && newPageBtn}
 
       <div className="pt-entry" ref={entryRef}>
         <button
