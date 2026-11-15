@@ -40,8 +40,14 @@ export function PropertyRow(props: {
   flash?: boolean;
   /** 用户开始编辑这个属性（focus）时回调，用于取消高亮 */
   onEdited?: () => void;
+  /**
+   * 不画右上角的 ×（v0.4.6）。
+   * 临时卡片里用：那张卡片不是"列表里的一行"，它跟着选中的元素活着，
+   * 摆一个 × 会让人以为要手动管理它（用户明确要求「临时卡片不要有 ×」）。
+   */
+  noRemove?: boolean;
 }) {
-  const { schemaItem, elementId, elementType, onRemove, highlight, flash, onEdited } = props;
+  const { schemaItem, elementId, elementType, onRemove, highlight, flash, onEdited, noRemove } = props;
   const scene = useScene((s) => s.scene);
   const beginStyleEdit = useScene((s) => s.beginStyleEdit);
   const endStyleEdit = useScene((s) => s.endStyleEdit);
@@ -150,7 +156,9 @@ export function PropertyRow(props: {
           )}
           {highlight && <span className="prop-new-badge">新</span>}
         </span>
-        <button className="prop-remove" title="删除此属性" onClick={(e) => animateRemove(e.currentTarget, onRemove)}><Icon name="close" size={12} /></button>
+        {!noRemove && (
+          <button className="prop-remove" title="删除此属性" onClick={(e) => animateRemove(e.currentTarget, onRemove)}><Icon name="close" size={12} /></button>
+        )}
       </div>
       <div className="prop-row-body">
         {schemaItem.input === 'font' && (

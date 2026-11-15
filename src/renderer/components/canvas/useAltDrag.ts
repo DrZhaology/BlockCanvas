@@ -10,6 +10,7 @@ import { useRef, useState } from 'react';
 import { findNode, useScene } from '@store/sceneStore';
 import { MEDIA_TAGS, TEXT_TAGS } from '@lib/types';
 import { boundsFor, ALT_REPARENT_ENABLED } from './walls';
+import { measureFixedViewport } from '@lib/fixedViewport';
 import { contentBoxOf, hasSideValue, pickAxisSide, readBoxModel, edgeAt } from './geometry';
 import { applyAltDragMove, finishAltDrag, type AltDragCtx } from './altDragMove';
 import type { AltBoxModelData, AltDragState, AltHover, Bar, Bounds } from './types';
@@ -20,9 +21,7 @@ export const LOCK_FRAME_SEC = 1;
 export type AltDragOptions = {
   /** 当前缩放（要 ÷ zoom 才能把 client px 换成 CSS px） */
   zoom: number;
-  /** 基准视口高度（fixed 的空气墙 / 首屏线） */
-  viewportHeight?: number;
-  /** 画布元素（fixed 的包含块 = 它，相当于浏览器视口） */
+  /** 画布元素（fixed 的视口层挂在它里面，见 components/canvas/fixedLayer.ts） */
   canvasRef: React.RefObject<HTMLDivElement | null>;
   /** Ctrl+滚轮缩放请求 */
   onZoomChange?: (next: number) => void;
@@ -30,11 +29,9 @@ export type AltDragOptions = {
   onMiddlePress?: (id: string, x: number, y: number) => void;
 };
 
-export function useAltDrag({ zoom, viewportHeight = 900, canvasRef, onZoomChange, onMiddlePress }: AltDragOptions) {
+export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: AltDragOptions) {
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
-  const viewportHeightRef = useRef(viewportHeight);
-  viewportHeightRef.current = viewportHeight;
 
   const [altHover, setAltHover] = useState<AltHover | null>(null);
   const altHoverRef = useRef<AltHover | null>(null);
@@ -115,7 +112,7 @@ export function useAltDrag({ zoom, viewportHeight = 900, canvasRef, onZoomChange
 
   // ── 每帧用的上下文（传给 altDragMove.ts） ────────────────────────────────────
   const ctx: AltDragCtx = {
-    zoomRef, viewportHeightRef, canvasRef, altPadRef,
+    zoomRef, canvasRef, altPadRef,
     setAltPad, setWallHints, setAltBadge, setGuides, setDropTarget, setBoxModel,
     flashWall, spawnAltGhost, moveAltGhost, removeAltGhost,
     altPreviewTimer, altPreviewRef,
@@ -166,10 +163,12 @@ export function useAltDrag({ zoom, viewportHeight = 900, canvasRef, onZoomChange
       .some((k) => String(style[k] ?? '').trim() === 'auto');
     if (!hasAuto && vals.every((v) => v === 0)) return; // 本来就是干净的
     const cbEl = d.isFixed
-      ? (el.closest('.canvas') as HTMLElement | null)
+      ? null
       : (el.offsetParent as HTMLElement | null);
-    if (!cbEl) return;
-    const cb = contentBoxOf(cbEl);
+    const cb = d.isFixed
+      ? measureFixedViewport(el.closest('.canvas') as HTMLElement | null)
+      : (cbEl ? contentBoxOf(cbEl) : null);
+    if (!cb) return;
     const r = el.getBoundingClientRect();
     const offL = (r.left - cb.left) / z;
     const offT = (r.top - cb.top) / z;
@@ -340,7 +339,7 @@ export function useAltDrag({ zoom, viewportHeight = 900, canvasRef, onZoomChange
     const rect = el.getBoundingClientRect();
     const pos = cs.position;
     const positioned = pos === 'absolute' || pos === 'fixed' || pos === 'relative';
-    const bounds: Bounds = boundsFor(el, rect, viewportHeightRef.current);
+    const bounds: Bounds = boundsFor(el, rect);
     const parentNode = findNode(root, h.id);
     const posKind = (['relative', 'absolute', 'fixed', 'sticky'] as const).includes(pos as never)
       ? (pos as 'relative' | 'absolute' | 'fixed' | 'sticky')
@@ -348,12 +347,12 @@ export function useAltDrag({ zoom, viewportHeight = 900, canvasRef, onZoomChange
     const isFixed = pos === 'fixed';
     // 定位基准：优先计算后的 left/top（缺省时按"当前实际位置 - 定位父级内容盒"补一个，
     // 这样 right/bottom 锚定或 left/top:auto 的元素第一次拖动不会跳变）
-    // v0.4.5：**fixed 的包含块是 `.canvas`（模拟浏览器视口）**，不是它的 DOM 父元素 ——
-    // 浏览器里 fixed 相对视口定位，按父元素算偏移会整体错位。
-    const cbEl = isFixed
-      ? (el.closest('.canvas') as HTMLElement | null)
-      : (el.offsetParent as HTMLElement | null);
-    const cb = cbEl ? contentBoxOf(cbEl) : null;
+    // v0.4.6：**fixed 的包含块是画布里的「视口层」**（= 红框），所以参照框直接量视口；
+    // 以前按 `.canvas` 的内容盒算，left/top 里混进了画布留白，一拖就错位。
+    const cbEl = isFixed ? null : (el.offsetParent as HTMLElement | null);
+    const cb = isFixed
+      ? measureFixedViewport(el.closest('.canvas') as HTMLElement | null)
+      : (cbEl ? contentBoxOf(cbEl) : null);
     const parsedLeft = parseFloat(cs.left);
     const parsedTop = parseFloat(cs.top);
     const startLeft = Number.isFinite(parsedLeft) ? parsedLeft : (cb ? rect.left - cb.left : 0);
@@ -389,7 +388,21 @@ export function useAltDrag({ zoom, viewportHeight = 900, canvasRef, onZoomChange
       startRight, startBottom, stretchX, stretchY,
       pinX: false, pinY: false,
       bounds,
-      walls: [bounds.barL, bounds.barR, bounds.barT, bounds.barB].filter(Boolean) as Bar[],
+      /**
+       * v0.4.6 修（用户第四次反馈，原话「fixed 的 Alt 显示还是四边都显示，说了两边！！！」）：
+       *
+       * 定位元素在画布上**只有两条偏移**（面板是最高权限），所以 Alt 也该只显示
+       * 这两条偏移对应的「可达边界」—— left 锚着就只画左边那条，top 锚着就只画上边。
+       * 以前把四面墙全塞进来，一按 Alt 屏幕上四条橙线，等于在说"你被四面框住"，
+       * 跟面板里那两条是矛盾的。
+       *
+       * 常规流元素不受影响（它的可动范围本来就得四面都挡）。
+       */
+      walls: (positioned
+        ? [axisSide.x === 'left' ? bounds.barL : bounds.barR,
+           axisSide.y === 'top' ? bounds.barT : bounds.barB]
+        : [bounds.barL, bounds.barR, bounds.barT, bounds.barB]
+      ).filter(Boolean) as Bar[],
       reparent: false,
       dropId: null,
       parentId: parentNode?.id ?? null,

@@ -67,7 +67,7 @@
   display: flex;
   min-height: 92px;
   border: 1px dashed var(--border-strong, var(--border));
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--panel-soft);
   user-select: none;
   box-sizing: border-box;
@@ -80,7 +80,7 @@
   align-items: center;
   justify-content: inherit;
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: 8px;
   outline: 1px dashed var(--border);
   outline-offset: 0;
   font-size: 13px;
@@ -109,7 +109,7 @@
   cursor: nwse-resize;
   border-right: 2px solid var(--border-strong, var(--border));
   border-bottom: 2px solid var(--border-strong, var(--border));
-  border-bottom-right-radius: 7px;
+  border-bottom-right-radius: 12px;
 }
 .cpv-corner:hover,
 .cpv-corner.active { border-color: var(--accent); background: var(--accent-soft, rgba(30, 136, 229, 0.16)); }
@@ -141,7 +141,7 @@
   position: relative;
   flex: 1 1 auto;
   height: 18px;
-  border-radius: 9px;
+  border-radius: 16px;
   background: var(--panel-soft);
   border: 1px solid var(--border);
   cursor: ew-resize;
@@ -152,7 +152,7 @@
   left: 1px;
   top: 1px;
   bottom: 1px;
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--accent-soft, rgba(30, 136, 229, 0.22));
 }
 .cpv-size-knob {
@@ -161,7 +161,7 @@
   width: 4px;
   height: 14px;
   margin-left: -2px;
-  border-radius: 2px;
+  border-radius: 4px;
   background: var(--accent);
   transform: translateY(-50%);
 }
@@ -172,7 +172,7 @@
   height: 26px;
   padding: 0 6px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text);
   font-family: inherit;
@@ -196,7 +196,7 @@ body.bc-style-dragging * { cursor: nwse-resize; }
 .tpv-wrap { display: flex; flex-direction: column; gap: 4px; }
 .tpv-label { font-size: 10.5px; color: var(--text-muted); }
 .tpv-caption { font-size: 11px; color: var(--text); text-align: center; opacity: 0.9; }
-.tpv-table { border-radius: 6px; transition: background 0.12s ease, border-color 0.12s ease; }
+.tpv-table { border-radius: 10px; transition: background 0.12s ease, border-color 0.12s ease; }
 .tpv-cell { color: inherit; }
 .tpv-cell.is-head { font-weight: 600; }
 
@@ -232,7 +232,7 @@ body.bc-style-dragging * { cursor: nwse-resize; }
   height: 28px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text);
   font-family: inherit;
@@ -244,7 +244,7 @@ body.bc-style-dragging * { cursor: nwse-resize; }
   height: 28px;
   padding: 0 4px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text-muted);
   font-family: inherit;

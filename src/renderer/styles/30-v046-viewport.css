@@ -45,18 +45,41 @@ body.bc-alt-dragging .canvas-fixed-frame {
   opacity: 0.45;
 }
 
-/* ── fixed 元素钉在视口上 ──────────────────────────────────────────────────
-   `.canvas` 有 transform: scale(zoom)，所以它是 fixed 后代的包含块，
-   元素写 top:100px 其实是"距画布顶 100px"。滚动时画布顶跑到视口顶上面，
-   这里补一段 translate 把它拉回原位 —— 视觉上就是"浏览器里 fixed 不动"。
-   用独立的 `translate` 属性（不是 transform），这样用户自己的 transform 不会被覆盖。
-   ------------------------------------------------------------------------ */
-.canvas [data-bc-fixed='1'] {
+/* ── 画布内「浏览器视口层」：fixed 元素的包含块 ───────────────────────────────
+   v0.4.6 重做。这一层的位置与尺寸**就等于红框**（由 lib/fixedViewport.ts 写
+   --bc-fl-* 驱动），并且它自带 translate → 天然构成 fixed 的包含块。
+
+   于是层内 fixed 元素的 left/top/right/bottom 全部相对**视口**解析：
+     · `bottom: 0` = 贴视口底（不再是"贴画布底"，画布可是会长到 3000px 的）；
+     · 四个角对齐就是四个角，不会突破红框；
+     · 面板里只留两条偏移，画布上也就只按两条摆。
+
+   注意：**不能**给这一层写 padding / border —— 它会把这个内缩量算进包含块，
+   元素就整体偏一截（这正是老代码的错法之一）。
+   ------------------------------------------------------------------------- */
+.canvas-fixed-layer {
+  position: absolute;
+  left: var(--bc-fl-left, 0px);
+  top: var(--bc-fl-top, 0px);
+  width: var(--bc-fl-w, 0px);
+  height: var(--bc-fl-h, 0px);
+  /* 滚动时把整层拉回来（画布会随滚动往上跑，fixed 不该跟着跑） */
   translate: 0 var(--bc-fixed-shift, 0px);
+  /* 不做裁切：fixed 元素允许超出视口（浏览器里也是这样），只是会被判定"越界" */
+  overflow: visible;
+  pointer-events: none;
+  z-index: 3;
+  /* 自己就是包含块，靠这个而不是靠父级的 transform */
+  will-change: transform;
+}
+
+/* 层本身不吃鼠标，但里面的元素要吃（否则画布上的 fixed 元素点不中） */
+.canvas-fixed-layer > * {
+  pointer-events: auto;
 }
 
 /* 缩放画布 / 拖画布宽度期间：fixed 元素暂时隐藏（用户："显示了反麻烦"） */
-body.bc-fixed-hidden .canvas [data-bc-fixed='1'] {
+body.bc-fixed-hidden .canvas-fixed-layer {
   visibility: hidden;
 }
 

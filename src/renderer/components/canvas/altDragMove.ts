@@ -12,12 +12,11 @@
 import { findNode, useScene } from '@store/sceneStore';
 import { contentBoxOf } from './geometry';
 import { pickDropTarget, ALT_REPARENT_ENABLED, clearDropPreview } from './walls';
+import { measureFixedViewport } from '@lib/fixedViewport';
 import type { AltDragState, Bar } from './types';
 
 export type AltDragCtx = {
   zoomRef: React.MutableRefObject<number>;
-  /** 基准视口高度（fixed 的空气墙 / 首屏线），由场景提供 */
-  viewportHeightRef: React.MutableRefObject<number>;
   canvasRef: React.RefObject<HTMLDivElement | null>;
   altPadRef: React.MutableRefObject<number>;
   setAltPad: React.Dispatch<React.SetStateAction<number>>;
@@ -352,10 +351,18 @@ export function applyAltDragMove(d: AltDragState, ev: PointerEvent, ctx: AltDrag
       patch.right = undefined;
       patch.bottom = undefined;
     } else {
-      const cbEl = d.isFixed
-        ? (ctx.canvasRef.current as HTMLElement | null)
-        : (elNow.offsetParent as HTMLElement | null);
-      const cb = cbEl ? contentBoxOf(cbEl) : null;
+      /**
+       * v0.4.6 重做：**fixed 的包含块 = 画布里的「视口层」**（`.canvas-fixed-layer`，
+       * 位置尺寸就等于红框），所以量出来的参照框是 measureFixedViewport 的结果。
+       *
+       * 以前用 `.canvas` 的内容盒 —— 那是整张画布，于是 left/top 里混进了画布留白，
+       * bottom/right 更是指向"页面底部"而不是"视口底部"：用户看到的
+       * 「莫名其妙 top: 215」「左下/右下角突破画布」都是这条。
+       */
+      const cbEl = d.isFixed ? null : (elNow.offsetParent as HTMLElement | null);
+      const cb = d.isFixed
+        ? measureFixedViewport(ctx.canvasRef.current)
+        : (cbEl ? contentBoxOf(cbEl) : null);
       if (cb) {
         const dL = (targetLeft - cb.left) / zNow;
         const dR = (cb.right - (targetLeft + d.rect.width)) / zNow;
@@ -476,17 +483,14 @@ export function finishAltDrag(d: AltDragState, ctx: AltDragCtx): void {
       right: cvRaw.right
     } : undefined;
     /**
-     * v0.4.6（R6-16）：fixed 的"底面"是**首屏线**，不是画布底。
-     *
-     * 以前拿画布底（cv.bottom）当视口底 —— 可画布会随内容长到 3000px，
-     * 于是"往下拖到贴底"永远贴不到用户心里的"首屏底部"，`bottom: 0` 写不出来；
-     * 反过来，之前写死的 bottom 值在长页面上又跑到看不见的地方。
-     * 现在按基准视口高度算首屏线，画布比它矮时仍取画布底（免得线跑到画布外）。
+     * v0.4.6 重做：fixed 的"视口"就是画布里那层视口层（`.canvas-fixed-layer`，
+     * 位置尺寸 = 红框），直接量它。以前拿"画布顶 + 基准视口高度"算首屏线的近似值，
+     * 用户连着三轮说不对 —— 这次不再近似。
      */
-    const vp = cvRaw
-      ? Math.min(cvRaw.bottom - padNow, cvRaw.top + (ctx.viewportHeightRef.current || 900))
-      : undefined;
-    const cvFixed = cv && vp !== undefined ? { ...cv, bottom: vp } : cv;
+    const fv = d.isFixed ? measureFixedViewport(ctx.canvasRef.current) : null;
+    const cvFixed = fv
+      ? { top: fv.top, bottom: fv.bottom, left: fv.left, right: fv.right }
+      : cv;
     if (el) {
       const r = el.getBoundingClientRect();
       const cs = getComputedStyle(el);
@@ -510,20 +514,17 @@ export function finishAltDrag(d: AltDragState, ctx: AltDragCtx): void {
          * 所以：**双边约束的轴不做贴边归一化**（那两边本来就是用户要的定位基准）。
          */
         /**
-         * v0.4.6（R6-16）：**只有"页面不超过一屏"时才把贴边归一化成 bottom/right: 0**。
+         * v0.4.6 重做：贴边就写 0px。
          *
-         * 原因：画布自己就是 fixed 的包含块。`bottom: 0` 在这个包含块里解析成"画布底"，
-         * 而画布会随内容长到 3000px —— 于是长页面上松手的一瞬间，元素会从首屏线
-         * **跳到页面最底部**（用户看到的就是"一松手就飞走了"）。
-         * 短页面（画布高度 ≈ 基准视口）时 `bottom: 0` 恰好等于首屏底，这时才写它。
-         * 长页面上保留数值偏移：位置不跳，导出的 `top: Npx` 在 900px 窗口里也是同一处。
+         * 以前只在"页面不超过一屏"时才敢写 `bottom: 0` —— 因为那时包含块是整张画布，
+         * 长页面上 `bottom: 0` 会把元素甩到页面最底。现在包含块是视口层，
+         * `bottom: 0` 恒等于"贴视口底"，任何时候都写它，位置不会跳。
          */
-        const canvasTall = (ctx.canvasRef.current?.offsetHeight ?? 0) > (ctx.viewportHeightRef.current || 900) + 4;
-        if (!d.stretchY && !canvasTall) {
+        if (!d.stretchY) {
           if (nearBottom) { patch.bottom = '0px'; patch.top = undefined; }
           else if (nearTop) { patch.top = '0px'; patch.bottom = undefined; }
         }
-        if (!d.stretchX && !canvasTall) {
+        if (!d.stretchX) {
           if (nearRight) { patch.right = '0px'; patch.left = undefined; }
           else if (nearLeft) { patch.left = '0px'; patch.right = undefined; }
         }

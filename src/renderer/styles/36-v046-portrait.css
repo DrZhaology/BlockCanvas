@@ -1,0 +1,369 @@
+/* ============================================================================
+   v0.4.6 · 竖屏「操作栏」（底部两条）
+   ----------------------------------------------------------------------------
+   用户原话：
+     「手机端，保持上方什么也没有……把屏幕下方的一部分区域，类似手机版 Edge
+       下方控制栏，作为核心的跳转入口和工具栏操作。」
+     「分成 2 条栏，从下到上，两条控制栏，第一条是最底下的，第二条是第一条上面的。」
+
+   三条硬约束：
+     1. 只作用于 `data-shell='stack'`（≤899px）。宽屏一条都不出现。
+     2. 报两条栏是 `.app` 的**普通 flex 子项**，不是浮层 ——
+        内容区自己缩，永远不会盖住画布底部（这是手机浏览器的做法）。
+     3. 第一条栏在每个视图都在，左端在编辑器里是撤销/重做、在子页面里是返回。
+   ========================================================================== */
+
+/* ── 竖屏顶部：什么也不留 ─────────────────────────────────────────────────
+   自绘标题栏（Logo / 菜单 / 三个窗口按钮）和多标签页条在竖屏整体不显示。
+   注意：这是**布局层**的取舍，不是输入层 —— 所以只挂 data-shell，不碰 data-input。 */
+.app[data-shell='stack'] .bc-titlebar,
+.app[data-shell='stack'] .project-tab-bar {
+  display: none !important;
+}
+
+/* ── 竖屏画布：去掉滚动条（用户："竖屏画布右侧的滚动条删除"）─────────────
+   原生滚动条与自绘的那一层都关掉。竖屏改成单指平移（后续切片实现），
+   滚动条既挡内容又容易被误拖。 */
+.app[data-shell='stack'] .canvas-wrap {
+  scrollbar-width: none;
+}
+.app[data-shell='stack'] .canvas-wrap::-webkit-scrollbar { width: 0; height: 0; }
+/* 自绘滚动条那一层看 `lib/overlayScroll.ts` 的 measurable()：竖屏直接不画。
+   这里只兜住原生那条（CSS 能做到的那一半）。 */
+
+/* 画布左右两边的"拖宽"把手也去掉（用户："画布左侧右侧可以调整画布宽度的功能删除。
+   放置误触。"）—— 竖屏上这两条正好压在手指最容易碰到的地方。 */
+.app[data-shell='stack'] .canvas-resize-handle { display: none !important; }
+
+/* ── 左右面板要盖住第二条操作栏，但不盖第一条 ─────────────────────────────
+   用户原话：「让左右两侧面板覆盖第二层的操作栏。」
+   抽屉默认 `bottom: 0` 相对 `.workspace`，也就是停在第二条栏上沿；
+   这里把它往下多伸一条栏的高度，正好压住第二条、在第一条之前停下
+   （第一条必须始终可点，否则抽屉一开就没法关）。
+   用 --pt-bar2-h 而不是写死 58px：展开态那条栏会变高，后面调这里就行。 */
+.app[data-shell='stack'] { --pt-bar2-h: 58px; }
+.app[data-shell='stack'] .elem-pane-wrap,
+.app[data-shell='stack'] .right-pane-wrap {
+  bottom: calc(-1 * var(--pt-bar2-h, 58px));
+}
+/* 遮罩同样盖住第二条栏，否则抽屉开着时点第二条栏不会关（观感像"点外面没反应"） */
+.app[data-shell='stack'] .shell-drawer-scrim {
+  top: 0;
+  bottom: calc(-1 * var(--pt-bar2-h, 58px));
+}
+
+/* ── 通用：栏体 ─────────────────────────────────────────────────────────── */
+.pt-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  -webkit-user-select: none;
+  user-select: none;
+  /* ⚠ 不要在这里加 position / z-index：一旦给栏体建了层叠上下文，
+     画布抽屉（.elem-pane-wrap z-index:58）与遮罩的层序会跟着变，
+     实测会把"点把手开抽屉 / 手势跟手"整条链路带歪。
+     栏是 .app 最后一个 flex 子项，DOM 顺序已经保证它画在上面。 */
+}
+
+/* ── 第一条：5 个核心按钮 ─────────────────────────────────────────────────── */
+.pt-bar1 {
+  height: 56px;
+  padding: 0 4px max(0px, env(safe-area-inset-bottom, 0px));
+  gap: 2px;
+}
+
+.pt-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--dur-fast, 120ms) var(--ease-out, ease),
+              transform var(--dur-fast, 120ms) var(--ease-out, ease);
+}
+.pt-btn:active:not(:disabled) { transform: scale(0.94); background: var(--bg-hover, rgba(0, 0, 0, 0.06)); }
+.pt-btn:disabled { opacity: 0.35; cursor: default; }
+.pt-btn.is-open { background: var(--bg-hover, rgba(0, 0, 0, 0.06)); }
+
+.pt-btn-label {
+  font-size: 10.5px;
+  line-height: 1;
+  letter-spacing: 0.2px;
+  opacity: 0.85;
+}
+
+/* 会话数角标：圆角正方形 + 中间数字 */
+.pt-sess-glyph { position: relative; display: inline-flex; width: 22px; height: 22px; }
+.pt-sess-count {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「三」的二级菜单：从栏里往上弹，不遮住这一栏本身 */
+.pt-entry { position: relative; flex: 1 1 0; display: flex; min-width: 0; }
+.pt-entry > .pt-btn { flex: 1; }
+
+.pt-entry-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 152px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  transform-origin: bottom right;
+  animation: ptMenuIn 140ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+  z-index: 62;
+}
+@keyframes ptMenuIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.pt-entry-menu button {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.pt-entry-menu button:active { background: var(--bg-hover, rgba(0, 0, 0, 0.08)); }
+
+/* ── 第二条：桌面工具栏按钮 ───────────────────────────────────────────────── */
+.pt-bar2 {
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  /* 两条栏之间不要分隔线（用户："第二层和第一层操作栏之间多了一条风格线"） */
+  border-top: 0;
+  /* 这一条要同时满足两件事：
+     · 手指**横滑** = 翻看折叠态的按钮 → 必须交给浏览器原生横滚（pan-x）；
+     · 长按后**纵滑** = 展开/折叠 → 纵向手势不让浏览器接管（所以不给 pan-y）。
+     以前写 touch-action:none，结果横滑被彻底吃掉，一滑不动。 */
+  touch-action: pan-x;
+  transition: height var(--dur-mid, 200ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+}
+/* 抓握提示条：告诉用户"这条能长按拖动" */
+.pt-bar2-grip {
+  width: 100%;
+  height: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.pt-bar2-grip::after {
+  content: '';
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.pt-bar2-inner {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 折叠态：一行、可左右滑动。覆盖 33 号分片里"窄屏工具栏折成两行"的旧规则
+   （那是顶部工具栏时代的要求，现在顶栏没了，改由这里接管）。
+   高度锁死在 58px：不锁的话里面工具栏的 padding/行高会把这条栏撑到 100px+，
+   画布白掉半个屏幕。 */
+.pt-bar2:not(.is-expanded) { height: 58px; }
+.pt-bar2:not(.is-expanded) .pt-bar2-inner {
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* 横滑条不要看到 —— 手指滑就行，画一条灰杠只是脏 */
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+}
+.pt-bar2:not(.is-expanded) .pt-bar2-inner::-webkit-scrollbar { width: 0; height: 0; }
+.pt-bar2:not(.is-expanded) .toolbar {
+  flex-wrap: nowrap;
+  height: 40px;
+  row-gap: 0;
+  padding: 0 6px;
+  width: max-content;
+  min-width: 100%;
+  align-items: center;
+}
+.pt-bar2:not(.is-expanded) .tb-main { flex-wrap: nowrap; overflow: visible; flex: 0 0 auto; }
+.pt-bar2:not(.is-expanded) .tb-right { order: 0; margin-left: 0; }
+
+/* 展开态：全部按钮换行铺开，超过 4 行内部滚（不把画布挤没） */
+.pt-bar2.is-expanded { max-height: 52vh; }
+.pt-bar2.is-expanded .pt-bar2-inner { overflow-y: auto; }
+.pt-bar2.is-expanded .toolbar {
+  flex-wrap: wrap;
+  height: auto;
+  row-gap: 4px;
+  padding: 0 6px 8px;
+}
+.pt-bar2.is-expanded .tb-main { flex-wrap: wrap; flex: 1 1 100%; order: 2; overflow: visible; }
+.pt-bar2.is-expanded .tb-right { order: 1; margin-left: auto; }
+
+/* 栏内工具栏不要自己的上边框和背景（栏体已经有了，别套两层） */
+.pt-bar2 .toolbar {
+  background: transparent;
+  border-top: 0;
+  box-shadow: none;
+}
+
+/* ── 会话管理页（用户：黑色背景 → 确认改为「跟随当前主题」）────────────────
+   布局照 Edge 手机版：每行两张卡片，上面缩略图，下面项目名 + 大一点的 ×。
+   ⚠ 缩略图是**实时渲染**（把会话的场景树自然尺寸画一遍再整体缩小），
+     不是静态截图 —— 切回来看到的永远是最新状态。 */
+.sess-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--bg);
+  padding: 14px 12px 20px;
+}
+
+.sess-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 12px; }
+.sess-title { font-size: 20px; font-weight: 600; }
+.sess-sub { font-size: 12px; color: var(--text-muted); }
+
+.sess-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.sess-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  overflow: visible;
+  transition: transform var(--dur-fast, 120ms) var(--ease-out, ease);
+}
+.sess-card:active { transform: scale(0.975); }
+/* ⚠ 用 outline 而不是 inset box-shadow：inset 阴影画在**子元素背景之下**，
+   而缩略图是一块不透明底 → 只有卡片下半边（信息行）能看见蓝框，
+   上半边的缩略图把它盖住了。outline 画在子元素之上，整圈都在。 */
+.sess-card.is-active { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* 关闭动画：缩一下 + 淡出 + 收高（让后面的卡片自然补位，不是"啪"地消失） */
+.sess-card.is-leaving {
+  animation: sessOut 190ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) forwards;
+  pointer-events: none;
+}
+@keyframes sessOut {
+  0% { opacity: 1; transform: scale(1); }
+  40% { opacity: 0.6; transform: scale(0.94); }
+  100% { opacity: 0; transform: scale(0.86); }
+}
+
+.sess-thumb {
+  position: relative;
+  height: 112px;
+  border-radius: 13px 13px 0 0;
+  overflow: hidden;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+}
+.sess-thumb-stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 12px 14px;
+  transform-origin: top left;
+  transform: scale(0.145);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.sess-meta { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 10px; }
+.sess-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 用户要求：「这个 × 的按钮稍微大一点不要太小」 */
+.sess-close {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.sess-close:active { background: var(--bg-hover, rgba(0, 0, 0, 0.08)); color: var(--text); }
+
+.sess-rename {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.sess-menu {
+  position: absolute;
+  right: 6px;
+  bottom: 44px;
+  min-width: 132px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+  z-index: 70;
+  animation: ptMenuIn 140ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+}
+.sess-menu button {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.sess-menu button:active { background: var(--bg-hover, rgba(0, 0, 0, 0.08)); }
+

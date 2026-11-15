@@ -124,6 +124,20 @@
   color: var(--accent, #1e88e5);
 }
 
+/* v0.4.7：菜单弹出去之后按钮自己要留在"按下"的样子 ——
+   以前只有 hover 态，鼠标一挪开按钮就恢复常态，看起来像没点着。 */
+.bc-titlebar-menu-btn.is-open {
+  background: var(--hover-accent, #f0f7ff);
+  color: var(--accent, #1e88e5);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #1e88e5) 24%, transparent);
+}
+
+/* 键盘走查（Tab 到菜单、方向键切换、Enter 打开）时的焦点环 */
+.bc-titlebar-menu-btn:focus-visible {
+  outline: 2px solid var(--accent, #1e88e5);
+  outline-offset: -2px;
+}
+
 .bc-titlebar-menu-btn:active {
   background: var(--focus-accent, #e1f0ff);
 }
@@ -234,16 +248,16 @@ html[data-bc-dark] .bc-win-ring {
    竖屏/窄屏下菜单与产品名收起（竖屏那点宽度要留给画布），
    菜单的动作改由工具栏第二行提供。
    ------------------------------------------------------------------------ */
-.app[data-shell='narrow'] .bc-titlebar-name,
-.app[data-shell='narrow'] .bc-titlebar-menu {
+.app[data-shell='stack'] .bc-titlebar-name,
+.app[data-shell='stack'] .bc-titlebar-menu {
   display: none;
 }
 
-.app[data-shell='narrow'] .bc-titlebar {
+.app[data-shell='stack'] .bc-titlebar {
   padding-left: 6px;
 }
 
-.app[data-shell='narrow'] .bc-win-btn {
+.app[data-shell='stack'] .bc-win-btn {
   width: 40px;
 }
 
@@ -270,7 +284,10 @@ html[data-bc-dark] .bc-win-ring {
 .bc-osb-layer {
   position: fixed;
   inset: 0;
-  z-index: 9990;
+  /* v0.4.7：以前抬到 9990（比模态还高），结果画布的滑块会盖在**右侧属性面板 / 抽屉**
+     上面 —— 用户看到的就是"右侧面板完全和滚动条重合"。
+     滑块只需要"盖住自己容器里的内容"，所以压到抽屉(58)/工具栏(560)/模态(900)之下。 */
+  z-index: 45;
   pointer-events: none;
   contain: strict;
 }
@@ -278,16 +295,28 @@ html[data-bc-dark] .bc-win-ring {
 .bc-osb-thumb {
   position: fixed;
   border-radius: var(--r-pill);
-  background: rgba(120, 128, 140, 0.45);
-  /* v0.4.6：**常显**（0.32），滚动/悬停时加深。
-     用户反馈"竖向的滚动条直接消失了" —— 因为我把原生那条藏了、自己那条又只在滚动时出现，
-     结果静止时一条都没有。现在静止也有一条很淡的，滚起来变实。 */
-  opacity: 0.32;
+  background-color: rgba(120, 128, 140, 0.45);
+  /* 静止态**常显**（0.55），滚动/悬停时加深到 1。
+     v0.4.7：用户说"5px 太细小、按下变宽看不出来" —— 现在三档厚度
+     5（静止）→ 7（悬停）→ 9（按住拖动），透明度 0.55 → 1，
+     两者都走 140ms 过渡。粗细由这根线自己的 width/height 决定（JS 只写长度，
+     所以 CSS 换档不会被内联样式压住），并且**锚定同一条边**（JS 写 right/bottom），
+     变粗时只往容器里侧长，边缘不会漂移。 */
+  opacity: 0.55;
   pointer-events: auto;
   cursor: default;
-  transition: opacity 160ms ease-out, width 90ms ease-out, height 90ms ease-out,
-              background 120ms ease-out;
+  transition:
+    width 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    height 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 140ms ease-out,
+    background-color 140ms ease-out;
 }
+
+/* 三档粗细：竖条改 width、横条改 height；长度由 JS 内联写，互不干扰 */
+.bc-osb-thumb.is-y { width: 5px; }
+.bc-osb-thumb.is-x { height: 5px; }
+.bc-osb-thumb.is-y:hover { width: 7px; }
+.bc-osb-thumb.is-x:hover { height: 7px; }
 
 /* 老分片里给工具栏 / 页签条 / 图层树单独写过 ::-webkit-scrollbar 的粗样式，
    优先级比那条全局隐藏更高 —— 这里点名摁掉，否则"上方菜单还冒一条横条"。 */
@@ -311,33 +340,36 @@ html[data-bc-dark] .bc-win-ring {
   display: none;
 }
 
-.bc-osb-thumb.is-visible {
+/* 滚动中（is-visible）与悬停都是"实"的；静止保持 0.55，**永不透明到 0** */
+.bc-osb-thumb.is-visible,
+.bc-osb-thumb:hover,
+.bc-osb-thumb.is-dragging {
   opacity: 1;
   pointer-events: auto;
 }
 
 .bc-osb-thumb:hover,
 .bc-osb-thumb.is-dragging {
-  background: rgba(96, 104, 118, 0.66);
+  background-color: rgba(96, 104, 118, 0.66);
 }
 
-.bc-osb-thumb.is-y:hover,
-.bc-osb-thumb.is-y.is-dragging {
-  width: 5px !important;
-}
-
-.bc-osb-thumb.is-x:hover,
-.bc-osb-thumb.is-x.is-dragging {
-  height: 5px !important;
-}
+/* 按住拖动最粗（9px）。必须排在 :hover 之后 —— 同优先级靠顺序取胜，
+   拖动时指针也压在滑块上（:hover 同时命中），顺序反了就永远是 7px。 */
+.bc-osb-thumb.is-y.is-dragging { width: 9px; }
+.bc-osb-thumb.is-x.is-dragging { height: 9px; }
 
 html[data-bc-dark] .bc-osb-thumb {
-  background: rgba(190, 200, 215, 0.34);
+  background-color: rgba(190, 200, 215, 0.34);
 }
 
 html[data-bc-dark] .bc-osb-thumb:hover,
 html[data-bc-dark] .bc-osb-thumb.is-dragging {
-  background: rgba(210, 220, 235, 0.52);
+  background-color: rgba(210, 220, 235, 0.52);
+}
+
+/* 减弱动效：粗细/透明度直接跳变（滑块本身还是要常显的） */
+@media (prefers-reduced-motion: reduce) {
+  .bc-osb-thumb { transition-duration: 0.01ms; }
 }
 
 /* ── 12. 右侧面板缺失的过渡（v0.4.6，设计规则 6） ─────────────────────────
@@ -419,6 +451,25 @@ html[data-bc-dark] .bc-osb-thumb.is-dragging {
 .quick-helper .pos-helper {
   padding: 4px 0 0;
   gap: 8px;
+}
+
+/* 定位助手展开/收起（v0.4.7）
+   用户："快捷助手里面的定位助手没有展开合起来的动画。"
+   机制跟布局 / 文字渐变那两个板块**完全一致**（<Collapse>：grid-template-rows
+   0fr ↔ 1fr 撑开高度 + 透明度 + 上浮，无需测量高度；收场等动画跑完才卸载元素）。
+   唯一的差别是时长：快捷助手是"点一下就变"的轻量面板，180ms 比属性面板的
+   0.3s 更跟手，仍落在 150~200ms 这一档。
+   `.collapse-inner` 自带的 overflow:hidden 保证动画过程中内容不会掉出来，
+   跑完（is-settled）才放开裁切，下拉菜单不会被剪。 */
+.quick-helper .collapse.qh-pos-collapse {
+  transition-duration: 180ms;
+}
+/* 减弱动效：和全局 .collapse 一样直接跳过动画（这条必须写在上面那条之后，
+   否则同优先级下 180ms 会把 prefers-reduced-motion 的 0.01ms 盖掉） */
+@media (prefers-reduced-motion: reduce) {
+  .quick-helper .collapse.qh-pos-collapse {
+    transition-duration: 0.01ms;
+  }
 }
 
 /* 说明文字：不要底色块（一大片灰底最"花眼睛"），只要小字 */
@@ -624,7 +675,7 @@ html[data-bc-dark] .bc-osb-thumb.is-dragging {
 .bc-posswitch-body p { margin: 0 0 8px; }
 .bc-posswitch-body code {
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: 8px;
   background: var(--surface-sunken, #f1f5f9);
   font-family: Consolas, monospace;
   font-size: 11.5px;

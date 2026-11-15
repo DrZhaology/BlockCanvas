@@ -59,7 +59,7 @@
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   font-family: inherit;
   font-size: 12px;

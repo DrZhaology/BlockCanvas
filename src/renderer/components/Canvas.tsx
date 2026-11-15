@@ -13,6 +13,8 @@ import { useAltDrag } from './canvas/useAltDrag';
 import { useMarquee } from './canvas/useMarquee';
 import { useStickyMarks } from './canvas/sticky';
 import { useFixedFrame } from './canvas/useFixedFrame';
+import { FixedLayerContext } from './canvas/fixedLayer';
+import { useEnterAnim } from './canvas/useEnterAnim';
 import { useInlineSel } from './canvas/useInlineSel';
 
 // BlockCanvas · 画布（组装层）
@@ -89,8 +91,6 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   const activeBreakpoint = useScene((s) => s.activeBreakpoint);
   // v0.4.6（R6-16）：基准视口高度 —— 画布最小高度 + fixed 的空气墙 + 首屏线位置
   const viewportHeight = useScene((s) => s.scene.viewportHeight) ?? 900;
-  // 画布实际高度（用于判断"首屏线该不该显示"）：交给 ResizeObserver，避免每次渲染都量
-  const [canvasHeight, setCanvasHeight] = useState(0);
 
   // 画布专用断点生效规则：在当前非桌面断点下，为 .canvas 内所有匹配元素强行应用该断点样式规则
   const canvasResponsiveCss = useMemo(() => {
@@ -112,6 +112,24 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
 
   const toggleSelect = useScene((s) => s.toggleSelect);
   const canvasRef = useRef<HTMLDivElement>(null);
+  /**
+   * v0.4.6 重做 fixed：画布里挂一层「浏览器视口层」。
+   *
+   * 这一层的位置和尺寸**就等于红框**（由 lib/fixedViewport.ts 写 CSS 变量驱动），
+   * fixed 节点通过 portal 渲染进去，于是它们的 left/top/right/bottom 相对**视口**解析，
+   * 而不是相对整张画布 —— `bottom: 0` 才真的是"贴视口底"。
+   *
+   * 用真实 DOM 节点（而不是 <div ref> + state）是为了首帧就能 portal，
+   * 否则 fixed 元素会晚一帧出现，"插入动画"会先闪一下。
+   */
+  const fixedLayerEl = useMemo(() => document.createElement('div'), []);
+  useEffect(() => {
+    const host = canvasRef.current;
+    if (!host) return;
+    fixedLayerEl.className = 'canvas-fixed-layer';
+    host.appendChild(fixedLayerEl);
+    return () => { fixedLayerEl.remove(); };
+  }, [fixedLayerEl]);
   // v0.4.5（性能）：画布图片按显示尺寸降采样。
   // 4K 图按原始分辨率解码一张≈33MB，插 50 张就是 1.6GB —— 这是内存飙升的主因。
   // 这里在场景/尺寸变化后扫一遍，把"原图远大于显示尺寸"的图换成小副本（导出仍用原图）。
@@ -121,16 +139,6 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     }, 260);
     return () => window.clearTimeout(id);
   }, [root, canvasWidth, zoom, activeBreakpoint]);
-
-  // v0.4.6（R6-16）：跟踪画布实际高度 —— 只在内容比基准视口高时才画「首屏线」。
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => setCanvasHeight(el.offsetHeight));
-    ro.observe(el);
-    setCanvasHeight(el.offsetHeight);
-    return () => ro.disconnect();
-  }, [zoom, canvasWidth]);
 
   // 画布内「浏览器视口」（v0.4.6）：选中 fixed 元素时画红框 + 把 fixed 元素钉在视口上。
   // 几何与语义在 lib/fixedViewport.ts，React 接线在 canvas/useFixedFrame.ts。
@@ -154,7 +162,6 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   // Alt 交互（拖拽 / 缩放 / 改字号 / Alt·Ctrl 滚轮）
   const alt = useAltDrag({
     zoom,
-    viewportHeight,
     canvasRef,
     onZoomChange: (next) => { onZoomChange?.(() => next); },
     onMiddlePress: (id, x, y) => { select(id); setPropSearch({ x, y }); }
@@ -162,6 +169,9 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
 
   // 框选
   const mq = useMarquee(canvasRef);
+
+  // 元素进场动画（v0.4.6）：新增节点打标 → CSS 播，见 canvas/useEnterAnim.ts
+  useEnterAnim(root, canvasRef);
 
   /**
    * v0.4.6（R6-17）：sticky 的元素标记。
@@ -316,23 +326,13 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
         }}
         onWheel={alt.onCanvasWheel}
       >
-        {root.children.map((c) => (
-          <CanvasNode key={c.id} node={c} depth={0} selectedIds={selectedIds} onSelect={select} onSelectParent={selectParent} onToggleSelect={toggleSelect} onTextMenu={openTextMenu} />
-        ))}
+        <FixedLayerContext.Provider value={fixedLayerEl}>
+          {root.children.map((c) => (
+            <CanvasNode key={c.id} node={c} depth={0} selectedIds={selectedIds} onSelect={select} onSelectParent={selectParent} onToggleSelect={toggleSelect} onTextMenu={openTextMenu} />
+          ))}
+        </FixedLayerContext.Provider>
         {root.children.length === 0 && (
           <div className="canvas-empty">从下方元素面板点一个元素，就能插入到画布</div>
-        )}
-        {/* v0.4.6（R6-16）「首屏线」：fixed 元素的参照底面。
-            它只在画布比基准视口高时才显示（内容短时画布就到这儿，线没有意义）。
-            pointer-events: none —— 纯参考线，不能挡拖动。 */}
-        {canvasHeight > viewportHeight + 4 && (
-          <div
-            className="canvas-viewport-line"
-            style={{ top: viewportHeight }}
-            title={`首屏线：固定定位 (fixed) 元素的参照底面 ${viewportHeight}px。页面滚动时浏览器窗口只有这么高。`}
-          >
-            <span>首屏 {viewportHeight}px</span>
-          </div>
         )}
         {/* 画布左右拖拽手柄：贴住画布左右边缘，鼠标上去变左右拉伸光标 */}
         <span className="canvas-resize-handle canvas-resize-handle-l" onPointerDown={(e) => onResizeStart(e, 'l')} title="拖动调整画布宽度" />

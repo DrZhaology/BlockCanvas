@@ -14,9 +14,14 @@
 // 现在的做法（业内叫 overlay scrollbar）：
 //   · 原生滚动条**彻底隐藏**（`scrollbar-width: none` + `::-webkit-scrollbar { display:none }`）
 //     → 不再占宽度，也不再因为出现/消失导致重排；
-//   · 自己画一根 3px 的圆角长条，`position: fixed` 贴在滚动容器右边缘/下边缘
+//   · 自己画一根 5px 的圆角长条，`position: fixed` 贴在滚动容器右边缘/下边缘
 //     （fixed 是"脱离文档流"的关键：它不参与任何布局计算，画在哪都不影响内容）；
-//   · 滚动时才显形、静止 0.9s 后淡出，悬停加粗到 5px，可以按住拖 —— 就是"轻微的交互"。
+//   · 滚动时才显形、静止 0.9s 后淡出，悬停加粗到 7px、按住拖动 9px，可以按住拖 —— "轻微的交互"。
+//
+// v0.4.7（用户："滚动条静止 5px，按下的时候变宽一点，交互动画不明显，而且太细小了点"）：
+//   · 粗细三档 5 / 7 / 9 全部交给 CSS，JS **只写长度**（内联样式会压住 CSS 换档）；
+//   · 位置改成写 `right`（竖条）/ `bottom`（横条）而非 left/top —— 变粗时只朝容器里侧长，
+//     贴边的那一侧纹丝不动，不会出现"一悬停整条往右漂 2px"。
 //
 // 三条硬约束（踩过坑才知道）：
 //   1. **绝不能进布局**：thumb 一律 position:fixed + pointer-events:auto 仅在自己身上；
@@ -26,10 +31,8 @@
 //      导出后一模一样，所以那条子树保持浏览器原生滚动条（CSS 里做的例外）。
 // ============================================================================
 
-/** 竖条宽度（静止）；悬停加粗到 5px 由 CSS 负责 */
-const BAR_W = 3;
-/** 两端的留白：贴容器内边缘，但不糊住内容 */
-const INSET = 2;
+/** 两端的留白：贴容器内边缘，但不糊住内容（粗细由 CSS 决定，这里只管"离边多远"） */
+const INSET = 6;
 /** 最短的滑块（内容再长也不至于细成一根线，拖不住） */
 const MIN_LEN = 26;
 /** 静止多久后淡出 */
@@ -64,6 +67,17 @@ function ensureLayer(): HTMLDivElement {
 
 /** 这个元素现在需不需要滚动条？ */
 function measurable(el: HTMLElement): { y: boolean; x: boolean } {
+  /**
+   * v0.4.6 竖屏：`.app[data-shell='stack']` 里**一律不做自绘滚动条**。
+   * 用户原话：「竖屏画布右侧的滚动条删除」——竖屏要改成单指平移 + 双指缩放，
+   * 拇指粗细的滑块既挡内容又抢手势。
+   *
+   * 为什么在这里判而不是写 CSS：自绘滑块那层挂在 `document.body` 上，
+   * 从 `.app` 往下写选择器根本匹配不到；用 `body:has(.app[data-shell='stack'])`
+   * 能匹配，但 `:has()` 会在每次 DOM 变动时重新求值 —— 实测拖抽屉时明显发滞，
+   * 而且滑块反复增删。所以放到这个"要不要画"的判定点，一次到位。
+   */
+  if (el.closest('.app')?.getAttribute('data-shell') === 'stack') return { y: false, x: false };
   const st = getComputedStyle(el);
   const auto = (v: string) => v === 'auto' || v === 'scroll' || v === 'overlay';
   const y = auto(st.overflowY) && el.scrollHeight > el.clientHeight + 1;
@@ -111,12 +125,12 @@ function paint(t: Track) {
     const len = Math.max(MIN_LEN, Math.round(r.height * ratio));
     const maxScroll = el.scrollHeight - el.clientHeight;
     const top = r.top + INSET + (maxScroll > 0 ? (el.scrollTop / maxScroll) * (r.height - len - INSET * 2) : 0);
-    const right = window.innerWidth - r.right;
     const show = el.matches(':hover') || Date.now() - (t as unknown as { lastScroll: number }).lastScroll < FADE_MS;
+    // 用 right 定位：粗细从 5 → 7 → 9 时只朝容器里侧长，贴边那一侧不漂移
     Object.assign(t.v.style, {
-      left: `${Math.round(window.innerWidth - right - INSET - BAR_W)}px`,
+      right: `${Math.round(window.innerWidth - r.right + INSET)}px`,
+      left: 'auto',
       top: `${Math.round(top)}px`,
-      width: `${BAR_W}px`,
       height: `${len}px`
     } as CSSStyleDeclaration);
     t.v.classList.toggle('is-visible', show);
@@ -134,9 +148,9 @@ function paint(t: Track) {
     const show = el.matches(':hover') || Date.now() - (t as unknown as { lastScroll: number }).lastScroll < FADE_MS;
     Object.assign(t.h.style, {
       left: `${Math.round(left)}px`,
-      top: `${Math.round(r.bottom - INSET - BAR_W)}px`,
-      width: `${len}px`,
-      height: `${BAR_W}px`
+      bottom: `${Math.round(window.innerHeight - r.bottom + INSET)}px`,
+      top: 'auto',
+      width: `${len}px`
     } as CSSStyleDeclaration);
     t.h.classList.toggle('is-visible', show);
   } else if (t.h) {
@@ -150,13 +164,15 @@ function bindDrag(t: Track, bar: HTMLDivElement, axis: 'y' | 'x') {
     if (ev.button !== 0) return;
     ev.preventDefault();
     bar.setPointerCapture(ev.pointerId);
-    bar.classList.add('is-dragging');
     const el = t.el;
     const start = axis === 'y' ? ev.clientY : ev.clientX;
     const startScroll = axis === 'y' ? el.scrollTop : el.scrollLeft;
     const r = el.getBoundingClientRect();
     const trackLen = axis === 'y' ? r.height : r.width;
+    // 先量长度再加 is-dragging：加类会让滑块从 7px 变 9px（140ms 过渡中），
+    // 过渡途中读出来的 offsetWidth 是中间值，会把"1px 拖动 = 滚多少"算歪。
     const barLen = axis === 'y' ? bar.offsetHeight : bar.offsetWidth;
+    bar.classList.add('is-dragging');
     const maxScroll = axis === 'y'
       ? el.scrollHeight - el.clientHeight
       : el.scrollWidth - el.clientWidth;

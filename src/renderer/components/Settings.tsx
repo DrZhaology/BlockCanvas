@@ -484,7 +484,7 @@ export function Settings(props: Props) {
               {/* v0.4.6（R6-9）：竖屏验收 —— 把窗口一键设成手机尺寸。
                   用户提到"电脑完全支持屏幕竖屏"，竖屏显示器就是现成的手机验收台；
                   但手动把窗口拖到 412×915 很难精确，所以给三个真机尺寸的按钮。 */}
-              <div className="fluent-group-title">竖屏 · 手机尺寸验收（仅窗口状态）</div>
+              <div className="fluent-group-title fluent-area-head" data-area="portrait">竖屏 · 手机尺寸验收（仅窗口状态）</div>
               {/* v0.4.6（用户："这个仅限窗口状态可以用要说明一下"） */}
               <div className="fluent-group-note">
                 只改<strong>窗口大小</strong>（窗口状态），不动画布内容与断点；竖屏显示器可以当现成的手机验收台。
@@ -536,7 +536,7 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
-              <div className="fluent-group-title">横屏 · 工作区排版布局</div>
+              <div className="fluent-group-title fluent-area-head" data-area="landscape">横屏 · 工作区排版布局</div>
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="layout" /></div>
                 <div className="fluent-card-info">
@@ -635,7 +635,7 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
-              <div className="fluent-group-title">公共 · 插入与构建习惯</div>
+              <div className="fluent-group-title fluent-area-head" data-area="common">公共 · 插入与构建习惯</div>
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="wand" /></div>
                 <div className="fluent-card-info">

@@ -3,30 +3,47 @@
    （由单文件 styles.css 拆分而来；分片顺序 = 级联顺序，勿调整 import 顺序。
      新增样式：优先写进语义对应的分片末尾；跨轮追加统一进 14-v04x-append.css。）
    ========================================================================== */
-/* Workspace —— 布局双模式（4-F 版2）：
-   left  : 左=元素/模板，中=画布，右=属性（原版）
-   bottom: 上=画布+右属性，下=元素/模板（默认，画布最大）
-   grid-template-areas 在两种模式下重排三个区域，DOM 顺序不用动 */
+/* Workspace —— 布局以**堆叠形态为基准**（v0.4.6 外壳方向翻转）
+   ---------------------------------------------------------------------------
+   基准 = 单列一格、画布占满；左右面板在这个基准下是**覆盖层抽屉**
+   （抽屉的位移/透明度/过渡写在 33-v046-shell.css）。
+   只有 `.app[data-shell='split']`（≥900px）才把三栏 / 上下两行接回来。
+
+   ⚠ 为什么不再"三栏为默认、窄屏靠覆盖去撤销"（别改回去）：
+     那个写法每加一个宽屏功能就欠一笔"窄屏得撤销它"的债，没人写就崩一块 ——
+     竖屏反复崩就是这么来的。现在新功能默认就是窄屏可用的，宽屏是想加才加。
+     验收网：tests/e2e/probe-shell-widths.mjs 扫 360/500/700/899/901/1280 六档，
+     每档断言"页面不横向溢出 / 画布不塌 / 网格形态正确"。
+
+   面板摆左手还是下方仍是另一个维度（`.workspace[data-layout='left|bottom']`），
+   它只在 split 形态下有意义 —— 堆叠形态里面板是抽屉，不占格。 */
 .workspace {
   flex: 1;
   display: grid;
-  grid-template-areas: 'elem canvas right';
-  grid-template-columns: var(--bc-left-width, 230px) 1fr var(--bc-right-width, 320px);
-  grid-template-rows: 1fr;
+  grid-template-areas: 'canvas';
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  /* 抽屉是 position:absolute 的覆盖层，要有定位上下文才不会飘到窗口顶上
+     （曾经飘到 y=0 被工具栏盖掉 227px，表现成"面板一打开就少了一截"）*/
+  position: relative;
   min-height: 0;
   transition: grid-template-rows 0.22s cubic-bezier(0.16, 1, 0.3, 1), grid-template-columns 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.workspace[data-layout='bottom'] {
-  /* 右下角归属性面板：右列贯穿上下行，左上画布、左下元素面板 */
+
+/* 并排形态（≥900px）：左=元素/模板，中=画布，右=属性 */
+.app[data-shell='split'] .workspace {
+  grid-template-areas: 'elem canvas right';
+  grid-template-columns: var(--bc-left-width, 230px) minmax(100px, 1fr) var(--bc-right-width, 320px);
+  grid-template-rows: 1fr;
+  position: static;
+}
+/* 并排 + 底部元素面板（4-F 版2，默认）：右下角归属性面板，右列贯穿上下行 */
+.app[data-shell='split'] .workspace[data-layout='bottom'] {
   grid-template-areas:
     'canvas right'
     'elem   right';
   grid-template-columns: 1fr var(--bc-right-width, 320px);
   grid-template-rows: minmax(0, 1fr) var(--bc-bottom-height, 250px);
-}
-/* 左侧布局：元素面板可拖宽，画布编辑区保留最小 100px，保证左右两栏永不重叠 */
-.workspace:not([data-layout='bottom']) {
-  grid-template-columns: var(--bc-left-width, 230px) minmax(100px, 1fr) var(--bc-right-width, 320px);
 }
 .elem-pane-wrap { grid-area: elem; display: flex; min-width: 0; min-height: 0; overflow: hidden; }
 .elem-pane-wrap > .element-panel { flex: 1; min-width: 0; min-height: 0; height: auto; }
@@ -69,7 +86,7 @@
   height: 36px;
   border: 1px solid var(--border);
   background: var(--bg-panel);
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   font-family: inherit;
   font-size: 12px;
@@ -138,7 +155,7 @@
   display: flex;
   background: var(--panel-tint);
   padding: 3px;
-  border-radius: 6px;
+  border-radius: 10px;
   gap: 3px;
 }
 /* 自适应：独立小按钮，不参与分段高亮（设备高亮由画布实际宽度决定） */
@@ -151,7 +168,7 @@
   color: var(--text-muted);
   background: var(--panel-tint);
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
   transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
@@ -165,7 +182,7 @@
   flex: 1;
   height: 26px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-muted);
   font-size: 11px;
@@ -203,7 +220,7 @@
   padding: 8px 10px;
   background: #f0f7ff;
   border: 1px solid #bfdbfe;
-  border-radius: 6px;
+  border-radius: 10px;
   margin-bottom: 10px;
   display: flex;
   flex-direction: column;
@@ -239,7 +256,7 @@ html[data-bc-dark] .inspector-bp-banner-head {
   font-size: 11px;
   padding: 2px 8px;
   height: 24px;
-  border-radius: 4px;
+  border-radius: 8px;
   background: var(--bg-panel);
   color: var(--text);
 }
@@ -271,7 +288,7 @@ html[data-bc-dark] .inspector-bp-banner-head {
   font-size: 10px;
   font-weight: 700;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: 6px;
   background: #dbeafe;
   color: #1d4ed8;
   margin-left: 6px;

@@ -33,7 +33,10 @@ import { TitleBar } from '@comp/TitleBar';
 import { SnapshotInfoPanel } from '@comp/SnapshotBar';
 import { LoadingScreen } from '@comp/LoadingScreen';
 import { useLoadScreen } from '@store/loadStore';
-import { useShellMode } from '@lib/shellMode';
+import { useShellLayout } from '@lib/shellMode';
+import { useInputMode } from '@lib/inputMode';
+import { PortraitBar1, PortraitBar2 } from '@comp/portrait/PortraitBars';
+import { SessionsView } from '@comp/portrait/SessionsView';
 import { useEdgeSwipe } from '@lib/useEdgeSwipe';
 import { useDrawerSide } from '@lib/drawerSide';
 import { DrawerHandle } from '@comp/DrawerHandle';
@@ -61,7 +64,7 @@ const RIGHT_WIDTH_MIN = 340;
 /** 只读快照预览的右侧面板固定宽度（不写进持久化，退出后编辑器宽度原样恢复） */
 const SNAPSHOT_PANE_WIDTH = 372;
 
-export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 'help';
+export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 'help' | 'sessions';
 
 export default function App() {
   // v0.4.2：全局「横向滚动区直接滚轮」桥接（容器加 .bc-hscroll 即生效）
@@ -70,19 +73,43 @@ export default function App() {
    * v0.4.6（R6-7）：外壳断点。
    *
    * ⚠ 别和画布断点混了：`BREAKPOINTS`（768/480）是**被设计的那张网页**的断点，
-   * 这个 `shell.mode` 是**编辑器自己的界面**在窄窗口下换形态（左右面板变抽屉）。
+   * 这个 `shell.layout` 是**编辑器自己的界面**在窄窗口下换形态（左右面板变抽屉）。
    * 以前窗口锁在 ≥960，所以"外壳窄屏"这件事根本不存在 —— 现在放开到 360。
+   *
+   * v0.4.6 拆轴：布局看宽度（split/stack），输入看设备能力（pointer/touch），
+   * 两者不正交时 —— 1280px 的平板横放够宽但没有 Alt/悬停，窄窗桌面有鼠标却被塞触摸手势。
    */
-  const shell = useShellMode();
+  const shell = useShellLayout();
+  const inputMode = useInputMode();
   // 窄屏下的抽屉：'left' 元素面板 / 'right' 属性面板 / null 都收起
   const [drawer, setDrawer] = useState<'left' | 'right' | null>(null);
   // 窄屏切回宽屏时把抽屉收掉（否则回到宽屏还挂着一个半透明遮罩）
   useEffect(() => {
-    if (shell.mode === 'wide' && drawer !== null) setDrawer(null);
-  }, [shell.mode, drawer]);
+    if (shell.layout === 'split' && drawer !== null) setDrawer(null);
+  }, [shell.layout, drawer]);
+
+  /**
+   * v0.4.7 · 竖屏标签页策略（用户原话）：
+   *   「竖屏没有多标签页的管理，横屏切换到竖屏就保留当前的页面，别的标签关闭。」
+   *
+   * 所以切到窄屏壳（<900px，含手机竖屏与窄窗口）时只保留当前标签：
+   *   · **干净的**（isDirty === false）直接关 —— 工程文件本来就在磁盘上，关掉不丢东西；
+   *   · **有未保存修改的保留下来** —— 为了"看起来符合规则"而静默丢用户的活，这条红线不碰。
+   *     这种残留标签在竖屏下只能通过工具条切回去，属于安全兜底。
+   * 关掉的数量走一条轻提示，避免"我的标签怎么自己没了"。
+   */
+  useEffect(() => {
+    if (shell.layout !== 'stack') return;
+    const { tabs, activeTabId, closeTab } = useTabStore.getState();
+    if (tabs.length <= 1) return;
+    const closable = tabs.filter((t) => t.id !== activeTabId && !t.isDirty);
+    if (closable.length === 0) return;
+    closable.forEach((t) => closeTab(t.id));
+    showToast(`竖屏只保留当前页面，已关闭 ${closable.length} 个其它标签`, 'info' as ToastType);
+  }, [shell.layout]);
   // v0.4.6：窄屏抽屉的边缘滑动手势（往内滑打开 / 往边缘滑关闭，含方向判定与打断）
   useEdgeSwipe({
-    enabled: shell.mode === 'narrow',
+    enabled: shell.layout === 'stack',
     drawer,
     setDrawer,
     paneWidth: () => Math.round(window.innerWidth * 0.86)
@@ -608,11 +635,14 @@ export default function App() {
   }
 
   return (
-    <div className="app" data-shell={shell.mode} data-drawer-side={drawerSide}>
-      {/* v0.4.6：自绘窗口标题栏（网页版没有窗口控件，组件内部自己返回 null） */}
-      <TitleBar />
+    <div className="app" data-shell={shell.layout} data-input={inputMode} data-drawer-side={drawerSide}>
+      {/* v0.4.6 竖屏重做：竖屏**顶部完全清空**（用户："把整个上方的所有东西全部删除"）。
+          自绘标题栏（Logo / 菜单 / 三个窗口按钮）只在并排形态渲染，DOM 里也不留。 */}
+      {shell.layout === 'split' && <TitleBar />}
       <div className="bc-win-ring" aria-hidden="true" />
-      {view === 'table' && tableEditId ? (
+      {view === 'sessions' ? (
+        <SessionsView onBack={() => switchView('editor')} />
+      ) : view === 'table' && tableEditId ? (
         <TableEditor tableId={tableEditId} onBack={() => switchView('editor')} />
       ) : view === 'update' ? (
         <UpdateCenter onBack={() => switchView('editor')} />
@@ -644,13 +674,15 @@ export default function App() {
             />
           ) : (
             <>
-              <ProjectTabBar />
+              {/* v0.4.6 竖屏重做：多标签页条与顶部工具栏在多标签页里**不渲染**，
+                  改由底部两条操作栏接管（PortraitBar1 / PortraitBar2）。 */}
+              {shell.layout === 'split' && <ProjectTabBar />}
               {/* v0.4.5（J 重构）：只读快照**不再占用顶部一整条工具条**。
                   以前这里换成 SnapshotBar，把"快照信息 + 三个动作"摊在顶栏，
                   用户反馈"信息散在上下两处、还占掉一行高度"。
                   现在所有文字与动作都收进右侧那一张卡片（SnapshotInfoPanel），
                   顶部只保留标签栏本身。 */}
-              {!(readonly && activeTab) && (
+              {!(readonly && activeTab) && shell.layout === 'split' && (
                 <Toolbar
                   canvasWidth={canvasWidth}
                   onCanvasWidthChange={setCanvasWidth}
@@ -681,7 +713,7 @@ export default function App() {
                 } as React.CSSProperties}
               >
                 {/* v0.4.6（R6-8）：窄屏外壳的两个抽屉入口（宽屏不渲染，DOM 里也不留） */}
-                {shell.mode === 'narrow' && (
+                {shell.layout === 'stack' && (
                   <>
                     {!readonly && (
                       <DrawerHandle
@@ -785,6 +817,29 @@ export default function App() {
           })()}
             </>
           )}
+        </>
+      )}
+      {/* v0.4.6 竖屏：底部两条操作栏（宽屏一条都不渲染）。
+          第二条在编辑器且有会话时才出现，第一条在每个视图都在。 */}
+      {shell.layout === 'stack' && (
+        <>
+          {view === 'editor' && tabCount > 0 && (
+            <PortraitBar2
+              zoom={zoom}
+              setZoom={setZoom}
+              canvasWidth={canvasWidth}
+              setCanvasWidth={setCanvasWidth}
+            />
+          )}
+          <PortraitBar1
+            view={view}
+            editorish={view === 'editor' && tabCount > 0}
+            onBack={() => switchView('editor')}
+            onOpenSessions={() => switchView('sessions')}
+            onOpenSettings={() => window.dispatchEvent(new CustomEvent('menu:settings'))}
+            onOpenHelp={() => window.dispatchEvent(new CustomEvent('menu:help'))}
+            onOpenPlugins={() => window.dispatchEvent(new CustomEvent('menu:settings'))}
+          />
         </>
       )}
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />

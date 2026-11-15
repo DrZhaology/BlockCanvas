@@ -17,7 +17,6 @@
    `scrollbar-width: thin` 还原为 auto，统一走下面这套自绘细身滚动条。
    ========================================================================== */
 .toolbar .tb-main,
-.tab-strip,
 .tbman-preview {
   scrollbar-width: auto;
   scrollbar-color: auto;
@@ -95,7 +94,7 @@
 .toolbar .tb-grp-btn {
   height: 28px;
   padding: 0 9px;
-  border-radius: 5px;
+  border-radius: 9px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -133,7 +132,7 @@
   padding: 8px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 16px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
   max-width: min(92vw, 460px);
   animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
@@ -175,7 +174,7 @@
 
 /* 「⋯ 更多」面板：竖向排列 */
 .tb-more-panel { min-width: 190px; }
-.toolbar .tb-more-panel .tb-more-item { border-radius: 6px; }
+.toolbar .tb-more-panel .tb-more-item { border-radius: 10px; }
 
 /* —— 工具栏管理：工具组编辑行 —— */
 .tbman-grp-row {
@@ -185,7 +184,7 @@
   gap: 8px;
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--panel-soft);
 }
 .tbman-grp-ico { font-size: 15px; line-height: 1; }
@@ -194,7 +193,7 @@
   height: 26px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text);
   font-family: inherit;
@@ -234,7 +233,7 @@
 .tbman-grp-add {
   height: 26px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text);
   font-family: inherit;

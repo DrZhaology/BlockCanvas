@@ -115,6 +115,14 @@ export function readBoxModel(el: HTMLElement, root: Parameters<typeof findNode>[
   const st = (node?.style ?? {}) as Record<string, string | undefined>;
   const autoSides = ['marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'top', 'right', 'bottom', 'left']
     .filter((k) => String(st[k] ?? '').trim() === 'auto');
+  /**
+   * v0.4.7：**真正声明了的那几条偏移**。
+   * Alt 悬停时只该标出这些（用户："fixed 的 Alt 显示还是四边都显示，说了两边！！"）。
+   * 注意不能用 `autoSides` 的反面——没声明过的边既不在 autoSides 里、也不该被标出来，
+   * 所以这里单独算一份"有值且不是 auto"的清单。
+   */
+  const setSides = (['top', 'right', 'bottom', 'left'] as const)
+    .filter((k) => { const v = String(st[k] ?? '').trim(); return v !== '' && v !== 'auto'; });
   return {
     x: r.left, y: r.top, w: r.width, h: r.height,
     mt: n(cs.marginTop), mr: n(cs.marginRight), mb: n(cs.marginBottom), ml: n(cs.marginLeft),
@@ -124,6 +132,7 @@ export function readBoxModel(el: HTMLElement, root: Parameters<typeof findNode>[
     offsetX: pos === 'relative' ? n(cs.left) : 0,
     offsetY: pos === 'relative' ? n(cs.top) : 0,
     autoSides,
+    setSides,
     insets: { top: cs.top, right: cs.right, bottom: cs.bottom, left: cs.left },
     posKind
   };

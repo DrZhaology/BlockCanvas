@@ -23,6 +23,8 @@ export type AltBoxModelData = {
   offsetX: number; offsetY: number;
   /** v0.4.5：场景样式里写成 auto 的边（computed 会把 auto 算成具体像素，只能回场景读） */
   autoSides: string[];
+  /** v0.4.7：真正写了值的偏移边（top/right/bottom/left 的子集）—— Alt 只标这几条 */
+  setSides: string[];
   /** v0.4.5：定位偏移的原始写法（可能是 'auto'），fixed/absolute 时画布上要能看到 */
   insets: { top: string; right: string; bottom: string; left: string };
   /** v0.4.5：定位方式（决定画布上显示哪些辅助） */

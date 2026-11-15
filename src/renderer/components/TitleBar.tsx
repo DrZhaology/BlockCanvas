@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import logoUrl from '@renderer/assets/logo.svg';
 
 // ============================================================================
@@ -84,7 +84,18 @@ export function TitleBar() {
     return () => window.removeEventListener('focus', onFocus);
   }, []);
 
-  if (!hasWin) return null;
+  /**
+   * v0.4.6 竖屏重做（用户原话）：
+   *   「网页版需要让 Windows 桌面端最上方自己写的窗口的左侧 Logo 和按钮一直上去，
+   *     右侧的 3 个窗口按钮网页版不需要。手机端完全不需要最上方的窗口栏。」
+   *
+   * 所以这里不再整条返回 null：
+   *   · 桌面端（有 winControl）：Logo + 菜单 + 拖动区 + 三个窗口按钮（原样）；
+   *   · 网页版（无 winControl）：**只留左端 Logo 与产品名**，去掉菜单（网页版没有原生菜单可弹）
+   *     和三个窗口按钮（浏览器自己有），并去掉拖动区（没有窗口可拖）。
+   * 竖屏整条栏的隐藏交给 App（不渲染）+ CSS（.app[data-shell='stack'] .bc-titlebar）。
+   */
+  const webOnly = !hasWin;
 
   const popup = (e: React.MouseEvent<HTMLButtonElement>, id: string) => {
     const r = e.currentTarget.getBoundingClientRect();
@@ -93,28 +104,65 @@ export function TitleBar() {
     void host!.menuPopup?.(id, r.left, r.bottom + 2);
   };
 
+  /**
+   * v0.4.7 · 菜单的键盘走查（用户："上方的菜单做好，交互设计好"）
+   *
+   * 一条真正的菜单栏必须能用键盘走完：←/→ 在菜单之间横移、↓ / Enter / 空格 打开、
+   * Esc 收起、Tab 能落到菜单上。以前只有鼠标点击，键盘用户在这条自绘标题栏上寸步难行。
+   */
+  const btnRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const onMenuKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, idx: number, id: string) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const next = (idx + (e.key === 'ArrowRight' ? 1 : MENUS.length - 1)) % MENUS.length;
+      btnRefs.current[next]?.focus();
+      return;
+    }
+    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      popup(e as unknown as React.MouseEvent<HTMLButtonElement>, id);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpenMenu(null);
+    }
+  };
+
   return (
-    <div className="bc-titlebar" data-maximized={maximized ? '1' : '0'}>
+    <div className="bc-titlebar" data-maximized={maximized ? '1' : '0'} data-web-only={webOnly ? '1' : undefined}>
       <div className="bc-titlebar-lead">
         <img className="bc-titlebar-logo" src={logoUrl} alt="" draggable={false} />
         <span className="bc-titlebar-name">BlockCanvas</span>
       </div>
 
-      <nav className="bc-titlebar-menu" aria-label="主菜单">
-        {MENUS.map((m) => (
-          <button
-            key={m.id}
-            className={'bc-titlebar-menu-btn' + (openMenu === m.id ? ' is-open' : '')}
-            onClick={(e) => popup(e, m.id)}
-            onMouseEnter={() => setOpenMenu(null)}
-          >{m.label}</button>
-        ))}
-      </nav>
+      {!webOnly && (
+        <nav className="bc-titlebar-menu" role="menubar" aria-label="主菜单">
+          {MENUS.map((m, i) => (
+            <button
+              key={m.id}
+              ref={(el) => { btnRefs.current[i] = el; }}
+              className={'bc-titlebar-menu-btn' + (openMenu === m.id ? ' is-open' : '')}
+              role="menuitem"
+              aria-haspopup="menu"
+              aria-expanded={openMenu === m.id}
+              onClick={(e) => popup(e, m.id)}
+              onKeyDown={(e) => onMenuKeyDown(e, i, m.id)}
+              onMouseEnter={() => setOpenMenu(null)}
+            >{m.label}</button>
+          ))}
+        </nav>
+      )}
 
-      {/* 拖动区：把剩余空白全吃掉，双击由系统负责最大化/还原 */}
-      <div className="bc-titlebar-drag" onDoubleClick={() => void host!.winControl?.('maximize-toggle')} />
+      {/* 拖动区：把剩余空白全吃掉，双击由系统负责最大化/还原（网页版没有窗口，不放） */}
+      {!webOnly && (
+        <div className="bc-titlebar-drag" onDoubleClick={() => void host!.winControl?.('maximize-toggle')} />
+      )}
+      {/* 网页版：顶部到最上、左端贴边（用户：「左侧 Logo 和按钮一直上去」） */}
+      {webOnly && <div className="bc-titlebar-spacer" />}
 
-      <div className="bc-titlebar-win">
+      {!webOnly && (
+        <div className="bc-titlebar-win">
         <button className="bc-win-btn" title="最小化" aria-label="最小化" onClick={() => void host!.winControl?.('minimize')}>
           <GlyphMin />
         </button>
@@ -129,7 +177,8 @@ export function TitleBar() {
         <button className="bc-win-btn is-close" title="关闭" aria-label="关闭" onClick={() => void host!.winControl?.('close')}>
           <GlyphClose />
         </button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

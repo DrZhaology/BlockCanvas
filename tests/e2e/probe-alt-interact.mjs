@@ -420,8 +420,11 @@ async function main() {
     };
   }, fid2);
   if (fixedPos && fixedPos.canvasTall) {
-    ok('fixed 拖到底 → 被视口底挡住（长页面不写 bottom:0，也不会飞到画布底）',
-      fixedBottom === null && Math.abs(fixedPos.gapToViewportBottom) <= 16,
+    // v0.4.7：视口层重做后，"拖到底"的正确结果就是**贴视口底**，
+    // 长页面上也敢写 bottom:0（包含块是视口层，不再是整张画布）。
+    ok('fixed 拖到底 → 被视口底挡住（长页面上也可以写 bottom:0，且不会飞到画布底）',
+      (fixedBottom !== null || Math.abs(fixedPos.gapToViewportBottom) <= 16)
+        && fixedPos.gapToCanvasBottom > 200,
       JSON.stringify({ bottom: fixedBottom, gapToViewportBottom: fixedPos.gapToViewportBottom, gapToCanvasBottom: fixedPos.gapToCanvasBottom }));
   } else {
     ok('短页面下 fixed 也仍然在视口内（不再把贴边归一化成 bottom:0）',

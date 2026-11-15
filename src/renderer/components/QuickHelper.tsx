@@ -593,7 +593,12 @@ export function QuickHelper(props: Props) {
             }
           />
         </div>
-        {posOpen && (
+        {/* v0.4.7：用户说"定位助手没有展开合起来的动画" —— 以前这里是
+            `{posOpen && <div/>}` 的条件渲染，收起瞬间消失、展开瞬间出现。
+            现在和其他板块（布局 / 文字渐变）一样走 <Collapse>：
+            grid-template-rows 0fr ↔ 1fr 撑开高度 + 透明度/位移，无需量高度，
+            收场还要等动画跑完才卸载，所以不会再"啪"地一下。 */}
+        <Collapse open={posOpen} className="qh-pos-collapse">
           <div className="pos-helper">
             <div className="flex-helper-row">
               <label>定位方式 (position)</label>
@@ -844,7 +849,7 @@ export function QuickHelper(props: Props) {
               画布上那个<strong>红色框</strong>就是它的参照面。
             </div>
           </div>
-        )}
+        </Collapse>
       </div>
 
       {/* ——— ② 文字渐变（仅文本元素可用） ——— */}

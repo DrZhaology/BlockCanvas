@@ -86,6 +86,9 @@ const PROBES = [
   'probe-codec',
   'probe-plugin-perms',
   'probe-shell-narrow',
+  // v0.4.6 外壳方向翻转：六档宽度扫描（360/500/700/898/902/1280），
+  // 每档断言"不横向溢出 / 画布不塌 / 网格形态正确" —— 这是"C 加宽屏功能别再崩窄屏"的网
+  'probe-shell-widths',
   // v0.4.6 Web 版（R6-12/13/14）：需要先 `pnpm build:web` 产出 dist-web/index.html
   'probe-web',
   // v0.4.6 R6-3：CSS 域约束（主域登记 / 前缀归位 / 重复不超基线）

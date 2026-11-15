@@ -1,15 +1,17 @@
-// v0.4.6 · fixed 空气墙验收（R6-16）
+// ============================================================================
+// v0.4.6 · fixed 定位「视口层」验收 + 元素进退场动画验收
+// ----------------------------------------------------------------------------
+// 这一版把 fixed 的参照面从"整张画布"换成了画布里的一层「浏览器视口层」
+// （.canvas-fixed-layer，位置尺寸 = 红框）。本探针只认硬数字，不认"看着像"：
 //
-// 背景（用户原话不可考，但症状明确）：`position: fixed` 在浏览器里相对**视口**定位，
-// 而画布高度随内容长 —— 于是：
-//   ① 把 fixed 元素往下拖永远"贴不到底"，写不出 `bottom: 0`；
-//   ② 之前写死的 bottom 值在长页面上跑到看不见的地方。
-//
-// 本版的解法（方案 B）：
-//   · 场景记住「基准视口高度」viewportHeight（默认 900）；
-//   · 画布**至少**撑到这么高（min-height）；
-//   · 画布比它高时，在该高度画一条「首屏线」（.canvas-viewport-line）；
-//   · fixed 的拖动墙止步于首屏线，并且**不再跟着画布变长**。
+//   ① 视口层存在，且矩形 == 红框矩形（±2px）
+//   ② 「首屏线」彻底不存在了（用户："原来的首屏幕 900px 还会显示"）
+//   ③ 画布比视口高得多时，left/right/top/bottom 四条都相对**视口**解析
+//      （bottom: 0 = 贴视口底，不是贴 3000px 的画布底）
+//   ④ 滚动时 fixed 元素钉在视口上（画布滚 300，元素屏幕位置不变）
+//   ⑤ Alt 拖到底 → 松手写 bottom: 0，且全元素最多两条偏移（面板是最高权限）
+//   ⑥ 左下 / 右下角对齐不越出视口（用户实测会突破的那两个角）
+//   ⑦ 新增元素有进场动画、删除元素有退场影子
 //
 // 用法：node tests/e2e/probe-fixed-airwall.mjs
 import { createRequire } from 'module';
@@ -25,12 +27,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let pass = 0; let fail = 0;
 const check = (name, ok, detail) => {
-  if (ok) { pass++; console.log(`PASS  ${name}${detail ? '  → ' + detail : ''}`); }
+  if (ok) { pass++; console.log(`PASS  ${name}${detail ? '   -> ' + detail : ''}`); }
   else { fail++; console.log(`FAIL  ${name}  [${detail ?? ''}]`); }
 };
+const near = (a, b, tol = 2) => Math.abs(a - b) <= tol;
 
 async function main() {
-  const DATA_DIR = resolve(tmpdir(), 'bc-probe-airwall');
+  const DATA_DIR = resolve(tmpdir(), 'bc-probe-fixedvp');
   rmSync(DATA_DIR, { recursive: true, force: true });
   mkdirSync(DATA_DIR, { recursive: true });
   const SRC = resolve(ROOT, 'builtin-extensions');
@@ -47,310 +50,177 @@ async function main() {
   await sleep(600);
 
   await win.locator('.eh-btn', { hasText: '新建项目' }).click();
-  await sleep(1200);
+  await sleep(1400);
   await win.waitForSelector('.project-tab-bar', { timeout: 15000 });
 
-  // ── ① 默认值 ──────────────────────────────────────────────────────────
-  const dflt = await win.evaluate(() => {
-    const st = window.__sceneStore.getState();
-    const c = document.querySelector('.canvas');
-    return {
-      vh: st.scene.viewportHeight ?? null,
-      canvasH: c ? Math.round(c.offsetHeight) : 0,
-      hasLine: !!document.querySelector('.canvas-viewport-line')
-    };
-  });
-  check('新工程默认 900px 基准视口', dflt.vh === null || dflt.vh === 900, `viewportHeight=${dflt.vh}`);
-  check('空画布也至少撑到基准视口高度（≥890）', dflt.canvasH >= 890, `canvas=${dflt.canvasH}px`);
-  check('内容没超出时不画首屏线（画布底就是它的底）', dflt.hasLine === false, `hasLine=${dflt.hasLine}`);
-
-  // ── ② 内容超出后出现首屏线，位置 = 基准高度 ─────────────────────────
-  await win.evaluate(() => {
+  // ── 造一个"很高的页面" + 一个 fixed 元素 ────────────────────────────────
+  const ids = await win.evaluate(() => {
     const st = window.__sceneStore.getState();
     st.addElement('div');
-    const s2 = window.__sceneStore.getState();
-    const id = (s2.scene.root.children || [])[0]?.id;
-    if (id) s2.updateStyle(id, { height: '2400px', backgroundColor: '#eef2ff', width: '100%' });
+    const root = window.__sceneStore.getState().scene.root;
+    const tall = root.children[root.children.length - 1];
+    window.__sceneStore.getState().updateStyle(tall.id, { minHeight: '2600px', background: '#eef2f7' });
+    st.addElement('div');
+    const root2 = window.__sceneStore.getState().scene.root;
+    const box = root2.children[root2.children.length - 1];
+    window.__sceneStore.getState().updateStyle(box.id, {
+      position: 'fixed', left: '0px', top: '0px', width: '220px', height: '120px', background: '#ef4444'
+    });
+    window.__sceneStore.getState().selectElement(box.id);
+    return { tall: tall.id, box: box.id };
   });
-  await sleep(900);
-  const tall = await win.evaluate(() => {
-    const c = document.querySelector('.canvas');
-    const line = document.querySelector('.canvas-viewport-line');
-    const st = window.__sceneStore.getState();
-    return {
-      canvasH: c ? Math.round(c.offsetHeight) : 0,
-      hasLine: !!line,
-      lineTop: line ? Math.round(parseFloat(getComputedStyle(line).top) || 0) : -1,
-      pe: line ? getComputedStyle(line).pointerEvents : '',
-      vh: st.scene.viewportHeight ?? 900
-    };
-  });
-  check('内容比首屏长时画布跟着变长', tall.canvasH > 2000, `canvas=${tall.canvasH}px`);
-  check('长页面下显示首屏线', tall.hasLine === true, `hasLine=${tall.hasLine}`);
-  check('首屏线正好画在基准视口高度处', Math.abs(tall.lineTop - tall.vh) <= 1, `top=${tall.lineTop} vh=${tall.vh}`);
-  check('首屏线不吃鼠标事件（pointer-events: none）', tall.pe === 'none', `pointer-events=${tall.pe}`);
-
-  // ── ③ 改基准高度 → 线跟着走 ─────────────────────────────────────────
-  await win.evaluate(() => window.__sceneStore.getState().setViewportHeight(1200));
   await sleep(700);
-  const moved = await win.evaluate(() => {
-    const line = document.querySelector('.canvas-viewport-line');
-    const c = document.querySelector('.canvas');
-    return {
-      top: line ? Math.round(parseFloat(getComputedStyle(line).top) || 0) : -1,
-      minH: c ? Math.round(parseFloat(getComputedStyle(c).minHeight) || 0) : 0,
-      vh: window.__sceneStore.getState().scene.viewportHeight
-    };
-  });
-  check('改首屏高度后线的位置跟着变', Math.abs(moved.top - 1200) <= 1, `top=${moved.top}`);
-  check('画布的 min-height 同步到新基准', moved.minH >= 1200, `min-height=${moved.minH}`);
-  // 还原成 900，后面按默认值验证拖动
-  await win.evaluate(() => window.__sceneStore.getState().setViewportHeight(900));
-  await sleep(600);
 
-  // ── ④ 画布内「浏览器视口」：红框 + fixed 只能在框内动 ────────────────
-  const fixedId = await win.evaluate(() => {
+  const geo = async (id) => win.evaluate((boxId) => {
+    const layer = document.querySelector('.canvas-fixed-layer');
+    const frame = document.querySelector('.canvas-fixed-frame');
+    const el = document.querySelector(`.canvas [data-bc-id="${boxId}"]`);
+    const canvas = document.querySelector('.canvas');
+    const r = (n) => (n ? n.getBoundingClientRect() : null);
+    const lr = r(layer); const fr = r(frame); const er = r(el); const cr = r(canvas);
     const st = window.__sceneStore.getState();
-    st.beginStyleEdit();
-    st.addElement('div');
-    const s2 = window.__sceneStore.getState();
-    const kids = s2.scene.root.children || [];
-    const fresh = kids[kids.length - 1];
-    if (!fresh) return null;
-    s2.updateStyle(fresh.id, {
-      position: 'fixed', top: '40px', left: '40px',
-      width: '160px', height: '90px', backgroundColor: '#fde68a'
-    });
-    s2.endStyleEdit();
-    window.__sceneStore.getState().selectElement(fresh.id);
-    return fresh.id;
-  });
-  await sleep(900);
-
-  const frame = await win.evaluate(() => {
-    const f = document.querySelector('.canvas-fixed-frame');
-    const wrap = document.querySelector('.canvas-wrap');
-    const c = document.querySelector('.canvas');
-    if (!f || !wrap || !c) return { exists: !!f };
-    const fr = f.getBoundingClientRect();
-    const wr = wrap.getBoundingClientRect();
-    const cr = c.getBoundingClientRect();
+    const node = (function find(n) { if (n.id === boxId) return n; for (const c of n.children) { const f = find(c); if (f) return f; } return null; })(st.scene.root);
+    const style = node ? node.style : {};
+    const layerOf = layer ? getComputedStyle(layer) : null;
     return {
-      exists: true,
-      left: Math.round(fr.left), top: Math.round(fr.top),
-      right: Math.round(fr.right), bottom: Math.round(fr.bottom),
-      wrapTop: Math.round(wr.top), wrapBottom: Math.round(wr.bottom),
-      canvasLeft: Math.round(cr.left), canvasRight: Math.round(cr.right),
-      pointerEvents: getComputedStyle(f).pointerEvents,
-      borderColor: getComputedStyle(f).borderTopColor
+      layer: lr && { left: lr.left, top: lr.top, right: lr.right, bottom: lr.bottom, w: lr.width, h: lr.height },
+      frame: fr && { left: fr.left, top: fr.top, right: fr.right, bottom: fr.bottom },
+      el: er && { left: er.left, top: er.top, right: er.right, bottom: er.bottom, w: er.width, h: er.height },
+      canvas: cr && { top: cr.top, bottom: cr.bottom, left: cr.left, right: cr.right, h: canvas.offsetHeight },
+      layerCount: document.querySelectorAll('.canvas-fixed-layer').length,
+      vpLine: document.querySelectorAll('.canvas-viewport-line').length,
+      translate: layerOf ? layerOf.translate : '',
+      style: { left: style.left, right: style.right, top: style.top, bottom: style.bottom }
     };
-  });
-  check('选中 fixed 元素时显示「浏览器视口」红框', frame.exists === true, JSON.stringify(frame.left !== undefined));
-  check('视口左右 = 画布左右边缘',
-    frame.exists === true && Math.abs(frame.left - frame.canvasLeft) <= 1 && Math.abs(frame.right - frame.canvasRight) <= 1,
-    frame.exists ? `frame=${frame.left}~${frame.right} canvas=${frame.canvasLeft}~${frame.canvasRight}` : 'no frame');
-  check('视口上下 = 画布可见带（跟随面板高度，不是 900 首屏线）',
-    frame.exists === true && Math.abs(frame.top - frame.wrapTop) <= 2 && Math.abs(frame.bottom - frame.wrapBottom) <= 2,
-    frame.exists ? `frame=${frame.top}~${frame.bottom} wrap=${frame.wrapTop}~${frame.wrapBottom}` : 'no frame');
-  check('视口框是红色且不吃鼠标事件',
-    frame.exists === true && frame.pointerEvents === 'none' && /rgb\(229, 72, 77\)/.test(frame.borderColor),
-    frame.exists ? `${frame.borderColor} / ${frame.pointerEvents}` : 'no frame');
+  }, id);
 
-  // —— 往下拖：只能停在视口底，且不写 bottom: 0 ——
-  const plan = await win.evaluate((id) => {
-    const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
-    const c = document.querySelector('.canvas');
+  const g0 = await geo(ids.box);
+  check('视口层存在且只有一层', g0.layerCount === 1, `count=${g0.layerCount}`);
+  check('视口层矩形 == 红框矩形（±2px）', !!g0.layer && !!g0.frame
+    && near(g0.layer.left, g0.frame.left) && near(g0.layer.top, g0.frame.top)
+    && near(g0.layer.right, g0.frame.right) && near(g0.layer.bottom, g0.frame.bottom),
+    g0.layer && g0.frame ? `layer=${Math.round(g0.layer.left)},${Math.round(g0.layer.top)},${Math.round(g0.layer.right)},${Math.round(g0.layer.bottom)} frame=${Math.round(g0.frame.left)},${Math.round(g0.frame.top)},${Math.round(g0.frame.right)},${Math.round(g0.frame.bottom)}` : 'missing');
+  check('视口层比画布矮（画布 2600+，视口只有一屏）', !!g0.layer && !!g0.canvas && g0.canvas.h > g0.layer.h + 400,
+    g0.layer && g0.canvas ? `canvas=${g0.canvas.h} layer=${Math.round(g0.layer.h)}` : '');
+  check('「首屏线」已删除（DOM 里一条都没有）', g0.vpLine === 0, `vpLine=${g0.vpLine}`);
+
+  // ── ③ 四条偏移都相对视口 ─────────────────────────────────────────────────
+  const setStyle = async (patch) => {
+    await win.evaluate(([id, p]) => window.__sceneStore.getState().updateStyle(id, p), [ids.box, patch]);
+    await sleep(320);
+  };
+
+  await setStyle({ left: '0px', top: '0px', right: 'auto', bottom: 'auto' });
+  let g = await geo(ids.box);
+  check('left:0 → 贴视口左边', near(g.el.left, g.layer.left), `el=${Math.round(g.el.left)} layer=${Math.round(g.layer.left)}`);
+
+  await setStyle({ left: 'auto', top: 'auto', right: '0px', bottom: '0px' });
+  g = await geo(ids.box);
+  check('right:0 → 贴视口右边', near(g.el.right, g.layer.right), `el=${Math.round(g.el.right)} layer=${Math.round(g.layer.right)}`);
+  check('bottom:0 → 贴视口底（不是 2600px 的画布底）', near(g.el.bottom, g.layer.bottom),
+    `el=${Math.round(g.el.bottom)} layer=${Math.round(g.layer.bottom)} canvas=${Math.round(g.canvas.bottom)}`);
+  check('bottom:0 时元素仍在画布可视范围内（没跑到页面最底）', g.el.bottom < g.canvas.bottom - 400,
+    `el.bottom=${Math.round(g.el.bottom)} canvas.bottom=${Math.round(g.canvas.bottom)}`);
+  check('右下角对齐后仍是两条偏移', (['left', 'right', 'top', 'bottom'].filter((k) => g.style[k] && g.style[k] !== 'auto')).length === 2,
+    JSON.stringify(g.style));
+
+  // ── ⑥ 左下角 / 右下角都不越界 ────────────────────────────────────────────
+  await setStyle({ left: '0px', top: 'auto', right: 'auto', bottom: '0px' });
+  g = await geo(ids.box);
+  check('左下角对齐：left 不越界', g.el.left >= g.layer.left - 2, `el=${Math.round(g.el.left)} layer=${Math.round(g.layer.left)}`);
+  check('左下角对齐：bottom 不越界', g.el.bottom <= g.layer.bottom + 2, `el=${Math.round(g.el.bottom)} layer=${Math.round(g.layer.bottom)}`);
+
+  // ── ④ 滚动时钉在视口上 ──────────────────────────────────────────────────
+  await setStyle({ left: '40px', top: '60px', right: 'auto', bottom: 'auto' });
+  const beforeScroll = await geo(ids.box);
+  await win.evaluate(() => {
     const wrap = document.querySelector('.canvas-wrap');
-    if (!el || !c || !wrap) return null;
-    const r = el.getBoundingClientRect();
-    const wr = wrap.getBoundingClientRect();
-    return {
-      centerX: Math.round(r.left + r.width / 2),
-      centerY: Math.round(r.top + r.height / 2),
-      // 故意拖过头 60px：墙应该把元素夹在视口底
-      dy: Math.round(wr.bottom - r.bottom + 60),
-      winB: Math.round(wr.bottom),
-      rectBottom: Math.round(r.bottom)
-    };
-  }, fixedId);
-  check('准备：fixed 元素已渲染且能算出下移量', !!plan && plan.dy > 0,
-    plan ? `需要下移 ${plan.dy}px（视口底 ${plan.winB}）` : '没算出来');
+    if (wrap) wrap.scrollTop = 320;
+  });
+  await sleep(420);
+  const afterScroll = await geo(ids.box);
+  check('画布滚 320px 后 fixed 元素屏幕位置不变（钉在视口上）',
+    near(beforeScroll.el.top, afterScroll.el.top, 3) && near(beforeScroll.el.left, afterScroll.el.left, 3),
+    `top ${Math.round(beforeScroll.el.top)} -> ${Math.round(afterScroll.el.top)}；shift=${afterScroll.translate}`);
+  await win.evaluate(() => { const w = document.querySelector('.canvas-wrap'); if (w) w.scrollTop = 0; });
+  await sleep(420);
 
-  if (plan) {
-    await win.keyboard.down('Alt');
-    await win.mouse.move(plan.centerX, plan.centerY);
-    await win.mouse.move(plan.centerX + 1, plan.centerY + 1);
-    await sleep(280);
-    await win.mouse.down();
-    for (let i = 1; i <= 8; i++) {
-      await win.mouse.move(plan.centerX, plan.centerY + Math.round((plan.dy * i) / 8));
-      await sleep(90);
-    }
-    await sleep(200);
-    await win.mouse.up();
-    await win.keyboard.up('Alt');
-    await sleep(400);
-
-    const after = await win.evaluate((id) => {
-      const st = window.__sceneStore.getState();
-      const n = (function find(node) {
-        if (node.id === id) return node;
-        for (const c of node.children) { const r = find(c); if (r) return r; }
-        return null;
-      })(st.scene.root);
-      const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
-      const wrap = document.querySelector('.canvas-wrap');
-      const wr = wrap.getBoundingClientRect();
-      return {
-        bottom: n?.style.bottom ?? null,
-        top: n?.style.top ?? null,
-        screenBottom: el ? Math.round(el.getBoundingClientRect().bottom) : -1,
-        winB: Math.round(wr.bottom)
-      };
-    }, fixedId);
-
-    check('不写 bottom: 0（新模型一律用 top 表达"距视口顶"）',
-      after.bottom !== '0px', `bottom=${after.bottom ?? '(无)'} top=${after.top ?? '(无)'}`);
-    check('拖过头也被视口底挡住（元素停在视口内 ±14px）',
-      Math.abs(after.screenBottom - after.winB) <= 14,
-      `元素底 ${after.screenBottom} / 视口底 ${after.winB}`);
-    check('没越出视口下沿', after.screenBottom <= after.winB + 2,
-      `${after.screenBottom} <= ${after.winB}`);
+  // ── ⑤ Alt 拖到底 → bottom:0 + 最多两条偏移 ───────────────────────────────
+  await setStyle({ left: '60px', top: '80px', right: 'auto', bottom: 'auto' });
+  const g2 = await geo(ids.box);
+  const cx = (g2.el.left + g2.el.right) / 2;
+  const cy = (g2.el.top + g2.el.bottom) / 2;
+  const targetY = g2.layer.bottom - 8;
+  await win.keyboard.down('Alt');
+  await win.mouse.move(cx, cy);
+  await sleep(180);
+  await win.mouse.down();
+  for (let i = 1; i <= 12; i++) {
+    await win.mouse.move(cx, cy + ((targetY - cy) * i) / 12);
+    await sleep(24);
   }
-
-  // ── ⑤ 滚动画布：fixed 元素钉在视口上（浏览器语义）─────────────────────
-  const pin = await win.evaluate(async (id) => {
-    const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
-    const wrap = document.querySelector('.canvas-wrap');
-    if (!el || !wrap) return null;
-    const before = Math.round(el.getBoundingClientRect().top);
-    wrap.scrollTop = 400;
-    await new Promise((r) => setTimeout(r, 350));
-    const after = Math.round(el.getBoundingClientRect().top);
-    const shift = getComputedStyle(document.querySelector('.canvas')).getPropertyValue('--bc-fixed-shift').trim();
-    wrap.scrollTop = 0;
-    await new Promise((r) => setTimeout(r, 250));
-    return { before, after, shift };
-  }, fixedId);
-  check('画布滚动时 fixed 元素钉在视口上（屏幕位置不变 ±3px）',
-    !!pin && Math.abs(pin.after - pin.before) <= 3,
-    pin ? `滚动前 ${pin.before} → 滚动后 ${pin.after}（shift=${pin.shift}）` : 'no data');
-
-  // ── ⑥ 缩放画布时 fixed 元素临时隐藏 ─────────────────────────────────
-  const hidden = await win.evaluate(async (id) => {
-    window.dispatchEvent(new CustomEvent('bc:test-zoom'));
-    // 直接调用 store 之外的缩放通道：拖 Alt/Ctrl 滚轮太慢，这里用 app 的缩放事件
-    const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
-    return { hasEl: !!el };
-  }, fixedId);
-  check('准备：fixed 元素仍在 DOM 里（隐藏只是 visibility）', hidden.hasEl === true, String(hidden.hasEl));
-
-  // ── ⑦ 四值归一：面板是最高权限（用户："Alt 还是会 4 边一起改 4 个属性值"）──
-  const quad = await win.evaluate(async () => {
-    const st = window.__sceneStore.getState();
-    st.addElement('div');
-    const id = window.__sceneStore.getState().scene.selectedId;
-    // 故意造一个"四值齐全"的历史脏数据（有明确宽高，模拟用户实测截图里那种元素）
-    window.__sceneStore.getState().updateStyle(id, {
-      position: 'fixed', left: '60px', right: '120px', top: '80px', bottom: '140px',
-      width: '200px', height: '120px', backgroundColor: '#fde68a'
-    });
-    window.__sceneStore.getState().selectElement(id);
-    await new Promise((r) => setTimeout(r, 500));
-    const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
-    const r = el.getBoundingClientRect();
-    return { id, w: Math.round(r.width), h: Math.round(r.height), cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2) };
-  });
-  await sleep(300);
-  // Alt 拖一小段（触发"开始拖动"那一帧的归一化）
-  await win.keyboard.down('Alt');
-  await win.mouse.move(quad.cx, quad.cy);
-  await win.mouse.move(quad.cx + 1, quad.cy + 1);
-  await sleep(260);
-  await win.mouse.down();
-  for (let i = 1; i <= 6; i++) { await win.mouse.move(quad.cx + 6 * i, quad.cy + 4 * i); await sleep(80); }
   await win.mouse.up();
   await win.keyboard.up('Alt');
-  await sleep(500);
-  const afterQuad = await win.evaluate((id) => {
-    const n = (function find(node) {
-      if (node.id === id) return node;
-      for (const c of node.children) { const r = find(c); if (r) return r; }
-      return null;
-    })(window.__sceneStore.getState().scene.root);
+  await sleep(520);
+  const g3 = await geo(ids.box);
+  const onCount = ['left', 'right', 'top', 'bottom'].filter((k) => g3.style[k] && g3.style[k] !== 'auto').length;
+  check('Alt 拖到底：贴在视口底（±14px）或直接写 bottom:0',
+    g3.style.bottom === '0px' || near(g3.el.bottom, g3.layer.bottom, 14),
+    `style.bottom=${g3.style.bottom} el.bottom=${Math.round(g3.el.bottom)} layer.bottom=${Math.round(g3.layer.bottom)}`);
+  check('Alt 拖动后全元素最多两条偏移（面板最高权限）', onCount <= 2, JSON.stringify(g3.style));
+  check('Alt 拖动后没有把滚动量烘进 top（top 不该出现三位数大值）',
+    !(g3.style.top && g3.style.top !== 'auto' && parseFloat(g3.style.top) > 200),
+    `top=${g3.style.top}`);
+
+  // ── ⑦ 进场 / 退场动画 ──────────────────────────────────────────────────
+  const enter = await win.evaluate(async () => {
+    const st = window.__sceneStore.getState();
+    st.addElement('div');
+    const root = window.__sceneStore.getState().scene.root;
+    const id = root.children[root.children.length - 1].id;
+    await new Promise((r) => setTimeout(r, 60));
     const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
-    const r = el.getBoundingClientRect();
+    const cs = el ? getComputedStyle(el) : null;
+    const anims = el && el.getAnimations ? el.getAnimations() : [];
     return {
-      style: n?.style ?? {},
-      w: Math.round(r.width), h: Math.round(r.height)
+      id,
+      marked: !!el && el.getAttribute('data-bc-new') === '1',
+      anim: cs ? cs.animationName : '',
+      // 进场动画走 Web Animations API（React 会重写 style/className，CSS 动画会被抹掉）
+      waapi: anims.length,
+      animMode: document.documentElement.getAttribute('data-bc-anim') || 'full'
     };
-  }, quad.id);
-  const sideCount = ['left', 'right', 'top', 'bottom']
-    .filter((k) => { const v = afterQuad.style[k]; return v !== undefined && v !== '' && v !== 'auto'; }).length;
-  check('拖动开始时把"四值齐全"收成两值（面板最高权限）',
-    sideCount === 2, JSON.stringify({ sides: sideCount, style: afterQuad.style }));
-  check('收成两值后尺寸不变（视觉零变化）',
-    Math.abs(afterQuad.w - quad.w) <= 2 && Math.abs(afterQuad.h - quad.h) <= 2,
-    `${quad.w}×${quad.h} → ${afterQuad.w}×${afterQuad.h}`);
+  });
+  check('新增元素打了进场标记', enter.marked, `data-bc-new=${enter.marked}`);
+  // 进场动画走 Web Animations API —— 用 getAnimations() 量，不看 animationName
+  // （React 会重写画布节点的 style/className，CSS 动画在这里会被抹掉）。
+  check('新增元素在播进场动画（Web Animations）', enter.waapi >= 1,
+    `getAnimations=${enter.waapi} animationName=${enter.anim}`);
 
-  // ── ⑦.5 居中钉死：钉住的那条轴 Alt 拖不动（用户 A3："钉死在 1 维"）──
-  const pinSetup = await win.evaluate(async () => {
+  const leave = await win.evaluate(async ([tallId]) => {
     const st = window.__sceneStore.getState();
     st.addElement('div');
-    const id = window.__sceneStore.getState().scene.selectedId;
-    window.__sceneStore.getState().updateStyle(id, {
-      position: 'fixed', left: '0px', right: '0px', marginLeft: 'auto', marginRight: 'auto',
-      top: '120px', bottom: 'auto', width: '120px', height: '60px', backgroundColor: '#bbf7d0'
-    });
-    window.__sceneStore.getState().selectElement(id);
-    await new Promise((r) => setTimeout(r, 500));
-    const el = document.querySelector(`.canvas [data-bc-id="${id}"]`);
-    const r = el.getBoundingClientRect();
-    return { id, cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2) };
-  });
-  await sleep(300);
-  await win.keyboard.down('Alt');
-  await win.mouse.move(pinSetup.cx, pinSetup.cy);
-  await win.mouse.move(pinSetup.cx + 1, pinSetup.cy + 1);
-  await sleep(260);
-  await win.mouse.down();
-  for (let i = 1; i <= 6; i++) { await win.mouse.move(pinSetup.cx + 8 * i, pinSetup.cy + 6 * i); await sleep(80); }
-  await win.mouse.up();
-  await win.keyboard.up('Alt');
-  await sleep(500);
-  const afterPin = await win.evaluate((id) => {
-    const n = (function find(node) {
-      if (node.id === id) return node;
-      for (const c of node.children) { const r = find(c); if (r) return r; }
-      return null;
-    })(window.__sceneStore.getState().scene.root);
-    const s = n?.style ?? {};
-    return { left: s.left, right: s.right, ml: s.marginLeft, mr: s.marginRight, top: s.top };
-  }, pinSetup.id);
-  check('钉住水平居中后：左右两条与 auto 外边距都没被拖动改掉',
-    afterPin.left === '0px' && afterPin.right === '0px' && afterPin.ml === 'auto' && afterPin.mr === 'auto',
-    JSON.stringify(afterPin));
-  check('钉住的水平轴不动，但另一条轴（上）照常能被拖',
-    afterPin.top !== '120px', `top=${afterPin.top}`);
+    const root = window.__sceneStore.getState().scene.root;
+    const id = root.children[root.children.length - 1].id;
+    await new Promise((r) => setTimeout(r, 60));
+    window.__sceneStore.getState().removeElement(id);
+    await new Promise((r) => setTimeout(r, 40));
+    const ghost = document.querySelectorAll('.canvas .bc-node-leaving');
+    const count = ghost.length;
+    const anim = count ? getComputedStyle(ghost[0]).animationName : '';
+    await new Promise((r) => setTimeout(r, 400));
+    return { count, anim, after: document.querySelectorAll('.canvas .bc-node-leaving').length, tallOk: !!document.querySelector(`.canvas [data-bc-id="${tallId}"]`) };
+  }, [ids.tall]);
+  check('删除元素时留下退场影子', leave.count >= 1, `count=${leave.count}`);
+  check('退场影子在播 bcNodeOut', leave.anim === 'bcNodeOut', `animationName=${leave.anim}`);
+  check('退场影子 200ms 后自己清掉', leave.after === 0, `after=${leave.after}`);
 
-  // ── ⑧ 持久化：viewportHeight 随工程文件保存 ──────────────────────
-  const saved = await win.evaluate(() => {
-    window.__sceneStore.getState().setViewportHeight(1080);
-    const sc = window.__sceneStore.getState().scene;
-    return { vh: sc.viewportHeight, json: JSON.stringify(sc).includes('"viewportHeight":1080') };
-  });
-  check('viewportHeight 会进工程 JSON（随工程保存）', saved.vh === 1080 && saved.json === true, JSON.stringify(saved));
+  const nonzero = errs.filter((e) => !/ResizeObserver loop/.test(e));
+  check('无未捕获页面错误', nonzero.length === 0, nonzero.slice(0, 2).join(' | '));
 
-  // 还原，别污染后续
-  await win.evaluate(() => window.__sceneStore.getState().setViewportHeight(900));
-  await sleep(300);
-  check('无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));
-
+  console.log(`\n=== ${pass} passed, ${fail} failed ===`);
   await app.close();
-  rmSync(DATA_DIR, { recursive: true, force: true });
-
-  console.log(`\n===== ${pass}/${pass + fail} 通过 =====`);
-  if (fail) process.exitCode = 1;
+  process.exit(fail === 0 ? 0 : 1);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -79,11 +79,25 @@ export function measureFixedViewport(canvasEl: HTMLElement | null): FixedViewpor
 }
 
 /**
- * 把 `fixed` 元素钉在视口上：写 `--bc-fixed-shift`（画布内容坐标系里的位移）。
+ * 把「画布内浏览器视口」写进 CSS 变量，并让 fixed 元素钉在视口上。
  *
- * 推导：`.canvas` 有 `transform: scale(zoom)`，所以它是 fixed 后代的**包含块**，
- * fixed 元素的 top 是"距画布顶"的距离。要让它看起来"距视口顶"，就得补上
- * 画布顶相对视口顶偏移的那段 —— 滚动时画布顶跑到视口顶上面，位移为正。
+ * v0.4.6 重做（用户第三次反馈 fixed 依然不对）：
+ *
+ * 以前 fixed 元素的**包含块是 `.canvas`（整张画布）**，于是：
+ *   · `bottom: 0` 解析成"画布底" —— 画布随内容长，元素直接跑到页面最底、越出视口；
+ *   · 对齐到左下/右下角时，元素突破红框（用户实测的两个角）；
+ *   · 面板里明明只有 left/top 两条，画布上却是按四条算的。
+ *
+ * 现在改成：画布里放一层 `.canvas-fixed-layer`，**尺寸和位置就等于红框**，
+ * 并让它成为 fixed 后代的包含块（它自己带 translate，天然构成包含块）。
+ * 于是 fixed 元素的 left/top/right/bottom 全部相对**视口**解析 —— 与浏览器完全一致：
+ *   · `bottom: 0` = 贴视口底，无论画布多长；
+ *   · 四角对齐就是四角，不会越界；
+ *   · 面板里两条偏移，画布上就只按两条摆。
+ *
+ * 这里负责写四个几何量（画布 padding 盒坐标系，即绝对定位子元素的 0 点）：
+ *   --bc-fl-left / --bc-fl-top / --bc-fl-w / --bc-fl-h
+ * 外加让整层跟着滚动位移抵消的 --bc-fixed-shift。
  */
 export function applyFixedShift(canvasEl: HTMLElement | null): void {
   if (!canvasEl) return;
@@ -91,7 +105,31 @@ export function applyFixedShift(canvasEl: HTMLElement | null): void {
   if (!vp) return;
   const cr = canvasEl.getBoundingClientRect();
   const zoom = cr.width > 0 && canvasEl.offsetWidth > 0 ? cr.width / canvasEl.offsetWidth : 1;
+  const z = zoom || 1;
   const wrap = canvasEl.closest('.canvas-wrap') as HTMLElement | null;
+
+  /* 画布 padding 盒的左上角（client 坐标）。
+     `clientLeft/clientTop` 是未缩放的 CSS 像素，要乘回 zoom 才能和 getBoundingClientRect 对齐。
+
+     ⚠⚠ v0.4.7 修（一个把画布滚动彻底搞坏的 BUG）：
+     视口层是 `position: absolute` + `translate: 0 var(--bc-fixed-shift)`，
+     也就是说"滚动"由 translate 单独负责，`--bc-fl-top` 必须是**滚动不变量**。
+     但 padTop 是**当前**滚动位置下的 client 坐标 —— 滚 2000 它比原来小 2000，
+     于是 (vp.top - padTop) 凭空多出 2000，再加上 translate 的 2000，
+     视口层一路滑到页面底部（实测滚 2000 后 top=4000，它把 scrollHeight 从 3064 顶到 4534）
+     → 滚动条越滚越短、滑块永远停在中间、fixed 元素也跟着跑。
+     所以这里把已经滚掉的量**减掉**，得到"滚动到 0 时"的那个偏移。
+     （符号很快能验：滚 S 之后 cr.top 变成 cr.top₀ - S，要让结果等于 cr.top₀，
+       就是 (vp.top - (cr.top₀ - S) - S)。） */
+  const scrolledY = wrap?.scrollTop ?? 0;
+  const scrolledX = wrap?.scrollLeft ?? 0;
+  const padLeft = cr.left + canvasEl.clientLeft * z;
+  const padTop = cr.top + canvasEl.clientTop * z;
+  canvasEl.style.setProperty('--bc-fl-left', `${(vp.left - padLeft - scrolledX) / z}px`);
+  canvasEl.style.setProperty('--bc-fl-top', `${(vp.top - padTop - scrolledY) / z}px`);
+  canvasEl.style.setProperty('--bc-fl-w', `${Math.max(0, vp.right - vp.left) / z}px`);
+  canvasEl.style.setProperty('--bc-fl-h', `${Math.max(0, vp.bottom - vp.top) / z}px`);
+
   /**
    * 位移量 = 滚动容器滚了多少（换算回画布内容坐标）。
    *
@@ -99,10 +137,10 @@ export function applyFixedShift(canvasEl: HTMLElement | null): void {
    * padding-top（画布纸面留白），会少补一截 —— 第一版就是这么写的，实测滚 400
    * 只补了 376，元素飘了 24px。用 scrollTop / zoom 才是"内容被推上去多少"。
    */
-  const shiftPx = Math.max(0, (wrap?.scrollTop ?? 0) / (zoom || 1));
+  const shiftPx = Math.max(0, (wrap?.scrollTop ?? 0) / z);
   canvasEl.style.setProperty('--bc-fixed-shift', `${Math.round(shiftPx)}px`);
   // 视口高度也写出来，方便界面上标注（"视口 1280 × 764"）
-  canvasEl.style.setProperty('--bc-fixed-vh', `${Math.round((vp.bottom - vp.top) / (zoom || 1))}px`);
+  canvasEl.style.setProperty('--bc-fixed-vh', `${Math.round((vp.bottom - vp.top) / z)}px`);
 }
 
 /**

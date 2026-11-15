@@ -210,7 +210,9 @@ async function createWindow() {
    *   · 在竖屏显示器上按 412×915 / 390×844 验收真实手机布局；
    *   · 为 Web 版与将来的安卓外壳打基础。
    *
-   * 900 以下由渲染层切 `data-shell="narrow"`（左右面板改抽屉 / 覆盖层）。
+   * 900 以下由渲染层切 `data-shell="stack"`（左右面板改抽屉 / 覆盖层）；
+   * 输入方式另用 `.app[data-input]`（pointer/touch）走设备能力查询，与宽度无关。
+   * ⚠ 别和 `.workspace[data-layout='left|bottom']` 混：那个是"面板摆哪"，这个才是整壳形态。
    * 开发态可以用环境变量 BC_MIN_WIN_WIDTH 临时调（探针固定窗口尺寸时会用到）。
    */
   const minWinW = Math.max(320, Number(process.env['BC_MIN_WIN_WIDTH'] ?? 360) || 360);

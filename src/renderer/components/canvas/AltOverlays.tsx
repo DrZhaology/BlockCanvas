@@ -20,6 +20,8 @@ export function AltBoxModel({ bm }: { bm: AltBoxModelData }) {
   const show = (v: number) => v >= 12; // 太窄就不画数字，避免糊成一团
   // v0.4.5：margin 写的是 auto 时显示 "auto"（computed 只会给出算好的像素）
   const isAuto = (k: string) => bm.autoSides.includes(k);
+  /** v0.4.7：这条偏移**真的写了值**才标出来（fixed/absolute 只该显示两条） */
+  const isSet = (k: 'top' | 'right' | 'bottom' | 'left') => (bm.setSides ?? []).includes(k);
   const mLbl = (k: string, v: number) => (isAuto(k) ? 'auto' : String(num(v)));
   // v0.4.5：定位偏移标签（fixed / absolute / sticky 才画）
   const insetLbl = (k: 'top' | 'right' | 'bottom' | 'left') => {
@@ -52,14 +54,21 @@ export function AltBoxModel({ bm }: { bm: AltBoxModelData }) {
       {(show(ml) || isAuto('marginLeft')) && <span className="bc-boxm-num" style={{ left: x - ml / 2, top: y + h / 2 }}>{mLbl('marginLeft', ml)}</span>}
       {(show(mr) || isAuto('marginRight')) && <span className="bc-boxm-num" style={{ left: x + w + mr / 2, top: y + h / 2 }}>{mLbl('marginRight', mr)}</span>}
 
-      {/* 定位偏移：fixed / absolute / sticky 时把 top/right/bottom/left 都标出来 */}
-      {showInsets && (
-        <>
-          <span className="bc-boxm-inset is-top" style={{ left: x + w / 2, top: y - 17 }}>{insetLbl('top')}</span>
-          <span className="bc-boxm-inset is-bottom" style={{ left: x + w / 2, top: y + h + 17 }}>{insetLbl('bottom')}</span>
-          <span className="bc-boxm-inset is-left" style={{ left: x - 22, top: y + h / 2 }}>{insetLbl('left')}</span>
-          <span className="bc-boxm-inset is-right" style={{ left: x + w + 22, top: y + h / 2 }}>{insetLbl('right')}</span>
-        </>
+      {/* 定位偏移：**只标真正在用的那几条**
+          v0.4.7（用户第五次反馈，原话「fixed 的 Alt 显示还是四边都显示，说了两边！！！」）：
+          以前 fixed/absolute 一按 Alt 就把 top/right/bottom/left 四个数字全标出来，
+          可面板里明明只有两条偏移 —— 等于在告诉用户"你有四条"。现在没写的边不画。 */}
+      {showInsets && isSet('top') && (
+        <span className="bc-boxm-inset is-top" style={{ left: x + w / 2, top: y - 17 }}>{insetLbl('top')}</span>
+      )}
+      {showInsets && isSet('bottom') && (
+        <span className="bc-boxm-inset is-bottom" style={{ left: x + w / 2, top: y + h + 17 }}>{insetLbl('bottom')}</span>
+      )}
+      {showInsets && isSet('left') && (
+        <span className="bc-boxm-inset is-left" style={{ left: x - 22, top: y + h / 2 }}>{insetLbl('left')}</span>
+      )}
+      {showInsets && isSet('right') && (
+        <span className="bc-boxm-inset is-right" style={{ left: x + w + 22, top: y + h / 2 }}>{insetLbl('right')}</span>
       )}
 
       {/* padding 四边数值 */}

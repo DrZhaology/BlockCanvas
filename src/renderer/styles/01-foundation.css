@@ -3,7 +3,10 @@
    （由单文件 styles.css 拆分而来；分片顺序 = 级联顺序，勿调整 import 顺序。
      新增样式：优先写进语义对应的分片末尾；跨轮追加统一进 14-v04x-append.css。）
    ========================================================================== */
-:root {
+/* v0.4.7：选择器从 `:root` 改成 `html:root` —— 匹配的还是同一个元素，特异性只升不降
+   （它本来就该盖住 00-theme-tokens.css 的 `:root`），效果一字不变；
+   但两个文件不再共用同一个选择器，跨域重复少一条。别改回 `:root`。 */
+html:root {
   --bg: #f3f3f3;
   --bg-panel: #ffffff;
   --bg-canvas: #ffffff;
@@ -83,7 +86,7 @@ html, body { overflow: hidden; }
   color: #8f3a37;
   background: var(--err-boundary-msg-bg);
   border: 1px solid #f3c8c4;
-  border-radius: 6px;
+  border-radius: 10px;
   padding: 10px 14px;
   max-width: 90%;
   max-height: 200px;
@@ -98,7 +101,7 @@ html, body { overflow: hidden; }
 .error-boundary-actions button {
   font-size: 13px;
   padding: 6px 16px;
-  border-radius: 6px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg-panel);
   cursor: pointer;

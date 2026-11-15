@@ -28,7 +28,7 @@
   margin: 0;
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text);
   font-family: inherit;
@@ -73,7 +73,7 @@
 .btn-mini {
   height: 24px;
   padding: 0 9px;
-  border-radius: 5px;
+  border-radius: 9px;
   font-size: 11px;
 }
 .btn-ghost {
@@ -103,7 +103,7 @@
 .inspector-sec-body .prop-row,
 .prop-row {
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--panel-soft);
 }
 .prop-row:hover { background: var(--hover-accent); }

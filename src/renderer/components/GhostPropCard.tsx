@@ -54,6 +54,8 @@ export function GhostPropCard(props: {
             elementType={elementType}
             flash={flashKey === it.key}
             // 幽灵卡片不提供"删除这条属性"：它不是列表里的一行，删什么删
+            // v0.4.6：连 × 都不画（用户明确「临时卡片不要有 ×」）
+            noRemove
             onRemove={() => { /* 无操作 */ }}
           />
         ))}

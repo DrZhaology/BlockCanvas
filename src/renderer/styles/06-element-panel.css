@@ -149,7 +149,7 @@ body.bc-alt-down .canvas-resize-handle { opacity: 0; pointer-events: none; }
   display: flex;
   flex-direction: column;
   background: var(--bg-canvas);
-  border-radius: 8px;
+  border-radius: 14px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
   overflow: hidden;
 }
@@ -187,7 +187,7 @@ body.bc-alt-down .canvas-resize-handle { opacity: 0; pointer-events: none; }
 .ext-item {
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   margin-bottom: 6px;
   background: var(--bg-panel);
 }
@@ -199,7 +199,7 @@ body.bc-alt-down .canvas-resize-handle { opacity: 0; pointer-events: none; }
   font-size: 11px;
   color: var(--accent);
   border: 1px solid var(--accent);
-  border-radius: 10px;
+  border-radius: 16px;
   padding: 0 8px;
 }
 .ext-item-badge-warn { color: #b7791f; border-color: #b7791f; }
@@ -212,7 +212,7 @@ body.bc-alt-down .canvas-resize-handle { opacity: 0; pointer-events: none; }
   padding: 8px 10px;
   margin-bottom: 6px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   cursor: pointer;
   font-family: inherit;

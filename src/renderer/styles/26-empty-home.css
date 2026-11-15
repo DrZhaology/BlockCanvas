@@ -74,7 +74,7 @@
   color: var(--text-muted);
   background: rgba(255, 255, 255, 0.7);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 16px;
   cursor: pointer;
   backdrop-filter: blur(8px);
   transition: color var(--dur-fast, 0.12s) ease, border-color var(--dur-fast, 0.12s) ease,
@@ -94,7 +94,7 @@
   padding: 14px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 18px;
   box-shadow: 0 16px 44px rgba(15, 23, 42, 0.18);
   animation: ehPanelIn 0.16s var(--ease-standard, ease) both;
   transform-origin: top right;
@@ -122,7 +122,7 @@
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: 5px;
+  border-radius: 9px;
   cursor: pointer;
 }
 .eh-panel-x:hover { color: var(--text); background: var(--hover); }
@@ -134,7 +134,7 @@
   margin-top: 10px;
   padding: 3px;
   background: var(--panel-soft);
-  border-radius: 8px;
+  border-radius: 14px;
 }
 .eh-tab {
   display: inline-flex;
@@ -146,7 +146,7 @@
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
   transition: background var(--dur-fast, 0.12s) ease, color var(--dur-fast, 0.12s) ease;
 }
@@ -164,7 +164,7 @@
   height: 38px;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   cursor: pointer;
   overflow: hidden;
   transition: transform var(--dur-fast, 0.12s) var(--ease-standard, ease);
@@ -221,7 +221,7 @@
   height: 52px;
   margin-top: 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
 }
 .eh-row { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
 .eh-color {
@@ -237,7 +237,7 @@
   height: 26px;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: none;
   cursor: pointer;
 }
@@ -251,7 +251,7 @@
   color: var(--text);
   background: var(--panel-soft);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   outline: none;
 }
 .eh-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
@@ -267,7 +267,7 @@
   color: #fff;
   background: var(--accent);
   border: 1px solid var(--accent);
-  border-radius: 7px;
+  border-radius: 12px;
   cursor: pointer;
 }
 .eh-apply:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -280,7 +280,7 @@
   color: var(--text);
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -324,7 +324,7 @@
   color: var(--text);
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 18px;
   outline: none;
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
   backdrop-filter: blur(10px);
@@ -354,7 +354,7 @@
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
 }
 .eh-search-clear:hover { color: var(--text); background: var(--hover); }
@@ -370,7 +370,7 @@
   text-align: left;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 16px;
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
   animation: ehPanelIn 0.14s var(--ease-standard, ease) both;
   z-index: 5;
@@ -391,7 +391,7 @@
   color: var(--text);
   background: transparent;
   border: none;
-  border-radius: 7px;
+  border-radius: 12px;
   cursor: pointer;
 }
 .eh-hit.is-active { background: var(--hover-accent, rgba(30, 136, 229, 0.1)); }
@@ -401,25 +401,49 @@
 .eh-hit-meta { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
 .eh-empty-hit { padding: 14px 10px; font-size: 12px; color: var(--text-muted); text-align: center; }
 
-/* —— 快捷入口 —— */
-.eh-actions { display: flex; gap: 10px; margin-top: 18px; }
+/* —— 快捷入口 ——
+   v0.4.7（用户："首屏幕的三个按钮直接呈倒三角型了，不好看"）：
+   以前 .eh-actions 是不换行的 flex，三个按钮各按内容撑宽，一旦被挤到折行
+   就变成"上面一个宽的、下面两个窄的"倒三角。
+   现在改成 grid 三列等分：三个按钮同宽同高、主按钮排第一（DOM 顺序不动），
+   任何宽度下都是一条整齐的横排；窗口 < 520px 时退成一列全宽的竖排，
+   依旧是主按钮在最上面（阅读顺序仍是"正"的，不是倒三角）。 */
+.eh-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  margin-top: 18px;
+}
 .eh-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
+  /* 等宽：宽度由网格列决定，内容再长也不撑破（min-width:0 + nowrap 保证不横向溢出） */
+  width: 100%;
+  min-width: 0;
   height: 40px;
-  padding: 0 18px;
+  padding: 0 12px;
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
   color: var(--text);
   background: rgba(255, 255, 255, 0.78);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 16px;
   cursor: pointer;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.05);
   backdrop-filter: blur(8px);
   transition: transform var(--dur-fast, 0.12s) var(--ease-standard, ease),
               box-shadow var(--dur-fast, 0.12s) ease, border-color var(--dur-fast, 0.12s) ease;
+}
+/* 窄窗口：一列全宽竖排（主按钮仍是最上面那个） */
+@media (max-width: 520px) {
+  .eh-actions {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
 }
 .eh-btn:hover { transform: translateY(-1px); border-color: var(--accent); box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1); }
 .eh-btn.is-primary { color: #fff; background: var(--accent); border-color: var(--accent); }
@@ -438,7 +462,7 @@
   color: var(--text);
   background: rgba(255, 255, 255, 0.66);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 16px;
   cursor: pointer;
   backdrop-filter: blur(8px);
   transition: border-color var(--dur-fast, 0.12s) ease, transform var(--dur-fast, 0.12s) var(--ease-standard, ease);
@@ -548,7 +572,7 @@ html[data-bc-dark] .eh-tab.is-active { background: var(--bg-panel); }
   text-align: center;
   color: #fff;
   background: rgba(17, 24, 39, 0.92);
-  border-radius: 8px;
+  border-radius: 14px;
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.25);
   animation: bcToastIn 0.18s var(--ease-standard, ease) both;
 }

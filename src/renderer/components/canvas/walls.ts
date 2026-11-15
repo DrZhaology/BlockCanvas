@@ -62,7 +62,7 @@ export function pickDropTarget(
  *   · 常规流子元素：父容器**设了固定高度**时下墙 = 父内容盒底（不再穿出父容器）；
  *     自适应高度的父允许撑长（不设下墙）。
  */
-export function boundsFor(el: HTMLElement, rect: DOMRect, viewportHeight = 900): Bounds {
+export function boundsFor(el: HTMLElement, rect: DOMRect): Bounds {
   const canvasEl = el.closest('.canvas') as HTMLElement | null;
   const cs = getComputedStyle(el);
   const pos = cs.position;
@@ -101,21 +101,17 @@ export function boundsFor(el: HTMLElement, rect: DOMRect, viewportHeight = 900):
   // v0.4.4：`fixed` 是**独立的视口层** —— 它相对画布（= 模拟浏览器视口）定位，
   // 不与文档流里的兄弟元素碰撞，四面墙都取画布视口。
   //
-  // v0.4.6（R6-16）：但画布高度是随内容长的（短页面 600、长页面 3000），
-  // 拿"画布底"当视口底会让 `bottom: 0` 永远贴不到首屏底部。
-  // 所以 fixed 的上下墙改用「首屏线」：画布顶部 + 基准视口高度。
-  // 画布比它矮时（内容很少），仍以画布底为下限，免得墙跑到画布外面。
+  // v0.4.6 重做：画布里有一层 `.canvas-fixed-layer`，**它就是红框（浏览器视口）**，
+  // 也是 fixed 元素的包含块。所以四面墙直接取这一层的位置 —— 与浏览器语义一字不差，
+  // 不再需要"首屏线 / 基准视口高度"那套近似（用户连着三轮说不对的就是那个近似）。
   if (isFixed && canvasEl) {
     const vb = boxOf(canvasEl);
-    // v0.4.6：fixed 的参照面就是「画布内的浏览器视口」（lib/fixedViewport.ts）——
-    // 左右贴画布边缘，上下取 .canvas-wrap 的**可见带**（工具栏下面、元素面板上面）。
-    // 面板高度一改，这条带子跟着变，fixed 的可动范围也随之变，不会再出现
-    // "在 2400px 长页面里拖到看不见的地方"。
+    // measureFixedViewport 返回 client 坐标；拿不到（还没布局）时退回画布盒
     const fv = measureFixedViewport(canvasEl);
     const vLeft = fv ? fv.left : vb.left;
     const vRight = fv ? fv.right : vb.right;
     const vTop = fv ? fv.top : vb.top;
-    const vBottom = fv ? fv.bottom : Math.min(vb.bottom, vb.top + viewportHeight);
+    const vBottom = fv ? fv.bottom : vb.bottom;
     wallLeft = vLeft + m.left;
     wallRight = vRight - m.right;
     wallTop = vTop + m.top;
@@ -130,7 +126,7 @@ export function boundsFor(el: HTMLElement, rect: DOMRect, viewportHeight = 900):
     const vb = boxOf(canvasEl);
     const fv = measureFixedViewport(canvasEl);
     const vTop = fv ? fv.top : vb.top;
-    const vBottom = fv ? fv.bottom : Math.min(vb.bottom, vb.top + viewportHeight);
+    const vBottom = fv ? fv.bottom : vb.bottom;
     const vLeft = fv ? fv.left : vb.left;
     const vRight = fv ? fv.right : vb.right;
     barL = vBar(wallLeft, vTop, vBottom);

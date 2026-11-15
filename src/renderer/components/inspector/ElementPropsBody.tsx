@@ -231,29 +231,12 @@ export function ElementPropsBody(props: { selected: SceneElement; justAddedKey: 
   // 画布上对元素按中键 → 敲属性名 → Enter → 这里展开「CSS 样式属性」、确保该行存在、滚动并闪烁高亮。
   const [flashKey, setFlashKey] = useState<string | null>(null);
   /**
-   * 定位「幽灵卡片」（v0.4.5 第十六批 · 用户澄清后的真实需求）
-   * ------------------------------------------------------------------
-   * 用户原话：「中间选中元素输入 position，Enter 就可以直接定位到这个元素右侧的
-   *            position 的幽灵卡片，只是用来临时数据修改，避免去快捷助手里面改。」
-   *
-   * 所以：中键搜到 position（或 left/top/right/bottom）时，除了展开 CSS 属性区，
-   * 还额外弹出这张**临时**卡片 —— 因为 position 的可编辑项分散在快捷助手里，
-   * 用户搜 position 却"点不进去"（反馈原话："对于定位 position 元素没有用"）。
-   */
-  /**
-   * 幽灵属性卡片（v0.4.6）
-   * ------------------------------------------------------------------
-   * 用户原话：「快捷助手关闭了显示到下方 CSS 属性的时候，中键搜索属性的时候，
-   *           临时做一个幽灵卡片，颜色做的不一样……中键每次搜索都弹出，
-   *           退出当前元素的面板幽灵卡片就没了。」
-   *
-   * 所以：
-   *   · 只有「显示到下方 CSS 属性」**关闭**时才需要它（开着的话下方列表里就有那一行）；
-   *   · 每次中键搜索都把搜中的属性放进来（最近的排最前，最多 3 条，避免卡片变成长列表）；
-   *   · **没有关闭按钮**：它是"当前这个元素"的临时物件，换元素/关面板自然消失。
+   * 「临时卡片」的 key 列表（v0.4.6 定名，之前叫"幽灵卡片"）。
+   * 它跟着"当前选中的这个元素"活着：换元素就清空；**没有 ×**，不让人以为要手动管理。
+   * 最多 3 条，避免长成一张小列表。
    */
   const [ghostKeys, setGhostKeys] = useState<string[]>([]);
-  // 换元素 → 上一张幽灵卡片作废（用户要求"退出当前元素的面板幽灵卡片就没了"）
+  // 换元素 → 上一张临时卡片作废
   useEffect(() => { setGhostKeys([]); }, [elementId]);
   // 用 ref 读开关：apply 回调挂在事件订阅里，不能因为它变化就重订阅
   const showHelperInCssRef = useRef(showHelperInCss);
@@ -262,14 +245,30 @@ export function ElementPropsBody(props: { selected: SceneElement; justAddedKey: 
     const apply = (req: PropFocusRequest) => {
       const key = req.key;
       if (!key) return;
-      // 「显示到下方 CSS 属性」关着 → 下方列表里不会有这一行，改由幽灵卡片承载
-      if (!showHelperInCssRef.current) {
-        setGhostKeys((prev) => [key, ...prev.filter((k) => k !== key)].slice(0, 3));
-      }
+      /**
+       * v0.4.7 修正（用户："临时卡片只有…不在下方显示的元素有，理解有错了"）：
+       * 判据只有一条 —— 这条属性此刻会不会出现在下方「CSS 样式属性」列表里？
+       * 会出现 → 只展开+闪烁定位那一行，不出卡片；不会出现 → 才出临时卡片。
+       * "不会出现"= 裸 Enter/左键（add=false）、快捷助手代管且开关关着、界面本来就没有这一行。
+       */
+      const findVis = (n: SceneElement): SceneElement | null => {
+        if (n.id === elementId) return n;
+        for (const c of n.children) { const f = findVis(c); if (f) return f; }
+        return null;
+      };
+      const curNode = findVis(useScene.getState().scene.root);
+      const alreadyListed = (curNode?.visibleProps ?? []).includes(key);
+      const helperOwned = HELPER_MANAGED_KEYS.has(key);
+      const helperHidden = helperOwned && !showHelperInCssRef.current;
       // add 默认 true（老行为）；中键搜索在"未添加"时按 Enter 会传 false —— 只提示、不偷偷加
       const shouldAdd = req.add !== false;
+      const willShowBelow = alreadyListed || (shouldAdd && !helperHidden);
+      if (!willShowBelow) {
+        setGhostKeys((prev) => [key, ...prev.filter((k) => k !== key)].slice(0, 3));
+      }
       setSecOpen((p) => ({ ...p, css: true }));
-      if (shouldAdd) addVisibleProp(elementId, key);
+      if (shouldAdd && willShowBelow) addVisibleProp(elementId, key);
+      const showBelow = willShowBelow;
       // v0.4.5：中键搜索的「属性值预测」—— 顺手把值也写进去（裸数字按 schema.unit 补单位）
       if (req.value !== undefined) {
         const item = getSchemaItem(key);
@@ -316,7 +315,8 @@ export function ElementPropsBody(props: { selected: SceneElement; justAddedKey: 
           }, 280);
         }
       };
-      window.setTimeout(() => scrollToRow(), 90);
+      // 走临时卡片时下方没有这一行，滚动定位无意义（以前会白重试 6 次）
+      if (showBelow) window.setTimeout(() => scrollToRow(), 90);
       window.setTimeout(() => setFlashKey(null), 2200);
     };
     // 挂载瞬间先消费缓冲：从「页面 / 类名 / 图层」切过来的请求，事件早就派发完了

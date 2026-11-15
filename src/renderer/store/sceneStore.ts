@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { SceneElement, SceneGraph, ElementType, ElementStyle, Breakpoint } from '@lib/types';
 import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS } from '@lib/types';
 import { SCHEMA } from '@lib/propertySchema';
+import { flyOutElement } from '@lib/elLeave';
 import type { TokenEntry } from '@lib/designTokens';
 // v0.4.6（R6-5）：树查询与样式合并搬到 store/scene/*（纯函数，可单测）
 import {
@@ -290,6 +291,9 @@ export const useScene = create<SceneStore>((set) => ({
   },
 
   removeElement: (id) => {
+    // v0.4.6：退场动画。节点马上要从 DOM 消失，先留一个按原位钉住的影子淡出
+    // （纯视觉，不碰状态；见 lib/elLeave.ts）。
+    flyOutElement(id);
     set((st) => {
       if (id === st.scene.root.id) return st;
       const scene = deepClone(st.scene);
@@ -305,6 +309,8 @@ export const useScene = create<SceneStore>((set) => ({
   },
 
   removeMany: (ids) => {
+    // 同上：每个被点名的元素各留一个影子（后代跟着父级一起消失，不必单独播）
+    for (const id of ids) flyOutElement(id);
     set((st) => {
       const pruned = pruneDescendantIds(st.scene.root, ids);
       if (pruned.length === 0) return st;

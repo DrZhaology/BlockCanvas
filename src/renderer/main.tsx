@@ -46,6 +46,8 @@ import './styles/33-v046-shell.css'; // v0.4.6：窄屏外壳（左右面板抽�
 import './styles/00-theme-tokens.css';
 import './animations.css'; // 统一动画体系：token + 全部 keyframes（分片里只写引用）
 import './styles/34-v046-visual.css'; // v0.4.6：连续曲率圆角 + 圆角尺度 + 自绘窗口标题栏 + 窗口描边
+import './styles/35-v046-cards.css'; // v0.4.6：画布元素进退场动画 + 属性卡片统一（不生效/临时只靠颜色区分）
+import './styles/36-v046-portrait.css'; // v0.4.6：竖屏底部两条操作栏（顶部清空）
 
 // v0.4.5：动画性能总督（不可见即暂停 / 掉帧自动精简 / 尊重系统"减少动态效果"）。
 // 必须在渲染之前启动：它要往 <html> 上写 data-bc-anim，避免首帧先按完整动效画一遍。

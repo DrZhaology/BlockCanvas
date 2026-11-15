@@ -179,7 +179,23 @@ async function main() {
   check('relative 的负偏移保留（位移量，负数合法）',
     clamp.rel.left === '-40px' && clamp.rel.top === '-25px', JSON.stringify(clamp.rel));
 
-  // —— position 幽灵卡片：中键搜 position → Enter → 右侧出现临时卡片 ——
+  // —— 临时卡片（幽灵属性卡片）：开关关着 + 属性由快捷助手代管 → 中键搜索时临时出一张 ——
+  //
+  // ⚠ v0.4.6 契约（用户原话）：
+  //   「临时卡片只有搜索快捷助手哪些 CSS 属性不在下方显示的元素有…现在所有的元素都会产生临时卡片」
+  //   判据只有一条：**这条属性此刻会不会出现在下方「CSS 样式属性」列表里？**
+  //     会出现 → 只展开+闪烁那一行，不出卡片；
+  //     不会出现 → 才出临时卡片。
+  //   "不会出现"的典型就是「快捷助手代管 + 显示到下方 CSS 属性开关关着」那几条
+  //   （display / gap / 背景渐变…，见 QuickHelper.tsx 的 HELPER_MANAGED_KEYS）。
+  //
+  //   为什么不再用 position 验：position 不在 HELPER_MANAGED_KEYS 里，下方列表本来就有它的行，
+  //   Ctrl+Enter（添加并定位）会把它加进列表 → 按新契约**不应该**再出卡片。
+  //   旧断言拿 position 测"开关关闭时出卡片"，是过期契约（会误报产品有 bug）。
+  const helperOff = await win.evaluate(() =>
+    !document.querySelector('.inspector [data-prop-key="display"]'));
+  check('准备：快捷助手代管的 display 不在下方列表里（开关关着）', helperOff === true, String(helperOff));
+
   await win.evaluate(() => {
     const el = document.querySelector('.canvas [data-bc-id]');
     const r = el.getBoundingClientRect();
@@ -207,7 +223,7 @@ async function main() {
     const ghost = await win.evaluate(async () => {
       const input = document.querySelector('.bc-prop-search-input');
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(input, 'position');
+      setter?.call(input, 'display');
       input.dispatchEvent(new Event('input', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 400));
       const first = document.querySelector('.bc-prop-search-item');
@@ -224,30 +240,29 @@ async function main() {
         added,
         closed: !document.querySelector('.bc-prop-search'),
         cardShown: !!card,
-        // 新契约：卡片里出现的就是 position 那条属性行（不再是专用定位卡）
-        hasPosRow: !!card?.querySelector('[data-prop-key="position"]'),
-        options: [...(card?.querySelectorAll('[data-prop-key="position"] select option') || [])]
+        hasDisplayRow: !!card?.querySelector('[data-prop-key="display"]'),
+        options: [...(card?.querySelectorAll('[data-prop-key="display"] select option') || [])]
           .map((o) => (o.textContent || '').trim()),
-        // 卡片里不许有"关闭 / ×"这类手动管理入口（用户明确要求删掉）
+        // 卡片里不许出现"关闭 / ×"这类手动管理入口（用户明确要求删掉）
         closeBtns: card ? card.querySelectorAll('.ghost-prop-card-head button, [title*="关闭"]').length : 0
       };
     });
-    check('搜 position 命中第一条就是 position', ghost.firstKey === 'position', ghost.firstKey);
+    check('搜 display 命中第一条就是 display', ghost.firstKey === 'display', ghost.firstKey);
     check('Enter / Ctrl+Enter 后搜索框关闭', ghost.closed === true, String(ghost.closed));
     check('开关关闭时：出现通用「幽灵属性卡片」', ghost.cardShown === true, String(ghost.cardShown));
-    check('卡片里就是 position 这条属性（可直接改）', ghost.hasPosRow === true, String(ghost.hasPosRow));
-    // 下拉里有 5 种定位方式（外加一条"未指定"，用于把属性清空）
-    const POS5 = ['static', 'relative', 'absolute', 'fixed', 'sticky'];
-    check('position 下拉给出 5 种定位方式',
-      POS5.every((p) => ghost.options.some((o) => o.includes(p))), ghost.options.join(' / '));
+    check('卡片里就是 display 这条属性（可直接改）', ghost.hasDisplayRow === true, String(ghost.hasDisplayRow));
+    // display 的候选：block / inline / inline-block / flex / inline-flex / grid / inline-grid / none
+    const DISP = ['block', 'flex', 'grid', 'none'];
+    check('display 下拉给出全部显示方式',
+      DISP.every((p) => ghost.options.some((o) => o.includes(p))), ghost.options.join(' / '));
     check('幽灵卡片没有关闭按钮（用户要求删掉 ×）', ghost.closeBtns === 0, String(ghost.closeBtns));
 
-    // 在卡片里把 position 改成 absolute → store 里生效
+    // 在卡片里把 display 改成 grid → store 里生效
     const changed = await win.evaluate(async () => {
-      const sel = document.querySelector('[data-bc-ghost-card="1"] [data-prop-key="position"] select');
+      const sel = document.querySelector('[data-bc-ghost-card="1"] [data-prop-key="display"] select');
       if (sel) {
         const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-        setter?.call(sel, 'absolute');
+        setter?.call(sel, 'grid');
         sel.dispatchEvent(new Event('change', { bubbles: true }));
       }
       await new Promise((r) => setTimeout(r, 500));
@@ -256,13 +271,25 @@ async function main() {
       const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === id);
       return { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) };
     });
-    check('在卡片里改定位立即生效（position=absolute）',
-      changed.position === 'absolute', JSON.stringify({ pos: changed.position }));
-    check('同一根轴只留一边（另一边是 auto）',
-      (changed.left === 'auto' || changed.left === undefined || changed.right === 'auto' || changed.right === undefined)
-      && (changed.top === 'auto' || changed.top === undefined || changed.bottom === 'auto' || changed.bottom === undefined),
-      JSON.stringify({ left: changed.left, right: changed.right, top: changed.top, bottom: changed.bottom }));
+    check('在卡片里改显示方式立即生效（display=grid）',
+      changed.display === 'grid', JSON.stringify({ display: changed.display }));
   }
+
+  // —— 同一根轴只留一边（直接走 store，不再依赖卡片）——
+  const axis = await win.evaluate(async () => {
+    const st = window.__sceneStore.getState();
+    const id = st.scene.selectedId;
+    st.updateStyle(id, { position: 'absolute', left: '-40px', top: '-25px' });
+    await new Promise((r) => setTimeout(r, 300));
+    const bp = window.__sceneStore.getState().activeBreakpoint;
+    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === id);
+    const s = { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) };
+    return { left: s.left, right: s.right, top: s.top, bottom: s.bottom };
+  });
+  check('同一根轴只留一边（另一边是 auto）',
+    (axis.left === 'auto' || axis.left === undefined || axis.right === 'auto' || axis.right === undefined)
+    && (axis.top === 'auto' || axis.top === undefined || axis.bottom === 'auto' || axis.bottom === undefined),
+    JSON.stringify(axis));
 
   // —— Alt + 滚轮：精准微调，且不弹盒模型 ——
   // 诊断：此时应用到底处于什么状态（画布/场景/视图）

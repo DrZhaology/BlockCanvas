@@ -1,18 +1,8 @@
-// BlockCanvas · 画布上的单个节点渲染
-//
-// 这里是"编辑器所见 = 导出所得"的落地点：样式全部来自 lib/styleClass 生成的同一套规则，
-// 内联里只允许出现**编辑器专属**的装饰（选中白线、空容器兜底），一律不导出。
-//
-// 四条渲染路径（顺序不能调）：
-//   ① hidden → 不渲染（导出也不渲染）
-//   ② 自闭合（img/input/hr/br）→ 无子元素
-//   ③ 文本独占（textarea）→ 受控只读
-//   ④ audio → 编辑器自绘外壳（原生控件会吃掉鼠标事件，见下方长注释）
-//   ⑤ 容器/文本型 → 文字 + 递归子节点
-//
-// ⚠ audio 必须排在"容器型 return"之前，且 **不在** SELF_CLOSING_TAGS 里 ——
-//   第一版把它的分支放进 SELF_CLOSING 块，整段是死代码、永不执行。
+// BlockCanvas · 画布上的单个节点渲染（编辑器所见 = 导出所得的落地点）
+// 渲染顺序不能调：hidden → 自闭合 → 文本独占 → audio（自绘外壳）→ 容器/文本。
+// ⚠ audio 必须排在"容器型 return"之前，且**不在** SELF_CLOSING_TAGS 里（否则整段是死代码）。
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useScene, getEffectiveStyle } from '@store/sceneStore';
 import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS, TEXT_TAGS, MEDIA_TAGS } from '@lib/types';
 import type { SceneElement } from '@lib/types';
@@ -22,6 +12,7 @@ import { useVideoCodecGate, CodecBlockedNotice } from './videoCodecGate';
 import { Icon } from '../Icon';
 import { LOCK_FRAME_SEC } from './useAltDrag';
 import { toRenderableSrc } from './mediaSrc';
+import { useFixedLayer } from './fixedLayer';
 import type { TextMenuPayload } from '../CanvasTextMenu';
 
 export type CanvasNodeProps = {
@@ -34,7 +25,7 @@ export type CanvasNodeProps = {
   onTextMenu: (p: TextMenuPayload) => void;
 };
 
-export const CanvasNode = React.memo(function CanvasNode(props: CanvasNodeProps) {
+const CanvasNodeBody = React.memo(function CanvasNodeBody(props: CanvasNodeProps) {
   const { node, selectedIds, onSelect, onSelectParent, onToggleSelect, onTextMenu } = props;
 
   // v0.4.4：伪类实时预览（必须在任何提前 return 之前声明 hook）
@@ -250,17 +241,13 @@ export const CanvasNode = React.memo(function CanvasNode(props: CanvasNodeProps)
   const editDeco = pick('textDecoration');
 
   /**
-   * v0.4.6（R6-18）：**挂载之前先问一句"这个编码能解吗"**（判定与占位块都在
-   * canvas/videoCodecGate.tsx，那里写清了三条不能破的规矩）。
+   * v0.4.6（R6-18）：挂载之前先问一句"这个编码能解吗"（判定与占位块都在
+   * canvas/videoCodecGate.tsx）。
    */
   const codecGate = useVideoCodecGate(node.type, node.attrs?.srcAbs, node.attrs?.src);
   const codecBlocked = codecGate.blocked;
 
-  /**
-   * 媒体元素（video / audio）的专属属性 —— 提前算好放成变量。
-   * v0.4.5：音频要用自己的外壳渲染（见下方 `node.type === 'audio'` 分支），
-   * 外壳里需要这份 props，所以不能再塞在 commonProps 里。
-   */
+  // 媒体元素（video / audio）的专属属性；audio 走自绘外壳，需要单独传 props
   const mediaProps: Record<string, unknown> = MEDIA_TAGS.has(node.type) && !codecBlocked
     ? (() => {
         // v0.4.5（用户反馈 C补2 / C补3 / C补8）：
@@ -510,11 +497,9 @@ export const CanvasNode = React.memo(function CanvasNode(props: CanvasNodeProps)
   }
 
   /**
-   * v0.4.6（R6-18）：**编码解不了的视频，画布上不挂 <video>** —— 挂上就等于让
-   * Chromium 的原生解码器尝试初始化（并报 Unsupported pixel format 白屏），
-   * 而那条日志 JS 屏蔽不了。改画占位块，选中/拖动行为与真元素一致。
-   *
-   * ⚠ 位置：必须在"容器型 return"之前（video 是 MEDIA_TAGS，不走 SELF_CLOSING 分支）。
+   * v0.4.6（R6-18）：编码解不了的视频**不挂 <video>**（挂上等于让 Chromium 尝试初始化，
+   * 报 Unsupported pixel format 白屏，日志屏蔽不了），改画占位块。
+   * ⚠ 必须在"容器型 return"之前（video 属 MEDIA_TAGS，不走 SELF_CLOSING 分支）。
    */
   if (codecBlocked) {
     const userCls = (commonProps as { className?: string }).className;
@@ -596,4 +581,19 @@ export const CanvasNode = React.memo(function CanvasNode(props: CanvasNodeProps)
       {node.locked && <span className="lock-badge"><Icon name="lock" size={12} /></span>}
     </Tag>
   );
+});
+
+/**
+ * 外层壳：把 `position: fixed` 的节点渲染进「视口层」，让 left/top/right/bottom
+ * 相对**视口**解析而不是整张画布（`bottom:0` = 贴视口底）。详见 canvas/fixedLayer.ts。
+ * 场景树不动、父子关系不动，只换 DOM 挂载位置。
+ */
+export const CanvasNode = React.memo(function CanvasNode(props: CanvasNodeProps) {
+  const bp = useScene((s) => s.activeBreakpoint);
+  const layer = useFixedLayer();
+  const body = <CanvasNodeBody {...props} />;
+  if (props.node.hidden) return body;
+  const fixed = (getEffectiveStyle(props.node, bp) as Record<string, string | undefined>).position === 'fixed';
+  // 视口层还没挂上（首帧）→ 原地渲染，绝不能让元素凭空消失
+  return fixed && layer ? createPortal(body, layer) : body;
 });
