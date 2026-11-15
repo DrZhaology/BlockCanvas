@@ -587,14 +587,19 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange, 
               className={'tb-more-panel' + (portrait ? ' pt-menu-panel' : '')}
               align={portrait ? 'left' : 'right'}
             >
-              {moreItems.map((it) => (
-                <button
-                  key={it.id}
-                  className="tb-more-item"
-                  title={it.title}
-                  onClick={() => { if (!it.block) it.onClick?.(); setMoreOpen(false); }}
-                >{it.icon && <span className="tb-icon">{it.icon}</span>}{typeof it.label === 'function' ? it.label() : it.label}</button>
-              ))}
+              {moreItems.map((it) => {
+                // 菜单项要带图标：注册项里的 icon 是"图标名"而不是节点，直接渲染 it.icon
+                // 什么也画不出来（第一版就是这样，菜单里只有干巴巴的文字）。
+                const ico = opMap.get(it.id)?.icon;
+                return (
+                  <button
+                    key={it.id}
+                    className="tb-more-item"
+                    title={it.title}
+                    onClick={() => { if (!it.block) it.onClick?.(); setMoreOpen(false); }}
+                  >{ico && <span className="tb-icon"><Icon name={ico} size={15} /></span>}{typeof it.label === 'function' ? it.label() : it.label}</button>
+                );
+              })}
             </AnchoredPanel>
           </div>
         )}

@@ -384,8 +384,13 @@ async function main() {
     await sleep(150);
     await tab.locator('.tab-close-btn').click({ timeout: 4000 }).catch(() => {});
   };
-  const sceneProbe = () => win.evaluate(() => {
-    const s = () => window.__sceneStore.getState();
+  // v0.4.6：关闭标签的二次确认从 native confirm 换成应用内确认卡
+  const closeGuardOpen = () => win.evaluate(() => !!document.querySelector('.bc-confirm-scrim, .bc-confirm-pop'));
+  const dismissCloseGuard = async (label) => {
+    const btn = win.locator('.bc-confirm-btn', { hasText: label }).first();
+    if (await btn.count()) { await btn.click({ timeout: 2000 }).catch(() => {}); await sleep(250); }
+  };
+  const sceneProbe = () => win.evaluate(() => {    const s = () => window.__sceneStore.getState();
     return { past: s().history.past.length, future: s().history.future.length, children: s().scene.root.children.length };
   });
   const drawThenDelete = () => win.evaluate(() => {
@@ -413,27 +418,36 @@ async function main() {
   await clickActiveTabClose();
   const closedSilently = await waitTabCount(tabsBase);
   ok('空且无撤销历史 → 点 × 直接关闭、不弹窗',
-    closedSilently && dialogs.length === 0,
-    `tabs=${await tabCount()}/${tabsBase} dialogs=${dialogs.length} ${dialogs.join(' | ')}`);
+    closedSilently && dialogs.length === 0 && !(await closeGuardOpen()),
+    `tabs=${await tabCount()}/${tabsBase} dialogs=${dialogs.length} guard=${await closeGuardOpen()}`);
 
-  // 7.3 空 + 有撤销历史 → 点 × 必须二次确认
+  // 7.3 有内容 + 未保存 → 点 × 必须二次确认
   await win.locator('.tab-add-btn').first().click({ timeout: 4000 });
   await sleep(350);
-  const made = await drawThenDelete();
-  ok('（前置）空标签「画过又删掉」：画布回到空、撤销栈非空',
-    made.past > 0 && made.children === 0, JSON.stringify(made));
+  // v0.4.6：确认的判据是"有内容且未保存"。空页面（哪怕是画了又删回来）直接关 ——
+  // 真的没东西可丢，弹窗只会变成噪音。所以这里造一个**留着的**元素。
+  const made = await win.evaluate(() => {
+    const s = () => window.__sceneStore.getState();
+    s().addElement('div');
+    return { past: s().history.past.length, children: s().scene.root.children.length };
+  });
+  ok('（前置）空标签放一个元素：画布非空、撤销栈非空',
+    made.past > 0 && made.children > 0, JSON.stringify(made));
   const tabsBeforeBlock = await tabCount();
   dialogs.length = 0;
   await clickActiveTabClose();
-  let blocked = false;
-  for (let i = 0; i < 14 && dialogs.length === 0 && !blocked; i++) {
+  // v0.4.6：二次确认已经从 native confirm 换成**应用内**的确认卡片
+  // （脏标签才问，干净标签直接关），所以要认 `.bc-confirm-scrim / .bc-confirm-pop`。
+  let guard = false;
+  for (let i = 0; i < 14 && !guard; i++) {
     await sleep(120);
-    blocked = await rendererBlocked(500);
+    guard = await closeGuardOpen();
   }
-  const dialogShown = dialogs.length > 0 || blocked;
-  ok('空但有撤销历史 → 点 × 必须二次确认（弹窗拦一道）', dialogShown,
-    `dialogs=${dialogs.length} blocked=${blocked} ${dialogs.join(' | ')}`);
-  if (blocked && dialogs.length === 0) { try { await win.keyboard.press('Escape'); } catch { /* 兜底关窗 */ } }
+  const dialogShown = guard || dialogs.length > 0;
+  ok('有内容且未保存 → 点 × 必须二次确认（拦一道确认卡）', dialogShown,
+    `guard=${guard} dialogs=${dialogs.length} ${dialogs.join(' | ')}`);
+  // 选「取消」：卡片关掉、标签留着
+  await dismissCloseGuard('取消');
   const unblocked = !(await rendererBlocked(2000));
   const tabsAfterCancel = unblocked ? await tabCount() : -1;
   ok('二次确认里选「取消」→ 标签保持打开、不误删',

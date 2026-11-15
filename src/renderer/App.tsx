@@ -39,9 +39,11 @@ import { useTouchCanvas } from '@lib/useTouchCanvas';
 import { useAltMode } from '@lib/altMode';
 import { PortraitBar1, PortraitBar2 } from '@comp/portrait/PortraitBars';
 import { SessionsView } from '@comp/portrait/SessionsView';
+import { PortraitLayers } from '@comp/portrait/PortraitLayers';
 import { TabCloseGuard } from '@comp/TabCloseGuard';
 import { useEdgeSwipe } from '@lib/useEdgeSwipe';
 import { useDrawerSide } from '@lib/drawerSide';
+import { usePortraitPrefs } from '@lib/portraitPrefs';
 import { DrawerHandle } from '@comp/DrawerHandle';
 // v0.4.6：抽屉把手已抽成 <DrawerHandle>（它自带长按调位置的三个状态），App 不再直接用 Icon
 
@@ -86,10 +88,22 @@ export default function App() {
   const inputMode = useInputMode();
   // 窄屏下的抽屉：'left' 元素面板 / 'right' 属性面板 / null 都收起
   const [drawer, setDrawer] = useState<'left' | 'right' | null>(null);
+  /** v0.4.6 竖屏：下方图层面板（只能通过「属性」离开，见 PortraitLayers） */
+  const [layerSheet, setLayerSheet] = useState(false);
+  /** 竖屏设置项（显示第二条栏 / 长按时长 / 面板高度）—— 设置页改完立刻生效 */
+  const ptPrefs = usePortraitPrefs();
   // 窄屏切回宽屏时把抽屉收掉（否则回到宽屏还挂着一个半透明遮罩）
   useEffect(() => {
     if (shell.layout === 'split' && drawer !== null) setDrawer(null);
   }, [shell.layout, drawer]);
+  // 切回宽屏时把下方图层面板也收掉（宽屏的图层在右侧面板里，不叠一块浮层）
+  useEffect(() => {
+    if (shell.layout === 'split' && layerSheet) setLayerSheet(false);
+  }, [shell.layout, layerSheet]);
+  // 竖屏右侧抽屉只显示属性（图层在下方那块面板里）→ 进来先把它拨回属性
+  useEffect(() => {
+    if (shell.layout === 'stack') setRightTabRaw('inspector');
+  }, [shell.layout]);
 
   /**
    * v0.4.7 · 竖屏标签页策略（用户原话）：
@@ -818,19 +832,23 @@ export default function App() {
                       <SnapshotInfoPanel tab={activeTab} />
                     ) : (
                       <>
-                        <div className="tab-bar">
-                          <button
-                            className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
-                            onClick={() => setRightTab('layers')}
-                          >图层</button>
-                          <button
-                            className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
-                            onClick={() => setRightTab('inspector')}
-                          >属性</button>
-                        </div>
+                        {/* v0.4.6 竖屏：图层搬到屏幕下方那块面板里了（PortraitLayers），
+                            右侧抽屉只留属性 —— 两个地方各放一份图层树只会让人迷惑。 */}
+                        {shell.layout !== 'stack' && (
+                          <div className="tab-bar">
+                            <button
+                              className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
+                              onClick={() => setRightTab('layers')}
+                            >图层</button>
+                            <button
+                              className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
+                              onClick={() => setRightTab('inspector')}
+                            >属性</button>
+                          </div>
+                        )}
                         <div className="tab-body" key={rightTab}>
                           <ErrorBoundary label="右侧面板">
-                            {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
+                            {rightTab === 'layers' && shell.layout !== 'stack' ? <LayerTree /> : <Inspector />}
                           </ErrorBoundary>
                         </div>
                       </>
@@ -848,12 +866,14 @@ export default function App() {
           第二条在编辑器且有会话时才出现，第一条在每个视图都在。 */}
       {shell.layout === 'stack' && (
         <>
-          {view === 'editor' && tabCount > 0 && (
+          {view === 'editor' && tabCount > 0 && ptPrefs.bar2 && (
             <PortraitBar2
               zoom={zoom}
               setZoom={setZoom}
               canvasWidth={canvasWidth}
               setCanvasWidth={setCanvasWidth}
+              layersOpen={layerSheet}
+              onOpenLayers={() => setLayerSheet(true)}
             />
           )}
           <PortraitBar1
@@ -865,6 +885,13 @@ export default function App() {
             onOpenHelp={() => window.dispatchEvent(new CustomEvent('menu:help'))}
             onOpenPlugins={() => window.dispatchEvent(new CustomEvent('menu:settings'))}
           />
+          {/* 下方图层面板：只能从「属性」离开（用户要求防误触） */}
+          {view === 'editor' && tabCount > 0 && (
+            <PortraitLayers
+              open={layerSheet}
+              onOpenProps={() => { setLayerSheet(false); setDrawer('right'); }}
+            />
+          )}
         </>
       )}
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />

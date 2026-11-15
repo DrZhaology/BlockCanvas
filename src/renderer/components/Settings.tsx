@@ -11,6 +11,7 @@ import { Collapse } from './Collapse';
 import { TIPS, TIPS_KEY, setTipsEnabled } from './CanvasOverlays';
 import { readSelHighlight, writeSelHighlight } from '@lib/selHighlight';
 import { useDrawerSide, DRAWER_SIDE_LABELS } from '@lib/drawerSide';
+import { usePortraitPrefs, setPortraitPrefs } from '@lib/portraitPrefs';
 import { appAlert, appConfirm } from '@lib/appConfirm';
 import type { DataPathsInfo, StorageStatsInfo, StorageBreakdownInfo, StorageCategoryId } from '../global';
 
@@ -30,6 +31,7 @@ export type SettingsSection =
   | 'storage'
   | 'toolbar'
   | 'extensions'
+  | 'portrait'
   | 'about';
 
 interface Props {
@@ -47,6 +49,8 @@ interface Props {
 export function Settings(props: Props) {
   const { onBack, onOpenWebManager, layout, onLayoutChange, canvasWidth, onCanvasWidthChange, initialSection, onOpenUpdateCenter } = props;
   const [section, setSection] = useState<SettingsSection>(initialSection || 'personalization');
+  // 竖屏那三条开关（显示第二条栏 / 长按判定 / 图层面板高度）—— 真实生效，不是摆设
+  const ptPrefs = usePortraitPrefs();
   const [paths, setPaths] = useState<DataPathsInfo | null>(null);
   const [storageStats, setStorageStats] = useState<StorageStatsInfo | null>(null);
   const [breakdown, setBreakdown] = useState<StorageBreakdownInfo | null>(null);
@@ -293,14 +297,34 @@ export function Settings(props: Props) {
 
   const qc = scene.quickCss ?? {};
 
-  const NAV_ITEMS: Array<{ id: SettingsSection; label: string; desc: string; svg: IconName }> = [
-    { id: 'personalization', label: '个性化与外观', svg: 'palette', desc: '深浅主题、白边重置、同类高亮' },
-    { id: 'editor', label: '编辑器与画布', svg: 'sliders', desc: '布局模式、画布默认宽度、继承机制' },
-    { id: 'storage', label: '存储与自动备份', svg: 'database', desc: '备份周期、快照数量、便携 data/ 目录' },
-    { id: 'toolbar', label: '工具栏管理', svg: 'tool', desc: '每个按钮的停靠区与顺序自由编排' },
-    { id: 'extensions', label: '扩展与插件中心', svg: 'puzzle', desc: '管理、启停、导入插件与模板资源包' },
-    { id: 'about', label: '关于与系统', svg: 'info', desc: '版本号、开源协议与技术栈' }
+  // v0.4.6：导航分三块（用户："手机端设置分三块（电脑设置 / 通用设置 / 竖屏设置）"）。
+  // 分组不只是竖屏好看：它同时回答了"这一项为什么在这儿"——
+  // 「电脑设置」里的项只在并排/桌面形态有意义，「竖屏设置」里的是手机专属开关。
+  const NAV_GROUPS: Array<{ title: string; items: Array<{ id: SettingsSection; label: string; desc: string; svg: IconName }> }> = [
+    {
+      title: '通用设置',
+      items: [
+        { id: 'personalization', label: '个性化与外观', svg: 'palette', desc: '深浅主题、白边重置、同类高亮' },
+        { id: 'storage', label: '存储与自动备份', svg: 'database', desc: '备份周期、快照数量、便携 data/ 目录' },
+        { id: 'extensions', label: '扩展与插件中心', svg: 'puzzle', desc: '管理、启停、导入插件与模板资源包' },
+        { id: 'about', label: '关于与系统', svg: 'info', desc: '版本号、开源协议与技术栈' }
+      ]
+    },
+    {
+      title: '电脑设置',
+      items: [
+        { id: 'editor', label: '编辑器与画布', svg: 'sliders', desc: '布局模式、画布默认宽度、继承机制' },
+        { id: 'toolbar', label: '工具栏管理', svg: 'tool', desc: '每个按钮的停靠区与顺序自由编排' }
+      ]
+    },
+    {
+      title: '竖屏设置',
+      items: [
+        { id: 'portrait', label: '竖屏与触摸', svg: 'phone', desc: '操作栏、长按判定、图层面板高度' }
+      ]
+    }
   ];
+  const NAV_ITEMS = NAV_GROUPS.flatMap((g) => g.items);
 
   return (
     <div className="fluent-settings-page">
@@ -317,18 +341,23 @@ export function Settings(props: Props) {
         </div>
 
         <div className="fluent-nav-list">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              className={"fluent-nav-item" + (section === item.id ? " active" : "")}
-              onClick={() => setSection(item.id)}
-            >
-              <span className="fluent-nav-icon"><Icon name={item.svg} /></span>
-              <div className="fluent-nav-meta">
-                <span className="fluent-nav-title">{item.label}</span>
-                <span className="fluent-nav-desc">{item.desc}</span>
-              </div>
-            </button>
+          {NAV_GROUPS.map((g) => (
+            <div className="fluent-nav-group" key={g.title}>
+              <div className="fluent-nav-group-title">{g.title}</div>
+              {g.items.map((item) => (
+                <button
+                  key={item.id}
+                  className={"fluent-nav-item" + (section === item.id ? " active" : "")}
+                  onClick={() => setSection(item.id)}
+                >
+                  <span className="fluent-nav-icon"><Icon name={item.svg} /></span>
+                  <div className="fluent-nav-meta">
+                    <span className="fluent-nav-title">{item.label}</span>
+                    <span className="fluent-nav-desc">{item.desc}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       </div>
@@ -346,6 +375,70 @@ export function Settings(props: Props) {
 
         {/* v0.4.4：分区切换不再瞬变 —— key 变化重挂载 + 轻量入场动画（bcSwapIn） */}
         <div className="fluent-cards-container" key={section}>
+          {/* ——— 0. 竖屏与触摸（v0.4.6 新增，三条都真的生效）——— */}
+          {section === 'portrait' && (
+            <>
+              <div className="fluent-group-title">底部操作栏</div>
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="sliders" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">显示第二条操作栏</div>
+                  <div className="fluent-card-desc">屏幕最下面第一条是撤销/会话/入口；第二条放工具栏按钮（设备、预览、导出…），可长按上滑展开。关掉它画布就多 72px 高。</div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <label className="fluent-switch">
+                    <input
+                      type="checkbox"
+                      checked={ptPrefs.bar2}
+                      onChange={(e) => setPortraitPrefs({ bar2: e.target.checked })}
+                    />
+                    <span className="fluent-slider" />
+                  </label>
+                </div>
+              </div>
+
+              <div className="fluent-group-title">触摸手感</div>
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="hand" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">长按判定时长</div>
+                  <div className="fluent-card-desc">在画布上按住多久算"长按选中"。短一点更跟手，长一点更不容易手滑误选。</div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <select
+                    className="fluent-select"
+                    value={String(ptPrefs.holdMs)}
+                    onChange={(e) => setPortraitPrefs({ holdMs: Number(e.target.value) })}
+                  >
+                    <option value="300">300 毫秒（灵敏）</option>
+                    <option value="420">420 毫秒（默认）</option>
+                    <option value="600">600 毫秒（防误触）</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="fluent-group-title">图层面板</div>
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="rows" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">面板高度</div>
+                  <div className="fluent-card-desc">竖屏的图层结构从屏幕下方升起，这块给它多高。越高看得越多，留给自己看画布的地方越少。</div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <select
+                    className="fluent-select"
+                    value={String(ptPrefs.sheetVh)}
+                    onChange={(e) => setPortraitPrefs({ sheetVh: Number(e.target.value) })}
+                  >
+                    <option value="35">35%（多看画布）</option>
+                    <option value="42">42%（默认）</option>
+                    <option value="55">55%（多看层级）</option>
+                  </select>
+                </div>
+              </div>
+            </>
+          )}
+
           {/* ——— 1. 个性化与外观 ——— */}
           {section === 'personalization' && (
             <>

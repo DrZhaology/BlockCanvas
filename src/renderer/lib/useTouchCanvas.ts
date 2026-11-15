@@ -22,9 +22,22 @@
 //   宽屏（split）完全不受影响，桌面端一条老逻辑都不动。
 // ============================================================================
 import { useEffect, useRef } from 'react';
+import { portraitPrefsNow } from './portraitPrefs';
 
-const HOLD_MS = 420;
+const HOLD_MS = 420; // 兜底值；实际用设置页「竖屏设置 → 长按判定」里的值
+const holdMs = () => portraitPrefsNow().holdMs || HOLD_MS;
 const MOVE_TOL = 8;
+/**
+ * 「再来一次长按才算取消选中」的闸门：
+ *   按住 → 抬起 之间只允许 doSelect 生效一次。实测同一次按住里长按定时器会被
+ *   二次执行（约 0.7s 后又一次），第一次把元素选中、第二次就走到"再长按一次取消它"
+ *   的分支，把刚选中的又取消掉 —— 现象就是"长按元素选不上"
+ *   （probe-portrait-input / probe-touch-canvas 都在这条上翻过车）。
+ *   抬起后才把闸门打开：真正想取消选中 = 松手再按一次，行为没变。
+ */
+let holdArmed = false;
+/** 手指是否还按着（模块级：跨监听实例也能看到）。用来丢掉"手指已抬起后才开火"的残留定时器 */
+let pressDown = false;
 
 type Pt = { x: number; y: number };
 
@@ -59,11 +72,17 @@ export function useTouchCanvas(opts: {
       return Math.hypot(a.x - b.x, a.y - b.y);
     };
 
-    /** 长按落点命中哪个画布元素（没有就是空白） */
+    /** 长按落点命中哪个画布元素（没有就是空白）
+     *  ⚠ 用 elementsFromPoint 从栈顶往下找，而不是只看最上层那一个：
+     *    选中之后画布上会盖一层选中框/内联编辑框（它们不是 [data-bc-id]），
+     *    只取最上层会得到 null → 明明按在元素上却"取消选中"（实测的真 bug）。 */
     const hitId = (x: number, y: number): string | null => {
-      const el = document.elementFromPoint(x, y) as HTMLElement | null;
-      const node = el?.closest?.('.canvas [data-bc-id]') as HTMLElement | null;
-      return node?.getAttribute('data-bc-id') ?? null;
+      const list = document.elementsFromPoint(x, y) as HTMLElement[];
+      for (const el of list) {
+        const node = el?.closest?.('.canvas [data-bc-id]') as HTMLElement | null;
+        if (node) return node.getAttribute('data-bc-id');
+      }
+      return null;
     };
 
     const doSelect = (x: number, y: number) => {
@@ -73,9 +92,12 @@ export function useTouchCanvas(opts: {
       const id = hitId(x, y);
       if (!id) { st.selectElement(null); return; }
       const cur: string[] = st.scene.selectedIds ?? (st.scene.selectedId ? [st.scene.selectedId] : []);
+      const armed = holdArmed;
+      holdArmed = false; // 本次按住用掉了这一下
       if (cur.length === 0) { st.selectElement(id); return; }
       // 已在选区里 → 再长按一次取消它（多选的退出口；否则只能靠点空白全清）
       if (cur.includes(id)) {
+        if (!armed) return; // 同一次按住里的"第二次触发"不算数
         if (cur.length === 1) st.selectElement(null);
         else if (typeof st.toggleSelect === 'function') st.toggleSelect(id);
         else st.selectElement(id);
@@ -87,6 +109,7 @@ export function useTouchCanvas(opts: {
     };
 
     const onDown = (e: PointerEvent) => {
+      pressDown = true;
       const w = wrap();
       if (!w || !w.contains(e.target as Node)) return;
       // 竖屏下画布这块完全由本层接管：不让画布自己的 pointerdown 选元素
@@ -106,9 +129,11 @@ export function useTouchCanvas(opts: {
       longPressed = false;
       window.clearTimeout(holdTimer);
       holdTimer = window.setTimeout(() => {
+        if (longPressed) return; // 同一次按住里定时器只许生效一次
+        if (!pressDown) return; // 手指已经抬起了：这是残留定时器，丢掉
         longPressed = true;
         if (start) doSelect(start.x, start.y);
-      }, HOLD_MS);
+      }, holdMs());
     };
 
     const onMove = (e: PointerEvent) => {
@@ -145,7 +170,7 @@ export function useTouchCanvas(opts: {
       pts.delete(e.pointerId);
       if (pts.size < 2) pinch = null;
       window.clearTimeout(holdTimer);
-      if (pts.size === 0) { start = null; longPressed = false; }
+      if (pts.size === 0) { start = null; longPressed = false; holdArmed = true; pressDown = false; }
     };
 
     /**

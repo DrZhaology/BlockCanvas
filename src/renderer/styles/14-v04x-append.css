@@ -1354,3 +1354,24 @@ html[data-bc-dark] .update-mirror-tip { color: var(--text-muted); }
    ========================================================================== */
 .update-page { overflow-y: auto; }
 .update-body { overflow: visible; min-height: auto; }
+
+/* ==========================================================================
+   v0.4.6：属性行的退场动画（用户两次提到："这个退出动画是往右边直接滑出去"）
+   --------------------------------------------------------------------------
+   历史原因：`components/inspector/shared.ts` 的 animateRemove() 一直在给被删的行
+   加 `.is-removing` 类，然后 340ms 后才真正移除 —— 但**没有任何 CSS 接这个类**，
+   所以实际表现是"点了删除，行原地消失"，看起来像动画丢了。
+
+   动画只负责"滑出 + 淡出"，不负责收高度：删除完成后列表本来就会重排，
+   在动画里同时压 max-height 会和重排打架（中途闪一下）。
+   ========================================================================== */
+.prop-row.is-removing,
+.prop-card.is-removing {
+  animation: propRowOut 340ms var(--ease-exit, cubic-bezier(0.4, 0, 1, 1)) forwards;
+  pointer-events: none;
+}
+@keyframes propRowOut {
+  from { opacity: 1; transform: translateX(0); }
+  60%  { opacity: 0.35; }
+  to   { opacity: 0; transform: translateX(64px); }
+}

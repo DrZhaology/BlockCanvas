@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import { useScene, CONTAINER_TAGS } from '@store/sceneStore';
 import type { SceneElement } from '@lib/types';
@@ -25,7 +26,7 @@ const TYPE_LABELS: Record<string, string> = {
   form: 'form 表单', img: 'img 图片', hr: 'hr 分割线', br: 'br 换行'
 };
 
-export function LayerTree() {
+export function LayerTree({ portrait = false }: { portrait?: boolean }) {
   const root = useScene((s) => s.scene.root);
   const selectedIds = useScene((s) => s.scene.selectedIds);
   const select = useScene((s) => s.selectElement);
@@ -72,7 +73,7 @@ export function LayerTree() {
             onClick={() => toggleDrag(!dragEnabled)}
             title={dragEnabled ? '拖拽排序已开启（可直接按住节点拖动重排）。点击关闭' : '点击开启拖拽排序模式'}
           >
-            <Icon name="hand" size={12} /> 拖拽排序
+            <Icon name="hand" size={12} /> {portrait ? '开启拖动' : '拖拽排序'}
           </button>
         </div>
       </div>
@@ -115,6 +116,7 @@ export function LayerTree() {
           parentId={root.id}
           selectedIds={selectedIds}
           dragEnabled={dragEnabled}
+          portrait={portrait}
           draggedId={draggedId}
           setDraggedId={setDraggedId}
           dropTarget={dropTarget}
@@ -136,6 +138,8 @@ function LayerRow(props: {
   parentId: string;
   selectedIds: string[];
   dragEnabled: boolean;
+  /** 竖屏档位：行内操作按钮不渲染，改成"长按出行菜单"（用户要求） */
+  portrait?: boolean;
   draggedId: string | null;
   setDraggedId: (id: string | null) => void;
   dropTarget: { id: string; pos: 'above' | 'inside' | 'below' } | null;
@@ -143,10 +147,14 @@ function LayerRow(props: {
 }) {
   const {
     node, depth, index, parentId, selectedIds,
-    dragEnabled, draggedId, setDraggedId, dropTarget, setDropTarget
+    dragEnabled, portrait = false, draggedId, setDraggedId, dropTarget, setDropTarget
   } = props;
   const [expanded, setExpanded] = useState(true);
   const rowRef = useRef<HTMLDivElement>(null);
+  /** 竖屏长按菜单的位置（null=关闭）。拖动模式下永远不开（用户："拖动模式不弹右键菜单"） */
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const holdTimer = useRef(0);
+  const holdFired = useRef(false);
 
   const isSelected = selectedIds.includes(node.id);
   const select = useScene((s) => s.selectElement);
@@ -163,6 +171,12 @@ function LayerRow(props: {
 
   const isContainer = CONTAINER_TAGS.has(node.type);
   const canPasteInto = isContainer;
+
+  /** 抬手 / 移出这一行就取消长按计时（否则滑一下就误弹菜单） */
+  const cancelHold = () => {
+    if (holdTimer.current) { window.clearTimeout(holdTimer.current); holdTimer.current = 0; }
+  };
+  useEffect(() => cancelHold, []);
 
   // 选中元素时自动滚动到该行
   //
@@ -284,9 +298,24 @@ function LayerRow(props: {
         onDrop={handleDrop}
         onPointerDown={(e) => {
           e.stopPropagation();
+          // 竖屏：长按 450ms 弹出这一行的操作菜单（行内按钮已全部删除）。
+          // 拖动模式下手势属于拖拽，不许再弹菜单（用户："拖动模式不弹右键菜单"）。
+          if (portrait && !dragEnabled) {
+            holdFired.current = false;
+            if (holdTimer.current) window.clearTimeout(holdTimer.current);
+            const x = e.clientX;
+            const y = e.clientY;
+            holdTimer.current = window.setTimeout(() => {
+              holdFired.current = true;
+              setMenuAt({ x, y });
+            }, 450);
+          }
           if (e.ctrlKey || e.metaKey) toggleSelect(node.id);
           else select(node.id);
         }}
+        onPointerUp={cancelHold}
+        onPointerLeave={cancelHold}
+        onPointerCancel={cancelHold}
       >
         {node.children.length > 0 ? (
           <button
@@ -310,6 +339,8 @@ function LayerRow(props: {
         {relSel && <span className="layer-rel-badge" title={relSel}><Icon name="bolt" size={10} /></span>}
         {cls && !relSel && <span className="layer-cls-badge" title={cls}>.{cls.split(/\s+/)[0]}</span>}
         {node.text && <span className="layer-text-preview">{"· " + node.text}</span>}
+        {/* v0.4.6 竖屏：这排按钮全部不渲染，改成"长按出行菜单"（用户要求） */}
+        {!portrait && (
         <span className="layer-actions" onClick={(e) => e.stopPropagation()}>
           <button title="上移" onClick={() => moveChild(node.id, 'up')}><Svg><ChevronUp /></Svg></button>
           <button title="下移" onClick={() => moveChild(node.id, 'down')}><Svg><ChevronDown /></Svg></button>
@@ -326,6 +357,7 @@ function LayerRow(props: {
           )}
           <button title="删除" className="layer-del" onClick={() => removeElement(node.id)}><Svg><Trash /></Svg></button>
         </span>
+        )}
       </div>
       {expanded && node.children.length > 0 && (
         <div className="layer-children">
@@ -342,10 +374,37 @@ function LayerRow(props: {
               setDraggedId={setDraggedId}
               dropTarget={dropTarget}
               setDropTarget={setDropTarget}
+              portrait={portrait}
             />
           ))}
         </div>
       )}
+
+      {/* 竖屏：长按这一行弹出的操作菜单（Portal 到 body，不受面板裁切）。
+          往上偏 12px 出在手指上方 —— 松手那一下不会直接点到第一项。 */}
+      {portrait && menuAt && (() => {
+        const W = 172;
+        const H = 3 * 44 + 12;
+        const left = Math.min(Math.max(8, menuAt.x - W / 2), Math.max(8, window.innerWidth - W - 8));
+        const top = Math.min(Math.max(8, menuAt.y - H - 12), Math.max(8, window.innerHeight - H - 8));
+        return createPortal(
+          <>
+            <div className="layer-menu-scrim" onPointerDown={() => setMenuAt(null)} />
+            <div className="layer-menu pt-menu-panel" style={{ left, top, width: W }} role="menu">
+              {/* 只放这三项（用户第三问选的是"只放删除 / 复制 / 粘贴"）：
+                  调顺序交给「开启拖动」，不在菜单里再放一份。 */}
+              <button role="menuitem" onClick={() => { removeElement(node.id); setMenuAt(null); }}>删除</button>
+              <button role="menuitem" onClick={() => { duplicateElement(node.id); setMenuAt(null); }}>复制</button>
+              <button
+                role="menuitem"
+                disabled={!canPasteInto || !clipboard}
+                onClick={() => { pasteInto(node.id); setMenuAt(null); }}
+              >粘贴到内部</button>
+            </div>
+          </>,
+          document.body
+        );
+      })()}
     </div>
   );
 }

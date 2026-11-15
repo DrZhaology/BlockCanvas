@@ -222,11 +222,14 @@ export function PortraitBar1(props: PortraitBar1Props) {
  * 可用性判定、撤销栈联动等一大堆逻辑，重写一遍必然漂移。这里只改**外形**，
  * 逻辑一份不动 —— 等按钮清单定了再谈裁剪。
  */
-export function PortraitBar2({ zoom, setZoom, canvasWidth, setCanvasWidth }: {
+export function PortraitBar2({ zoom, setZoom, canvasWidth, setCanvasWidth, layersOpen, onOpenLayers }: {
   zoom: number;
   setZoom: (z: number) => void;
   canvasWidth: string;
   setCanvasWidth: (v: string) => void;
+  layersOpen: boolean;
+  /** 打开下方图层面板。已经开着时**不关**（图层面板不许一键关掉，见 PortraitLayers 注释） */
+  onOpenLayers: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const altMode = useAltMode();
@@ -276,6 +279,22 @@ export function PortraitBar2({ zoom, setZoom, canvasWidth, setCanvasWidth }: {
         <div className="pt-bar2-grip" aria-hidden="true" />
       </div>
       <div className="pt-bar2-inner">
+        {/* 竖屏「图层」入口：把图层面板从右侧搬到屏幕下方（用户要求）。
+            它排在工具栏之前，也就是「更多」之后、设备之前。 */}
+        <button
+          type="button"
+          className={'pt-layer-btn' + (layersOpen ? ' is-open' : '')}
+          aria-pressed={layersOpen}
+          title="图层（在下方打开层级结构，左侧可切到属性）"
+          onClick={onOpenLayers}
+        >
+          <svg width="18" height="18" viewBox="0 0 22 22" aria-hidden="true">
+            <path d="M11 3.5 3.5 7.5 11 11.5l7.5-4z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+            <path d="m4.5 11 6.5 3.5 6.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="m4.5 14.5 6.5 3.5 6.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          图层
+        </button>
         <Toolbar
           canvasWidth={canvasWidth}
           onCanvasWidthChange={setCanvasWidth}

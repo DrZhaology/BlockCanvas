@@ -56,8 +56,11 @@ export function TabCloseGuard() {
       const st = useTabStore.getState();
       const tab = st.tabs.find((t) => t.id === id);
       if (!tab) return;
-      // 干净的标签不用问，直接关（关掉不丢东西）
-      if (!tab.isDirty) { st.closeTab(id); return; }
+      // 干净的标签不用问，直接关（关掉不丢东西）——**空页面也算干净**：
+      // 一个还没放任何元素的标签（新建的、或者画了又全删掉的），问它"要不要保存"
+      // 只是噪音。用户抱怨过弹窗打扰，这条短路是故意的。
+      const empty = !(tab.scene?.root?.children?.length);
+      if (!tab.isDirty || empty) { st.closeTab(id); return; }
       setPending({ id, name: tab.name, hasFile: Boolean(tab.filePath), anchor: d.anchor });
     };
     window.addEventListener('bc:request-close-tab', onReq);

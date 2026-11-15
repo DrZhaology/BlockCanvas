@@ -41,7 +41,7 @@
    这里把它往下多伸一条栏的高度，正好压住第二条、在第一条之前停下
    （第一条必须始终可点，否则抽屉一开就没法关）。
    用 --pt-bar2-h 而不是写死 58px：展开态那条栏会变高，后面调这里就行。 */
-.app[data-shell='stack'] { --pt-bar2-h: 72px; }
+.app[data-shell='stack'] { --pt-bar2-h: 72px; --pt-bar1-h: 56px; }
 .app[data-shell='stack'] .elem-pane-wrap,
 .app[data-shell='stack'] .right-pane-wrap {
   bottom: calc(-1 * var(--pt-bar2-h, 72px));
@@ -390,14 +390,26 @@
 
 /* ── 展开态：全部按钮换行铺开，超过 4 行内部滚（不把画布挤没） */
 .pt-bar2.is-expanded { max-height: 52vh; }
-.pt-bar2.is-expanded .pt-bar2-inner { overflow-y: auto; }
+.pt-bar2.is-expanded .pt-bar2-inner {
+  overflow-y: auto;
+  /* 展开时「图层」按钮与工具栏各占一行：flex-wrap 让工具栏拿到 100% 宽，
+     否则它会跟图层按钮挤在同一行，.tb-main 被压成 50px 定高、换行的按钮溢出框外
+     （probe-portrait-bars 的"展开态主按钮区更高"就是这么挂的）。 */
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.pt-bar2.is-expanded .pt-bar2-inner > .toolbar {
+  flex: 1 1 100%;
+  min-width: 0;
+  height: auto;
+}
 .pt-bar2.is-expanded .toolbar {
   flex-wrap: wrap;
   height: auto;
   row-gap: 4px;
   padding: 0 6px 8px;
 }
-.pt-bar2.is-expanded .tb-main { flex-wrap: wrap; flex: 1 1 100%; order: 2; overflow: visible; }
+.pt-bar2.is-expanded .tb-main { flex-wrap: wrap; flex: 1 1 100%; order: 2; overflow: visible; height: auto; }
 .pt-bar2.is-expanded .tb-right { order: 1; margin-left: auto; }
 
 /* 栏内工具栏不要自己的上边框和背景（栏体已经有了，别套两层） */
@@ -406,6 +418,156 @@
   border-top: 0;
   box-shadow: none;
 }
+
+/* ── 竖屏「图层」底部面板（用户：图层面板放下面、左侧切图层 / 属性）────────
+   三条硬规矩：
+     1. 底边钉在**第一条栏上沿** → 天然盖住第二条操作栏、永远不盖第一条；
+     2. 图层面板**不能直接关**（没有关闭按钮、点旁边不关、下滑不关），
+        离开它只能切到「属性」（那一下收起本面板 + 打开右侧属性抽屉）。
+        这是用户明确要的防误触，别顺手改成"点外面就关"；
+     3. 切换要丝滑：transform + opacity 240ms，配 --ease-out。 */
+.pt-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--pt-bar1-h, 56px);
+  height: 42vh;
+  min-height: 220px;
+  z-index: 55;
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.16);
+  transform: translateY(calc(100% + 10px));
+  visibility: hidden;
+  transition: transform 240ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+              visibility 0s linear 240ms;
+  will-change: transform;
+}
+.pt-sheet.is-open {
+  transform: translateY(0);
+  visibility: visible;
+  transition: transform 240ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+              visibility 0s linear 0s;
+}
+
+/* 左侧切换条：图层 / 属性 */
+.pt-sheet-rail {
+  flex: 0 0 58px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 6px;
+  border-right: 1px solid var(--border);
+  box-sizing: border-box;
+}
+.pt-sheet-tab {
+  flex: 0 0 auto;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+.pt-sheet-tab.is-active {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+  color: var(--accent);
+  font-weight: 600;
+}
+.pt-sheet-tab:active { background: var(--bg-hover, rgba(0, 0, 0, 0.08)); }
+.pt-sheet-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* 面板里的图层树：整棵在面板内滚；「开启拖动」吸顶固定 */
+.pt-sheet .layer-tree {
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 0 8px;
+}
+.pt-sheet .layer-tree-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-panel);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+/* 面板自己有「图层」标题了，树里那条标题重复，去掉 */
+.pt-sheet .layer-tree-title { display: none; }
+.pt-sheet .layer-drag-toggle-wrap { margin: 0; }
+.pt-sheet .layer-drag-toggle-btn { min-height: 36px; padding: 0 12px; font-size: 12.5px; }
+/* 只留最干净的层级结构：关系选择器 / 类名徽标一律不显示 */
+.pt-sheet .layer-rel-badge,
+.pt-sheet .layer-cls-badge { display: none; }
+.pt-sheet .layer-row { min-height: 44px; }
+.pt-sheet .layer-name { font-size: 13px; }
+.pt-sheet .root-row .field-hint { display: none; }
+.pt-sheet .layer-drag-warn { margin: 0 10px 6px; }
+
+/* 长按图层行弹出的操作菜单（五档：删除 / 复制 / 粘贴 / 上移 / 下移） */
+.layer-menu-scrim { position: fixed; inset: 0; z-index: 9996; background: transparent; }
+.layer-menu {
+  position: fixed;
+  z-index: 9997;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.26);
+  animation: ptMenuIn 140ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+}
+.layer-menu button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 0 12px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.layer-menu button:active:not(:disabled) { background: var(--bg-hover, rgba(0, 0, 0, 0.08)); }
+.layer-menu button:disabled { opacity: 0.4; cursor: default; }
+
+/* 「图层」入口按钮：站在第二条操作栏最左边（更多 之后） */
+.pt-bar2-inner { display: flex; align-items: stretch; }
+.pt-layer-btn {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 52px;
+  min-height: 44px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font-size: 9.5px;
+  line-height: 1.15;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.pt-layer-btn.is-open { background: var(--bg-hover, rgba(0, 0, 0, 0.06)); color: var(--accent); }
 
 /* ── 竖屏子页面适配：设置页 / 使用手册 ─────────────────────────────────────
    实测（412×860，shots-portrait-pages.mjs）：
@@ -458,6 +620,71 @@
   min-width: 0;
 }
 
+/* 设置导航分三块（通用 / 电脑 / 竖屏）：宽屏是小标题，竖屏那条横滑索引里
+   变成"分组标签 + 该组条目"，读起来还是三块，不会糊成一条。 */
+.fluent-nav-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  padding: 10px 12px 4px;
+}
+.fluent-nav-group:first-child .fluent-nav-group-title { padding-top: 2px; }
+.app[data-shell='stack'] .fluent-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.app[data-shell='stack'] .fluent-nav-group-title {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  font-size: 11px;
+  border-left: 1px solid var(--border);
+  line-height: 1.1;
+}
+.app[data-shell='stack'] .fluent-nav-group:first-child .fluent-nav-group-title {
+  border-left: 0;
+  padding-left: 0;
+}
+
+/* ── 项目中心：竖屏头两行放不下（实测 .pc-header-right 越界 429px）─────────
+   宽屏那一行是「返回 + 标题 + 计数 + ? | 搜索 + 三个按钮」，竖屏 412px 装不下。
+   做法：头部分成三行 —— 第一行 返回+标题，第二行 搜索吃满宽，第三行 三个按钮横滑。 */
+.app[data-shell='stack'] .pc-page { width: 100%; min-width: 0; }
+.app[data-shell='stack'] .pc-header {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px;
+}
+.app[data-shell='stack'] .pc-header-left {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  min-width: 0;
+}
+.app[data-shell='stack'] .pc-header-right {
+  flex-wrap: nowrap;
+  min-width: 0;
+  width: 100%;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.app[data-shell='stack'] .pc-header-right::-webkit-scrollbar { width: 0; height: 0; }
+.app[data-shell='stack'] .pc-search-input {
+  flex: 1 1 auto;
+  min-width: 120px;
+  max-width: 100%;
+}
+.app[data-shell='stack'] .pc-header-right .btn-mini { flex: 0 0 auto; }
+.app[data-shell='stack'] .pc-title { font-size: 14px; }
+.app[data-shell='stack'] .pc-body { padding: 8px 10px 12px; }
+/* 卡片一列（两张并排时缩略图只剩 160px，标题全被挤成省略号） */
+.app[data-shell='stack'] .pc-grid { grid-template-columns: 1fr; }
+
 /* ── 设置页：竖屏要**换布局**，不是把东西压窄 ─────────────────────────────
    实测（10-settings.png）：宽屏那套是"左导航 + 右正文"两栏；
    竖屏照搬的结果是导航占掉 2/3 宽、正文被挤成一条竖排文字（每行一个词）。
@@ -486,7 +713,19 @@
 .app[data-shell='stack'] .fluent-settings-page .fluent-nav-item {
   flex: 0 0 auto;
   width: auto;
+  /* 竖屏那条索引里不显示说明文字：说明一长，条目就变成 232px 宽的巨块，
+     一条能占掉半个屏宽（实测 overflow 156px）。标题足够认路了。 */
+  min-height: 38px;
+  padding: 0 10px;
+  max-width: none;
 }
+.app[data-shell='stack'] .fluent-settings-page .fluent-nav-desc { display: none; }
+.app[data-shell='stack'] .fluent-settings-page .fluent-nav-meta {
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+}
+.app[data-shell='stack'] .fluent-settings-page .fluent-nav-title { white-space: nowrap; font-size: 12.5px; }
 .app[data-shell='stack'] .fluent-settings-page .fluent-main {
   width: 100%;
   max-width: none;

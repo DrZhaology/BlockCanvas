@@ -157,7 +157,10 @@ function main() {
    * 这里保留成一条"计数断言"：只要求**数量不再增长**（防止有人新增重复），
    * 并把当前值钉在 BASELINE。要降就得真的去合并，而不是悄悄放宽。
    */
-  const BASELINE = 217;
+  // v0.4.6 竖屏：+2（36 号分片新增 `.app[data-shell='stack'] .elem-pane-wrap` /
+  // `.right-pane-wrap` 的抽屉几何覆盖，以及 `.app[data-shell='stack'] .pt-bar2 .toolbar`
+  // 的层级归零）。这两条都是"竖屏要盖掉桌面写法"，合并会牵动宽屏回归，先记账。
+  const BASELINE = 219;
   check(`跨域重复选择器不超过基线（当前 ${realConflicts.length} / 基线 ${BASELINE}）`,
     realConflicts.length <= BASELINE,
     realConflicts.length > BASELINE
