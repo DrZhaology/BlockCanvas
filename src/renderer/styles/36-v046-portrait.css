@@ -23,9 +23,17 @@
 
 /* ── 竖屏画布：去掉滚动条（用户："竖屏画布右侧的滚动条删除"）─────────────
    原生滚动条与自绘的那一层都关掉。竖屏改成单指平移（后续切片实现），
-   滚动条既挡内容又容易被误拖。 */
+   滚动条既挡内容又容易被误拖。
+
+   v0.4.6 第 43 批：**禁掉浏览器自带的双指缩放**。
+   默认 touch-action: auto 时，触摸屏上浏览器会自己接管双指手势去做"页面缩放"——
+   它和我们的手势层抢同一批 pointer 事件，表现就是"缩放一顿一顿、跟手不了"。
+   竖屏下画布的平移与缩放全部由手势层负责（单指平移 / 双指缩放），所以这里
+   直接 touch-action: none，浏览器别再插手；顺带禁掉下拉刷新。 */
 .app[data-shell='stack'] .canvas-wrap {
   scrollbar-width: none;
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 .app[data-shell='stack'] .canvas-wrap::-webkit-scrollbar { width: 0; height: 0; }
 /* 自绘滚动条那一层看 `lib/overlayScroll.ts` 的 measurable()：竖屏直接不画。
@@ -493,6 +501,29 @@
   font-weight: 600;
 }
 .pt-sheet-tab:active { background: var(--bg-hover, rgba(0, 0, 0, 0.08)); }
+/* 左侧栏第 44 批扩成四件事（图层 / 属性 / 拖动 / 关闭），
+   42vh 的面板里 52px 一行会顶出去 → 页签压到 44（仍是可点尺寸），
+   下面两颗工具按钮贴底（rail-gap 撑开中间空白）。 */
+.pt-sheet-tab { min-height: 44px; font-size: 12.5px; }
+.pt-sheet-rail-gap { flex: 1 1 auto; min-height: 8px; }
+.pt-sheet-tool {
+  flex: 0 0 auto;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+}
+.pt-sheet-tool:active { background: var(--bg-hover, rgba(0, 0, 0, 0.08)); }
+.pt-sheet-tool.is-on { background: var(--accent-weak, rgba(56, 132, 255, 0.12)); color: var(--accent); }
 .pt-sheet-body {
   flex: 1 1 auto;
   min-width: 0;
@@ -884,6 +915,13 @@
   z-index: 78;
   background: rgba(10, 16, 26, 0.34);
   animation: bcFadeIn 140ms var(--ease-out, ease);
+  /* v0.4.6 第 45 批：退场时遮罩跟着淡出（以前是随抽屉一起被瞬间卸载，
+     所以"关掉"看起来是硬切）。JS 只负责把抽屉滑出去，这里补一层透明度过渡。 */
+  transition: opacity var(--dur-drawer, 0.24s) var(--ease-out, ease);
+}
+.help-drawer-scrim.is-closing {
+  opacity: 0;
+  pointer-events: none;
 }
 .help-drawer {
   position: fixed;
@@ -901,12 +939,19 @@
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
   box-shadow: 10px 0 32px rgba(0, 0, 0, 0.22);
-  animation: helpDrawerIn 220ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+  /* v0.4.6 第 45 批：进场 / 退场 / 拖拽全部由这一个变量驱动（JS 写值）。
+     ⚠ 不要再用 keyframes 播进场：animation 会压过 transform 声明，
+       进场那 220ms 里手指按住抽屉是拖不动的（打断就失效了）。 */
+  transform: translateX(var(--help-drawer-x, 0px));
+  transition: transform var(--dur-drawer, 0.24s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+  will-change: transform;
+  /* 纵向还给浏览器（目录能滚），横向由手势层接管（滑动关闭） */
+  touch-action: pan-y;
 }
-@keyframes helpDrawerIn {
-  from { transform: translateX(-100%); }
-  to   { transform: translateX(0); }
-}
+/* 拖拽中不能有过渡，否则抽屉会"慢半拍地追手指" */
+.help-drawer.is-dragging { transition: none; }
+/* 退场途中仍然可点（用户要求"打断"）：所以这里**不能**写 pointer-events: none */
+.help-drawer.is-closing { cursor: grabbing; }
 .help-drawer-head {
   display: flex;
   align-items: center;

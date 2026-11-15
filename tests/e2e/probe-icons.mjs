@@ -2,7 +2,7 @@
 // 目的：图标从"手写在 Icon.tsx 里的 JSX"改成"assets/icons/*.svg + 代码生成"之后，证明四件事：
 //   ① 生成器与 svg 目录同步（改了 svg 忘了生成，能被拦住）；
 //   ② 每个 svg 都符合图标规范（24×24 统一外壳、不自带尺寸/颜色、只用基础图形）；
-//   ③ 生成的 Icon.tsx 里 140 个片段与 svg 源文件逐个一致（静态比对，全覆盖）；
+//   ③ 生成的 Icon.tsx 里每个片段都与 svg 源文件逐个一致（静态比对，全覆盖）；
 //   ④ 界面里真正渲染出来的图标外壳正确、图形与源文件一致（运行时抽样，生产包里也做得到）。
 // 用法：node tests/e2e/probe-icons.mjs
 import { createRequire } from 'module';
@@ -76,7 +76,8 @@ async function main() {
   // ── ② svg 规范 ──────────────────────────────────────────────────
   const files = existsSync(SVG_DIR) ? readdirSync(SVG_DIR).filter((f) => /\.svg$/i.test(f)).sort() : [];
   check('图标目录存在且非空', files.length > 0, `${files.length} 个 .svg`);
-  check('图标数量 = 140（与 v0.4.5 手写集合一一对应）', files.length === 140, `${files.length}`);
+  // 数量基线随图标集增长（v0.4.6 第 45 批：+ zoom-out）
+  check('图标数量 = 141（v0.4.5 的 140 + v0.4.6 的 zoom-out）', files.length === 141, `${files.length}`);
 
   const badWrapper = [];
   const selfSize = [];
@@ -106,7 +107,7 @@ async function main() {
 
   const unionNames = [...tsx.slice(tsx.indexOf('export type IconName'), tsx.indexOf('const P: Record'))
     .matchAll(/'([A-Za-z][A-Za-z0-9]*)'/g)].map((m) => m[1]);
-  check('IconName 联合类型含 140 个名字', unionNames.length === 140, `${unionNames.length}`);
+  check('IconName 联合类型含 141 个名字', unionNames.length === 141, `${unionNames.length}`);
 
   const pStart = tsx.indexOf('const P: Record');
   const pEnd = tsx.indexOf('export function Icon');
@@ -115,7 +116,7 @@ async function main() {
   const fre = /^ {2}([A-Za-z][A-Za-z0-9]*): \(\r?\n([\s\S]*?)\r?\n {2}\),?\s*$/gm;
   let fm;
   while ((fm = fre.exec(pBody))) frags[fm[1]] = fm[2];
-  check('P 映射表里有 140 个片段', Object.keys(frags).length === 140, `${Object.keys(frags).length}`);
+  check('P 映射表里有 141 个片段', Object.keys(frags).length === 141, `${Object.keys(frags).length}`);
 
   const mismatched = [];
   const missingFile = [];
@@ -129,7 +130,7 @@ async function main() {
     if (want !== got) mismatched.push(`${name}\n    svg : ${want}\n    tsx : ${got}`);
   }
   check('每个图标名都有同名 svg 文件', missingFile.length === 0, missingFile.slice(0, 5).join(', '));
-  check('140 个片段的图形与 svg 源文件逐个一致', mismatched.length === 0,
+  check('每个片段的图形都与 svg 源文件一致', mismatched.length === 0,
     mismatched.length ? `${mismatched.length} 个不一致\n  ` + mismatched.slice(0, 2).join('\n  ') : '');
 
   // ── ④ 运行时：外壳 + 抽样比对 ───────────────────────────────────

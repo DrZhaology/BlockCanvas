@@ -13,6 +13,7 @@ import { widthLabel, widthToDevice, DEVICE_LIST, requestDevice, useEffectiveDevi
 import { runHealthCheck, hasBlocking } from '@lib/healthCheck';
 import { HealthWizard } from './HealthWizard';
 import { AnchoredPanel } from './AnchoredPanel';
+import { PortraitToolbar } from './portrait/PortraitToolbar';
 import { TaskButton } from './TaskButton';
 import { appAlert } from '@lib/appConfirm';
 import { Icon, resolveIconName, type IconName } from './Icon';
@@ -34,30 +35,20 @@ const ZOOM_MIN = 50;   // % 最小
 const ZOOM_MAX = 200;  // % 最大
 
 /**
- * v0.4.6 竖屏第二条操作栏的按钮顺序（用户逐字指定）：
- *   更多 / 设备 / 导出前体检 / 操作（删除+副本）/ 预览 / 轮廓 /
- *   导出 HTML / 全部项目 / 导出元素模板
- * 「更多」不在这里 —— 它是 `moreItems` 的入口按钮，由 CSS 排到最左。
- * 不在这个表里的按钮（撤销/重做/复制/剪切/粘贴/取消选中/缩放）全部进「更多」。
+ * 工具栏里的一个内建操作。v0.4.6 竖屏第二条栏（PortraitToolbar）要复用这张表
+ * （文案 / 图标 / disabled 判定只写一份，两边不能各说各的），所以把类型提到模块级导出。
  */
-const PORTRAIT_MAIN = [
-  'blk.device',
-  'blk.clsid',
-  'duplicate',
-  'delete',
-  'preview',
-  'outline',
-  'export-html',
-  'projects-center',
-  'export-template'
-];
+export type ToolbarOp = {
+  id: string; label: () => string; title: string; cls: string; icon: IconName;
+  onClick: () => void; disabled?: () => boolean; dock?: 'main' | 'right';
+};
 
 export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange, portrait = false }: {
   canvasWidth: string;
   onCanvasWidthChange: (v: string) => void;
   zoom: number;
   onZoomChange: (z: number) => void;
-  /** v0.4.6 竖屏档位：按用户指定的 9 个按钮排序，其余收进「更多」 */
+  /** v0.4.6 竖屏档位：固定 9 个按钮 + 三个二级菜单（见 PortraitToolbar），桌面端排序逻辑完全不参与 */
   portrait?: boolean;
 }) {
   const scene = useScene((s) => s.scene);
@@ -210,11 +201,6 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange, 
     if (res.canceled) return;
     if (res.ok) void appAlert('模板已导出：\n' + res.path, '导出成功');
     else void appAlert('导出失败：' + (res.error ?? '未知错误'), '导出失败');
-  };
-
-  type ToolbarOp = {
-    id: string; label: () => string; title: string; cls: string; icon: IconName;
-    onClick: () => void; disabled?: () => boolean; dock?: 'main' | 'right';
   };
 
   // —— 全部内建按钮（注册进 toolbarStore，停靠默认值见 dock 字段）——
@@ -502,34 +488,16 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange, 
   };
 
   // —— 分组查找表 + 三区分配 ——
-  const sorted = useMemo(() => {
-    const base = getSortedItems(items, userOrder);
-    if (!portrait) return base;
-    // 竖屏：主区按用户指定顺序，其余保持原排序（进「更多」菜单）
-    const idx = (id: string) => {
-      const i = PORTRAIT_MAIN.indexOf(id);
-      return i >= 0 ? i : 900 + base.findIndex((x) => x.id === id);
-    };
-    return [...base].sort((a, b) => idx(a.id) - idx(b.id));
-  }, [items, userOrder, portrait]);
+  // （v0.4.6：竖屏不再走这套 —— 它固定 9 个按钮，见 PortraitToolbar。这里只管桌面端。）
+  const sorted = useMemo(() => getSortedItems(items, userOrder), [items, userOrder]);
   const groupByItem = useMemo(() => {
-    // v0.4.6 竖屏：把「副本 + 删除」并成**一个「操作」组按钮**
-    // （用户："操作（把删除和副本塞里面）"）。桌面端的组来自设置，竖屏用固定合成组。
-    const src = portrait
-      ? [{ id: 'pt-ops', label: '操作', dock: 'main' as const, itemIds: ['duplicate', 'delete'] }]
-      : groups;
     const m = new Map<string, ToolbarGroup>();
-    for (const g of src as ToolbarGroup[]) for (const id of g.itemIds) m.set(id, g);
+    for (const g of groups) for (const id of g.itemIds) m.set(id, g);
     return m;
-  }, [groups, portrait]);
+  }, [groups]);
 
   // 组内成员的最终停靠跟随「组」；独立按钮用自身 dock
   const placementOf = (it: ToolbarItem): ToolbarDock => {
-    // v0.4.6 竖屏档位：按用户指定的顺序把 9 个按钮排进主区，其余全部收进「更多」。
-    // 复用同一套 OPS / handler，只换"谁在哪"，桌面端一条不受影响。
-    if (portrait) {
-      return PORTRAIT_MAIN.includes(it.id) ? 'main' : 'more';
-    }
     const g = groupByItem.get(it.id);
     return g ? g.dock : dockOf(it, docks);
   };
@@ -569,52 +537,75 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange, 
 
   return (
     <div className="toolbar" data-bc-avoid="toolbar">
-      {/* —— 主区：可滚动流水线（竖向滚轮直接左右滚） —— */}
-      <div className="tb-main bc-hscroll" title="工具按钮：放不下时可左右滚动（滚轮直接左右滚，不必按 Shift）；在「设置 → 工具栏管理」里可自由调整 / 分组">
-        {renderArea(mainItems)}
-      </div>
-
-      {/* —— 右侧固定区：常驻手边工具（空间不够时同样可左右滚动） —— */}
-      <div className="tb-right bc-hscroll">
-        {renderArea(rightItems)}
-
-        {/* 后台任务按钮：常驻在「⋯更多」的**左边**（下载 / 更新都有进度，可暂停 / 继续 / 取消） */}
-        <TaskButton />
-
-        {/* 「⋯ 更多」：收纳停靠为 more 的按钮 */}
-        {moreItems.length > 0 && (
-          <div className="tb-more-wrap" ref={moreWrapRef}>
-            <button className="tb-more-btn" title={`还有 ${moreItems.length} 个按钮收在这里`} onClick={() => setMoreOpen((o) => !o)}>
-              ⋯{portrait ? <span className="tb-pt-label">更多</span> : null}
-            </button>
-            <AnchoredPanel
-              open={moreOpen}
-              anchorRef={moreWrapRef}
-              onClose={() => setMoreOpen(false)}
-              className={'tb-more-panel' + (portrait ? ' pt-menu-panel' : '')}
-              align={portrait ? 'left' : 'right'}
-            >
-              {moreItems.map((it) => {
-                // 菜单项要带图标：注册项里的 icon 是"图标名"而不是节点，直接渲染 it.icon
-                // 什么也画不出来（第一版就是这样，菜单里只有干巴巴的文字）。
-                const ico = opMap.get(it.id)?.icon;
-                return (
-                  <button
-                    key={it.id}
-                    className="tb-more-item"
-                    title={it.title}
-                    onClick={() => { if (!it.block) it.onClick?.(); setMoreOpen(false); }}
-                  >{ico && <span className="tb-icon"><Icon name={ico} size={15} /></span>}{typeof it.label === 'function' ? it.label() : it.label}</button>
-                );
-              })}
-            </AnchoredPanel>
+      {portrait ? (
+        /* v0.4.6 竖屏：固定 9 个按钮（顶部 操作/设备/更多 + 6 个直出），
+           桌面那套排序 / 停靠 / 分组完全不参与。 */
+        <PortraitToolbar
+          opMap={opMap}
+          items={items}
+          canvasWidth={canvasWidth}
+          onCanvasWidthChange={onCanvasWidthChange}
+          zoom={zoom}
+          onZoomChange={onZoomChange}
+          onExport={doExport}
+          onPreview={doPreview}
+          onExportTemplate={doExportTemplate}
+          outlines={outlines}
+          onToggleOutlines={() => setOutlines((v) => !v)}
+          issueCount={issueCount}
+          onOpenHealth={() => setHealthOpen(true)}
+        />
+      ) : (
+        <Fragment>
+          {/* —— 主区：可滚动流水线（竖向滚轮直接左右滚） —— */}
+          <div className="tb-main bc-hscroll" title="工具按钮：放不下时可左右滚动（滚轮直接左右滚，不必按 Shift）；在「设置 → 工具栏管理」里可自由调整 / 分组">
+            {renderArea(mainItems)}
           </div>
-        )}
-      </div>
+
+          {/* —— 右侧固定区：常驻手边工具（空间不够时同样可左右滚动） —— */}
+          <div className="tb-right bc-hscroll">
+            {renderArea(rightItems)}
+
+            {/* 后台任务按钮：常驻在「⋯更多」的**左边**（下载 / 更新都有进度，可暂停 / 继续 / 取消） */}
+            <TaskButton />
+
+            {/* 「⋯ 更多」：收纳停靠为 more 的按钮 */}
+            {moreItems.length > 0 && (
+              <div className="tb-more-wrap" ref={moreWrapRef}>
+                <button className="tb-more-btn" title={`还有 ${moreItems.length} 个按钮收在这里`} onClick={() => setMoreOpen((o) => !o)}>
+                  ⋯{portrait ? <span className="tb-pt-label">更多</span> : null}
+                </button>
+                <AnchoredPanel
+                  open={moreOpen}
+                  anchorRef={moreWrapRef}
+                  onClose={() => setMoreOpen(false)}
+                  className={'tb-more-panel' + (portrait ? ' pt-menu-panel' : '')}
+                  align={portrait ? 'left' : 'right'}
+                >
+                  {moreItems.map((it) => {
+                    // 菜单项要带图标：注册项里的 icon 是"图标名"而不是节点，直接渲染 it.icon
+                    // 什么也画不出来（第一版就是这样，菜单里只有干巴巴的文字）。
+                    const ico = opMap.get(it.id)?.icon;
+                    return (
+                      <button
+                        key={it.id}
+                        className="tb-more-item"
+                        title={it.title}
+                        onClick={() => { if (!it.block) it.onClick?.(); setMoreOpen(false); }}
+                      >{ico && <span className="tb-icon"><Icon name={ico} size={15} /></span>}{typeof it.label === 'function' ? it.label() : it.label}</button>
+                    );
+                  })}
+                </AnchoredPanel>
+              </div>
+            )}
+          </div>
+        </Fragment>
+      )}
 
       {tips && <div className="export-tips">{tips}</div>}
 
-      {/* 导出前体检向导（Portal 到 body，不受工具栏高度限制） */}
+      {/* 导出前体检向导（Portal 到 body，不受工具栏高度限制）——
+          竖屏也从第二条栏的「体检」按钮打开，所以这里必须两种档位都渲染 */}
       <HealthWizard
         open={healthOpen}
         onClose={() => { setHealthOpen(false); pendingAfterHealth.current = null; }}

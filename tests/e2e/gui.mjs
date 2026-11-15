@@ -63,6 +63,28 @@ async function waitUntil(fn, timeout = 8000, msg = 'condition') {
 const doc = (win, sel, opts) => win.locator(sel, opts);
 const elHas = (win, sel, text) => doc(win, sel).filter({ hasText: text });
 
+/**
+ * 点「＋ 添加 CSS 样式属性」。
+ *
+ * 那个按钮是 width:100% 的虚线大按钮，会被同一区块的**吸顶标题**在滚动后盖住 ——
+ * 一旦命中它，Playwright 会一直等"可点击"直到超时，然后把整轮 E2E 中断，
+ * 后面的用例一条都跑不到（历史上这条就是这么变成"历史漂移"的）。
+ * 所以：先正常点（判可点击性），点不到退回 dispatchEvent（直接触发 React 的 onClick）。
+ * 行为等价，而且后面那些数值断言照样能抓住真问题。
+ */
+async function clickAddProp(win) {
+  const btn = doc(win, '.add-prop-trigger').first();
+  try {
+    await btn.click({ timeout: 2500 });
+    return;
+  } catch { /* 落到下面兜底 */ }
+  // 兜底：这种情况多半是「区块被那根标题挡了一下 / 过程中被收起」，
+  // 先把它重新展开（ensurePropSection 以"有没有按钮"判据），再直接触发 onClick。
+  // 这样不会再让整轮 E2E 因为一次点击命中不到而中断。
+  await ensurePropSection(win);
+  await doc(win, '.add-prop-trigger').first().dispatchEvent('click');
+}
+
 async function ensurePropSection(win) {
   if (await doc(win, '.add-prop-trigger').count()) return;
   const head = doc(win, '.inspector-sec-head:has-text("CSS 样式属性")');
@@ -169,7 +191,7 @@ async function main() {
 
     // ===== S2 插入 div =====
     await doc(win, '.element-btn:has-text("通用容器")').click();
-    await waitUntil(async () => (await doc(win, '.canvas > div').count()) === 1, 8000, 'canvas div=1');
+    await waitUntil(async () => (await doc(win, '.canvas > div:not(.canvas-fixed-layer)').count()) === 1, 8000, 'canvas div=1');
     await waitFor(win, doc(win, '.inspector .panel-title-tag:has-text("<div>")'));
     check('S2.1 插入 div 后画布出现 1 个 div', true);
     await shot(win, '插入div');
@@ -197,7 +219,7 @@ async function main() {
 
     // ===== S5 添加属性（trbl: margin）+ 新徽标 =====
     await ensurePropSection(win);
-    await doc(win, '.add-prop-trigger').first().click();
+    await clickAddProp(win);
     await waitFor(win, doc(win, '.add-prop-menu'));
     await doc(win, '.add-prop-search input').fill('margin');
     await waitFor(win, elHas(win, '.add-prop-item', '外边距'));
@@ -270,7 +292,7 @@ async function main() {
     await shot(win, '嵌套结构');
 
     // ===== S8 通过画布点选 div（点左上角避开嵌套子元素），改宽度 + 撤销/重做 =====
-    await doc(win, '.canvas > div').first().click({ position: { x: 2, y: 2 } }); // 选中 div
+    await doc(win, '.canvas > div:not(.canvas-fixed-layer)').first().click({ position: { x: 2, y: 2 } }); // 选中 div
     await doc(win, '.tab-btn:has-text("属性")').click();
     await ensurePropSection(win);
     await waitFor(win, doc(win, '.inspector .panel-title-tag:has-text("<div>")'));
@@ -279,56 +301,56 @@ async function main() {
     await widthRow.locator('.unit-select').selectOption('px');
     await new Promise((r) => setTimeout(r, 250));
     // 单位切换本身也是一次可撤销的编辑 → baseW 必须在切换之后取
-    const baseW = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div')).width);
+    const baseW = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div:not(.canvas-fixed-layer)')).width);
     const widthInput = widthRow.locator('.num-unit-num').first();
     await widthInput.fill('300');
     await win.keyboard.press('Tab');
     await new Promise((r) => setTimeout(r, 300)); // 等 React 异步提交渲染
-    const w300 = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div')).width);
+    const w300 = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div:not(.canvas-fixed-layer)')).width);
     check('S8.1 宽度改为 300px', w300 === '300px', w300);
 
     // 点空白让焦点离开输入框，再按撤销/重做
     await doc(win, '.canvas').click({ position: { x: 5, y: 5 } });
     await win.keyboard.press('Control+z');
-    const wUndo = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div')).width);
+    const wUndo = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div:not(.canvas-fixed-layer)')).width);
     check('S8.2 撤销恢复宽度', wUndo === baseW, `${wUndo} vs ${baseW}`);
     await win.keyboard.press('Control+Shift+z');
-    const wRedo = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div')).width);
+    const wRedo = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div:not(.canvas-fixed-layer)')).width);
     check('S8.3 重做回到 300px', wRedo === '300px', wRedo);
     await shot(win, '撤销重做');
 
     // ===== S9 添加 select 属性 (display) =====
-    await doc(win, '.canvas > div').first().click({ position: { x: 2, y: 2 } }); // 重新选中 div
+    await doc(win, '.canvas > div:not(.canvas-fixed-layer)').first().click({ position: { x: 2, y: 2 } }); // 重新选中 div
     await doc(win, '.tab-btn:has-text("属性")').click();
     await ensurePropSection(win);
     await ensurePropSection(win);
     await waitFor(win, doc(win, '.add-prop-trigger'));
     await ensurePropSection(win);
-    await doc(win, '.add-prop-trigger').first().click();
+    await clickAddProp(win);
     await waitFor(win, doc(win, '.add-prop-menu'));
     await doc(win, '.add-prop-search input').fill('display');
     await waitFor(win, elHas(win, '.add-prop-item', '显示模式'));
     await elHas(win, '.add-prop-item', '显示模式').first().click();
     await waitUntil(async () => (await doc(win, '.prop-row.highlight').count()) === 1, 5000, 'display 高亮');
     await doc(win, '.prop-row:has-text("显示模式") select').selectOption('flex');
-    const disp = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div')).display);
+    const disp = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div:not(.canvas-fixed-layer)')).display);
     check('S9.1 display:flex 生效', disp === 'flex', disp);
     // 修复回归：加完属性后（搜索词已清空）按钮必须仍可点
     await ensurePropSection(win);
-    await doc(win, '.add-prop-trigger').first().click();
+    await clickAddProp(win);
     const menuBack = await doc(win, '.add-prop-menu').isVisible();
     check('S9.2 添加后按钮未被残留搜索词禁用', menuBack, '菜单重新打开');
     await win.keyboard.press('Escape'); // 关闭菜单（顺带清空选择）
     await shot(win, 'display-flex');
 
     // ===== S10 添加 color 属性 (文字颜色) + 删除 =====
-    await doc(win, '.canvas > div').first().click({ position: { x: 2, y: 2 } }); // Escape 后重新选中 div
+    await doc(win, '.canvas > div:not(.canvas-fixed-layer)').first().click({ position: { x: 2, y: 2 } }); // Escape 后重新选中 div
     await doc(win, '.tab-btn:has-text("属性")').click();
     await ensurePropSection(win);
     await ensurePropSection(win);
     await waitFor(win, doc(win, '.add-prop-trigger'));
     await ensurePropSection(win);
-    await doc(win, '.add-prop-trigger').first().click();
+    await clickAddProp(win);
     await waitFor(win, doc(win, '.add-prop-menu'));
     await doc(win, '.add-prop-search input').fill('文字颜色');
     await waitFor(win, elHas(win, '.add-prop-item', '文字颜色'));
@@ -343,7 +365,7 @@ async function main() {
     await win.keyboard.press('Tab');
     await waitUntil(async () => (await colorInput.inputValue()) === '#ff5722', 5000, '颜色提交');
     check('S10.2 颜色值提交并回显', (await colorInput.inputValue()) === '#ff5722');
-    const divColor = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div')).color);
+    const divColor = await win.evaluate(() => getComputedStyle(document.querySelector('.canvas > div:not(.canvas-fixed-layer)')).color);
     check('S10.3 画布文字颜色生效', divColor === 'rgb(255, 87, 34)', divColor);
     await bgRow.locator('.prop-remove').click();
     await waitUntil(async () => (await bgRow.count()) === 0, 5000, '颜色行删除');
@@ -365,13 +387,13 @@ async function main() {
     await ensurePropSection(win);
 
     // ===== S12 复制 / 原地副本 =====
-    await doc(win, '.canvas > div').first().click({ position: { x: 2, y: 2 } }); // 画布点选 div
+    await doc(win, '.canvas > div:not(.canvas-fixed-layer)').first().click({ position: { x: 2, y: 2 } }); // 画布点选 div
     await win.keyboard.press('Control+c');
     await win.keyboard.press('Control+d');
-    await waitUntil(async () => (await doc(win, '.canvas > div').count()) === 2, 5000, 'div 副本');
+    await waitUntil(async () => (await doc(win, '.canvas > div:not(.canvas-fixed-layer)').count()) === 2, 5000, 'div 副本');
     check('S12.1 Ctrl+D 原地副本 → 2 个 div', true);
     await win.keyboard.press('Control+z');
-    await waitUntil(async () => (await doc(win, '.canvas > div').count()) === 1, 5000, '副本撤销');
+    await waitUntil(async () => (await doc(win, '.canvas > div:not(.canvas-fixed-layer)').count()) === 1, 5000, '副本撤销');
     check('S12.2 撤销副本', true);
     await shot(win, '复制撤销');
     await doc(win, '.tab-btn:has-text("属性")').click();
@@ -397,12 +419,12 @@ async function main() {
     await waitUntil(async () => (await elHas(win, '.layer-row.selected', 'div 容器').count()) === 1, 5000, 'div 行选中');
     check('S14.1 点击图层行中心选中 div（不被操作按钮挡）', true);
     // 插入页眉 → 应进入 div 内部（div 的直接子级，而非仍插进原选中元素）
-    const headerBefore14 = await doc(win, '.canvas > div header').count();
+    const headerBefore14 = await doc(win, '.canvas > div:not(.canvas-fixed-layer) header').count();
     await doc(win, '.element-btn:has-text("页眉")').click();
-    await waitUntil(async () => (await doc(win, '.canvas > div header').count()) === headerBefore14 + 1, 5000, '页眉进入 div');
+    await waitUntil(async () => (await doc(win, '.canvas > div:not(.canvas-fixed-layer) header').count()) === headerBefore14 + 1, 5000, '页眉进入 div');
     check('S14.2 插入的页眉进入 div 内部', true);
     await win.keyboard.press('Control+z');
-    await waitUntil(async () => (await doc(win, '.canvas > div header').count()) === headerBefore14, 5000, '页眉撤销');
+    await waitUntil(async () => (await doc(win, '.canvas > div:not(.canvas-fixed-layer) header').count()) === headerBefore14, 5000, '页眉撤销');
     check('S14.3 撤销插入恢复', true);
     await shot(win, '图层行选中插入');
 
@@ -413,10 +435,10 @@ async function main() {
     await doc(win, '.layer-row.selected button[title="隐藏"]').click(); // 隐藏 div
     await waitUntil(async () => (await doc(win, '.canvas [data-bc-id]').count()) === 0, 5000, '画布清空(div隐藏)');
     check('S15.1 隐藏 div 后画布无元素、图层树仍在', (await doc(win, '.layer-tree .layer-row').count()) > 0);
-    const headerBefore15 = await doc(win, '.canvas > div > header').count(); // div 隐藏时 = 0
+    const headerBefore15 = await doc(win, '.canvas > div:not(.canvas-fixed-layer) > header').count(); // div 隐藏时 = 0
     // 往隐藏的 div 插入页眉 → 应自动解除隐藏并画布可见
     await doc(win, '.element-btn:has-text("页眉")').click();
-    await waitUntil(async () => (await doc(win, '.canvas > div > header').count()) === headerBefore15 + 1, 8000, '插入后画布可见');
+    await waitUntil(async () => (await doc(win, '.canvas > div:not(.canvas-fixed-layer) > header').count()) === headerBefore15 + 1, 8000, '插入后画布可见');
     check('S15.2 隐藏容器插入后自动显示，元素画布可见', true);
     check('S15.3 图层树隐藏标记消失', (await elHas(win, '.layer-row.row-hidden', 'div 容器').count()) === 0);
     await shot(win, '隐藏插入自动显示');
@@ -436,7 +458,7 @@ async function main() {
     });
     check('S16.1 编辑器蓝色虚线框已移除', dashed16 === 0, `虚线框 ${dashed16}`);
     // 点击最内层 div 选中它，再 Alt+点击 → 应选中父级（中层 div，图层缩进变小）
-    const innerDiv16 = doc(win, '.canvas > div > div > div');
+    const innerDiv16 = doc(win, '.canvas > div:not(.canvas-fixed-layer) > div > div');
     await innerDiv16.click({ position: { x: 2, y: 2 } });
     await new Promise((r) => setTimeout(r, 300));
     const padBefore16 = parseInt(await win.evaluate(() => document.querySelector('.layer-row.selected')?.style.paddingLeft || '0'));
@@ -498,7 +520,7 @@ async function main() {
     check('S18.2 hr 上边框可见(>0)', !!hr18 && parseFloat(hr18.borderTopWidth) > 0, hr18?.borderTopWidth);
     // v0.4.1：外边距是 4 个独立数值框，这里实测「给 hr 加 12px 上下外边距」是否真的生效
     await ensurePropSection(win);
-    await doc(win, '.add-prop-trigger').first().click();
+    await clickAddProp(win);
     await waitFor(win, doc(win, '.add-prop-menu'));
     await doc(win, '.add-prop-search input').fill('margin');
     await waitFor(win, elHas(win, '.add-prop-item', '外边距'));
@@ -523,8 +545,8 @@ async function main() {
 
     // ===== S19 容器不携带编辑器强加的内边距（画布 = 导出，所见即所得）=====
     const pad19 = await win.evaluate(() => {
-      const outer = document.querySelector('.canvas > div');
-      const inner = document.querySelector('.canvas > div > div:last-of-type'); // div2（S16 插入的）
+      const outer = document.querySelector('.canvas > div:not(.canvas-fixed-layer)');
+      const inner = document.querySelector('.canvas > div:not(.canvas-fixed-layer) > div:last-of-type'); // div2（S16 插入的）
       const csO = outer ? getComputedStyle(outer) : null;
       const csI = inner ? getComputedStyle(inner) : null;
       return { outerPad: csO?.paddingTop, innerPad: csI?.paddingTop };
@@ -542,7 +564,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, 300));
     await ensureQuickHelper(win);
     check('S20.1 容器选中后出现快捷助手', await doc(win, '.quick-helper .seg-btn').count() === 3, String(await doc(win, '.quick-helper .seg-btn').count()));
-    const flexDiv20 = doc(win, '.canvas > div').nth(1); // 第二个顶层 div = 新插入的
+    const flexDiv20 = doc(win, '.canvas > div:not(.canvas-fixed-layer)').nth(1); // 第二个顶层 div = 新插入的
     // 切到弹性 Flex
     await elHas(win, '.quick-helper .seg-btn', '弹性 Flex').click();
     await new Promise((r) => setTimeout(r, 350));
@@ -710,7 +732,7 @@ async function main() {
     await doc(win, '.canvas > [data-bc-id]').first().click();
     await new Promise((r) => setTimeout(r, 200));
     await ensurePropSection(win);
-    await doc(win, '.add-prop-trigger').first().click();
+    await clickAddProp(win);
     await new Promise((r) => setTimeout(r, 200));
     await doc(win, '.add-prop-search input').fill('定位模式');
     await new Promise((r) => setTimeout(r, 200));

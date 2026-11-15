@@ -126,3 +126,15 @@ export function revealAncestors(root: SceneElement, node: SceneElement): void {
   }
   for (const n of chain) n.hidden = false;
 }
+
+/**
+ * 往容器里放东西之前调用：**容器自己**和它的祖先链都要可见。
+ *
+ * `revealAncestors` 只往上走一层层解开父级，唯独不含容器本身 —— 于是
+ * 「在图层树里隐藏一个 div → 再往里面插页眉」画布上什么都不出现（元素插进了黑洞）。
+ * 用户视角这就是"插入没反应"，v0.4.6 第 45 批补上这一步。
+ */
+export function revealHost(root: SceneElement, node: SceneElement): void {
+  if (node !== root) node.hidden = false;
+  revealAncestors(root, node);
+}

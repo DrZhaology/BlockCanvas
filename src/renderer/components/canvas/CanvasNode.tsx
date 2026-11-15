@@ -31,9 +31,7 @@ const CanvasNodeBody = React.memo(function CanvasNodeBody(props: CanvasNodeProps
   // v0.4.4：伪类实时预览（必须在任何提前 return 之前声明 hook）
   const previewPseudo = useScene((s) => s.previewPseudo);
 
-  // hidden：画布不渲染（导出也不渲染，见 exporter）
-  if (node.hidden) return null;
-
+  // ⚠ hidden 的早退在外层 CanvasNode（见文件末尾）：留在这里会让 hook 数量随隐藏变化 → React #300 白屏。
   const isSelected = selectedIds.includes(node.id);
   const Tag = node.type as keyof React.JSX.IntrinsicElements;
   // 4-C/4-F：选择器 = 类名优先 → ID → 行内样式（与导出同一计算 → DOM 与规则文本一致）
@@ -591,8 +589,10 @@ const CanvasNodeBody = React.memo(function CanvasNodeBody(props: CanvasNodeProps
 export const CanvasNode = React.memo(function CanvasNode(props: CanvasNodeProps) {
   const bp = useScene((s) => s.activeBreakpoint);
   const layer = useFixedLayer();
+  /** hidden：画布不渲染（导出同）。⚠ 必须在外层：外层恒 2 个 hook，内层整棵不挂载，
+   *  否则 hook 数量随隐藏/显示变化 → React #300，隐藏最后一个元素就白屏。 */
+  if (props.node.hidden) return null;
   const body = <CanvasNodeBody {...props} />;
-  if (props.node.hidden) return body;
   const fixed = (getEffectiveStyle(props.node, bp) as Record<string, string | undefined>).position === 'fixed';
   // 视口层还没挂上（首帧）→ 原地渲染，绝不能让元素凭空消失
   return fixed && layer ? createPortal(body, layer) : body;

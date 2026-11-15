@@ -6,7 +6,8 @@
 //   「把屏幕下方的一部分区域，类似手机版 Edge 下方控制栏，作为核心的跳转入口和工具栏操作。」
 //   「分成 2 条栏，从下到上：第一条最底，第二条在第一条上面。」
 //   第一条只含 5 个核心按钮：撤销 / 重做 / 新建页面 / 管理会话 / 入口「三」。
-//   第二条是桌面工具栏的按钮，折叠态单行可横滑，长按上滑展开、下滑折叠。
+//   第二条是桌面工具栏的按钮，**固定单行**、可左右横滑（抽屉手势已删，见 PortraitBar2 注释）。
+//   第二条上方还有第三层「情境栏」（PortraitContextBar）：按钮按需出现，不常驻。
 //
 // 三条设计约束（写在这里免得后面改坏）：
 //   1. **只在 `data-shell='stack'` 渲染**。宽屏一条不出现（DOM 里也没有），
@@ -19,9 +20,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Toolbar } from '../Toolbar';
+import { PortraitContextBar } from './PortraitContextBar';
+import type { PortraitContextAction } from './PortraitContextBar';
 import { useScene } from '@store/sceneStore';
 import { useTabStore } from '@store/tabStore';
-import { useAltMode, setAltMode } from '@lib/altMode';
 
 /** 会话数角标：圆角正方形 + 中间数字（用户指定：「svg 做成一个圆角正方形，中间数字」） */
 function GlyphSessions({ n }: { n: number }) {
@@ -94,15 +96,24 @@ export function PortraitBar1(props: PortraitBar1Props) {
   const tabCount = useTabStore((s) => s.tabs.length);
 
   const openEntryMenu = () => {
-    // 用户：「二级菜单出现的位置就在第二层操作栏的上面」——
-    // 所以锚点取**第二条栏的顶边**，不是按钮顶边（按钮在第一条栏里，
-    // 按按钮算会让菜单压在第二条栏上，实测压掉 54px）。
+    /**
+     * 菜单位置：**第二条栏上沿之上**。
+     *
+     * 用户原话：「第一层菜单，也就是最下面的菜单，最右侧的类似"三"的按钮，
+     *   打开的二级菜单在按钮上面，不要跑道二层菜单上面。」
+     * → 菜单底边锚在**第二条栏的顶边**：既在按钮上方，又不会压在工具按钮上面。
+     *   （上一版锚的是第一条栏顶边，菜单整块盖住第二条栏，工具按钮全被挡掉。）
+     *
+     * 右端对齐按钮右缘，这样虽然中间隔了一条栏，看起来仍然是这颗按钮的菜单。
+     */
     const bar2 = document.querySelector('.pt-bar2')?.getBoundingClientRect();
     const r = entryBtnRef.current?.getBoundingClientRect();
     if (r) {
+      // 兜底：第一条 56 + 第二条 48 —— 取不到矩形时按窗口底 104px 算，不会飘
+      const bar2Top = bar2 ? bar2.top : window.innerHeight - 104;
       setEntryPos({
         right: Math.max(8, Math.round(window.innerWidth - r.right)),
-        bottom: Math.round(window.innerHeight - (bar2 ? bar2.top : r.top) + 8)
+        bottom: Math.round(window.innerHeight - bar2Top)
       });
     }
     setEntryOpen(true);
@@ -229,89 +240,40 @@ export function PortraitBar1(props: PortraitBar1Props) {
   );
 }
 
-/**
- * 第二条操作栏：桌面工具栏的按钮。
- *
- * 折叠态 = 一行、可左右滑动；展开态 = 全部按钮换行铺开（超过 4 行内部再滚）。
- * 长按（≥380ms）后上滑展开 / 下滑折叠（用户：「长按这个栏，然后往上滑动完全展开」）。
- *
- * 为什么复用 <Toolbar/> 而不是重写一套按钮：那一套里有二级菜单、设备断点、
- * 可用性判定、撤销栈联动等一大堆逻辑，重写一遍必然漂移。这里只改**外形**，
- * 逻辑一份不动 —— 等按钮清单定了再谈裁剪。
- */
-export function PortraitBar2({ zoom, setZoom, canvasWidth, setCanvasWidth, layersOpen, onOpenLayers }: {
+export type PortraitBar2Props = {
   zoom: number;
   setZoom: (z: number) => void;
   canvasWidth: string;
   setCanvasWidth: (v: string) => void;
-  layersOpen: boolean;
-  /** 打开下方图层面板。已经开着时**不关**（图层面板不许一键关掉，见 PortraitLayers 注释） */
-  onOpenLayers: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const altMode = useAltMode();
-  const holdRef = useRef<{ t: number | null; y: number; active: boolean }>({ t: null, y: 0, active: false });
+  /** 第三层「情境栏」要显示的按钮，由 App 按当前状态算好传进来；不传 = 一个都不显示 */
+  ctxActions?: PortraitContextAction[];
+};
 
-  const onPointerDown = (e: React.PointerEvent) => {
-    const st = holdRef.current;
-    st.y = e.clientY;
-    st.active = false;
-    if (st.t !== null) window.clearTimeout(st.t);
-    st.t = window.setTimeout(() => { st.active = true; }, 380);
-  };
-  const onPointerMove = (e: React.PointerEvent) => {
-    const st = holdRef.current;
-    if (!st.active) return;
-    const dy = e.clientY - st.y;
-    if (dy < -24 && !expanded) setExpanded(true);
-    if (dy > 24 && expanded) setExpanded(false);
-  };
-  const endHold = () => {
-    const st = holdRef.current;
-    if (st.t !== null) { window.clearTimeout(st.t); st.t = null; }
-    st.active = false;
-  };
+/** 默认值必须是模块级常量：写成解构默认的 `= []` 每次渲染都是新数组，
+ *  情境栏那边的同步 effect 就会白跑一轮（见 PortraitContextBar 的注释）。 */
+const NO_CTX_ACTIONS: PortraitContextAction[] = [];
+
+/**
+ * 第二条操作栏：桌面工具栏的按钮，**固定单行**、可左右滑动。
+ *
+ * 上一版它能像抽屉一样"长按上滑展开 / 下滑折叠"，抽屉能力后来被删掉了，
+ * 但顶部那条像抽屉把手的横条（连同装在里面的 Alt 开关）留了下来 ——
+ * 用户："上方像抽屉把手的横条没有删除，删除一下。"
+ * 所以 .pt-bar2-head 整块连手势一起删了（expanded / holdRef / 那几个 pointer 事件），
+ * 现在是固定高度、只有一行的带状栏。
+ *
+ * 为什么复用 <Toolbar/> 而不是重写一套按钮：那一套里有二级菜单、设备断点、
+ * 可用性判定、撤销栈联动等一大堆逻辑，重写一遍必然漂移。这里只改**外形**，
+ * 逻辑一份不动 —— 按钮清单由 Toolbar 自己维护。
+ */
+export function PortraitBar2(props: PortraitBar2Props) {
+  const { zoom, setZoom, canvasWidth, setCanvasWidth, ctxActions = NO_CTX_ACTIONS } = props;
 
   return (
-    <div
-      className={'pt-bar pt-bar2' + (expanded ? ' is-expanded' : '')}
-      role="toolbar"
-      aria-label="工具栏（长按上下滑动可展开或折叠）"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={endHold}
-      onPointerCancel={endHold}
-    >
-      <div className="pt-bar2-head">
-        {/* v0.4.6：Alt 模式开关（用户："下方工具栏的加入一个按钮，开启 Alt 模式"）——
-            触摸屏没有 Alt 键，开了它就把"按住 Alt"这个状态锁住，
-            后面画布走桌面那套定位助手逻辑。 */}
-        <button
-          type="button"
-          className={'pt-alt-btn' + (altMode ? ' is-on' : '')}
-          aria-pressed={altMode}
-          title={altMode ? 'Alt 模式已开启：画布按电脑端方式操作' : '开启 Alt 模式（等同于一直按住 Alt）'}
-          onClick={() => setAltMode(!altMode)}
-        >Alt 模式</button>
-        <div className="pt-bar2-grip" aria-hidden="true" />
-      </div>
+    <div className="pt-bar pt-bar2" role="toolbar" aria-label="工具栏（可左右滑动）">
+      {/* 第三层「情境栏」：在工具栏**上面**，没按钮时高度 0（不占位、不可见） */}
+      <PortraitContextBar actions={ctxActions} />
       <div className="pt-bar2-inner">
-        {/* 竖屏「图层」入口：把图层面板从右侧搬到屏幕下方（用户要求）。
-            它排在工具栏之前，也就是「更多」之后、设备之前。 */}
-        <button
-          type="button"
-          className={'pt-layer-btn' + (layersOpen ? ' is-open' : '')}
-          aria-pressed={layersOpen}
-          title="图层（在下方打开层级结构，左侧可切到属性）"
-          onClick={onOpenLayers}
-        >
-          <svg width="18" height="18" viewBox="0 0 22 22" aria-hidden="true">
-            <path d="M11 3.5 3.5 7.5 11 11.5l7.5-4z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-            <path d="m4.5 11 6.5 3.5 6.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="m4.5 14.5 6.5 3.5 6.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          图层
-        </button>
         <Toolbar
           canvasWidth={canvasWidth}
           onCanvasWidthChange={setCanvasWidth}

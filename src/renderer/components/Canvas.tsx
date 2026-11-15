@@ -313,7 +313,11 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           // 始终给 .canvas 一个 transform：让它成为 fixed 后代的"包含块"，
           // 于是画布里的 position:fixed 元素被关在画布内（相当于浏览器视口），
           // 不会跑到编辑器面板上乱盖。zoom=1 时 scale(1) 视觉上无差别。
-          transform: `scale(${zoom})`,
+          //
+          // v0.4.6 第 43 批：缩放走 CSS 变量（--bc-canvas-k / -dx / -dy）。
+          // 兜底值 = React 的 zoom（平时行为不变）；触摸双指缩放期间由手势层直接写变量，
+          // 一帧都不用 React 渲染 → 跟手不卡（以前每帧 setState → 整棵画布树重渲染 → 僵硬）。
+          transform: `translate(var(--bc-canvas-dx, 0px), var(--bc-canvas-dy, 0px)) scale(var(--bc-canvas-k, ${zoom}))`,
           transformOrigin: zoomOrigin,
           // v0.4.6（R6-16）：画布至少撑到基准视口高度 ——
           // 短页面下 fixed 的 bottom:0 才有落点，也才看得见"整屏大概多长"。

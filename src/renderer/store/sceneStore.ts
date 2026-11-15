@@ -7,7 +7,7 @@ import type { TokenEntry } from '@lib/designTokens';
 // v0.4.6（R6-5）：树查询与样式合并搬到 store/scene/*（纯函数，可单测）
 import {
   deepClone, findNode, findParent, findFirstWithToken, findFirstWithRel,
-  pruneDescendantIds, indexOfChild, isDescendant, revealAncestors
+  pruneDescendantIds, indexOfChild, isDescendant, revealHost
 } from './scene/tree';
 import { getEffectiveStyle } from './scene/style';
 import { stripAncestorChildStyles } from './scene/childStyles';
@@ -259,7 +259,7 @@ export const useScene = create<SceneStore>((set) => ({
       }
 
       parent.children.push(el);
-      revealAncestors(scene.root, parent);
+      revealHost(scene.root, parent);
       scene.selectedId = el.id;
       scene.selectedIds = [el.id];
       return { scene, history: pushPast(st.history, st.scene) };
@@ -283,7 +283,7 @@ export const useScene = create<SceneStore>((set) => ({
       };
       const el = renew(deepClone(tree));
       parent.children.push(el);
-      revealAncestors(scene.root, parent);
+      revealHost(scene.root, parent);
       scene.selectedId = el.id;
       scene.selectedIds = [el.id];
       return { scene, history: pushPast(st.history, st.scene) };
@@ -424,7 +424,7 @@ export const useScene = create<SceneStore>((set) => ({
       const parent = findNode(scene.root, parentId);
       if (!parent || SELF_CLOSING_TAGS.has(parent.type)) return st;
       appendPasted(scene, parent, st.clipboard);
-      revealAncestors(scene.root, parent);
+      revealHost(scene.root, parent);
       return { scene, history: pushPast(st.history, st.scene) };
     });
   },
@@ -446,7 +446,7 @@ export const useScene = create<SceneStore>((set) => ({
         target = findParent(scene.root, target.id) ?? scene.root;
       }
       appendPasted(scene, target, st.clipboard);
-      revealAncestors(scene.root, target);
+      revealHost(scene.root, target);
       return { scene, history: pushPast(st.history, st.scene) };
     });
   },

@@ -71,7 +71,13 @@ export const DOMAIN_OF = {
   '34-v046-visual.css': 'theme',
   // v0.4.6：画布元素进退场动画 + 属性卡片统一（不生效/临时只靠颜色区分）+ 设置页三块分区横幅
   '35-v046-cards.css': 'inspector',
-  '36-v046-portrait.css': 'shell'
+  '36-v046-portrait.css': 'shell',
+  // v0.4.6 第 43 批：竖屏操作栏重构 —— 情境栏（第三层）+ 底部栏体外观
+  '37-v046-ctx.css': 'shell',
+  // v0.4.6 第 43 批：竖屏第二条操作栏的九个按钮与二级菜单
+  '38-v046-ptoolbar.css': 'shell',
+  // v0.4.6 第 43 批：竖屏双指缩放（禁掉浏览器自带捏合手势）
+  '39-v046-pinch.css': 'canvas'
 } as const;
 
 export type CssDomain = typeof DOMAIN_OF[keyof typeof DOMAIN_OF];

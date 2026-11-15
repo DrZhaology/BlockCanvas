@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Toolbar } from '@comp/Toolbar';
 import { ElementPanel } from '@comp/ElementPanel';
 import { Canvas } from '@comp/Canvas';
@@ -38,12 +38,14 @@ import { useInputMode } from '@lib/inputMode';
 import { useTouchCanvas } from '@lib/useTouchCanvas';
 import { useAltMode } from '@lib/altMode';
 import { PortraitBar1, PortraitBar2 } from '@comp/portrait/PortraitBars';
+import type { PortraitContextAction } from '@comp/portrait/PortraitContextBar';
 import { SessionsView } from '@comp/portrait/SessionsView';
 import { PortraitLayers } from '@comp/portrait/PortraitLayers';
 import { TabCloseGuard } from '@comp/TabCloseGuard';
 import { useEdgeSwipe } from '@lib/useEdgeSwipe';
 import { useDrawerSide } from '@lib/drawerSide';
 import { usePortraitPrefs } from '@lib/portraitPrefs';
+import { resetCanvasView } from '@lib/canvasView';
 import { DrawerHandle } from '@comp/DrawerHandle';
 // v0.4.6：抽屉把手已抽成 <DrawerHandle>（它自带长按调位置的三个状态），App 不再直接用 Icon
 
@@ -169,6 +171,42 @@ export default function App() {
      ⚠ Alt 模式打开时要**关掉手势层**：否则画布指针全被它吃掉，桌面那套 Alt 拖拽收不到事件。 */
   const altOn = useAltMode();
   useTouchCanvas({ enabled: shell.layout === 'stack' && !altOn, zoom, onZoomChange: setZoom });
+  /**
+   * v0.4.6 第 43 批：竖屏「情境栏」（第三层菜单）要显示哪些按钮。
+   *
+   * 用户原话：「还有个第三层菜单，但不是一直放固定按钮的，需要时出现按钮，
+   *   按钮从右到左依次出现，没有固定位置，先到的先排右边。
+   *   选中元素时，二层菜单上面的第三层菜单显示一个按钮：取消选中。
+   *   画布被缩放的时候（宽度被调整不算），显示按钮：还原大小。」
+   *
+   * 判定放在 App（这里是唯一知道"选中没""缩放没"的地方），
+   * PortraitContextBar 只管怎么显示 —— 它不该知道这些业务概念。
+   *
+   * ⚠ 宽度变了不算"缩放"：用户明确说了「（宽度被调整不算）」，
+   *   所以这里只看 zoom，不看 canvasWidth。
+   */
+  const selectedCount = useScene((s) => s.scene.selectedIds.length);
+  const ctxActions = useMemo<PortraitContextAction[]>(() => {
+    const out: PortraitContextAction[] = [];
+    // 「还原大小」先来（画布缩放比选中更早发生）→ 先到的排右边
+    if (zoom !== 1) {
+      out.push({
+        key: 'reset-zoom',
+        label: '还原大小',
+        // 不只是把缩放拉回 100%：还要把画布"回正"（滚回左上、清掉手势残留位移），
+        // 否则屏幕上看不到画布的顶部（用户：「有些在屏幕外面」）。
+        onClick: () => resetCanvasView(setZoom)
+      });
+    }
+    if (selectedCount > 0) {
+      out.push({
+        key: 'clear-selection',
+        label: '取消选中',
+        onClick: () => useScene.getState().selectElement(null)
+      });
+    }
+    return out;
+  }, [zoom, selectedCount]);
   const [view, setView] = useState<AppView>('editor');
   // 标签数（用于空页面判断）。⚠ 必须在组件顶部调用 —— 不能放进 JSX 的 view 分支里，
   // 否则切到"表格编辑器/设置"等视图时这个 hook 不执行，hooks 数量前后不一致，
@@ -880,20 +918,35 @@ export default function App() {
                       <SnapshotInfoPanel tab={activeTab} />
                     ) : (
                       <>
-                        {/* v0.4.6 竖屏：图层搬到屏幕下方那块面板里了（PortraitLayers），
-                            右侧抽屉只留属性 —— 两个地方各放一份图层树只会让人迷惑。 */}
-                        {shell.layout !== 'stack' && (
-                          <div className="tab-bar">
-                            <button
-                              className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
-                              onClick={() => setRightTab('layers')}
-                            >图层</button>
-                            <button
-                              className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
-                              onClick={() => setRightTab('inspector')}
-                            >属性</button>
-                          </div>
-                        )}
+                        {/* v0.4.6 竖屏：图层不再塞进右抽屉，但**入口留在这儿**
+                            （用户："图层的进入放到右侧划入的属性面板，改回类似电脑端右侧菜单
+                            上方的布局"）。所以竖屏下这颗「图层」是个开关而不是页签：
+                            点它 = 收起右抽屉 + 打开下方面板；「属性」= 反过来。
+                            两个面板位置不同、没法共用同一个 body，做页签会自相矛盾。 */}
+                        <div className="tab-bar">
+                          <button
+                            className={"tab-btn" + (
+                              shell.layout === 'stack'
+                                ? (layerSheet ? ' active' : '')
+                                : (rightTab === 'layers' ? ' active' : '')
+                            )}
+                            onClick={() => {
+                              if (shell.layout === 'stack') { setDrawer(null); setLayerSheet(true); return; }
+                              setRightTab('layers');
+                            }}
+                          >图层</button>
+                          <button
+                            className={"tab-btn" + (
+                              shell.layout === 'stack'
+                                ? (layerSheet ? '' : ' active')
+                                : (rightTab === 'inspector' ? ' active' : '')
+                            )}
+                            onClick={() => {
+                              if (shell.layout === 'stack') { setLayerSheet(false); setDrawer('right'); return; }
+                              setRightTab('inspector');
+                            }}
+                          >属性</button>
+                        </div>
                         <div className="tab-body" key={rightTab}>
                           <ErrorBoundary label="右侧面板">
                             {rightTab === 'layers' && shell.layout !== 'stack' ? <LayerTree /> : <Inspector />}
@@ -920,8 +973,7 @@ export default function App() {
               setZoom={setZoom}
               canvasWidth={canvasWidth}
               setCanvasWidth={setCanvasWidth}
-              layersOpen={layerSheet}
-              onOpenLayers={() => setLayerSheet(true)}
+              ctxActions={ctxActions}
             />
           )}
           <PortraitBar1
@@ -940,11 +992,12 @@ export default function App() {
             /* 手册页：第一条栏最左边多一颗「侧边栏」（切换文档 / 搜索 / 目录） */
             onOpenHelpSidebar={view === 'help' ? () => window.dispatchEvent(new CustomEvent('bc:help-sidebar')) : undefined}
           />
-          {/* 下方图层面板：只能从「属性」离开（用户要求防误触） */}
+          {/* 下方图层面板：左侧栏的「属性」离开它，另有「关闭」直接收起来 */}
           {view === 'editor' && tabCount > 0 && (
             <PortraitLayers
               open={layerSheet}
               onOpenProps={() => { setLayerSheet(false); setDrawer('right'); }}
+              onClose={() => setLayerSheet(false)}
             />
           )}
         </>

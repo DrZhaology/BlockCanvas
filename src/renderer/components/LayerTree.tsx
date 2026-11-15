@@ -26,20 +26,46 @@ const TYPE_LABELS: Record<string, string> = {
   form: 'form 表单', img: 'img 图片', hr: 'hr 分割线', br: 'br 换行'
 };
 
-export function LayerTree({ portrait = false }: { portrait?: boolean }) {
+/**
+ * 图层树。
+ *
+ * `dragToggle`：
+ *   · 'inline'（默认，桌面端）—— 拖拽开关就画在树自己的标题栏里；
+ *   · 'external'（竖屏）—— 开关被挪到下方图层面板的**左侧栏**（用户原话：
+ *     「图层面板左侧就是图层和属性，以及开启拖动按钮也放到左侧」），
+ *     这时树里不能再画一颗（否则同一个开关出现两次）。
+ *     外部模式用受控的 `dragEnabled` / `onDragEnabledChange`。
+ */
+export function LayerTree({
+  portrait = false,
+  dragToggle = 'inline',
+  dragEnabled: dragEnabledProp,
+  onDragEnabledChange
+}: {
+  portrait?: boolean;
+  dragToggle?: 'inline' | 'external';
+  dragEnabled?: boolean;
+  onDragEnabledChange?: (v: boolean) => void;
+}) {
   const root = useScene((s) => s.scene.root);
   const selectedIds = useScene((s) => s.scene.selectedIds);
   const select = useScene((s) => s.selectElement);
   const reparent = useScene((s) => s.reparent);
 
   // 拖拽排序开关状态（记忆到 localStorage）
-  const [dragEnabled, setDragEnabled] = useState<boolean>(() => {
+  const [dragInner, setDragInner] = useState<boolean>(() => {
     try { return localStorage.getItem('bc-layer-drag') === '1'; } catch { return false; }
   });
+  // 外部模式（竖屏左侧栏）用受控值，内部模式用自己那份
+  const external = dragToggle === 'external';
+  const dragEnabled = external ? !!dragEnabledProp : dragInner;
 
   const toggleDrag = (v: boolean) => {
-    setDragEnabled(v);
-    try { localStorage.setItem('bc-layer-drag', v ? '1' : '0'); } catch {}
+    if (!external) {
+      setDragInner(v);
+      try { localStorage.setItem('bc-layer-drag', v ? '1' : '0'); } catch {}
+    }
+    onDragEnabledChange?.(v);
   };
 
   // 拖拽状态
@@ -59,24 +85,28 @@ export function LayerTree({ portrait = false }: { portrait?: boolean }) {
 
   return (
     <div className="layer-tree">
-      <div className="layer-tree-header">
-        <div className="layer-tree-title">
-          <span>图层结构</span>
-          <HelpButton
-            title="图层树功能说明"
-            content={'【图层树】\n\n· 单击选中，Ctrl+点击多选。\n· 开启拖拽排序后，可按住节点上下调序，或拖入容器形成嵌套。\n\n注意：跨父容器移动后，元素此前的智能关系选择器（如 .hero > h1）可能失效，建议重新关联。'}
-          />
+      {/* 外部模式（竖屏图层面板）左侧栏已经有「拖动 / 关闭」两颗按钮了，
+          标题栏里再画一颗就成了同一个开关两个地方 —— 整条 header 直接不渲染。 */}
+      {!external && (
+        <div className="layer-tree-header">
+          <div className="layer-tree-title">
+            <span>图层结构</span>
+            <HelpButton
+              title="图层树功能说明"
+              content={'【图层树】\n\n· 单击选中，Ctrl+点击多选。\n· 开启拖拽排序后，可按住节点上下调序，或拖入容器形成嵌套。\n\n注意：跨父容器移动后，元素此前的智能关系选择器（如 .hero > h1）可能失效，建议重新关联。'}
+            />
+          </div>
+          <div className="layer-drag-toggle-wrap">
+            <button
+              className={"layer-drag-toggle-btn" + (dragEnabled ? ' active' : '')}
+              onClick={() => toggleDrag(!dragEnabled)}
+              title={dragEnabled ? '拖拽排序已开启（可直接按住节点拖动重排）。点击关闭' : '点击开启拖拽排序模式'}
+            >
+              <Icon name="hand" size={12} /> {portrait ? '开启拖动' : '拖拽排序'}
+            </button>
+          </div>
         </div>
-        <div className="layer-drag-toggle-wrap">
-          <button
-            className={"layer-drag-toggle-btn" + (dragEnabled ? ' active' : '')}
-            onClick={() => toggleDrag(!dragEnabled)}
-            title={dragEnabled ? '拖拽排序已开启（可直接按住节点拖动重排）。点击关闭' : '点击开启拖拽排序模式'}
-          >
-            <Icon name="hand" size={12} /> {portrait ? '开启拖动' : '拖拽排序'}
-          </button>
-        </div>
-      </div>
+      )}
 
       {dragEnabled && (
         <div className="layer-drag-warn">

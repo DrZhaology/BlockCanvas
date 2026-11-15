@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
 import { Icon } from './Icon';
+import { useClosing } from '@lib/useClosing';
 import { useShellLayout } from '@lib/shellMode';
 import {
   DOCS,
@@ -206,11 +207,128 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
   const shell = useShellLayout();
   const stacked = shell.layout === 'stack';
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  /**
+   * v0.4.6 第 45 批：竖屏手册侧边栏 —— **往左滑关闭 + 退场动画 + 可打断**。
+   *
+   * 用户原话：「使用手册右侧的菜单改成往左边滑动关闭，有退出动画和打断动画，
+   *   现在退出无动画。」
+   *
+   * 之前它是 `{sidebarOpen && …}` 条件渲染：一关就整个卸载 → 退场动画根本没机会播，
+   * 看起来就是"啪一下没了"。
+   *
+   * 现在分三层：
+   *   · useClosing：关掉之后先留在 DOM 里播退场动画，播完才卸载；
+   *   · 拖拽：手指按住抽屉往左拖，抽屉**跟着手指走**（位移写在 CSS 变量上，
+   *     不走 React → 拖动跟手）；松手时按位移/速度决定是关闭还是弹回；
+   *   · 可打断：退场动画播到一半再按住 → 从**当前位置**重新抓住继续拖，
+   *     动画不跳帧、不回起点。
+   */
+  // 卸载延迟要**大于** CSS 里的滑出时长（--dur-drawer = 0.24s），
+  // 否则最后 20ms 会被提前摘掉，看着就是滑到一半突然没了。
+  const { mounted: drawerMounted, closing: drawerClosing } = useClosing(sidebarOpen, 320);
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const dragRef = useRef<{ x0: number; y0: number; base: number; t0: number; axis: 'none' | 'x' | 'y' } | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  /** 抽屉宽度：既是"完全滑出"的距离，也是拖拽的上限 */
+  const drawerW = () => drawerRef.current?.offsetWidth ?? 320;
+  /** 位移写进 CSS 变量（0 = 完全展开，-宽度 = 完全滑出屏幕左侧） */
+  const setDrawerX = (x: number) => drawerRef.current?.style.setProperty('--help-drawer-x', `${x}px`);
+  /** 抽屉**此刻**的实际位移（退场动画播到一半时是半路值，打断要从这里接着抓） */
+  const drawerXNow = () => {
+    const el = drawerRef.current;
+    if (!el) return 0;
+    const t = getComputedStyle(el).transform;
+    if (!t || t === 'none') return 0;
+    try { return new DOMMatrixReadOnly(t).m41; } catch { return 0; }
+  };
+
+  /**
+   * 所有"关闭"入口（遮罩 / 右上叉 / 第一条栏那颗按钮）都走这里：
+   * 先把抽屉**滑出去**再让 state 变 false —— 直接 setSidebarOpen(false) 的话
+   * useClosing 只是延后 260ms 卸载，元素停在原地不动，看起来还是"啪一下没了"。
+   */
+  const closeDrawer = useCallback(() => {
+    setDrawerX(-drawerW());
+    setSidebarOpen(false);
+  }, []);
+
+  // 进场：挂载那一帧先推到屏幕外，下一帧再滑进来（否则第一次打开也是硬切）。
+  // ⚠ `dragRef.current` 那道闸门是给"打断"用的：退场途中按住 → 我们会把 open 改回 true，
+  //    这个 effect 就会重跑；若此时又把它推回屏幕外，手指下的抽屉会直接消失。
+  useLayoutEffect(() => {
+    if (!drawerMounted || drawerClosing || dragRef.current) return;
+    const el = drawerRef.current;
+    if (!el) return;
+    el.style.setProperty('--help-drawer-x', `${-drawerW()}px`);
+    const raf = requestAnimationFrame(() => {
+      el.style.setProperty('--help-drawer-x', '0px');
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [drawerMounted, drawerClosing]);
+
+  const onDrawerDown = (e: React.PointerEvent) => {
+    const el = drawerRef.current;
+    if (!el) return;
+    // 退场动画途中被按住 → **从当前位置**重新抓住，动画不跳回起点、不回弹
+    const base = drawerXNow();
+    el.style.setProperty('--help-drawer-x', `${base}px`);
+    dragRef.current = { x0: e.clientX, y0: e.clientY, base, t0: e.timeStamp, axis: 'none' };
+    if (drawerClosing) setSidebarOpen(true);
+  };
+
+  const onDrawerMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const dx = e.clientX - d.x0;
+    const dy = e.clientY - d.y0;
+    if (d.axis === 'none') {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      // 方向锁：横着划归抽屉（滑动关闭），竖着划还给内容自己滚（目录很长）
+      d.axis = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
+      if (d.axis === 'y') { dragRef.current = null; return; }
+      setDragging(true);
+    }
+    if (d.axis !== 'x') return;
+    const w = drawerW();
+    const next = d.base + dx;
+    // 只往左滑有效；往右给 0.25 的阻尼（橡皮筋手感，不会真的把抽屉拽出容器）
+    setDrawerX(next <= 0 ? Math.max(-w, next) : Math.min(w * 0.25, next * 0.25));
+  };
+
+  const onDrawerUp = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    setDragging(false);
+    const w = drawerW();
+    const x = drawerXNow();
+    // 只是按了一下（没横向拖）也要有个交代：退场途中按住的，按"出去多少"决定去留。
+    // 不处理的话抽屉会**停在半路**（-247px 那种），既不算开也不算关。
+    if (!d || d.axis !== 'x') {
+      if (x < -w * 0.5) closeDrawer();
+      else setDrawerX(0);
+      return;
+    }
+    const dt = Math.max(1, e.timeStamp - d.t0);
+    // 速度要**带方向**：只有"往左甩"才算关闭意图。
+    // 用 |位移| 的话，用户从半路往右拖回来（拖得急）也会被判成"甩出去"，
+    // 明明救回来了却又被关掉（探针里就是这条翻的车）。
+    const vx = (x - d.base) / dt;   // px/ms，<0 = 正在往左（关闭方向）
+    // 关闭条件（都要"真的滑出去"才成立，避免轻轻一扫就关）：
+    //   · 滑过 30% 宽度；或
+    //   · 往左甩得很快（>0.8 px/ms）且已经出去 15% 宽度
+    if (x < -w * 0.3 || (vx < -0.8 && x < -w * 0.15)) closeDrawer();
+    else setDrawerX(0);
+  };
+
+  const openRef = useRef(false);
+  openRef.current = sidebarOpen;
   useEffect(() => {
-    const onToggle = () => setSidebarOpen((o) => !o);
+    const onToggle = () => { if (openRef.current) closeDrawer(); else setSidebarOpen(true); };
     window.addEventListener('bc:help-sidebar', onToggle);
     return () => window.removeEventListener('bc:help-sidebar', onToggle);
-  }, []);
+  }, [closeDrawer]);
+
   const docRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -612,14 +730,31 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
         </div>
       )}
 
-      {/* 竖屏侧边栏抽屉：切换文档 / 搜索 / 目录（用户要求收在这里） */}
-      {stacked && sidebarOpen && (
+      {/* 竖屏侧边栏抽屉：切换文档 / 搜索 / 目录（用户要求收在这里）。
+          v0.4.6 第 45 批：**往左滑关闭**（跟手）+ 退场动画 + 可打断。
+          · mounted 由 useClosing 管：关掉后先留 DOM 播退场，播完才卸载；
+          · 位移写在 --help-drawer-x 上（不走 React → 拖起来跟手）；
+          · is-dragging 期间关掉 transition，否则会"追着手指慢慢挪"。 */}
+      {stacked && drawerMounted && (
         <>
-          <div className="help-drawer-scrim" onClick={() => setSidebarOpen(false)} />
-          <aside className="help-drawer" role="dialog" aria-label="手册侧边栏">
+          <div
+            className={'help-drawer-scrim' + (drawerClosing ? ' is-closing' : '')}
+            onClick={closeDrawer}
+          />
+          <aside
+            ref={drawerRef}
+            className={'help-drawer' + (drawerClosing ? ' is-closing' : '') + (dragging ? ' is-dragging' : '')}
+            role="dialog"
+            aria-label="手册侧边栏"
+            aria-hidden={drawerClosing}
+            onPointerDown={onDrawerDown}
+            onPointerMove={onDrawerMove}
+            onPointerUp={onDrawerUp}
+            onPointerCancel={onDrawerUp}
+          >
             <div className="help-drawer-head">
               {brandBlock}
-              <button className="help-drawer-close" onClick={() => setSidebarOpen(false)} aria-label="关闭侧边栏">
+              <button className="help-drawer-close" onClick={closeDrawer} aria-label="关闭侧边栏">
                 <Icon name="close" size={16} />
               </button>
             </div>

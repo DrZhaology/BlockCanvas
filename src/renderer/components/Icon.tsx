@@ -151,7 +151,8 @@ export type IconName =
   | 'video'
   | 'wand'
   | 'warning'
-  | 'zoomIn';
+  | 'zoomIn'
+  | 'zoomOut';
 
 const P: Record<IconName, ReactNode> = {
   activity: (
@@ -852,6 +853,11 @@ const P: Record<IconName, ReactNode> = {
   zoomIn: (
     <>
       <circle cx="10.6" cy="10.6" r="6.4" /> <path d="m15.4 15.4 4.8 4.8M10.6 7.8v5.6M7.8 10.6h5.6" />
+    </>
+  ),
+  zoomOut: (
+    <>
+      <circle cx="10.6" cy="10.6" r="6.4" /> <path d="m15.4 15.4 4.8 4.8M7.8 10.6h5.6" />
     </>
   ),
 };
