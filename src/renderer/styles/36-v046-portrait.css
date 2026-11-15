@@ -569,6 +569,24 @@
 }
 .pt-layer-btn.is-open { background: var(--bg-hover, rgba(0, 0, 0, 0.06)); color: var(--accent); }
 
+/* ── 竖屏程序内预览（整屏 iframe，底部第一条栏留着退出）─────────────────
+   用户：「竖屏预览改程序内预览（第一层保留可退出）」。手机上把预览交给系统浏览器
+   = 跳出应用，回来还得重新找会话，体验是断的。 */
+.bc-preview-view {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  background: #fff;
+}
+.bc-preview-frame {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
 /* ── 竖屏子页面适配：设置页 / 使用手册 ─────────────────────────────────────
    实测（412×860，shots-portrait-pages.mjs）：
      设置页有 4 个控件横向溢出，最多 130px（.fluent-card-ctrl / .fluent-select）

@@ -186,6 +186,13 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange, 
   };
   const previewNow = async () => {
     const result = exportHTML(useScene.getState().scene);
+    // v0.4.6 竖屏：预览走**程序内**全屏 iframe（第一条栏留着「返回」可以退出）。
+    // 手机上"交给系统浏览器"= 跳出应用，回来还得重新找会话，体验是断的。
+    if (portrait) {
+      window.dispatchEvent(new CustomEvent('bc:inapp-preview', { detail: { html: result.html } }));
+      showExportTips(result);
+      return;
+    }
     const res = await window.bc.previewOpen(result.html);
     if (!res.ok) void appAlert('预览失败：' + (res.error ?? '未知错误'), '预览失败');
     else showExportTips(result);

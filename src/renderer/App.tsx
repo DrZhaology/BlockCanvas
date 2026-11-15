@@ -69,7 +69,7 @@ const RIGHT_WIDTH_MIN = 340;
 /** 只读快照预览的右侧面板固定宽度（不写进持久化，退出后编辑器宽度原样恢复） */
 const SNAPSHOT_PANE_WIDTH = 372;
 
-export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 'help' | 'sessions';
+export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 'help' | 'sessions' | 'preview';
 
 export default function App() {
   // v0.4.2：全局「横向滚动区直接滚轮」桥接（容器加 .bc-hscroll 即生效）
@@ -92,6 +92,8 @@ export default function App() {
   const [layerSheet, setLayerSheet] = useState(false);
   /** 竖屏设置项（显示第二条栏 / 长按时长 / 面板高度）—— 设置页改完立刻生效 */
   const ptPrefs = usePortraitPrefs();
+  /** v0.4.6 竖屏：程序内预览的 HTML（交给全屏 iframe，第一条栏留返回） */
+  const [previewHtml, setPreviewHtml] = useState<string>('');
   // 窄屏切回宽屏时把抽屉收掉（否则回到宽屏还挂着一个半透明遮罩）
   useEffect(() => {
     if (shell.layout === 'split' && drawer !== null) setDrawer(null);
@@ -104,6 +106,18 @@ export default function App() {
   useEffect(() => {
     if (shell.layout === 'stack') setRightTabRaw('inspector');
   }, [shell.layout]);
+  // 程序内预览：工具栏在竖屏下发这个事件（宽屏仍走系统浏览器）
+  useEffect(() => {
+    const onPreview = (e: Event) => {
+      const html = (e as CustomEvent<{ html?: string }>).detail?.html;
+      if (!html) return;
+      setPreviewHtml(html);
+      switchView('preview');
+    };
+    window.addEventListener('bc:inapp-preview', onPreview);
+    return () => window.removeEventListener('bc:inapp-preview', onPreview);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * v0.4.7 · 竖屏标签页策略（用户原话）：
@@ -689,6 +703,11 @@ export default function App() {
         <ProjectsCenter
           onBack={() => switchView('editor')}
         />
+      ) : view === 'preview' ? (
+        /* v0.4.6 竖屏程序内预览：整屏 iframe，底部第一条栏仍在（返回即可退出） */
+        <div className="bc-preview-view">
+          <iframe className="bc-preview-frame" title="预览" srcDoc={previewHtml} />
+        </div>
       ) : view === 'help' ? (
         <HelpCenter initialDoc={helpDoc} initialTarget={helpTarget} onBack={() => switchView('editor')} />
       ) : view === 'settings' ? (

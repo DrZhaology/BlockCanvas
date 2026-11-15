@@ -248,6 +248,25 @@ const main = async () => {
   /* ⑬ 宽屏回归：并排形态不能被动坏（点一张会话卡回到编辑器） */
   await win.locator('.sess-card').first().click();
   await sleep(600);
+
+  /* ⑫b 程序内预览：竖屏点「预览」不走系统浏览器，而是整屏 iframe + 第一条栏留返回。
+         这里直接注入一份测试 HTML（绕过"导出前体检"向导，那条逻辑另有探针管）。 */
+  await win.evaluate(() => window.dispatchEvent(new CustomEvent('bc:inapp-preview', {
+    detail: { html: '<!doctype html><meta charset=utf-8><body style="margin:0;font-family:system-ui;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh"><h1>程序内预览 OK</h1></body>' }
+  })));
+  await sleep(700);
+  const preview = await win.evaluate(() => ({
+    frame: !!document.querySelector('.bc-preview-frame'),
+    bar1: !!document.querySelector('.pt-bar1'),
+    bar2: !!document.querySelector('.pt-bar2'),
+    frameH: Math.round(document.querySelector('.bc-preview-frame')?.getBoundingClientRect().height || 0)
+  }));
+  console.log('13a-preview  ' + JSON.stringify(preview));
+  await shot('13a-preview');
+  // 返回编辑器：第一条栏最左那颗（子页面形态下是「返回」）
+  await win.locator('.pt-bar1 .pt-btn[aria-label="返回"]').click();
+  await sleep(600);
+
   await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setSize(1440, 900); w.center(); });
   await sleep(900);
   const wide = await win.evaluate(() => ({

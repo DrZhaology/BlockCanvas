@@ -267,6 +267,46 @@ async function main() {
   const z1 = await readZoom();
   check('⑥ 双指张开 → 画布放大（zoom 变大）', z1 > z0 + 1, `zoom ${z0}% → ${z1}%`);
 
+  // ⑦ 双指缩放的**锚点**：手指按住的那个内容点要留在手指下面，不能把画布"拽走"
+  //    判据：以两指中心为原点，某个元素中心的相对位置应按 zoom 比例同步放大
+  //    （d1 ≈ d0 × k）。偏差 > 14px 就说明锚点没守住。
+  const boxCenter = () => win.evaluate((bid) => {
+    const el = document.querySelector(`.canvas [data-bc-id="${bid}"]`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }, ids.a);
+  const c0 = await boxCenter();
+  if (!c0) {
+    check('⑦ 双指缩放以两指中心为锚（内容点不漂）', false, '找不到方块 A');
+  } else {
+    const anchor = { x: Math.round(c0.x + 70), y: Math.round(c0.y) };
+    const za = await readZoom();
+    await win.evaluate((p) => {
+      const fire = (type, id, x, y) => document.elementFromPoint(p.x, p.y)?.dispatchEvent(
+        new PointerEvent(type, { pointerId: id, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, cancelable: true })
+      );
+      fire('pointerdown', 31, p.x - 20, p.y);
+      fire('pointerdown', 32, p.x + 20, p.y);
+      for (let i = 1; i <= 6; i++) {
+        fire('pointermove', 31, p.x - 20 - i * 6, p.y);
+        fire('pointermove', 32, p.x + 20 + i * 6, p.y);
+      }
+      fire('pointerup', 31, p.x - 56, p.y);
+      fire('pointerup', 32, p.x + 56, p.y);
+    }, anchor);
+    await sleep(450);
+    const za2 = await readZoom();
+    const c1 = await boxCenter();
+    const k = za2 / za;
+    const d0 = c0.x - anchor.x;
+    const d1 = c1 ? c1.x - anchor.x : NaN;
+    const drift = d1 - d0 * k;
+    check('⑦ 双指缩放以两指中心为锚（内容点不漂）',
+      Number.isFinite(drift) && Math.abs(drift) < 14,
+      `锚点位移 ${drift.toFixed(1)}px（zoom ${za}% → ${za2}%，k=${k.toFixed(2)}，d0=${d0.toFixed(0)} → d1=${d1.toFixed(0)}）`);
+  }
+
   check('无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));
 
   console.log(`\n===== ${pass}/${pass + fail} 通过 =====`);

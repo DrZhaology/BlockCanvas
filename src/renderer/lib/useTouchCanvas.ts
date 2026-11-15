@@ -65,6 +65,17 @@ export function useTouchCanvas(opts: {
     let scroll0: Pt = { x: 0, y: 0 };
     let pinch: { dist: number; zoom: number } | null = null;
     const pts = new Map<number, Pt>();
+    /**
+     * 双指缩放的两个体验点（v0.4.6 收尾）：
+     *   ① **以两指中心为锚**：缩放后把滚动量按比例补回去，手指按住的那个内容点不动；
+     *   ② **一帧最多一次 setState**：pointermove 可以来 120 次/秒，不合并的话
+     *      React 每来一个事件就重渲染一次（这就是"捏合发涩"的来源）。
+     * `applied` 记的是"上一次真正下发给 React 的 zoom"，用它算比例才不会被
+     * 还没提交的旧 zoom 拖累（否则连续两帧会重复放大同一段）。
+     */
+    let applied = 0;
+    let pinchRaf = 0;
+    let pinchPending: { zoom: number; cx: number; cy: number } | null = null;
 
     const dist = () => {
       const [a, b] = [...pts.values()];
@@ -95,12 +106,13 @@ export function useTouchCanvas(opts: {
       const armed = holdArmed;
       holdArmed = false; // 本次按住用掉了这一下
       if (cur.length === 0) { st.selectElement(id); return; }
-      // 已在选区里 → 再长按一次取消它（多选的退出口；否则只能靠点空白全清）
       if (cur.includes(id)) {
-        if (!armed) return; // 同一次按住里的"第二次触发"不算数
-        if (cur.length === 1) st.selectElement(null);
-        else if (typeof st.toggleSelect === 'function') st.toggleSelect(id);
-        else st.selectElement(id);
+        // 已经在选区里：
+        //   · 多选时 → 这一下把它从选区里摘掉（多选的退出口）；
+        //   · 单选时 → **什么都不做**。以前这里会"取消选中"，结果就是
+        //     "长按一个已选中的元素 = 反而选不上"（probe-portrait-input 一直卡这条）。
+        //     清空选区有别的入口：长按空白 / 更多菜单里的「取消选中」/ Esc。
+        if (cur.length > 1 && armed && typeof st.toggleSelect === 'function') st.toggleSelect(id);
         return;
       }
       // 选区非空时再长按别的元素 → **加选**（用户："再次长按别的元素可以多选"）
@@ -108,10 +120,32 @@ export function useTouchCanvas(opts: {
       else st.selectElement(id);
     };
 
+    /** 一帧一次地真正下发缩放 + 把两指中心按住的内容点"钉"回原位 */
+    const flushPinch = () => {
+      pinchRaf = 0;
+      const p = pinchPending;
+      const w = wrap();
+      if (!p || !w) return;
+      const before = applied || zoomRef.current;
+      if (Math.abs(p.zoom - before) < 0.004) return;
+      const r = w.getBoundingClientRect();
+      const rx = p.cx - r.left;
+      const ry = p.cy - r.top;
+      const k = p.zoom / before;
+      applied = p.zoom;
+      zoomCb.current(p.zoom);
+      // 下一帧再校滚动：React 提交后画布尺寸才变，这一帧还是旧尺寸（会被钳住）
+      requestAnimationFrame(() => {
+        const w2 = wrap();
+        if (!w2) return;
+        w2.scrollLeft = (w2.scrollLeft + rx) * k - rx;
+        w2.scrollTop = (w2.scrollTop + ry) * k - ry;
+      });
+    };
+
     const onDown = (e: PointerEvent) => {
       pressDown = true;
-      const w = wrap();
-      if (!w || !w.contains(e.target as Node)) return;
+      const w = wrap();      if (!w || !w.contains(e.target as Node)) return;
       // 竖屏下画布这块完全由本层接管：不让画布自己的 pointerdown 选元素
       e.stopPropagation();
       pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -120,6 +154,7 @@ export function useTouchCanvas(opts: {
         window.clearTimeout(holdTimer);
         longPressed = false;
         pinch = { dist: dist(), zoom: zoomRef.current };
+        applied = zoomRef.current;
         return;
       }
       if (pts.size > 2) return;
@@ -148,7 +183,14 @@ export function useTouchCanvas(opts: {
         const d = dist();
         if (pinch.dist > 8 && d > 8) {
           const next = Math.min(maxZoom, Math.max(minZoom, pinch.zoom * (d / pinch.dist)));
-          zoomCb.current(Math.round(next * 100) / 100);
+          // 两指中点（client 坐标）：缩放要绕着它，内容才不会被"拽走"
+          let cx = 0;
+          let cy = 0;
+          for (const p of pts.values()) { cx += p.x; cy += p.y; }
+          cx /= pts.size;
+          cy /= pts.size;
+          pinchPending = { zoom: Math.round(next * 100) / 100, cx, cy };
+          if (!pinchRaf) pinchRaf = requestAnimationFrame(flushPinch);
         }
         return;
       }
@@ -191,6 +233,7 @@ export function useTouchCanvas(opts: {
     window.addEventListener('click', onClickCapture, true);
     return () => {
       window.clearTimeout(holdTimer);
+      if (pinchRaf) cancelAnimationFrame(pinchRaf);
       window.removeEventListener('pointerdown', onDown, true);
       window.removeEventListener('pointermove', onMove, true);
       window.removeEventListener('pointerup', onUp, true);
