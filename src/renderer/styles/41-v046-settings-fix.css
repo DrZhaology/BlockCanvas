@@ -1,0 +1,96 @@
+/* ============================================================================
+   v0.4.6 第 47 批 · 竖屏设置页的塌陷修复 + 页内切换动画
+   ----------------------------------------------------------------------------
+   用户反馈（附了两张截图）：
+     「设置页面存储这一块界面崩了，没有适配，你截图验收的时候没有往下看，这个页面还是这样。」
+     「插件与资源包这里一个字一行，界面也崩了，你也没看到。」
+
+   两张图的真因是同一个：`36-v046-portrait.css` 里那条两段式网格
+   `.fluent-card { display:grid; grid-template-columns: 34px 1fr; grid-template-areas: 'icon info' 'ctrl ctrl' }`
+   **只对"图标 + 文案 + 控件"三件套成立**。而这两张卡片是自定义结构：
+
+     · 存储总览：`<div class="fluent-card">` 里自己套了一层 flex 行（图标+标题+按钮），
+       再套 `.bc-storage-list`。它们没有 `grid-area`，于是被自动放进 34px 的**第一列** ——
+       标题被挤成一列单字，明细行从 x=93、y=699 才开始（既偏右又偏下）。
+     · 扩展资源包：`.fluent-ext-main` 是"图标 + 文案 + 一排按钮"的 flex 行，按钮不换行，
+       文案只剩 40~60px 宽 → 一个字一行。
+
+   修法（三条）：
+     ① 网格只给带 `.fluent-card-info` 的标准卡片（改在 36 号分片的 :has 上）；
+     ② 非标准卡片一律"竖着排 + 子块占满宽度"，里面那些"标题行 / 按钮行"允许换行；
+     ③ 明细行与扩展卡片的操作区在窄屏下各占一行，不再和文案抢宽度。
+   ========================================================================== */
+
+/* ── ① 非标准卡片：竖排、占满、允许换行 ───────────────────────────────── */
+.app[data-shell='stack'] .fluent-settings-page .fluent-card:not(:has(> .fluent-card-info)) {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+/* 卡片里自带的"标题 + 右侧按钮"那行：窄屏换行，按钮掉到下一行右对齐 */
+.app[data-shell='stack'] .fluent-settings-page .fluent-card:not(:has(> .fluent-card-info)) > div {
+  flex-wrap: wrap;
+  row-gap: 8px;
+  min-width: 0;
+}
+.app[data-shell='stack'] .fluent-settings-page .fluent-card:not(:has(> .fluent-card-info)) .fluent-card-ctrl {
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+/* 存储总览里那串 data 路径：允许断行，别把标题挤没 */
+.app[data-shell='stack'] .fluent-settings-page .fluent-card .fluent-card-desc {
+  overflow-wrap: anywhere;
+}
+
+/* ── ② 存储明细行：文案独占一行，大小 + 清理按钮落第二行 ───────────────── */
+.app[data-shell='stack'] .fluent-settings-page .bc-storage-row {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  padding: 9px 10px;
+}
+.app[data-shell='stack'] .fluent-settings-page .bc-storage-main {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+.app[data-shell='stack'] .fluent-settings-page .bc-storage-size {
+  margin-left: auto;
+  min-width: 0;
+  text-align: right;
+}
+.app[data-shell='stack'] .fluent-settings-page .bc-storage-hint {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ── ③ 扩展 / 资源包卡片：操作区单独一行 ────────────────────────────────── */
+.app[data-shell='stack'] .fluent-settings-page .fluent-ext-main {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  padding: 12px;
+  gap: 10px;
+}
+.app[data-shell='stack'] .fluent-settings-page .fluent-ext-text {
+  flex: 1 1 calc(100% - 34px);
+  min-width: 0;
+}
+.app[data-shell='stack'] .fluent-settings-page .fluent-ext-actions {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.app[data-shell='stack'] .fluent-settings-page .fluent-ext-desc {
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+/* 展开后的模板列表：窄屏一行一个，别并排 */
+.app[data-shell='stack'] .fluent-settings-page .fluent-ext-tpls {
+  grid-template-columns: minmax(0, 1fr);
+}
+

@@ -63,7 +63,11 @@ export interface StorageBreakdownInfo {
 
 declare global {
   interface ScanResult {
-    plugins: { id: string; name: string; version: string; author: string; description: string; enabled: boolean; error: string | null }[];
+    plugins: {
+      id: string; name: string; version: string; author: string; description: string; enabled: boolean; error: string | null;
+      /** v0.4.6（R6-22）：插件接口声明 —— 只有这两项会过 IPC，用于裁剪插件能力 */
+      manifest?: { apiVersion?: string; permissions?: string[] };
+    }[];
     resources: {
       id: string; name: string; version: string; author: string; description: string;
       categories?: { id: string; name: string; description: string }[];
@@ -74,6 +78,17 @@ declare global {
   }
   interface Window {
     bc: {
+      // ── v0.4.6：自绘窗口标题栏（网页版没有窗口概念 → 全部可选，缺了就不画那几个按钮）──
+      /** 最小化 / 最大化切换 / 关闭 */
+      winControl?: (action: 'minimize' | 'maximize-toggle' | 'close') => Promise<{ ok: boolean; maximized?: boolean }>;
+      /** 当前窗口状态（是否最大化） */
+      winState?: () => Promise<{ ok: boolean; maximized: boolean; focused: boolean }>;
+      /** 主进程主动推窗口状态（双击标题栏 / Win+↑ 也会触发） */
+      onWinState?: (cb: (s: { maximized: boolean; fullscreen: boolean }) => void) => () => void;
+      /** 系统强调色（"我设置的主题色"）—— 取不到返回 null，界面回退到 --accent */
+      accentColor?: () => Promise<{ ok: boolean; color: string | null }>;
+      /** 自绘标题栏点「文件/编辑/视图/帮助/设置」→ 弹原生子菜单（x/y 相对窗口内容区） */
+      menuPopup?: (id: string, x: number, y: number) => Promise<{ ok: boolean; error?: string }>;
       // 导出与网页管理
       exportHTML: (html: string, defaultName?: string) => Promise<{ ok: boolean; path?: string; error?: string; canceled?: boolean }>;
       exportHTMLWithProject: (html: string, scene: unknown, defaultName?: string, projectName?: string) => Promise<{ ok: boolean; htmlPath?: string; projectPath?: string; error?: string; canceled?: boolean }>;
@@ -247,7 +262,29 @@ declare global {
       /** v0.4.5：启动加载页的真实进度（主进程逐条播报） */
       onLoadProgress: (cb: (p: { id: string; label: string; percent: number }) => void) => () => void;
       setNativeTheme: (source: 'dark' | 'light' | 'system') => void;
+      /**
+       * v0.4.6（R6-9）：竖屏验收 —— 一键把窗口设成手机尺寸。
+       * preset: android 412×915 / iphone 390×844 / compact 360×800 / reset 1280×800。
+       * 返回**实际**得到的尺寸（窗口管理器可能修正），用它对账。
+       */
+      setAcceptanceSize: (preset: 'android' | 'iphone' | 'compact' | 'reset') => Promise<{
+        ok: boolean; width?: number; height?: number;
+        requested?: { width: number; height: number }; error?: string;
+      }>;
       pickImageSrc: (mode?: 'abs' | 'rel') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
+      /**
+       * v0.4.6（R6-18）：媒体编码探测。
+       *   result = 'supported'   → 容器头里的编码当前能解
+       *   result = 'unsupported' → 明确解不了（HEVC / 杜比视界 / 10bit AVC…），别挂 <video>
+       *   result = 'unknown'     → 读不出来 → **照常尝试播放**（绝不因为探测失败就误杀）
+       */
+      probeMediaCodec: (filePath: string) => Promise<{
+        ok: boolean;
+        result: 'supported' | 'unsupported' | 'unknown';
+        codecs: string[];
+        advice?: string;
+        error?: string;
+      }>;
       /** 首页背景用：选择图片 / 视频文件（返回绝对路径，渲染层用 bc-img:// 显示） */
       pickMediaSrc: (kind: 'image' | 'video' | 'audio') => Promise<{ ok: boolean; path?: string; absPath?: string; error?: string; canceled?: boolean }>;
     };

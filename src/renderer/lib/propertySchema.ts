@@ -937,13 +937,27 @@ export function hasStyleValue(style: Record<string, string | undefined>, schemaI
   if ((schemaItem.input === 'box4' || schemaItem.input === 'trbl') && schemaItem.sides) {
     return schemaItem.sides.some((s) => isPresent(style[s.key]));
   }
+  /**
+   * ⚠ v0.4.7：`background` 是 `backgroundColor` 的简写。
+   *   有的入口（首页/模板/探针造场景）直接把值写进 `background`，
+   *   而这里只认 `backgroundColor` —— 于是"这条属性明明有值却不显示"，
+   *   更糟的是删除时清掉 `backgroundColor`、`background` 还在 → 行删不掉（"删了会卡"）。
+   *   两个键任一个有值就算有。
+   */
+  if (schemaItem.key === 'backgroundColor') {
+    return isPresent(style.backgroundColor) || isPresent(style.background);
+  }
   return isPresent(style[schemaItem.key]);
 }
 
-/** 边框涉及的全部样式字段（简写 + 四边粗细 + 线型 + 颜色） */
+/** 边框涉及的全部样式字段（简写 + 四边粗细 + 四边线型 + 线型 + 颜色）
+ *  ⚠ v0.4.7：补上 borderTopStyle/Right/Bottom/Left —— 可视化编辑器在"只改某一侧线型"
+ *     这类操作下会写四边线型；漏了它们，删除时会留下"孤儿字段"，
+ *     行就永远删不掉（用户：「删除属性卡片删不掉，会卡」）。 */
 const BORDER_KEYS = [
   'border', 'borderStyle', 'borderColor',
-  'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'
+  'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+  'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle'
 ];
 
 function isPresent(v: string | undefined): boolean {
@@ -957,7 +971,10 @@ export function clearStyleKeys(style: Record<string, string | undefined>, schema
     ? BORDER_KEYS
     : (schemaItem.input === 'box4' || schemaItem.input === 'trbl') && schemaItem.sides
       ? schemaItem.sides.map((s) => s.key)
-      : [schemaItem.key];
+      : schemaItem.key === 'backgroundColor'
+        // background 简写也要清，否则"删了又回来"
+        ? ['backgroundColor', 'background']
+        : [schemaItem.key];
   for (const k of keys) newStyle[k] = undefined;
   return newStyle;
 }

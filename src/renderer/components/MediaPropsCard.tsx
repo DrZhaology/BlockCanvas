@@ -3,6 +3,7 @@ import { useScene, findNode } from '@store/sceneStore';
 import { Icon } from './Icon';
 import type { ElementType } from '@lib/types';
 import { getProjectDir } from '@lib/projectDir';
+import { useCodecVerdict } from '@lib/codecGuard';
 import {
   type MediaSrcMode, detectSrcMode, isUrlLike, isAbsoluteFsPath,
   normalizeSlashes, resolveToAbsolute, toRelativeFrom
@@ -47,6 +48,12 @@ export function MediaPropsCard({ elementId, elementType }: { elementId: string; 
   const updateAttr = useScene((s) => s.updateAttr);
   const node = findNode(scene.root, elementId);
   const [picking, setPicking] = useState(false);
+  const isVideoType = elementType === 'video';
+  const srcForProbe = String(findNode(scene.root, elementId)?.attrs?.srcAbs
+    || findNode(scene.root, elementId)?.attrs?.src
+    || '');
+  // v0.4.6（R6-18）：视频编码预检（结果按路径缓存，同一文件只探一次）
+  const codec = useCodecVerdict(isVideoType ? srcForProbe : '');
 
   if (!node) return null;
   const isVideo = elementType === 'video';
@@ -133,6 +140,23 @@ export function MediaPropsCard({ elementId, elementType }: { elementId: string; 
       </div>
 
       <div className="media-props-body">
+        {/* v0.4.6（R6-18）：编码预检结果 —— 解不了的视频画布上不挂 <video>，
+            所以这里必须说清楚"为什么没画面、该怎么办"（否则用户只会看到一片空白）。 */}
+        {isVideo && codec.state === 'unsupported' && (
+          <div className="media-codec-warn">
+            <span className="media-codec-ico"><Icon name="warning" size={13} /></span>
+            <div className="media-codec-body">
+              <b>这个视频的编码编辑器解不了，画布上不显示画面</b>
+              <span>
+                {codec.advice || '建议转成 H.264（MP4）再插入。'}
+                {' '}导出的网页里用支持该编码的播放器仍可能正常播放，但编辑器不做预览。
+              </span>
+              {codec.codecs.length > 0 && (
+                <code title="容器头里读到的编码标识">{codec.codecs.join(' / ')}</code>
+              )}
+            </div>
+          </div>
+        )}
         {/* —— 路径写法三选一 —— */}
         <div className="media-path-modes" role="group" aria-label="路径写法">
           {(['relative', 'absolute', 'url'] as MediaSrcMode[]).map((m) => (

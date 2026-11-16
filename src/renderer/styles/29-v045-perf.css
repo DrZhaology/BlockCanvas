@@ -152,7 +152,7 @@ html[data-bc-dark] .snapshot-info-solo {
   gap: 2px;
   padding: 8px 4px;
   border: 1px solid var(--line, var(--border));
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--surface-1, var(--panel-soft));
 }
 .snap-solo-stats b { font-size: 15px; font-weight: 700; color: var(--text-1, var(--text)); }
@@ -165,7 +165,7 @@ html[data-bc-dark] .snapshot-info-solo {
   gap: 7px;
   margin-top: 2px;
   padding: 10px 11px;
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--surface-sunken, var(--panel-soft));
   border: 1px solid var(--line, var(--border));
 }
@@ -187,10 +187,13 @@ html[data-bc-dark] .snapshot-info-solo {
 .snap-solo-more > summary::-webkit-details-marker { display: none; }
 .snap-solo-more > summary::before { content: '▸ '; }
 .snap-solo-more[open] > summary::before { content: '▾ '; }
-/* 只读布局下画布占满：左侧面板不渲染时 grid 里不能留空列 */
-.workspace.is-readonly { grid-template-areas: 'canvas right'; }
-.workspace.is-readonly[data-layout='bottom'] { grid-template-areas: 'canvas right'; }
-.workspace.is-readonly:not([data-layout='bottom']) {
+/* 只读布局下画布占满：左侧面板不渲染时 grid 里不能留空列
+   ⚠ v0.4.6 外壳方向翻转：这些都是**并排形态**才成立的重排，必须加 split 守卫。
+   堆叠形态下 `.workspace.is-readonly` 会被设成 `'canvas right'` 两列，
+   把画布挤成一条（同一个坑在 16-v042b 也踩过）。 */
+.app[data-shell='split'] .workspace.is-readonly { grid-template-areas: 'canvas right'; }
+.app[data-shell='split'] .workspace.is-readonly[data-layout='bottom'] { grid-template-areas: 'canvas right'; }
+.app[data-shell='split'] .workspace.is-readonly:not([data-layout='bottom']) {
   grid-template-columns: minmax(100px, 1fr) var(--bc-right-width, 372px);
 }
 
@@ -207,7 +210,7 @@ html[data-bc-dark] .snapshot-info-solo {
   margin: 6px 0 10px;
   border: 1px solid var(--line, var(--border));
   border-left: 3px solid var(--accent);
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--bg-panel);
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
   animation: bcSwapIn var(--dur-pop) var(--ease-standard);
@@ -220,7 +223,7 @@ html[data-bc-dark] .snapshot-info-solo {
   padding: 7px 10px;
   border-bottom: 1px solid var(--line, var(--border));
   background: var(--panel-soft);
-  border-radius: 7px 7px 0 0;
+  border-radius: 12px 12px 0 0;
 }
 .pos-ghost-title {
   display: inline-flex;
@@ -237,7 +240,7 @@ html[data-bc-dark] .snapshot-info-solo {
   display: inline-grid;
   place-items: center;
   border: none;
-  border-radius: 4px;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-3, var(--text-muted));
   cursor: pointer;
@@ -259,7 +262,7 @@ html[data-bc-dark] .snapshot-info-solo {
   height: 24px;
   padding: 0 9px;
   border: 1px solid var(--line, var(--border));
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text-2, var(--text-muted));
   font-family: inherit;
@@ -385,7 +388,7 @@ html[data-bc-dark] .fp-badge.lic-unknown { color: var(--text-3); border-color: v
   max-width: calc(100vw - 48px);
   padding: 12px 14px 10px;
   border: 1px solid var(--line, var(--border));
-  border-radius: 10px;
+  border-radius: 16px;
   background: var(--bg-panel);
   box-shadow: var(--shadow-2, 0 8px 28px rgba(15, 23, 42, 0.18));
   animation: bcPopIn 0.16s cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -477,7 +480,7 @@ html[data-bc-dark] .pc-badge.is-external { color: #fcd34d; border-color: #78350f
   padding: 12px 14px;
   border: 1px solid #fcd34d;
   border-left: 3px solid #f59e0b;
-  border-radius: 8px;
+  border-radius: 14px;
   background: #fffbeb;
 }
 .dd-session-warn-head {
@@ -502,7 +505,7 @@ html[data-bc-dark] .pc-badge.is-external { color: #fcd34d; border-color: #78350f
   height: 28px;
   padding: 0 11px;
   border: 1px solid #f59e0b;
-  border-radius: 6px;
+  border-radius: 10px;
   background: #fff;
   color: #92400e;
   font-size: 11.5px;
@@ -568,7 +571,7 @@ html[data-bc-dark] .dd-session-warn-btn:hover { background: #2a1f0a; }
    ========================================================================== */
 .help-doc .bc-doc-hit {
   position: relative;
-  border-radius: 4px;
+  border-radius: 8px;
   background: linear-gradient(90deg, rgba(255, 226, 128, 0.85), rgba(255, 226, 128, 0.25) 82%, transparent);
   box-shadow: -10px 0 0 0 rgba(255, 226, 128, 0.85);
   padding-left: 10px;
@@ -588,7 +591,7 @@ html[data-bc-dark] .help-doc .bc-doc-hit {
 /* 关键词荧光笔：比"命中词淡入"更明确 —— 底色是实打实的黄 */
 .help-doc mark.hc-hit {
   padding: 0 2px;
-  border-radius: 3px;
+  border-radius: 6px;
   background: #ffe58a;
   color: #4a3300;
   box-shadow: 0 0 0 1px rgba(240, 180, 0, 0.45);
@@ -637,8 +640,3 @@ html[data-bc-dark] .help-doc mark.hc-hit {
   min-height: 0;
 }
 
-/* 首页「页面设置」四个板块（预设/渐变/图片/视频）—— 同样是条件渲染 */
-.eh-panel-tabbody {
-  animation: bcSwapIn var(--dur-pop) var(--ease-standard);
-  min-width: 0;
-}

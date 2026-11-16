@@ -1,0 +1,282 @@
+/* ==========================================================================
+   BlockCanvas · v0.4.6 竖屏：第二条栏体改造 + 第三层「情境栏」
+   --------------------------------------------------------------------------
+   本分片只做三件事（其余竖屏样式仍在 36-v046-portrait.css 里）：
+
+     1. 第二条操作栏从"抽屉"改成**固定单行**。抓手横条和 Alt 开关已经从 DOM 删掉，
+        36 号里那几段旧规则（.pt-bar2-head / .pt-bar2-grip / .pt-alt-btn）先留着，
+        由后面统一清理；这里只用更高特异性把**栏体高度**改掉，压住旧的折叠态高度规则。
+     2. 「三」的二级菜单底边改贴**第一条栏上沿**（JS 算的位置见 PortraitBars.tsx），
+        并允许在视口内滚动 —— 条目再也不会顶出屏幕外面。
+     3. 新增第三层「情境栏」.pt-ctx 的全部样式（结构见 PortraitContextBar.tsx）。
+
+   规矩：不带 !important；竖屏专属规则一律以 .app[data-shell='stack'] 开头
+   （body 下还有桌面端样式，漏了前缀就会串到宽屏）。
+   ========================================================================== */
+
+/* ── 变量：第二条栏高度 ───────────────────────────────────────────────────
+   左右抽屉和遮罩靠 36 号分片的 --pt-bar2-h 对齐第二条栏
+   （.elem-pane-wrap / .right-pane-wrap / .shell-drawer-scrim 的 bottom: calc(-1 * var(--pt-bar2-h))），
+   所以栏体换高度时这里必须一起改，否则抽屉会多盖或少盖一截。
+   双写 .app 是为了提特异性，避免依赖两个分片的加载顺序。 */
+.app[data-shell='stack'].app {
+  --pt-bar2-h: 48px;
+}
+
+/* ── 第二条栏体：固定单行 ─────────────────────────────────────────────────
+   .pt-bar2 现在是"竖排容器"：上面挂情境栏、下面挂工具栏。
+   高度不能锁死（旧规则锁了 72px）—— 锁死会把 44px 的情境栏裁掉。
+
+   ⚠ position: relative 是给**悬浮的情境栏**当定位基准用的
+     （情境栏浮在栏体上沿外侧，不占布局位置）。
+     relative + z-index:auto **不会**建立层叠上下文，
+     所以不会影响画布抽屉（z-index:58）与栏体的层序（36 号分片的警告针对的是
+     "给栏体建层叠上下文"，relative 不会）。 */
+.app[data-shell='stack'] .pt-bar2,
+.app[data-shell='stack'] .pt-bar2:not(.is-expanded) {
+  position: relative;
+  flex-direction: column;
+  align-items: stretch;
+  height: auto;
+  min-height: 48px;
+  padding: 0;
+  /* 情境栏要浮到栏体外侧 → 这里不能裁切（旧规则裁切是为了展开态） */
+  overflow: visible;
+  /* 两根栏之间不要分隔线（用户："第二层和第一层操作栏之间多了一条风格线"） */
+  border-top: 0;
+  /* 抽屉手势已删，纵向不再需要拦截；横滑交给浏览器原生 pan-x */
+  touch-action: pan-x;
+}
+
+/* 工具栏那一行：定高 48、内部可横滑、不画滚动条
+   （手指滑就行，画一条灰杠只是脏 —— 用户没要求看得见） */
+.app[data-shell='stack'] .pt-bar2 > .pt-bar2-inner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 48px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+.app[data-shell='stack'] .pt-bar2 > .pt-bar2-inner::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* 行内直接子项按内容撑宽（配合上面的 overflow-x: auto 才能左右滑）。
+   这一条不认具体类名 —— 栏里最终渲染什么由 Toolbar 决定，换一套按钮也不该把横滑弄丢。 */
+.app[data-shell='stack'] .pt-bar2 > .pt-bar2-inner > * {
+  flex: 0 0 auto;
+  min-width: 100%;
+  max-height: 100%;
+}
+
+/* 栏内工具栏：一行不换行、行高 44、按钮吃满 44 触摸高度。
+   只约束"行高 / 不换行 / 触摸高度"，不碰按钮宽度与内部排版 ——
+   那是 Toolbar 自己的事，改这里会把另一边的调整顶掉。 */
+.app[data-shell='stack'] .pt-bar2 .toolbar {
+  flex-wrap: nowrap;
+  align-items: center;
+  width: max-content;
+  min-width: 100%;
+  height: 44px;
+  padding: 0 6px;
+  background: transparent;
+  border-top: 0;
+  box-shadow: none;
+}
+.app[data-shell='stack'] .pt-bar2 .toolbar button {
+  flex: 0 0 auto;
+  min-height: 44px;
+}
+.app[data-shell='stack'] .pt-bar2 .toolbar .tb-main {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  height: 44px;
+  overflow: visible;
+}
+
+/* ── 抽屉与遮罩要连情境栏一起盖住 ──────────────────────────────────────────
+   36 号分片里抽屉/遮罩靠 `--pt-bar2-h` 决定"往下多伸多少"，
+   而情境栏是**浮在**第二条栏上沿外侧的（不占布局位置），所以这里**不需要**额外补偿。 */
+
+/* ── 「三」的二级菜单：底边贴住第一条栏上沿 ───────────────────────────────
+   ⚠ 这里**不能**加 .app[data-shell='stack'] 前缀：菜单是 Portal 到 body 的
+   （body 不是 .app 的后代）。.pt-entry-menu 只在竖屏第一条栏里出现，不会串到桌面端。
+   bottom 由 JS 按 .pt-bar1 的顶边算好（会盖住第二条栏并往上延伸），
+   这里只兜住"条目多到顶出视口"的情况：限高 + 内部滚动。 */
+.pt-entry-menu {
+  max-height: calc(100vh - var(--pt-bar1-h, 56px) - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ── 第三层「情境栏」.pt-ctx ──────────────────────────────────────────────
+   ⚠ 用户原话：「第三层菜单栏不要背景的白色横条，按钮直接出现在第二层菜单的上面。」
+   → 这一层**不是一根横条**，而是**浮在第二条栏上沿外侧的一排按钮**：
+     · 容器绝对定位（bottom: 100%）→ 不占布局位置，画布不会被顶下去；
+     · 容器本身透明、无边框、无阴影 → 没有"白色横条"；
+     · 按钮自己是圆角小药丸（自带底色+阴影）→ 浮在画布上看得清。
+   抽屉（z-index 58）会盖住这一层 —— 容器没有 z-index，不与抽屉抢层序。 */
+.app[data-shell='stack'] .pt-ctx {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  z-index: auto;
+  display: flex;
+  align-items: flex-end;
+  height: auto;
+  padding: 0 8px 6px;
+  box-sizing: border-box;
+  background: transparent;
+  box-shadow: none;
+  /* 容器不吃点击（否则会挡住画布），只有按钮吃 */
+  pointer-events: none;
+}
+
+/* 一行按钮、**贴右**排：
+   row-reverse 让 DOM 里先到的按钮落在右边（后来的依次往左排，用户："先到的先排右边"）。
+   ⚠ row-reverse 之后主轴起点在右边，所以"贴右"要用 flex-start；
+   写 flex-end 会变成整组按钮靠左，正好和用户要的相反。 */
+.app[data-shell='stack'] .pt-ctx-row {
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 44px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  touch-action: pan-x;
+  /* 容器不吃点击，按钮吃 */
+  pointer-events: auto;
+}
+.app[data-shell='stack'] .pt-ctx-row::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* 按钮：图标在左、文字在右（44px 高的条里竖排图标会挤成一团，横排更稳），
+   圆角 12，最小 44×44 触摸目标。
+   悬浮在画布上 → 底色要实、还要有阴影，否则和画布内容糊在一起。 */
+.app[data-shell='stack'] .pt-ctx-btn {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  /* 入场：从右边滑进来一点 + 淡入（backwards 而不是 both：播完要能把
+     :active 的 scale 交还给普通样式，否则按下去没反馈） */
+  animation: ptCtxIn var(--dur-fast, 160ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) backwards;
+  transition: background var(--dur-fast, 160ms) var(--ease-out, ease),
+              border-color var(--dur-fast, 160ms) var(--ease-out, ease),
+              transform var(--dur-fast, 160ms) var(--ease-out, ease);
+}
+.app[data-shell='stack'] .pt-ctx-btn:active {
+  transform: scale(0.96);
+  background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+}
+
+/* 退场：先淡出再卸载（组件那边要等 180ms 才真正把按钮摘掉） */
+.app[data-shell='stack'] .pt-ctx-btn[data-leaving='true'] {
+  animation: ptCtxOut var(--dur-fast, 160ms) var(--ease-exit, ease-in) forwards;
+  pointer-events: none;
+}
+
+.app[data-shell='stack'] .pt-ctx-ico {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+.app[data-shell='stack'] .pt-ctx-ico svg {
+  width: 16px;
+  height: 16px;
+}
+.app[data-shell='stack'] .pt-ctx-label {
+  font-size: 12.5px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+/* ⚠ 临时位置：项目规定 @keyframes 只放在 src/renderer/animations.css。
+   这一批只允许新建本分片，所以情境栏这两条先落在这里（名字按项目习惯取了 pt* 前缀），
+   后续要统一搬进 animations.css —— 搬走时删掉这段即可，选择器不用动。 */
+@keyframes ptCtxIn {
+  from { opacity: 0; transform: translateX(14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes ptCtxOut {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(10px); }
+}
+
+/* 系统开启"减少动态效果"时，高度和滑入也瞬时完成
+   （animations.css 只把 --dur-* 归零，这里的 --dur-mid 是带兜底的独立值，得单独收） */
+@media (prefers-reduced-motion: reduce) {
+  .app[data-shell='stack'] .pt-ctx {
+    transition: none;
+  }
+  .app[data-shell='stack'] .pt-ctx-btn {
+    animation: none;
+  }
+  /* 动画被关掉后，正在退场的按钮直接隐身（不然会原样挂 180ms 才突然没了） */
+  .app[data-shell='stack'] .pt-ctx-btn[data-leaving='true'] {
+    opacity: 0;
+  }
+}
+
+/* ============================================================================
+   v0.4.6 第 46 批 · 离开编辑器时第二条栏的退场
+   ----------------------------------------------------------------------------
+   用户原话：「会话页面的进入和退出动画，下方的工具栏不要死板的闪烁一下……
+     第二层从下方退出，不要闪烁像刷新一下一样。」
+
+   以前切到会话页，这一条栏是**条件渲染**直接卸载 —— 画面里少掉一整条，看着像刷新。
+   现在 App 让它多挂 220ms，挂 is-leaving 从下方滑出去，播完再卸载。
+   ⚠ 退场期间必须 position: fixed（脱离 flex 流），否则会话页会被顶矮 48px、再弹回来。
+   ========================================================================== */
+.app[data-shell='stack'] .pt-bar2.is-leaving {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--pt-bar1-h, 56px);
+  z-index: 45;
+  pointer-events: none;
+  animation: ptBar2Out 200ms var(--ease-exit, cubic-bezier(0.4, 0, 1, 1)) both;
+}
+@keyframes ptBar2Out {
+  from { transform: translateY(0); opacity: 1; }
+  to   { transform: translateY(100%); opacity: 0; }
+}
+
+/* 第一条栏按钮"换一套"时的入场动画已移到 36 号分片（ptLeadIn）——
+   这里原来是 ptBtnSwap（opacity + scale，且 fill-mode 用了 both，把 :active
+   的按压缩放永久压住了）。现在统一成"从下方 4px 滑入"，且播完不占 transform。 */
+
+@media (prefers-reduced-motion: reduce) {
+  .app[data-shell='stack'] .pt-bar2.is-leaving { animation: none; opacity: 0; }
+  .app[data-shell='stack'] .pt-bar1 .pt-btn { animation: none; }
+}

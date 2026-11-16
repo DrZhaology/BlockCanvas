@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Toolbar } from '@comp/Toolbar';
 import { ElementPanel } from '@comp/ElementPanel';
 import { Canvas } from '@comp/Canvas';
@@ -14,6 +14,7 @@ import { ProjectTabBar } from '@comp/ProjectTabBar';
 import { AboutModal } from '@comp/About';
 import { HelpCenter, type DocKey } from '@comp/HelpCenter';
 import { ShortcutsModal } from '@comp/ShortcutsModal';
+import { PositionSwitchHost } from '@lib/posSwitch';
 import { useScene, findNode } from '@store/sceneStore';
 import { useTabStore, isSnapshotTab } from '@store/tabStore';
 import { useUpdateBusy } from '@store/updateStore';
@@ -28,9 +29,25 @@ import { applySelHighlightClass } from '@lib/selHighlight';
 import { showToast, type ToastType } from '@lib/toast';
 import { requestPropFocus } from '@lib/propFocus';
 import { EmptyHome } from '@comp/EmptyHome';
+import { TitleBar } from '@comp/TitleBar';
 import { SnapshotInfoPanel } from '@comp/SnapshotBar';
 import { LoadingScreen } from '@comp/LoadingScreen';
 import { useLoadScreen } from '@store/loadStore';
+import { useShellLayout } from '@lib/shellMode';
+import { useInputMode } from '@lib/inputMode';
+import { useTouchCanvas } from '@lib/useTouchCanvas';
+import { useAltMode, setAltMode } from '@lib/altMode';
+import { PortraitBar1, PortraitBar2 } from '@comp/portrait/PortraitBars';
+import type { PortraitContextAction } from '@comp/portrait/PortraitContextBar';
+import { SessionsView } from '@comp/portrait/SessionsView';
+import { PortraitLayers } from '@comp/portrait/PortraitLayers';
+import { TabCloseGuard } from '@comp/TabCloseGuard';
+import { useEdgeSwipe } from '@lib/useEdgeSwipe';
+import { useDrawerSide } from '@lib/drawerSide';
+import { usePortraitPrefs } from '@lib/portraitPrefs';
+import { resetCanvasView } from '@lib/canvasView';
+import { DrawerHandle } from '@comp/DrawerHandle';
+// v0.4.6：抽屉把手已抽成 <DrawerHandle>（它自带长按调位置的三个状态），App 不再直接用 Icon
 
 // BlockCanvas · 主界面
 // - 顶部：Windows 11 记事本风格项目多标签栏 (ProjectTabBar)
@@ -54,11 +71,105 @@ const RIGHT_WIDTH_MIN = 340;
 /** 只读快照预览的右侧面板固定宽度（不写进持久化，退出后编辑器宽度原样恢复） */
 const SNAPSHOT_PANE_WIDTH = 372;
 
-export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 'help';
+export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 'help' | 'sessions' | 'preview';
+
+/**
+ * 竖屏下整页切换走「右进右出」（View Transitions）的视图。
+ *
+ * 用户原话：「进入和退出动画应该是右侧进入，右侧退出的样式，不要单纯刷新一下。」
+ * 后来追加：「所有别的页面都要修改一下」—— 所以除了两处有专属动画的页面，
+ * 其余整页视图都归这一档：
+ *   · editor：画布本身有平移/缩放那套，不能被通用滑屏顶掉；
+ *   · sessions：有"画布缩小成缩略图"的专属转场。
+ */
+const SLIDE_VIEWS: ReadonlySet<string> = new Set<AppView>([
+  'projects', 'settings', 'update', 'table', 'help', 'preview'
+]);
 
 export default function App() {
   // v0.4.2：全局「横向滚动区直接滚轮」桥接（容器加 .bc-hscroll 即生效）
   useHorizontalWheel();
+  /**
+   * v0.4.6（R6-7）：外壳断点。
+   *
+   * ⚠ 别和画布断点混了：`BREAKPOINTS`（768/480）是**被设计的那张网页**的断点，
+   * 这个 `shell.layout` 是**编辑器自己的界面**在窄窗口下换形态（左右面板变抽屉）。
+   * 以前窗口锁在 ≥960，所以"外壳窄屏"这件事根本不存在 —— 现在放开到 360。
+   *
+   * v0.4.6 拆轴：布局看宽度（split/stack），输入看设备能力（pointer/touch），
+   * 两者不正交时 —— 1280px 的平板横放够宽但没有 Alt/悬停，窄窗桌面有鼠标却被塞触摸手势。
+   */
+  const shell = useShellLayout();
+  const inputMode = useInputMode();
+  // 窄屏下的抽屉：'left' 元素面板 / 'right' 属性面板 / null 都收起
+  const [drawer, setDrawer] = useState<'left' | 'right' | null>(null);
+  /** v0.4.6 竖屏：下方图层面板（只能通过「属性」离开，见 PortraitLayers） */
+  const [layerSheet, setLayerSheet] = useState(false);
+  /** 竖屏设置项（显示第二条栏 / 长按时长 / 面板高度）—— 设置页改完立刻生效 */
+  const ptPrefs = usePortraitPrefs();
+  /** v0.4.6 竖屏：程序内预览的 HTML（交给全屏 iframe，第一条栏留返回） */
+  const [previewHtml, setPreviewHtml] = useState<string>('');
+
+  // 窄屏切回宽屏时把抽屉收掉（否则回到宽屏还挂着一个半透明遮罩）
+  useEffect(() => {
+    if (shell.layout === 'split' && drawer !== null) setDrawer(null);
+  }, [shell.layout, drawer]);
+  // 切回宽屏时把下方图层面板也收掉（宽屏的图层在右侧面板里，不叠一块浮层）
+  useEffect(() => {
+    if (shell.layout === 'split' && layerSheet) setLayerSheet(false);
+  }, [shell.layout, layerSheet]);
+  // 竖屏右侧抽屉只显示属性（图层在下方那块面板里）→ 进来先把它拨回属性
+  useEffect(() => {
+    if (shell.layout === 'stack') setRightTabRaw('inspector');
+  }, [shell.layout]);
+  // 程序内预览：工具栏在竖屏下发这个事件（宽屏仍走系统浏览器）
+  useEffect(() => {
+    const onPreview = (e: Event) => {
+      const html = (e as CustomEvent<{ html?: string }>).detail?.html;
+      if (!html) return;
+      setPreviewHtml(html);
+      switchView('preview');
+    };
+    window.addEventListener('bc:inapp-preview', onPreview);
+    return () => window.removeEventListener('bc:inapp-preview', onPreview);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // 「新建页面」统一入口：第一条栏的加号、会话页底部的按钮都发这个事件
+  useEffect(() => {
+    const onNew = () => { void requestNewPage(); };
+    window.addEventListener('bc:new-page', onNew);
+    return () => window.removeEventListener('bc:new-page', onNew);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * v0.4.7 · 竖屏标签页策略（用户原话）：
+   *   「竖屏没有多标签页的管理，横屏切换到竖屏就保留当前的页面，别的标签关闭。」
+   *
+   * 所以切到窄屏壳（<900px，含手机竖屏与窄窗口）时只保留当前标签：
+   *   · **干净的**（isDirty === false）直接关 —— 工程文件本来就在磁盘上，关掉不丢东西；
+   *   · **有未保存修改的保留下来** —— 为了"看起来符合规则"而静默丢用户的活，这条红线不碰。
+   *     这种残留标签在竖屏下只能通过工具条切回去，属于安全兜底。
+   * 关掉的数量走一条轻提示，避免"我的标签怎么自己没了"。
+   */
+  useEffect(() => {
+    if (shell.layout !== 'stack') return;
+    const { tabs, activeTabId, closeTab } = useTabStore.getState();
+    if (tabs.length <= 1) return;
+    const closable = tabs.filter((t) => t.id !== activeTabId && !t.isDirty);
+    if (closable.length === 0) return;
+    closable.forEach((t) => closeTab(t.id));
+    showToast(`竖屏只保留当前页面，已关闭 ${closable.length} 个其它标签`, 'info' as ToastType);
+  }, [shell.layout]);
+  // v0.4.6：窄屏抽屉的边缘滑动手势（往内滑打开 / 往边缘滑关闭，含方向判定与打断）
+  useEdgeSwipe({
+    enabled: shell.layout === 'stack',
+    drawer,
+    setDrawer,
+    paneWidth: () => Math.round(window.innerWidth * 0.86)
+  });
+  // v0.4.6：抽屉方位（左右分布 / 反向 / 都收一边）—— 只影响窄屏外壳
+  const [drawerSide] = useDrawerSide();
   const [rightTab, setRightTabRaw] = usePersistentState<RightTab>(RIGHT_TAB_KEY, 'inspector');
   // v0.4.4：页签切换不再走 View Transition —— VT 的旧帧快照会让文字"停一会儿"。
   // 改为内容重挂载 + 轻量入场动画（见 .tab-body 的 bcSwapIn）。
@@ -69,13 +180,164 @@ export default function App() {
   const [rightWidth, setRightWidth] = usePersistentState<number>(RIGHT_WIDTH_KEY, RIGHT_WIDTH_DEFAULT);
   const [leftWidth, setLeftWidth] = usePersistentState<number>(LEFT_WIDTH_KEY, LEFT_WIDTH_DEFAULT);
   const [zoom, setZoom] = useState(1);
+  /* v0.4.6 竖屏：画布触屏手势层 —— 长按选中 / 长按加选 / 单指平移 / 双指缩放。
+     只在 stack 形态挂上；宽屏一条老逻辑都不动（见 lib/useTouchCanvas.ts 顶部说明）。
+     ⚠ v0.4.6 第 46 批改：Alt 模式**不再关掉**手势层。以前"开了 Alt 就整个让位给桌面逻辑"，
+     可触摸屏没有 hover —— 元素既选不上也拖不动。现在手势层照常：长按=单选（altMode 档位
+     不允许加选）、单指=平移、双指=缩放；"改位置 / 改宽高"由画布上的触摸手柄显式触发。 */
+  const altOn = useAltMode();
+  /**
+   * 切回宽屏（电脑窗口）时**自动关掉 Alt 模式**（v0.4.7，用户要求）：
+   * 桌面本来就靠键盘上的 Alt 键，开关留着只会让人以为"Alt 一直按着"。
+   */
+  useEffect(() => {
+    if (shell.layout !== 'stack' && altOn) setAltMode(false);
+  }, [shell.layout, altOn]);
+  useTouchCanvas({ enabled: shell.layout === 'stack', zoom, onZoomChange: setZoom, altMode: altOn });
+  /**
+   * v0.4.6 第 43 批：竖屏「情境栏」（第三层菜单）要显示哪些按钮。
+   *
+   * 用户原话：「还有个第三层菜单，但不是一直放固定按钮的，需要时出现按钮，
+   *   按钮从右到左依次出现，没有固定位置，先到的先排右边。
+   *   选中元素时，二层菜单上面的第三层菜单显示一个按钮：取消选中。
+   *   画布被缩放的时候（宽度被调整不算），显示按钮：还原大小。」
+   *
+   * 判定放在 App（这里是唯一知道"选中没""缩放没"的地方），
+   * PortraitContextBar 只管怎么显示 —— 它不该知道这些业务概念。
+   *
+   * ⚠ 宽度变了不算"缩放"：用户明确说了「（宽度被调整不算）」，
+   *   所以这里只看 zoom，不看 canvasWidth。
+   */
+  const selectedCount = useScene((s) => s.scene.selectedIds.length);
+  /**
+   * 画布里"选中了一段文字"的状态（v0.4.7）。
+   *
+   * 用户原话：「选中文字的时候，第三层菜单出现全选和取消选中。」
+   * 就地编辑框里选区一变就发 `bc:text-sel`，这里只记一个布尔值，
+   * 两个按钮通过事件回传给编辑框执行（App 不碰 textarea 的细节）。
+   */
+  const [textSel, setTextSel] = useState(false);
+  useEffect(() => {
+    const on = (e: Event) => setTextSel(Boolean((e as CustomEvent<{ selected?: boolean }>).detail?.selected));
+    window.addEventListener('bc:text-sel', on);
+    return () => window.removeEventListener('bc:text-sel', on);
+  }, []);
+  const ctxActions = useMemo<PortraitContextAction[]>(() => {
+    const out: PortraitContextAction[] = [];
+    // 「还原大小」先来（画布缩放比选中更早发生）→ 先到的排右边
+    if (zoom !== 1) {
+      out.push({
+        key: 'reset-zoom',
+        label: '还原大小',
+        // 不只是把缩放拉回 100%：还要把画布"回正"（滚回左上、清掉手势残留位移），
+        // 否则屏幕上看不到画布的顶部（用户：「有些在屏幕外面」）。
+        onClick: () => resetCanvasView(setZoom)
+      });
+    }
+    if (textSel) {
+      // 选中文字时：全选 / 取消选中（针对**文字选区**，不是元素选区）
+      out.push({
+        key: 'text-select-all',
+        label: '全选',
+        onClick: () => window.dispatchEvent(new CustomEvent('bc:text-sel-all'))
+      });
+      out.push({
+        key: 'clear-text-sel',
+        label: '取消选中',
+        onClick: () => window.dispatchEvent(new CustomEvent('bc:text-sel-clear'))
+      });
+    } else if (selectedCount > 0) {
+      out.push({
+        key: 'clear-selection',
+        label: '取消选中',
+        onClick: () => useScene.getState().selectElement(null)
+      });
+    }
+    return out;
+  }, [zoom, selectedCount, textSel]);
   const [view, setView] = useState<AppView>('editor');
   // 标签数（用于空页面判断）。⚠ 必须在组件顶部调用 —— 不能放进 JSX 的 view 分支里，
   // 否则切到"表格编辑器/设置"等视图时这个 hook 不执行，hooks 数量前后不一致，
   // React 直接抛 #300 把整个视图渲染崩掉（踩过一次，表格编辑器打不开就是它）。
   const tabCount = useTabStore((s) => s.tabs.length);
+  /**
+   * v0.4.6：新建页面动画（用户："原来的画布往左移动，右边进来一个新的"）。
+   * 两段式：先让**旧画布**左移淡出 160ms，再 newTab()，再让**新画布**从右侧滑入 260ms。
+   * 只在"真的多出一页"时播；切标签不播。宽屏同样播（这个动画在桌面也不难看）。
+   */
+  /**
+   * v0.4.6 第 46 批：离开编辑器时，第二条操作栏不要"啪一下没了"。
+   * 用户原话：「会话页面的进入和退出动画，下方的工具栏不要死板的闪烁一下……
+   *   第二层从下方退出，不要闪烁像刷新一下一样。」
+   *
+   * 做法：切走之后让它继续挂 220ms，期间 is-leaving 把它从下方滑出（脱流，不顶布局），
+   * 播完再真正卸载。进入编辑器时它是直接挂上来的，不用特殊处理。
+   */
+  const [bar2Leaving, setBar2Leaving] = useState(false);
+  const prevViewForBar2 = useRef(view);
+  useEffect(() => {
+    const was = prevViewForBar2.current;
+    prevViewForBar2.current = view;
+    if (was === 'editor' && view !== 'editor') {
+      setBar2Leaving(true);
+      const t = window.setTimeout(() => setBar2Leaving(false), 220);
+      return () => window.clearTimeout(t);
+    }
+    if (view === 'editor') setBar2Leaving(false);
+    return undefined;
+  }, [view]);
+
+  const [pageAnim, setPageAnim] = useState<'out' | 'in' | null>(null);
+  const pageAnimBusy = useRef(false);
+  const requestNewPage = async () => {
+    if (pageAnimBusy.current) return;
+    pageAnimBusy.current = true;
+    setPageAnim('out');
+    await new Promise((r) => window.setTimeout(r, 160));
+    useTabStore.getState().newTab();
+    setPageAnim('in');
+    await new Promise((r) => window.setTimeout(r, 280));
+    setPageAnim(null);
+    pageAnimBusy.current = false;
+  };
+  /**
+   * 兜底：有些入口（Ctrl+N、首页的"新建"、插件的 newTab）不经过 requestNewPage，
+   * 直接往 store 里加一页。这里按"标签数变多"补播**右进**那半段，
+   * 保证任何路径新建页面都有反馈（probe-tab-close-guard ⓪ 就是查这个）。
+   */
+  const prevTabCount = useRef(tabCount);
+  useEffect(() => {
+    if (tabCount > prevTabCount.current && !pageAnimBusy.current) {
+      setPageAnim('in');
+      const t = window.setTimeout(() => setPageAnim(null), 280);
+      prevTabCount.current = tabCount;
+      return () => window.clearTimeout(t);
+    }
+    prevTabCount.current = tabCount;
+    return undefined;
+  }, [tabCount]);
   // 当前激活标签 + 是否"只读快照预览"（v0.4.5）
   const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
+  /**
+   * v0.4.6 第 46 批：切页 / 新建页时把画布滚回左上。
+   *
+   * 用户原话：「新建画布的时候，如果上一个画布在下面，不是页面最顶部，
+   *   下面一个画布也会在底部，超过的画布，修一下。」
+   * 真因：滚动位置属于 `.canvas-wrap` 这个容器，换标签只换内容、容器不动 ——
+   * 于是新页面直接继承了上一页的滚动量（看着就像"新画布也在底部"）。
+   */
+  const activeTabId = activeTab?.id ?? '';
+  useEffect(() => {
+    if (!activeTabId) return;
+    // 等一帧：新画布挂上之后才能滚（首帧容器高度还是旧页面的）
+    const raf = requestAnimationFrame(() => {
+      const w = document.querySelector('.canvas-wrap') as HTMLElement | null;
+      if (!w) return;
+      w.scrollLeft = 0;
+      w.scrollTop = 0;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [activeTabId]);
   const readonly = isSnapshotTab(activeTab);
   // 自动保存节流锚点：手动 Ctrl+S / 自动保存成功都会刷新（见下方自动保存循环）
   const autoSaveLastRef = useRef(0);
@@ -95,9 +357,28 @@ export default function App() {
     // v0.4.3：更新进行中锁死视图切换 —— 更新要替换程序文件，
     // 这期间绝不能再去动工程数据（全屏遮罩会兜底拦住鼠标操作）。
     if (useUpdateBusy.getState().busy) return;
-    withViewTransition(() => setView((cur) => (cur === next ? cur : next)));
-  }, []);
-  const [settingsSection, setSettingsSection] = useState<SettingsSection>('personalization');
+    /**
+     * v0.4.6 第 46 批：**设置页**的进出改成"右侧进入 / 右侧退出"。
+     *
+     * 用户原话：「设置页面变成了类似手机App设置的样式…但是进入和退出动画应该是右侧进入，
+     *   右侧退出的样式，不要单纯刷新一下。」
+     * 第 47 批追加：「所有别的页面都要修改一下」→ 扩到 SLIDE_VIEWS 里的所有整页视图。
+     *
+     * 做法：切进 / 切出这些页面时，在 <html> 上打个标记，交给 CSS 改写
+     * `::view-transition-old(root)` / `-new(root)` 两段动画（旧页往右滑出、新页从右侧滑入）。
+     * 只挂整页视图 —— 会话页那套"画布缩小成缩略图"是专门做的，不能被通用滑屏顶掉。
+     */
+    const html = document.documentElement;
+    const involvesSlide = SLIDE_VIEWS.has(next) || SLIDE_VIEWS.has(viewRef.current);
+    html.dataset.vtslide = involvesSlide && shell.layout === 'stack' ? 'page' : '';
+    try {
+      withViewTransition(() => setView((cur) => (cur === next ? cur : next)));
+    } finally {
+      // 过渡结束后摘掉标记（留一帧，别在动画中途撤样式）
+      window.setTimeout(() => { html.dataset.vtslide = ''; }, 420);
+    }
+  }, [shell.layout]);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [pocketExpanded, setPocketExpanded] = useState(() => {
@@ -139,17 +420,54 @@ export default function App() {
   // 0.1 「更新任务进入替换阶段」→ 才锁死编辑器（下载阶段不锁，用户可以继续干活）
   useUpdateTaskBridge();
 
+  /**
+   * 自适应档位下的**实际画布宽度**（v0.4.7）。
+   *
+   * 用户原话：「这个三段点的切换有点问题，竖屏和横屏之间样式不一样，但是这个切换要等
+   *   一段时间，或者鼠标点一下元素才触发，应该像网页一样是实时监测变换的。」
+   *
+   * 真因：`widthToBreakpoint("auto")` 永远返回 desktop，所以"自适应"档位的断点根本
+   * 不跟窗口走 —— 只有等别的操作把 canvasWidth 改成 px 才会重算。
+   * 现在用 ResizeObserver 盯住 `.canvas` 的真实宽度（÷ zoom，因为缩放是 transform），
+   * 窗口一变、面板一拖，断点立刻跟上。
+   */
+  const [autoCanvasW, setAutoCanvasW] = useState(0);
+  useEffect(() => {
+    /**
+     * Canvas 会在挂载后 / 尺寸变化时广播真实宽度（含 ResizeObserver）。
+     * 不在这里自己 querySelector：首帧还没有 `.canvas`（首页 / 空标签），
+     * 查不到就再也不会重试 —— 断点会永远停在 desktop（用户报的就是这个）。
+     */
+    const on = (e: Event) => {
+      const w = (e as CustomEvent<{ w?: number }>).detail?.w ?? 0;
+      if (w > 0) setAutoCanvasW(Math.round(w));
+    };
+    window.addEventListener('bc:canvas-size', on);
+    return () => window.removeEventListener('bc:canvas-size', on);
+  }, []);
+
   // 0. 设备 / 断点 / 画布宽度 三合一同步
   //    - 画布宽度变化 → 自动推导当前编辑断点（电脑 / 平板 / 手机）
   //    - 任意地方广播 bc:set-device → 反推标准画布宽度
   useEffect(() => {
-    const bp = widthToBreakpoint(canvasWidth);
+    const effective = canvasWidth === 'auto' ? (autoCanvasW ? autoCanvasW + 'px' : 'auto') : canvasWidth;
+    const bp = widthToBreakpoint(effective);
     if (useScene.getState().activeBreakpoint !== bp) {
       useScene.getState().setActiveBreakpoint(bp);
     }
     // 广播给关心"画布是否自适应"的组件（如属性面板断点栏的「自适应」按钮高亮）
     window.dispatchEvent(new CustomEvent('bc:canvas-width-changed', { detail: canvasWidth }));
-  }, [canvasWidth]);
+  }, [canvasWidth, autoCanvasW]);
+
+  /** 预览交给 iframe 的最终 HTML：补一条"不要横向滚动条"（只影响预览，不动导出） */
+  const previewDoc = useMemo(() => (
+    previewHtml ? previewHtml.replace('</head>', '<style>html,body{overflow-x:hidden}</style></head>') : ''
+  ), [previewHtml]);
+  /** 预览宽度 = 当前画布宽度（auto 时用实测值） */
+  const previewW = useMemo(() => {
+    if (canvasWidth !== 'auto') return parseInt(canvasWidth, 10) || 0;
+    return autoCanvasW || 0;
+  }, [canvasWidth, autoCanvasW]);
 
   useEffect(() => {
     const onSetDevice = (e: Event) => {
@@ -346,7 +664,8 @@ export default function App() {
     const toBottom = () => setLayout('bottom');
     const openProjects = () => switchView('projects');
     const openSettings = (sec?: SettingsSection) => {
-      setSettingsSection(sec || 'personalization');
+      // 竖屏两级导航：不带参数 = 停在分类列表页（一级）
+      setSettingsSection(sec ?? null);
       switchView('settings');
     };
     const openClass = () => {
@@ -360,7 +679,8 @@ export default function App() {
       if (useUpdateBusy.getState().busy) return;
       setHelpDoc(doc);
       setHelpTarget(target);
-      setView('help');
+      // 走 switchView 而不是 setView：手册页也要"右进右出"的转场（第 47 批）
+      switchView('help');
     };
     // 事件回调：允许携带 detail 指定文档（默认 manual）
     const onOpenHelpEvent = (e: Event) => {
@@ -568,15 +888,27 @@ export default function App() {
   if (!sessionReady) {
     return (
       <>
-        <div className="app bc-booting" />
+        <div className="app bc-booting">
+          <TitleBar />
+        </div>
+        <div className="bc-win-ring" aria-hidden="true" />
         <LoadingScreen />
       </>
     );
   }
 
   return (
-    <div className="app">
-      {view === 'table' && tableEditId ? (
+    <div className="app" data-shell={shell.layout} data-input={inputMode} data-drawer-side={drawerSide} data-newpage={pageAnim ?? undefined}>
+      {/* v0.4.6 竖屏重做：竖屏**顶部完全清空**（用户："把整个上方的所有东西全部删除"）。
+          自绘标题栏（Logo / 菜单 / 三个窗口按钮）只在并排形态渲染，DOM 里也不留。 */}
+      {shell.layout === 'split' && <TitleBar />}
+      <div className="bc-win-ring" aria-hidden="true" />
+      {view === 'sessions' ? (
+        <SessionsView
+          onBack={() => switchView('editor')}
+          onNewPage={() => { void requestNewPage().then(() => switchView('editor')); }}
+        />
+      ) : view === 'table' && tableEditId ? (
         <TableEditor tableId={tableEditId} onBack={() => switchView('editor')} />
       ) : view === 'update' ? (
         <UpdateCenter onBack={() => switchView('editor')} />
@@ -584,6 +916,21 @@ export default function App() {
         <ProjectsCenter
           onBack={() => switchView('editor')}
         />
+      ) : view === 'preview' ? (
+        /* v0.4.6 竖屏程序内预览：整屏 iframe，底部第一条栏仍在（返回即可退出） */
+        <div className="bc-preview-view">
+          {/* 预览按**当前画布宽度**渲染（以前铺满整屏，等于用另一个尺寸看设计，
+              用户："预览没有分清当前的设备，比如竖屏设置的样式用的还是横屏的"）。
+              同时把 iframe 文档的横向溢出藏掉 —— 8px 的 body 外边距配 width:100%+padding
+              就会多出一点点滚动条，`overflow-x: hidden` 是这里唯一不改变设计的手段。 */}
+          <iframe
+            className="bc-preview-frame"
+            title="预览"
+            srcDoc={previewDoc}
+            /* ⚠ 必须 flex:0 0 auto： 本身是 flex:1，光写 width 会被拉伸回满宽 */
+            style={previewW ? { width: previewW + 'px', flex: '0 0 auto' } : undefined}
+          />
+        </div>
       ) : view === 'help' ? (
         <HelpCenter initialDoc={helpDoc} initialTarget={helpTarget} onBack={() => switchView('editor')} />
       ) : view === 'settings' ? (
@@ -591,7 +938,8 @@ export default function App() {
           onBack={() => switchView('editor')}
           onOpenWebManager={() => switchView('projects')}
           onOpenUpdateCenter={openUpdateCenter}
-          initialSection={settingsSection}
+          section={shell.layout === 'stack' ? settingsSection : (settingsSection ?? 'personalization')}
+          onSectionChange={(s) => setSettingsSection(s)}
           layout={layout}
           onLayoutChange={setLayout}
           canvasWidth={canvasWidth}
@@ -608,13 +956,15 @@ export default function App() {
             />
           ) : (
             <>
-              <ProjectTabBar />
+              {/* v0.4.6 竖屏重做：多标签页条与顶部工具栏在多标签页里**不渲染**，
+                  改由底部两条操作栏接管（PortraitBar1 / PortraitBar2）。 */}
+              {shell.layout === 'split' && <ProjectTabBar />}
               {/* v0.4.5（J 重构）：只读快照**不再占用顶部一整条工具条**。
                   以前这里换成 SnapshotBar，把"快照信息 + 三个动作"摊在顶栏，
                   用户反馈"信息散在上下两处、还占掉一行高度"。
                   现在所有文字与动作都收进右侧那一张卡片（SnapshotInfoPanel），
                   顶部只保留标签栏本身。 */}
-              {!(readonly && activeTab) && (
+              {!(readonly && activeTab) && shell.layout === 'split' && (
                 <Toolbar
                   canvasWidth={canvasWidth}
                   onCanvasWidthChange={setCanvasWidth}
@@ -637,12 +987,38 @@ export default function App() {
               <div
                 className={"workspace" + (pocketExpanded ? " pocket-expanded" : "") + (readonly ? " is-readonly" : "")}
                 data-layout={layout}
+                data-drawer={drawer ?? 'none'}
                 style={{
                   '--bc-bottom-height': effectiveBottomHeight + 'px',
                   '--bc-right-width': effectiveRightWidth + 'px',
                   '--bc-left-width': effectiveLeftWidth + 'px'
                 } as React.CSSProperties}
               >
+                {/* v0.4.6（R6-8）：窄屏外壳的两个抽屉入口（宽屏不渲染，DOM 里也不留） */}
+                {shell.layout === 'stack' && (
+                  <>
+                    {!readonly && (
+                      <DrawerHandle
+                        side="left"
+                        icon="grid"
+                        title="元素面板：插入元素 / 模板（长按可上下挪）"
+                        opened={drawer === 'left'}
+                        onToggle={() => setDrawer((d) => (d === 'left' ? null : 'left'))}
+                      />
+                    )}
+                    <DrawerHandle
+                      side="right"
+                      icon={rightTab === 'layers' ? 'layers' : 'sliders'}
+                      title={(rightTab === 'layers' ? '图层' : '属性') + '（长按可上下挪）'}
+                      opened={drawer === 'right'}
+                      onToggle={() => setDrawer((d) => (d === 'right' ? null : 'right'))}
+                    />
+                    {/* 抽屉打开时的遮罩：点它就关，符合手机上"点外面关闭"的习惯 */}
+                    {drawer !== null && (
+                      <div className="shell-drawer-scrim" onClick={() => setDrawer(null)} />
+                    )}
+                  </>
+                )}
                 {/* 只读模式下左侧元素面板整个不出现（快照不能改内容，留一个空面板只会挤占画布） */}
                 {!readonly && (
                   <div className="elem-pane-wrap" data-bc-avoid="elem-pane">
@@ -699,19 +1075,38 @@ export default function App() {
                       <SnapshotInfoPanel tab={activeTab} />
                     ) : (
                       <>
+                        {/* v0.4.6 竖屏：图层不再塞进右抽屉，但**入口留在这儿**
+                            （用户："图层的进入放到右侧划入的属性面板，改回类似电脑端右侧菜单
+                            上方的布局"）。所以竖屏下这颗「图层」是个开关而不是页签：
+                            点它 = 收起右抽屉 + 打开下方面板；「属性」= 反过来。
+                            两个面板位置不同、没法共用同一个 body，做页签会自相矛盾。 */}
                         <div className="tab-bar">
                           <button
-                            className={"tab-btn" + (rightTab === 'layers' ? ' active' : '')}
-                            onClick={() => setRightTab('layers')}
+                            className={"tab-btn" + (
+                              shell.layout === 'stack'
+                                ? (layerSheet ? ' active' : '')
+                                : (rightTab === 'layers' ? ' active' : '')
+                            )}
+                            onClick={() => {
+                              if (shell.layout === 'stack') { setDrawer(null); setLayerSheet(true); return; }
+                              setRightTab('layers');
+                            }}
                           >图层</button>
                           <button
-                            className={"tab-btn" + (rightTab === 'inspector' ? ' active' : '')}
-                            onClick={() => setRightTab('inspector')}
+                            className={"tab-btn" + (
+                              shell.layout === 'stack'
+                                ? (layerSheet ? '' : ' active')
+                                : (rightTab === 'inspector' ? ' active' : '')
+                            )}
+                            onClick={() => {
+                              if (shell.layout === 'stack') { setLayerSheet(false); setDrawer('right'); return; }
+                              setRightTab('inspector');
+                            }}
                           >属性</button>
                         </div>
                         <div className="tab-body" key={rightTab}>
                           <ErrorBoundary label="右侧面板">
-                            {rightTab === 'layers' ? <LayerTree /> : <Inspector />}
+                            {rightTab === 'layers' && shell.layout !== 'stack' ? <LayerTree /> : <Inspector />}
                           </ErrorBoundary>
                         </div>
                       </>
@@ -725,9 +1120,53 @@ export default function App() {
           )}
         </>
       )}
+      {/* v0.4.6 竖屏：底部两条操作栏（宽屏一条都不渲染）。
+          第二条在编辑器且有会话时才出现，第一条在每个视图都在。 */}
+      {shell.layout === 'stack' && (
+        <>
+          {tabCount > 0 && ptPrefs.bar2 && (view === 'editor' || bar2Leaving) && (
+            <PortraitBar2
+              zoom={zoom}
+              setZoom={setZoom}
+              canvasWidth={canvasWidth}
+              setCanvasWidth={setCanvasWidth}
+              ctxActions={ctxActions}
+              leaving={bar2Leaving && view !== 'editor'}
+            />
+          )}
+          <PortraitBar1
+            view={view}
+            editorish={view === 'editor' && tabCount > 0}
+            /* 左下角 = **返回上一层**（用户："相当于 Alt + 左键"）：
+               设置页停在某个具体设置项时先回分类列表，再回编辑器。 */
+            onBack={() => {
+              if (view === 'settings' && settingsSection) { setSettingsSection(null); return; }
+              switchView('editor');
+            }}
+            onOpenSessions={() => switchView('sessions')}
+            onOpenSettings={() => window.dispatchEvent(new CustomEvent('menu:settings'))}
+            onOpenHelp={() => window.dispatchEvent(new CustomEvent('menu:help'))}
+            onOpenPlugins={() => window.dispatchEvent(new CustomEvent('menu:settings'))}
+            /* 手册页：第一条栏最左边多一颗「侧边栏」（切换文档 / 搜索 / 目录） */
+            onOpenHelpSidebar={view === 'help' ? () => window.dispatchEvent(new CustomEvent('bc:help-sidebar')) : undefined}
+          />
+          {/* 下方图层面板：左侧栏的「属性」离开它，另有「关闭」直接收起来 */}
+          {view === 'editor' && tabCount > 0 && (
+            <PortraitLayers
+              open={layerSheet}
+              onOpenProps={() => { setLayerSheet(false); setDrawer('right'); }}
+              onClose={() => setLayerSheet(false)}
+            />
+          )}
+        </>
+      )}
       <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
       <ShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      {/* v0.4.6：切换定位方式前问"要不要清外边距"（全程序唯一通道） */}
+      <PositionSwitchHost />
       <UpdateBusyOverlay />
+      {/* v0.4.6：关闭标签的统一闸门（未保存 → 保存 / 不保存 / 取消） */}
+      <TabCloseGuard />
       <AppToasts />
       {/* v0.4.5：打开工程 / 恢复会话期间的加载页（在主界面之后挂载 → 盖在最上层） */}
       <LoadingScreen />
@@ -887,11 +1326,26 @@ function startResize(
   const onUp = () => {
     window.removeEventListener('mousemove', onMove);
     window.removeEventListener('mouseup', onUp);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+    window.removeEventListener('blur', onUp);
     document.body.classList.remove('bc-resizing-ns');
     document.body.classList.remove('bc-resizing-col');
   };
   window.addEventListener('mousemove', onMove);
   window.addEventListener('mouseup', onUp);
+  /**
+   * v0.4.7：收尾要"多路兜底"。
+   *
+   * 用户在窗口外松手（或中途弹出原生对话框）时，`mouseup` 根本不会来 ——
+   * `bc-resizing-*` 就永久留在 <body> 上，而它的样式是
+   * `body.bc-resizing-* * { user-select: none; cursor: col-resize }`，
+   * 结果**全程序所有输入框都点不进去、打不了字**（用户报的"所有输入框又都坏了"）。
+   * 除了这里补 pointerup / pointercancel / blur，样式那边也留了输入控件的例外（见 06 号分片）。
+   */
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+  window.addEventListener('blur', onUp);
 }
 
 // ============ 全局快捷键 + 菜单事件 ============
@@ -990,8 +1444,19 @@ function useKeyboardShortcuts(
       // 放在"输入框守卫"之前：否则在右侧属性面板的输入框里按 Ctrl+Z 会完全没反应
       //（用户反馈"选中元素后 Ctrl+Z / Ctrl+Y 用不了"就是被这个守卫吃掉的）。
       // 表格编辑页改的是同一棵场景树、走的是同一条撤销栈（applyTableOp → replaceSubtree）。
-      if (undoable && !inTextEditor && mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); triggerUndo(); return; }
-      if (undoable && !inTextEditor && mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); triggerRedo(); return; }
+      //
+      // v0.4.6（用户反馈："属性输入框里按 Ctrl+Z，画布变了但数值不变，最终又跳回改之前"）：
+      // 原因不是"撤销没生效"，而是**输入框里还压着一次未提交的编辑**：
+      //   数字框 focus 时 beginStyleEdit 压了检查点，输入过程中走 updateStyleTransient（画布实时变），
+      //   但输入框自己的本地 state 还停在新数字上；撤销把 store 恢复成旧值后，输入框
+      //   因为"编辑中不同步"而没跟着变，随后 blur 又把这个旧数字提交回去 —— 看起来就是"跳回去了"。
+      // 解法：**先让输入框失焦提交，再撤销**（提交算同一会话，不额外压栈），撤销就撤到编辑前那一步。
+      const blurField = () => {
+        const ae = document.activeElement as HTMLElement | null;
+        if (ae && ae !== document.body && inField) ae.blur();
+      };
+      if (undoable && !inTextEditor && mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); blurField(); triggerUndo(); return; }
+      if (undoable && !inTextEditor && mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); blurField(); triggerRedo(); return; }
 
       if (inField) return;
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useScene } from '@store/sceneStore';
 import {
   useToolbar, dockOf, getSortedItems, groupOfItem,
@@ -10,6 +10,10 @@ import logoUrl from '@renderer/assets/logo.svg';
 import { Collapse } from './Collapse';
 import { TIPS, TIPS_KEY, setTipsEnabled } from './CanvasOverlays';
 import { readSelHighlight, writeSelHighlight } from '@lib/selHighlight';
+import { useDrawerSide, DRAWER_SIDE_LABELS } from '@lib/drawerSide';
+import { usePortraitPrefs, setPortraitPrefs } from '@lib/portraitPrefs';
+import { useShellLayout } from '@lib/shellMode';
+import { withNavTransition } from '@lib/navTransition';
 import { appAlert, appConfirm } from '@lib/appConfirm';
 import type { DataPathsInfo, StorageStatsInfo, StorageBreakdownInfo, StorageCategoryId } from '../global';
 
@@ -29,6 +33,7 @@ export type SettingsSection =
   | 'storage'
   | 'toolbar'
   | 'extensions'
+  | 'portrait'
   | 'about';
 
 interface Props {
@@ -41,11 +46,48 @@ interface Props {
   onCanvasWidthChange: (w: string) => void;
   /** 打开软件内更新中心页（v0.4.1：更新不再走弹窗） */
   onOpenUpdateCenter?: () => void;
+  /**
+   * v0.4.6 竖屏两级导航：`section === null` = 停在「分类列表」页，
+   * 有值 = 站在某一个具体设置页里。状态由 App 持有，因为**下方第一条栏的返回**
+   * 要按层级回退（用户："左下角的菜单定位是返回上一层……相当于 Alt+左键"）。
+   */
+  section?: SettingsSection | null;
+  onSectionChange?: (s: SettingsSection | null) => void;
 }
 
 export function Settings(props: Props) {
-  const { onBack, onOpenWebManager, layout, onLayoutChange, canvasWidth, onCanvasWidthChange, initialSection, onOpenUpdateCenter } = props;
-  const [section, setSection] = useState<SettingsSection>(initialSection || 'personalization');
+  const { onOpenWebManager, layout, onLayoutChange, canvasWidth, onCanvasWidthChange, initialSection, onOpenUpdateCenter } = props;
+  const shell = useShellLayout();
+  const stacked = shell.layout === 'stack';
+  const [sectionLocal, setSection] = useState<SettingsSection>(initialSection || 'personalization');
+  /** 受控值优先（App 拿着它做"返回上一层"）；宽屏没传就是本组件自己的状态 */
+  const section = props.section !== undefined ? props.section : sectionLocal;
+  const active: SettingsSection = section ?? 'personalization';
+  /** 这一版切换的往返方向（只影响转场，不影响任何数据） */
+  const navDirRef = useRef<'fwd' | 'back'>('fwd');
+  /**
+   * 竖屏换页 = **右进右出**（用户：「点进的一个大设置项后，右边相当于页面从右边划入，
+   * 退出时从右边从左往右划出」）。
+   *
+   * 以前这里是裸 setState → 旧内容直接卸载，只有新内容自己的入场 animation，
+   * 所以用户看到"只有进没有出"。现在交给 View Transitions：
+   * 浏览器给旧内容拍快照，退场动画作用在快照上（真 DOM 早换成新的了）。
+   *
+   * 宽屏不分两级（导航常驻），保持原来的瞬间切换：那边没有"页"的概念，
+   * 给它加滑屏反而是噪音。
+   */
+  const chooseSection = (s: SettingsSection | null) => {
+    const apply = () => {
+      setSection(s ?? 'personalization');
+      props.onSectionChange?.(s);
+    };
+    if (!stacked) { apply(); return; }
+    // 进下一级 = fwd（新内容从右边划入）；回到列表 = back（旧内容往右划出）
+    navDirRef.current = s ? 'fwd' : 'back';
+    withNavTransition(navDirRef.current, apply);
+  };
+  // 竖屏那三条开关（显示第二条栏 / 长按判定 / 图层面板高度）—— 真实生效，不是摆设
+  const ptPrefs = usePortraitPrefs();
   const [paths, setPaths] = useState<DataPathsInfo | null>(null);
   const [storageStats, setStorageStats] = useState<StorageStatsInfo | null>(null);
   const [breakdown, setBreakdown] = useState<StorageBreakdownInfo | null>(null);
@@ -164,6 +206,8 @@ export function Settings(props: Props) {
 
   // 选中高亮样式（v0.4.4）：橙色光晕闪烁（默认·最醒目）/ 蓝色细线（原始）
   const [selStyle, setSelStyle] = useState<'glow' | 'plain'>(() => readSelHighlight());
+  // v0.4.6：窄屏抽屉方位（竖屏专属）
+  const [drawerSide, setDrawerSide] = useDrawerSide();
   const changeSelStyle = (v: 'glow' | 'plain') => {
     setSelStyle(v);
     writeSelHighlight(v);
@@ -209,8 +253,7 @@ export function Settings(props: Props) {
   };
 
   // 深色模式状态
-  const [darkMode, setDarkMode] = useState<'auto' | 'dark' | 'light'>(() => {
-    try {
+  const [darkMode, setDarkMode] = useState<'auto' | 'dark' | 'light'>(() => {    try {
       const m = localStorage.getItem('bc-dm:mode');
       return m === 'dark' || m === 'light' ? m : 'auto';
     } catch { return 'auto'; }
@@ -291,21 +334,72 @@ export function Settings(props: Props) {
 
   const qc = scene.quickCss ?? {};
 
-  const NAV_ITEMS: Array<{ id: SettingsSection; label: string; desc: string; svg: IconName }> = [
-    { id: 'personalization', label: '个性化与外观', svg: 'palette', desc: '深浅主题、白边重置、同类高亮' },
-    { id: 'editor', label: '编辑器与画布', svg: 'sliders', desc: '布局模式、画布默认宽度、继承机制' },
-    { id: 'storage', label: '存储与自动备份', svg: 'database', desc: '备份周期、快照数量、便携 data/ 目录' },
-    { id: 'toolbar', label: '工具栏管理', svg: 'tool', desc: '每个按钮的停靠区与顺序自由编排' },
-    { id: 'extensions', label: '扩展与插件中心', svg: 'puzzle', desc: '管理、启停、导入插件与模板资源包' },
-    { id: 'about', label: '关于与系统', svg: 'info', desc: '版本号、开源协议与技术栈' }
+  // v0.4.6：导航分三块（用户："手机端设置分三块（电脑设置 / 通用设置 / 竖屏设置）"）。
+  // 分组不只是竖屏好看：它同时回答了"这一项为什么在这儿"——
+  // 「电脑设置」里的项只在并排/桌面形态有意义，「竖屏设置」里的是手机专属开关。
+  const NAV_GROUPS: Array<{ title: string; items: Array<{ id: SettingsSection; label: string; desc: string; svg: IconName }> }> = [
+    {
+      title: '通用设置',
+      items: [
+        { id: 'personalization', label: '个性化与外观', svg: 'palette', desc: '深浅主题、白边重置、同类高亮' },
+        { id: 'storage', label: '存储与自动备份', svg: 'database', desc: '备份周期、快照数量、便携 data/ 目录' },
+        { id: 'extensions', label: '扩展与插件中心', svg: 'puzzle', desc: '管理、启停、导入插件与模板资源包' },
+        { id: 'about', label: '关于与系统', svg: 'info', desc: '版本号、开源协议与技术栈' }
+      ]
+    },
+    {
+      title: '电脑设置',
+      items: [
+        { id: 'editor', label: '编辑器与画布', svg: 'sliders', desc: '布局模式、画布默认宽度、继承机制' },
+        { id: 'toolbar', label: '工具栏管理', svg: 'tool', desc: '每个按钮的停靠区与顺序自由编排' }
+      ]
+    },
+    {
+      title: '竖屏设置',
+      items: [
+        { id: 'portrait', label: '竖屏与触摸', svg: 'phone', desc: '操作栏、长按判定、图层面板高度' }
+      ]
+    }
   ];
+  const NAV_ITEMS = NAV_GROUPS.flatMap((g) => g.items);
+  /**
+   * 按形态过滤分组（v0.4.6 第 46 批）。
+   *
+   * 用户原话：「设置分成三个内容：通用设置（竖屏，横屏都有的设置项，通用），
+   *   横屏设置项（横屏才有，竖屏不显示），竖屏设置项（同理）。按需显示。」
+   * 现在竖屏看不到「电脑设置」（布局模式 / 工具栏编排这些在 412px 里既没法用、
+   * 又正是"文字被压成一列单字"的来源），宽屏也看不到「竖屏设置」。
+   */
+  /**
+   * 按形态过滤分组（v0.4.6 第 46 批）。
+   *
+   * 用户原话：「设置分成三个内容：通用设置（竖屏，横屏都有的设置项，通用），
+   *   横屏设置项（横屏才有，竖屏不显示），竖屏设置项（同理）。按需显示。」
+   * 现在竖屏看不到「电脑设置」（布局模式 / 工具栏编排这些在 412px 里既没法用、
+   * 又正是"文字被压成一列单字"的来源），宽屏也看不到「竖屏设置」。
+   *
+   * v0.4.7 第 47 批追加：「第二层菜单的排列不可在设置中修改，以及竖屏设置里面
+   *   不可以修改下方菜单的排布」。竖屏第二条栏是**固定九个按钮**（PortraitToolbar），
+   * 桌面那套排序/停靠/分组根本不参与渲染 —— 把入口摆在这里只会让人改了没反应。
+   * 所以「工具栏管理」在竖屏下一并隐藏（它本来就在「电脑设置」组里，这里是显式双保险）。
+   */
+  const HIDDEN_IN_STACK = new Set<SettingsSection>(['toolbar', 'editor']);
+  const visibleGroups = NAV_GROUPS
+    .filter((g) => (stacked ? g.title !== '电脑设置' : g.title !== '竖屏设置'))
+    .map((g) => ({ ...g, items: stacked ? g.items.filter((it) => !HIDDEN_IN_STACK.has(it.id)) : g.items }))
+    .filter((g) => g.items.length > 0);
+  // 形态切换后当前详情页可能已经被隐藏 → 退回第一项，避免停在一个"列表里没有"的页面
+  const activeVisible = visibleGroups.some((g) => g.items.some((it) => it.id === active));
 
   return (
-    <div className="fluent-settings-page">
-      {/* 左侧 Fluent 导航栏 */}
+    <div className="fluent-settings-page" data-level={stacked ? (section ? 'detail' : 'list') : 'split'}>
+      {/* 宽屏：左侧 Fluent 导航栏常驻。
+          竖屏：导航整条不渲染 —— 改成"一级 = 分类列表页，二级 = 具体设置页"（用户要求），
+          页面内也不再放「返回编辑器」，回退交给下方第一条栏。 */}
+      {!stacked && (
       <div className="fluent-sidebar">
         <div className="fluent-sidebar-top">
-          <button className="fluent-back-btn" onClick={onBack} title="返回画布编辑器">
+          <button className="fluent-back-btn" onClick={props.onBack} title="返回画布编辑器">
             <Icon name="chevronLeft" size={13} /> 返回编辑器
           </button>
           <div className="fluent-app-brand">
@@ -315,37 +409,145 @@ export function Settings(props: Props) {
         </div>
 
         <div className="fluent-nav-list">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              className={"fluent-nav-item" + (section === item.id ? " active" : "")}
-              onClick={() => setSection(item.id)}
-            >
-              <span className="fluent-nav-icon"><Icon name={item.svg} /></span>
-              <div className="fluent-nav-meta">
-                <span className="fluent-nav-title">{item.label}</span>
-                <span className="fluent-nav-desc">{item.desc}</span>
-              </div>
-            </button>
+          {visibleGroups.map((g) => (
+            <div className="fluent-nav-group" key={g.title}>
+              <div className="fluent-nav-group-title">{g.title}</div>
+              {g.items.map((item) => (
+                <button
+                  key={item.id}
+                  className={"fluent-nav-item" + (active === item.id ? " active" : "")}
+                  onClick={() => chooseSection(item.id)}
+                >
+                  <span className="fluent-nav-icon"><Icon name={item.svg} /></span>
+                  <div className="fluent-nav-meta">
+                    <span className="fluent-nav-title">{item.label}</span>
+                    <span className="fluent-nav-desc">{item.desc}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       </div>
+      )}
 
-      {/* 右侧主设置内容区 */}
-      <div className="fluent-content">
-        <div className="fluent-content-header">
-          <div className="fluent-breadcrumb">
-            <span>设置</span>
-            <span className="fluent-slash">/</span>
-            <span className="fluent-current">{NAV_ITEMS.find((n) => n.id === section)?.label}</span>
+      {/* 竖屏一级：分类列表（点一张卡片进具体设置页） */}
+      {stacked && (!section || !activeVisible) && (
+        <div className="set-list">
+          <div className="set-list-head">
+            <div className="set-list-brand">
+              <img className="fluent-brand-logo" src={logoUrl} alt="BlockCanvas" />
+              <span>设置</span>
+            </div>
           </div>
-          <h2 className="fluent-page-title">{NAV_ITEMS.find((n) => n.id === section)?.label}</h2>
+          {visibleGroups.map((g) => (
+            <div className="set-list-group" key={g.title}>
+              <div className="set-list-group-title">{g.title}</div>
+              {g.items.map((item) => (
+                <button key={item.id} className="set-list-card" onClick={() => chooseSection(item.id)}>
+                  <span className="set-list-icon"><Icon name={item.svg} size={18} /></span>
+                  <span className="set-list-meta">
+                    <span className="set-list-title">{item.label}</span>
+                    <span className="set-list-desc">{item.desc}</span>
+                  </span>
+                  <Icon name="chevronRight" size={14} />
+                </button>
+              ))}
+            </div>
+          ))}
         </div>
+      )}
+
+      {/* 内容区：宽屏一直在；竖屏只在"进了某一项"之后出现 */}
+      {(!stacked || (section && activeVisible)) && (
+      <div className="fluent-content">
+        {stacked ? (
+          <div className="set-detail-head">
+            <span className="set-detail-icon"><Icon name={NAV_ITEMS.find((n) => n.id === active)?.svg ?? 'sliders'} size={18} /></span>
+            <span className="set-detail-text">
+              <span className="set-detail-title">{NAV_ITEMS.find((n) => n.id === active)?.label}</span>
+              <span className="set-detail-desc">{NAV_ITEMS.find((n) => n.id === active)?.desc}</span>
+            </span>
+          </div>
+        ) : (
+          <div className="fluent-content-header">
+            <div className="fluent-breadcrumb">
+              <span>设置</span>
+              <span className="fluent-slash">/</span>
+              <span className="fluent-current">{NAV_ITEMS.find((n) => n.id === active)?.label}</span>
+            </div>
+            <h2 className="fluent-page-title">{NAV_ITEMS.find((n) => n.id === active)?.label}</h2>
+          </div>
+        )}
 
         {/* v0.4.4：分区切换不再瞬变 —— key 变化重挂载 + 轻量入场动画（bcSwapIn） */}
-        <div className="fluent-cards-container" key={section}>
+        <div className="fluent-cards-container" key={active}>
+          {/* ——— 0. 竖屏与触摸（v0.4.6 新增，三条都真的生效）——— */}
+          {active === 'portrait' && (
+            <>
+              <div className="fluent-group-title">底部操作栏</div>
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="sliders" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">显示第二条操作栏</div>
+                  <div className="fluent-card-desc">屏幕最下面第一条是撤销/会话/入口；第二条固定放 9 个工具按钮（操作、设备、更多、预览、轮廓、体检、导出 HTML、全部项目、导出元素模板），放不下可左右滑。关掉它画布就多 48px 高。</div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <label className="fluent-switch">
+                    <input
+                      type="checkbox"
+                      checked={ptPrefs.bar2}
+                      onChange={(e) => setPortraitPrefs({ bar2: e.target.checked })}
+                    />
+                    <span className="fluent-slider" />
+                  </label>
+                </div>
+              </div>
+
+              <div className="fluent-group-title">触摸手感</div>
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="hand" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">长按判定时长</div>
+                  <div className="fluent-card-desc">在画布上按住多久算"长按选中"。短一点更跟手，长一点更不容易手滑误选。</div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <select
+                    className="fluent-select"
+                    value={String(ptPrefs.holdMs)}
+                    onChange={(e) => setPortraitPrefs({ holdMs: Number(e.target.value) })}
+                  >
+                    <option value="300">300 毫秒（灵敏）</option>
+                    <option value="420">420 毫秒（默认）</option>
+                    <option value="600">600 毫秒（防误触）</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="fluent-group-title">图层面板</div>
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="rows" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">面板高度</div>
+                  <div className="fluent-card-desc">竖屏的图层结构从屏幕下方升起，这块给它多高。越高看得越多，留给自己看画布的地方越少。</div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <select
+                    className="fluent-select"
+                    value={String(ptPrefs.sheetVh)}
+                    onChange={(e) => setPortraitPrefs({ sheetVh: Number(e.target.value) })}
+                  >
+                    <option value="35">35%（多看画布）</option>
+                    <option value="42">42%（默认）</option>
+                    <option value="55">55%（多看层级）</option>
+                  </select>
+                </div>
+              </div>
+            </>
+          )}
+
           {/* ——— 1. 个性化与外观 ——— */}
-          {section === 'personalization' && (
+          {active === 'personalization' && (
             <>
               <div className="fluent-group-title">主题与界面色彩</div>
               <div className="fluent-card">
@@ -429,7 +631,7 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
-              <div className="fluent-group-title">网页导出基础重置</div>
+              <div className="fluent-group-title">公共 · 网页导出基础重置</div>
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="pageReset" /></div>
                 <div className="fluent-card-info">
@@ -477,9 +679,64 @@ export function Settings(props: Props) {
           )}
 
           {/* ——— 2. 编辑器与画布 ——— */}
-          {section === 'editor' && (
+          {active === 'editor' && (
             <>
-              <div className="fluent-group-title">工作区排版布局</div>
+              {/* v0.4.6（R6-9）：竖屏验收 —— 把窗口一键设成手机尺寸。
+                  用户提到"电脑完全支持屏幕竖屏"，竖屏显示器就是现成的手机验收台；
+                  但手动把窗口拖到 412×915 很难精确，所以给三个真机尺寸的按钮。 */}
+              <div className="fluent-group-title fluent-area-head" data-area="portrait">竖屏 · 手机尺寸验收（仅窗口状态）</div>
+              {/* v0.4.6（用户："这个仅限窗口状态可以用要说明一下"） */}
+              <div className="fluent-group-note">
+                只改<strong>窗口大小</strong>（窗口状态），不动画布内容与断点；竖屏显示器可以当现成的手机验收台。
+              </div>
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="phone" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">一键切换到手机窗口尺寸 (Portrait Acceptance)</div>
+                  <div className="fluent-card-desc">
+                    窗口小于 900px 时，编辑器外壳会自动换成<b>窄屏形态</b>：左右面板改抽屉，
+                    画布占满。用真机尺寸看一眼，比在宽屏上想象准确得多。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl portrait-accept-ctrl">
+                  <button className="fluent-btn" onClick={() => void window.bc.setAcceptanceSize('android')} title="412 × 915（Pixel 7 / 多数安卓）">
+                    安卓 412×915
+                  </button>
+                  <button className="fluent-btn" onClick={() => void window.bc.setAcceptanceSize('iphone')} title="390 × 844（iPhone 14/15）">
+                    iPhone 390×844
+                  </button>
+                  <button className="fluent-btn" onClick={() => void window.bc.setAcceptanceSize('compact')} title="360 × 800（国产安卓偏窄档，最容易挤爆）">
+                    窄档 360×800
+                  </button>
+                  <button className="fluent-btn is-ghost" onClick={() => void window.bc.setAcceptanceSize('reset')} title="恢复 1280 × 800 编辑尺寸">
+                    恢复编辑尺寸
+                  </button>
+                </div>
+              </div>
+
+              {/* v0.4.6：抽屉方位 —— 竖屏专属的访问性项（左手/右手、单手拇指） */}
+              <div className="fluent-card">
+                <div className="fluent-card-icon"><Icon name="layout" /></div>
+                <div className="fluent-card-info">
+                  <div className="fluent-card-title">抽屉方位（竖屏）</div>
+                  <div className="fluent-card-desc">
+                    窄屏/竖屏时两个抽屉从哪一侧滑出。宽屏（≥900px）下左右面板是并排的，不受影响。
+                  </div>
+                </div>
+                <div className="fluent-card-ctrl">
+                  <select
+                    className="fluent-select"
+                    value={drawerSide}
+                    onChange={(e) => setDrawerSide(e.target.value as never)}
+                  >
+                    {DRAWER_SIDE_LABELS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="fluent-group-title fluent-area-head" data-area="landscape">横屏 · 工作区排版布局</div>
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="layout" /></div>
                 <div className="fluent-card-info">
@@ -578,7 +835,7 @@ export function Settings(props: Props) {
                 </div>
               </div>
 
-              <div className="fluent-group-title">插入与构建习惯</div>
+              <div className="fluent-group-title fluent-area-head" data-area="common">公共 · 插入与构建习惯</div>
               <div className="fluent-card">
                 <div className="fluent-card-icon"><Icon name="wand" /></div>
                 <div className="fluent-card-info">
@@ -659,7 +916,7 @@ export function Settings(props: Props) {
           )}
 
           {/* ——— 3. 存储与自动备份 + 更新 ——— */}
-          {section === 'storage' && (
+          {active === 'storage' && (
             <>
               {/* 分组 1：运行缓存与自动清洁 */}
               <div className="fluent-group-title">
@@ -896,7 +1153,7 @@ export function Settings(props: Props) {
           )}
 
           {/* ——— 3b. 自动更新（紧接存储区块内） ——— */}
-          {section === 'storage' && (
+          {active === 'storage' && (
             <>
               <div className="fluent-group-title" style={{ marginTop: 16 }}>自动更新</div>
               <div className="fluent-card">
@@ -919,17 +1176,17 @@ export function Settings(props: Props) {
           )}
 
           {/* ——— 4. 工具栏管理（v0.4.3 重写：真实样式预览 + 拖拽排序 + 独立开关） ——— */}
-          {section === 'toolbar' && <ToolbarManagerSection
+          {active === 'toolbar' && <ToolbarManagerSection
             resetToolbar={resetToolbar}
           />}
 
           {/* ——— 5. 扩展与插件 (完全内嵌) ——— */}
-          {section === 'extensions' && (
+          {active === 'extensions' && (
             <EmbeddedExtensionsSection onOpenDir={() => window.bc.openExtensionsDir()} />
           )}
 
           {/* ——— 6. 关于与系统 ——— */}
-          {section === 'about' && (
+          {active === 'about' && (
             <>
               <div className="fluent-group-title">软件信息</div>
               <div className="fluent-about-box">
@@ -958,6 +1215,7 @@ export function Settings(props: Props) {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

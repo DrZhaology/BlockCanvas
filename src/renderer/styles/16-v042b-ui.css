@@ -114,7 +114,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 16px;
   overflow: hidden;
   background: var(--bg-panel);
 }
@@ -159,7 +159,7 @@
 .bc-update-blocker-card {
   width: min(560px, 94vw);
   padding: 26px 28px 22px;
-  border-radius: 14px;
+  border-radius: 20px;
   background: var(--bg-panel);
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
   text-align: center;
@@ -198,7 +198,7 @@
   overflow-y: auto;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--panel-soft, #0f172a0d);
   text-align: left;
   font-family: Consolas, Menlo, monospace;
@@ -336,11 +336,16 @@
 .qh-block-body,
 .qh-effect-card { min-width: 0; }
 
-/* —— ③ 三栏网格：右列可收缩 —— */
-.workspace:not([data-layout='bottom']) {
+/* —— ③ 三栏网格：右列可收缩 ——
+   v0.4.7：加 `.app` 前缀，断掉和 04-workspace-canvas.css 的同名跨域重复；
+   这两条本来就该盖住 04（后加载），特异性只升不降，视觉不变。
+   v0.4.6 外壳方向翻转：再加 `[data-shell='split']` 守卫 ——
+   这两条讲的是**并排形态**下右列怎么收缩；不守卫的话它们在堆叠形态下也会
+   把网格设成两列（实测 500/700px 时画布被挤到 44px / 244px，右侧凭空多一条 456px 列）。 */
+.app[data-shell='split'] .workspace:not([data-layout='bottom']) {
   grid-template-columns: var(--bc-left-width, 230px) minmax(100px, 1fr) minmax(240px, var(--bc-right-width, 320px));
 }
-.workspace[data-layout='bottom'] {
+.app[data-shell='split'] .workspace[data-layout='bottom'] {
   grid-template-columns: minmax(0, 1fr) minmax(240px, var(--bc-right-width, 320px));
 }
 
@@ -357,7 +362,7 @@
   padding: 8px 10px;
   margin-bottom: 10px;
   border: 1px solid var(--accent);
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--hover-accent);
 }
 .tbl-entry-text { flex: 1 1 160px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -414,7 +419,7 @@
   min-height: 0;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 18px;
   background: var(--bg-panel);
   overflow: hidden;
 }
@@ -505,7 +510,7 @@
   content: '';
   position: absolute;
   inset: 1px;
-  border-radius: 4px;
+  border-radius: 8px;
   background: transparent;
   transition: background 0.14s ease;
 }
@@ -535,7 +540,7 @@
 .tbl-ghost {
   z-index: 5;
   pointer-events: none;
-  border-radius: 4px;
+  border-radius: 8px;
   background: var(--accent);
   opacity: 0.32;
   animation: bcMaskIn var(--dur-fast) var(--ease-standard) both;
@@ -550,7 +555,7 @@
   padding: 4px 6px;
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 16px;
   background: var(--panel-soft);
   transition: border-color 0.16s ease, background 0.16s ease;
 }
@@ -566,7 +571,7 @@
   height: 24px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text);
   font-family: inherit;
@@ -587,7 +592,7 @@
   align-items: baseline;
   gap: 5px;
   padding: 5px 10px;
-  border-radius: 9px;
+  border-radius: 16px;
   background: var(--accent);
   color: #fff;
   font-size: 11px;
@@ -629,7 +634,7 @@ body.bc-rail-dragging { user-select: none; }
   gap: 8px;
   padding: 11px 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 18px;
   background: var(--bg-panel);
   min-width: 0;
 }
@@ -643,7 +648,7 @@ body.bc-rail-dragging { user-select: none; }
   height: 28px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text);
   font-family: inherit;
@@ -664,7 +669,7 @@ body.bc-rail-dragging { user-select: none; }
   height: 20px;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 8px;
   background: var(--bg-panel);
   color: var(--text-muted);
   font-family: inherit;
@@ -697,7 +702,7 @@ body.bc-rail-dragging { user-select: none; }
   min-width: 0;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text);
   font-family: inherit;
@@ -716,7 +721,7 @@ body.bc-rail-dragging { user-select: none; }
   text-align: left;
   padding: 9px 10px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 16px;
   background: var(--panel-soft);
   color: var(--text);
   font-family: inherit;

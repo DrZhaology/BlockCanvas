@@ -26,7 +26,7 @@
   height: 26px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-muted);
   font-size: 13px;
@@ -99,7 +99,7 @@
 .tb-task-empty {
   padding: 10px 8px;
   border: 1px dashed var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--panel-soft);
   color: var(--text-muted);
   font-size: 11.5px;
@@ -124,7 +124,7 @@
   padding: 8px 9px;
   border: 1px solid var(--border);
   border-left: 3px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--panel-soft);
 }
 .tb-task-row.is-running { border-left-color: var(--accent); background: var(--hover-accent); }
@@ -244,7 +244,7 @@
   height: 28px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--panel-soft);
 }
 .help-search:focus-within { border-color: var(--accent); background: var(--bg-panel); }
@@ -296,7 +296,7 @@
   width: 100%;
   padding: 5px 8px;
   border: none;
-  border-radius: 5px;
+  border-radius: 9px;
   background: transparent;
   color: var(--text);
   font-size: 12px;
@@ -365,7 +365,7 @@
   margin: 0.9em 0;
   padding: 8px 14px;
   border-left: 3px solid var(--accent);
-  border-radius: 0 6px 6px 0;
+  border-radius: 0 10px 10px 0;
   background: var(--hover-accent);
   color: var(--text);
 }
@@ -374,7 +374,7 @@
 .help-doc code {
   padding: 1px 5px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 8px;
   background: var(--panel-cloud);
   font-family: ui-monospace, Consolas, 'Cascadia Mono', monospace;
   font-size: 12px;
@@ -384,7 +384,7 @@
   margin: 0.9em 0;
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--panel-cloud);
   overflow-x: auto;
   scrollbar-gutter: stable;
@@ -404,7 +404,7 @@
   overflow-x: auto;
   scrollbar-gutter: stable;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
 }
 .help-doc table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .help-doc th,
@@ -416,7 +416,7 @@
 .help-doc img {
   max-width: 100%;
   height: auto;
-  border-radius: 6px;
+  border-radius: 10px;
 }
 /* README 顶部那段居中横幅 / 徽章 */
 .help-doc p[align='center'] { text-align: center; }
@@ -425,7 +425,7 @@
 
 .help-doc mark.hc-hit {
   padding: 0 2px;
-  border-radius: 3px;
+  border-radius: 6px;
   background: #ffe58a;
   color: #4a3300;
 }
@@ -434,7 +434,7 @@
   margin-bottom: 14px;
   padding: 8px 12px;
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--hover-accent);
   color: var(--text);
   font-size: 12px;
@@ -452,7 +452,7 @@
 .help-foot code {
   padding: 1px 5px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 8px;
   background: var(--panel-cloud);
   font-family: ui-monospace, Consolas, monospace;
 }

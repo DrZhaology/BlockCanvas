@@ -1,0 +1,275 @@
+/* ============================================================================
+   v0.4.6 第 47 批 · 属性卡片（CSS 属性行）的统一样式 + 进退场动画
+   ----------------------------------------------------------------------------
+   用户这一轮的原话（逐条对应下面每一段）：
+
+   ①「css属性加入元素的时候，做进入动画就是直接从右边滑入，别的属性卡片让位置」
+   ②「退出的时候，是卡片手动删除的时候加入退出动画！为什么我手动点删除反而没有动画！」
+   ③「退出动画卡片先轻微变小，阴影也变一下，有向后的感觉，然后从右边滑出，
+      别的卡片把退出的空位补上」
+   ④「Ctrl + Z 和 Ctrl + Y 的时候卡片有对应的进入和退出动画，和上面的一样」
+   ⑤「卡片的样式统一，普通卡片淡蓝色，幽灵卡片淡紫色，别的对应。纯淡的颜色！
+      不要别的边框，前面深颜色竖杠！不统一。」
+
+   ⚠ 这一版和上一版的区别（上一版仍然"不像我描述的"，原因在这三条）：
+
+   A. **高度没有收**。以前关键帧只动 transform/opacity —— 卡片滑出去时仍占着
+      原来那块高度，等 340ms 一到节点被删，下面的卡片"啪"地跳上来。
+      用户要的"别的卡片把退出的空位补上"根本没发生。
+      现在：退场同时把 height / margin / padding / border 一起收成 0
+      （真实高度由 JS 预先写进 `--bc-row-h`，首帧就从那个高度开始收缩）。
+
+   B. **手动点 × 那条以前压根没落到卡片上**。调用方传的是 `e.currentTarget`
+      —— 那颗 18×18 的 × 按钮。`.is-removing` 挂在小按钮上，卡片本体一动不动。
+      现在 animateRemove 自己往上找最近的 `.prop-row`，CssPropsSection 还用
+      state 控制这个类（防止 React 重渲染把类抹掉）。
+
+   C. **旧分类色条特异性更高，一直赢**。13 号分片里
+      `.prop-row[data-cat='盒模型'] { border-left-color: #3b82f6; background: … }`
+      是 0,2,1 —— 比新分片的 `.prop-row[data-cat]`（0,2,0）高，
+      所以"深色竖杠 + 彩色底"永远覆盖回来，看起来就是"你根本没改"。
+      那整块已从 13 号分片删除，这里重新定义唯一一套。
+   ========================================================================== */
+
+/* ── ① 进场：从右侧滑入，同时把高度从 0 长到真实高度（下面卡片被"推开"）─────
+   只有刚出现的那一行带 .is-just-added（父级给 460ms），不会整列表一起动。 */
+@keyframes propCardIn {
+  0% {
+    opacity: 0;
+    transform: translateX(56px);
+    height: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-top-width: 0;
+    border-bottom-width: 0;
+  }
+  42% { opacity: 1; }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+    height: var(--bc-row-h, auto);
+    margin-bottom: 6px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+  }
+}
+.props-list > .prop-row.is-just-added {
+  animation: propCardIn 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  overflow: hidden;
+  will-change: transform, opacity, height;
+}
+
+/* ── ②③ 退场：先缩小 + 阴影浮起（"被抽走、往后缩"），再右滑 + 收高度 ────────
+   节奏刻意分两段：
+     0~28% ：scale 1 → 0.966，阴影从小涨到明显 —— 这一段是"卡片被拿起来"的观感，
+             也是用户说的"有向后的感觉"；
+     28~100%：带着阴影往右滑 92px、再缩到 0.94、淡出，**同时高度收到 0**，
+             于是下面的卡片在整段里平滑往上补位，而不是最后跳一下。
+   `forwards` 很重要：播完必须停在"透明 + 0 高"，否则会闪回原样。 */
+@keyframes propCardOut {
+  0% {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+    box-shadow: 0 0 0 rgba(20, 40, 80, 0);
+    height: var(--bc-row-h, auto);
+    margin-bottom: 6px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+  }
+  28% {
+    opacity: 1;
+    transform: scale(0.966) translateX(0);
+    box-shadow: 0 10px 24px rgba(20, 40, 80, 0.18);
+    height: var(--bc-row-h, auto);
+    margin-bottom: 6px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    border-top-width: 1px;
+    border-bottom-width: 1px;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.94) translateX(92px);
+    box-shadow: 0 2px 6px rgba(20, 40, 80, 0.04);
+    height: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-top-width: 0;
+    border-bottom-width: 0;
+  }
+}
+.props-list > .prop-row.is-removing,
+.prop-row.is-removing {
+  animation: propCardOut 340ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: none;
+  /* 收缩期间内容不许溢出来 */
+  overflow: hidden;
+  /* 阴影要能画到行外，不然"浮起"看不出来 */
+  position: relative;
+  z-index: 3;
+  box-sizing: border-box;
+}
+
+/* ── ④ 凭空消失的行（Ctrl+Y 重做 / 换断点 / 换元素）：同尺寸骨架播退场 ───────
+   它只活在 PROP_REMOVE_MS 内（CssPropsSection 的定时器摘掉）。
+   高度由 JS 写成 --bc-row-h（取当前列表里任意一行的真实高度），
+   作用是把那一行原本占的高度再撑一会儿 —— 视觉上就是卡片自己走掉、下面补位。 */
+.prop-row.prop-gone {
+  pointer-events: none;
+  overflow: hidden;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border: 1px solid color-mix(in srgb, #3b82f6 16%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, #3b82f6 5%, var(--bg-panel));
+  height: var(--bc-row-h, auto);
+}
+.prop-row.prop-gone .prop-row-header { opacity: 1; }
+
+/* ── ⑤ 卡片样式统一：纯淡色底、无深色竖杠 ─────────────────────────────────
+   用户原话：「卡片的样式统一，普通卡片淡蓝色，幽灵卡片淡紫色，别的对应。
+     纯淡的颜色！不要别的边框，前面深颜色竖杠！不统一。」
+
+   现在：**所有普通卡片同一个淡蓝底、同一圈 1px 边框、同一个圆角**；
+   类别只体现在标题文字的颜色上（信息还在，但不再抢视线）。
+   不生效 = 淡琥珀；临时卡片 = 淡紫；同样都是"纯淡底 + 1px 边"。 */
+.prop-row {
+  border: 1px solid color-mix(in srgb, #3b82f6 16%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, #3b82f6 5%, var(--bg-panel));
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  box-shadow: none;
+}
+/* 干掉所有分类竖杠（含 data-cat 那条 3px 的 border-left） */
+.prop-row[data-cat] {
+  border-left-width: 1px;
+  border-left-style: solid;
+  border-left-color: color-mix(in srgb, #3b82f6 16%, var(--border));
+}
+/* 类别 → 只改标题色（不再动底色/边框） */
+.prop-row[data-cat] .prop-row-header { color: var(--text); }
+.prop-row[data-cat='盒模型'] .prop-row-header > span { color: #2563eb; }
+.prop-row[data-cat='颜色'] .prop-row-header > span { color: #be185d; }
+.prop-row[data-cat='字体与排版'] .prop-row-header > span { color: #6d28d9; }
+.prop-row[data-cat='边框与阴影'] .prop-row-header > span { color: #b45309; }
+.prop-row[data-cat='列表'] .prop-row-header > span { color: #0f766e; }
+.prop-row[data-cat='定位'] .prop-row-header > span { color: #b91c1c; }
+.prop-row[data-cat='多媒体'] .prop-row-header > span { color: #0e7490; }
+.prop-row[data-cat='Flex & Grid 布局'] .prop-row-header > span { color: #15803d; }
+.prop-row[data-cat='其他'] .prop-row-header > span { color: var(--text); }
+
+/* 不生效：淡琥珀（条件没满足，不是坏了）。照样 1px 边 */
+.prop-row.is-inapplicable {
+  background: color-mix(in srgb, #f59e0b 7%, var(--bg-panel));
+  border-color: color-mix(in srgb, #f59e0b 26%, var(--border));
+  border-left-width: 1px;
+  border-left-style: solid;
+  border-left-color: color-mix(in srgb, #f59e0b 26%, var(--border));
+  box-shadow: none;
+  opacity: 1;
+}
+
+/* 临时（幽灵）卡片：淡紫。卡片自己一层薄底，里面那些行**不要**再套第二层卡片 */
+.ghost-prop-card {
+  border: 1px solid color-mix(in srgb, #7c3aed 20%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, #7c3aed 6%, var(--bg-panel));
+  box-shadow: none;
+  padding: 6px;
+}
+.ghost-prop-card .prop-row,
+.ghost-prop-card .prop-row[data-cat],
+.ghost-prop-card .prop-row.is-inapplicable {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  margin-bottom: 0;
+  padding: 6px 2px;
+}
+.ghost-prop-card .prop-row + .prop-row {
+  border-top: 1px solid color-mix(in srgb, #7c3aed 14%, transparent);
+}
+
+/* 新添加的那一行：底色闪两下就够（用户："新增的卡片直接闪一闪就够了"）。
+   ⚠ 只闪底色，不改边框/不加徽标 —— 新加的行必须跟其它行长得一模一样。 */
+@keyframes propRowFlashSoft {
+  0%   { background-color: color-mix(in srgb, #3b82f6 5%, var(--bg-panel)); }
+  22%  { background-color: rgba(59, 130, 246, 0.22); }
+  56%  { background-color: color-mix(in srgb, #3b82f6 5%, var(--bg-panel)); }
+  76%  { background-color: rgba(59, 130, 246, 0.13); }
+  100% { background-color: color-mix(in srgb, #3b82f6 5%, var(--bg-panel)); }
+}
+.prop-row.flash { animation: propRowFlashSoft 0.8s ease-out 2; }
+
+/* ── 定位助手：relative / sticky 那一行必须占满整行 ─────────────────────────
+   真 BUG（v0.4.7 用户：`「position: relative; 的时候定位助手里面的偏移量全部不显示了」`）：
+
+   `.pos-edges` 在 27-v045-ui.css 里是
+     `display: grid; grid-template-columns: repeat(2, minmax(0, 1fr))`
+   —— 那是给 absolute / fixed 的「四条边各一格」设计的。
+   可 relative / sticky 分支只渲染**一行** `.pos-line`，里面塞两个数字框：
+   它被放进**半格宽**的网格单元里 → 两个 `.num-unit-row` 各分到几十像素 →
+   数字框宽度被压到 0，用户看到的就是"偏移量整块消失"。
+
+   修法：这一行是全宽行。用 `:only-child` 精准命中 ——
+   只有 relative（单行）和 sticky（单个 .pos-sticky-box）是唯一子元素；
+   absolute / fixed 的四个 .pos-line 依旧走两列网格，动都不动。 */
+.quick-helper .pos-edges > :only-child {
+  grid-column: 1 / -1;
+}
+/* 全宽行里的两个数字框要能平分 */
+.quick-helper .pos-edges > .pos-line {
+  min-width: 0;
+}
+.quick-helper .pos-edges > .pos-line > .num-unit-row {
+  flex: 1 1 0;
+  min-width: 0;
+}
+/* relative 的「偏移量」行：左侧标签占位收窄（原来 96px 全给标签太浪费），
+   两个数字框各拿到 ≥ 120px —— 45px 宽的框根本输不进 calc() 这种值。
+   数字框本身是三段（数字 / 单位 / var），所以 120px 还会再分。 */
+.quick-helper .pos-edges > .pos-line > .pos-line-check {
+  width: 62px;
+}
+.quick-helper .pos-edges > .pos-line > .num-unit-row > .num-unit-num {
+  min-width: 52px;
+}
+
+/* ── 深色主题：同一个色相，换成深色系里的"淡" ───────────────────────────── */
+html[data-bc-dark] .prop-row {
+  background: color-mix(in srgb, #60a5fa 9%, var(--bg-panel));
+  border-color: color-mix(in srgb, #60a5fa 22%, var(--border));
+}
+html[data-bc-dark] .prop-row[data-cat] {
+  border-left-color: color-mix(in srgb, #60a5fa 22%, var(--border));
+}
+html[data-bc-dark] .prop-row.is-inapplicable {
+  background: color-mix(in srgb, #f59e0b 12%, var(--bg-panel));
+  border-color: color-mix(in srgb, #f59e0b 30%, var(--border));
+  border-left-color: color-mix(in srgb, #f59e0b 30%, var(--border));
+}
+html[data-bc-dark] .ghost-prop-card {
+  background: color-mix(in srgb, #a78bfa 12%, var(--bg-panel));
+  border-color: color-mix(in srgb, #a78bfa 26%, var(--border));
+}
+
+/* 系统「减少动态效果」：进退场直接切（保留状态变化，不做位移/收缩） */
+@media (prefers-reduced-motion: reduce) {
+  .props-list > .prop-row.is-just-added,
+  .props-list > .prop-row.is-removing,
+  .prop-row.is-removing,
+  .prop-row.flash {
+    animation-duration: 0.01ms;
+  }
+}

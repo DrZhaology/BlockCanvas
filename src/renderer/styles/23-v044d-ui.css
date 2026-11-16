@@ -19,7 +19,7 @@
   color: var(--text);
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
 }
 .grad-pos-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
@@ -97,7 +97,7 @@ html[data-bc-dark] .bc-br-mark { color: #6b7280; }
   padding: 8px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 16px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22);
   animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
   transform-origin: top left;
@@ -109,7 +109,7 @@ html[data-bc-dark] .bc-br-mark { color: #6b7280; }
   height: 28px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--panel-soft);
 }
 .bc-prop-search-row:focus-within { border-color: var(--accent); background: var(--bg-panel); }
@@ -132,7 +132,7 @@ html[data-bc-dark] .bc-br-mark { color: #6b7280; }
   padding: 6px 8px;
   border: none;
   background: transparent;
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
   text-align: left;
 }
@@ -143,8 +143,12 @@ html[data-bc-dark] .bc-br-mark { color: #6b7280; }
 .bc-prop-search-empty { padding: 8px; font-size: 11px; color: var(--text-muted); text-align: center; }
 .bc-prop-search-hint { margin-top: 6px; font-size: 10px; color: var(--text-muted); text-align: center; }
 
-/* 中键定位到的那条属性行：橙色闪烁（复用撞墙动画） */
-.prop-row.flash { border-color: #f97316; box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.35); animation: bcWallFlash 0.9s ease-out 2; }
+/* 中键定位到的那条属性行：整行底色闪两下就够（v0.4.6）
+   ------------------------------------------------------------------
+   用户原话：「定位后会闪烁就够了，现在会上下橙色的框，有点丑，左右没覆盖。删除。」
+   —— 旧写法是给行加橙色 border + 橙色外发光，结果是「上下两条橙线、左右没包住」，
+   看着像没画完的框。现在只闪**整行底色**：天然左右都覆盖，也不会和行的边框打架。 */
+.prop-row.flash { animation: bcPropFlash 0.8s ease-out 2; }
 
 /* 「+ 添加属性」里按"属性值"命中的蓝色插入条目 */
 .add-prop-value-item {
@@ -156,7 +160,7 @@ html[data-bc-dark] .bc-br-mark { color: #6b7280; }
   margin-bottom: 3px;
   border: 1px solid var(--accent);
   background: var(--hover-accent);
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
   text-align: left;
 }
@@ -178,7 +182,7 @@ html[data-bc-dark] .bc-br-mark { color: #6b7280; }
   color: var(--text-muted);
   background: var(--panel-soft);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   cursor: pointer;
 }
 .bc-br-inspector-toggle:hover { color: var(--text); border-color: var(--accent); }
@@ -212,14 +216,14 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   z-index: 88;
   pointer-events: none;
   border: 1.5px dashed #f97316;
-  border-radius: 2px;
+  border-radius: 4px;
   box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.22) inset;
 }
 .bc-alt-box.is-live { border-style: solid; box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.35) inset; }
 .bc-alt-box.mode-font { border-color: #f59e0b; border-style: solid; }
 .bc-alt-box.mode-move { border-color: #10b981; border-style: solid; }
 /* 命中边的加粗提示（8 条边） */
-.bc-alt-edge { position: absolute; background: #f97316; border-radius: 2px; }
+.bc-alt-edge { position: absolute; background: #f97316; border-radius: 4px; }
 .bc-alt-edge.e-l { left: -3px; top: 0; width: 6px; height: 100%; }
 .bc-alt-edge.e-r { right: -3px; top: 0; width: 6px; height: 100%; }
 .bc-alt-edge.e-t { top: -3px; left: 0; height: 6px; width: 100%; }
@@ -240,7 +244,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   font-variant-numeric: tabular-nums;
   color: #fff;
   background: rgba(17, 24, 39, 0.92);
-  border-radius: 5px;
+  border-radius: 9px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
   white-space: nowrap;
 }
@@ -251,7 +255,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   z-index: 402;
   pointer-events: none;
   background: #f97316;
-  border-radius: 3px;
+  border-radius: 6px;
   box-shadow: 0 0 10px rgba(249, 115, 22, 0.9);
   animation: bcWallFlash 0.6s ease-out both;
 }
@@ -280,7 +284,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   gap: 8px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 16px;
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.2);
   animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
   transform-origin: top left;
@@ -292,7 +296,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   font-weight: 700;
   color: var(--accent);
   background: var(--hover-accent);
-  border-radius: 4px;
+  border-radius: 8px;
   padding: 1px 5px;
 }
 .bc-text-menu-tip { font-size: 10px; color: var(--text-muted); line-height: 1.35; }
@@ -309,7 +313,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   color: var(--text);
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 9px;
   cursor: pointer;
 }
 .bc-ts-btn:hover { border-color: var(--accent); color: var(--accent); }
@@ -328,7 +332,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   color: var(--text-muted);
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 9px;
   cursor: pointer;
 }
 .bc-weight-btn:hover { color: var(--text); background: var(--hover); }
@@ -344,7 +348,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   color: var(--text-muted);
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 9px;
   cursor: pointer;
 }
 .bc-style-btn:hover { color: var(--text); background: var(--hover); }
@@ -355,7 +359,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
 .bc-color-swatch {
   position: relative;
   height: 20px;
-  border-radius: 4px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   cursor: pointer;
   padding: 0;
@@ -388,7 +392,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   padding: 2px;
   background: var(--panel-soft);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 12px;
 }
 .help-doc-tab {
   display: inline-flex;
@@ -400,7 +404,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: 5px;
+  border-radius: 9px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -421,7 +425,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   padding: 6px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 16px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
   animation: bcPopIn var(--dur-pop) var(--ease-standard) both;
   transform-origin: top center;
@@ -434,7 +438,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   padding: 7px 9px;
   border: none;
   background: transparent;
-  border-radius: 7px;
+  border-radius: 12px;
   cursor: pointer;
 }
 .help-result:hover { background: var(--hover-accent); }
@@ -445,7 +449,7 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
   font-weight: 600;
   color: var(--accent);
   background: var(--hover-accent);
-  border-radius: 4px;
+  border-radius: 8px;
   padding: 1px 5px;
 }
 .help-result-title {
@@ -468,4 +472,36 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
 }
 
 
+
+
+/* ============================================================================
+   附：画布文字菜单（CanvasTextMenu）的进出动画 + 触摸友好的尺寸
+   ----------------------------------------------------------------------------
+   用户原话：「同时菜单的动画做好。」「如果觉的手机端还是比较别扭可以修改一下。」
+   - 进场：从 0.94 放大淡入（150ms），不是"啪"一下出现；
+   - 退场：缩回 0.96 + 淡出（150ms），点旁边才关；
+   - 触摸屏按钮加大到 40px 高，字号 13px，按着不费劲。
+   ========================================================================== */
+.bc-text-menu {
+  animation: bcTextMenuIn 150ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+@keyframes bcTextMenuIn {
+  from { opacity: 0; transform: scale(0.94) translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+.bc-text-menu.is-closing {
+  animation: bcTextMenuOut 150ms var(--ease-exit, cubic-bezier(0.4, 0, 1, 1)) both;
+  pointer-events: none;
+}
+@keyframes bcTextMenuOut {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: scale(0.96) translateY(4px); }
+}
+
+@media (max-width: 900px) {
+  .bc-text-menu { width: min(268px, calc(100vw - 24px)); padding: 12px; gap: 10px; }
+  .bc-text-menu .bc-ts-btn { min-width: 40px; min-height: 40px; }
+  .bc-text-menu .bc-text-menu-row { min-height: 40px; }
+  .bc-text-menu .bc-color-swatch { min-height: 32px; }
+}
 

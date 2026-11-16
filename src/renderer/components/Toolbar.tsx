@@ -13,6 +13,7 @@ import { widthLabel, widthToDevice, DEVICE_LIST, requestDevice, useEffectiveDevi
 import { runHealthCheck, hasBlocking } from '@lib/healthCheck';
 import { HealthWizard } from './HealthWizard';
 import { AnchoredPanel } from './AnchoredPanel';
+import { PortraitToolbar } from './portrait/PortraitToolbar';
 import { TaskButton } from './TaskButton';
 import { appAlert } from '@lib/appConfirm';
 import { Icon, resolveIconName, type IconName } from './Icon';
@@ -33,11 +34,22 @@ import { Icon, resolveIconName, type IconName } from './Icon';
 const ZOOM_MIN = 50;   // % 最小
 const ZOOM_MAX = 200;  // % 最大
 
-export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }: {
+/**
+ * 工具栏里的一个内建操作。v0.4.6 竖屏第二条栏（PortraitToolbar）要复用这张表
+ * （文案 / 图标 / disabled 判定只写一份，两边不能各说各的），所以把类型提到模块级导出。
+ */
+export type ToolbarOp = {
+  id: string; label: () => string; title: string; cls: string; icon: IconName;
+  onClick: () => void; disabled?: () => boolean; dock?: 'main' | 'right';
+};
+
+export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange, portrait = false }: {
   canvasWidth: string;
   onCanvasWidthChange: (v: string) => void;
   zoom: number;
   onZoomChange: (z: number) => void;
+  /** v0.4.6 竖屏档位：固定 9 个按钮 + 三个二级菜单（见 PortraitToolbar），桌面端排序逻辑完全不参与 */
+  portrait?: boolean;
 }) {
   const scene = useScene((s) => s.scene);
   // ⚠ 剪贴板 / 历史的「是否可用」一律在渲染时用 useScene.getState() 现取：
@@ -55,9 +67,23 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   const [zoomEditVal, setZoomEditVal] = useState('');
   // 「⋯ 更多」下拉开合
   const [moreOpen, setMoreOpen] = useState(false);
-  // 「导出前体检」向导：点 ⚠ 直接打开；导出/预览前若存在严重问题会先拦一道
+  // 竖屏「设备」二级菜单（自适应 / 电脑 / 平板 / 手机 收进一个按钮里）
+  const [deviceOpen, setDeviceOpen] = useState(false);
+  // 「导出前体检」向导：点 ⚠ 直接打开；**只有导出 HTML 前**会先拦一道
   const [healthOpen, setHealthOpen] = useState(false);
   const pendingAfterHealth = useRef<(() => void) | null>(null);
+  /**
+   * 体检闸门（v0.4.7 收窄）。
+   *
+   * 用户原话：「处处前体检你正常就放在哪里，只有导出 HTML 的时候显示一下，
+   *   正常预览不要出现拦截了，比较影响」。
+   *
+   * 以前导出和预览都走这道闸：想看一眼效果，先被一张"1 个关系选择器被多个元素共用"
+   * 的红牌拦住，得先点掉才能看 —— 预览是高频动作，这个拦截的代价远大于它挡住的风险
+   * （预览不改任何文件）。所以现在：
+   *   · **导出 HTML** → 仍然先体检（导出会写盘、会拷媒体、要拿到能用的成品）；
+   *   · **预览** → 直接出，不拦；⚠ 按钮本身还在，想体检随时点。
+   */
   const runWithHealthGuard = (fn: () => void) => {
     const res = runHealthCheck(useScene.getState().scene.root);
     if (hasBlocking(res)) {
@@ -92,8 +118,10 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   // 「设备」按钮的图标要按**画布实际宽度**实时显示：自适应时窗口一变窄，
   // 画布跟着变窄 → 图标应变成平板 / 手机（而不是永远显示电脑）。
   const liveDevice = useEffectiveDevice(canvasWidth);
+  const liveDeviceDef = DEVICE_LIST.find((d) => d.id === liveDevice) ?? DEVICE_LIST[0];
   // 「⋯ 更多」按钮锚点（弹出面板走 Portal，不会被工具栏横向滚动区裁切）
   const moreWrapRef = useRef<HTMLDivElement>(null);
+  const deviceWrapRef = useRef<HTMLDivElement>(null);
 
   // ⚠ 角标：只统计"问题条数"，具体清单由「导出前体检」向导展示（同一套 healthCheck 逻辑）
   const issueCount = useMemo(
@@ -121,7 +149,8 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
 
   // —— 内建操作 ——
   const doExport = () => runWithHealthGuard(exportNow);
-  const doPreview = () => runWithHealthGuard(previewNow);
+  /** 预览**不过体检闸门**（见 runWithHealthGuard 的注释：预览是高频动作，拦它代价太大） */
+  const doPreview = () => previewNow();
 
   const exportNow = async () => {
     /**
@@ -161,6 +190,13 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   };
   const previewNow = async () => {
     const result = exportHTML(useScene.getState().scene);
+    // v0.4.6 竖屏：预览走**程序内**全屏 iframe（第一条栏留着「返回」可以退出）。
+    // 手机上"交给系统浏览器"= 跳出应用，回来还得重新找会话，体验是断的。
+    if (portrait) {
+      window.dispatchEvent(new CustomEvent('bc:inapp-preview', { detail: { html: result.html } }));
+      showExportTips(result);
+      return;
+    }
     const res = await window.bc.previewOpen(result.html);
     if (!res.ok) void appAlert('预览失败：' + (res.error ?? '未知错误'), '预览失败');
     else showExportTips(result);
@@ -178,11 +214,6 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
     if (res.canceled) return;
     if (res.ok) void appAlert('模板已导出：\n' + res.path, '导出成功');
     else void appAlert('导出失败：' + (res.error ?? '未知错误'), '导出失败');
-  };
-
-  type ToolbarOp = {
-    id: string; label: () => string; title: string; cls: string; icon: IconName;
-    onClick: () => void; disabled?: () => boolean; dock?: 'main' | 'right';
   };
 
   // —— 全部内建按钮（注册进 toolbarStore，停靠默认值见 dock 字段）——
@@ -346,7 +377,41 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   // —— 块级渲染 ——
   const widgetMap: Record<string, React.ReactNode> = {
     // 设备切换：无外框分段（纯胶囊高亮，不再框中框）
-    'blk.device': (
+    // v0.4.6 竖屏档位：四个按钮**收进一个**「设备」按钮，点开是贴上方的二级菜单。
+    // 用户："你为什么把四个按钮全部放出来了，你应该放到二级菜单里"。
+    'blk.device': portrait ? (
+      <div className="tb-block tb-device-pt" ref={deviceWrapRef}>
+        <button
+          className={'tb-btn-ghost tb-device-pt-btn' + (deviceOpen ? ' is-open' : '')}
+          title="设备断点：自适应 / 电脑 / 平板 / 手机（切换会同时改变画布宽度与编辑断点）"
+          onClick={() => setDeviceOpen((o) => !o)}
+        >
+          <span className="tb-icon"><Icon name={canvasWidth === 'auto' ? 'responsive' : liveDeviceDef.iconName} size={16} /></span>
+          {canvasWidth === 'auto' ? '自适应' : liveDeviceDef.label}
+        </button>
+        <AnchoredPanel
+          open={deviceOpen}
+          anchorRef={deviceWrapRef}
+          onClose={() => setDeviceOpen(false)}
+          className="tb-device-panel pt-menu-panel"
+          align="left"
+        >
+          <button
+            className={'tb-more-item' + (canvasWidth === 'auto' ? ' active' : '')}
+            onClick={() => { onCanvasWidthChange('auto'); setDeviceOpen(false); }}
+          >自适应</button>
+          {DEVICE_LIST.map((d) => (
+            <button
+              key={d.id}
+              className={'tb-more-item' + (canvasWidth !== 'auto' && device === d.id ? ' active' : '')}
+              title={d.hint}
+              onClick={() => { requestDevice(d.id); setDeviceOpen(false); }}
+            ><span className="tb-icon"><Icon name={d.iconName} size={15} /></span>{d.label}</button>
+          ))}
+          {customWidth && <div className="tb-device-custom">当前：自定义 {widthLabel(customWidth)}</div>}
+        </AnchoredPanel>
+      </div>
+    ) : (
       <div className="tb-block tb-device" title="设备断点：切换会同时改变画布宽度与编辑断点（也可拖动画布左右边缘自定义宽度）">
         <div className="tb-bp-seg">
           <button
@@ -404,7 +469,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
         className={"tb-health-btn" + (issueCount > 0 ? ' has-issue' : '')}
         onClick={() => setHealthOpen(true)}
         title="导出前体检：未命名元素、重复 ID、伪类失效、同名样式不统一……按严重度列出并支持一键修复"
-      ><Icon name="warning" size={16} />{issueCount > 0 && <span className="tb-health-badge">{issueCount}</span>}</button>
+      ><Icon name="warning" size={16} />{portrait ? <span className="tb-pt-label">体检</span> : null}{issueCount > 0 && <span className="tb-health-badge">{issueCount}</span>}</button>
     )
   };
 
@@ -436,6 +501,7 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
   };
 
   // —— 分组查找表 + 三区分配 ——
+  // （v0.4.6：竖屏不再走这套 —— 它固定 9 个按钮，见 PortraitToolbar。这里只管桌面端。）
   const sorted = useMemo(() => getSortedItems(items, userOrder), [items, userOrder]);
   const groupByItem = useMemo(() => {
     const m = new Map<string, ToolbarGroup>();
@@ -484,47 +550,75 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange }
 
   return (
     <div className="toolbar" data-bc-avoid="toolbar">
-      {/* —— 主区：可滚动流水线（竖向滚轮直接左右滚） —— */}
-      <div className="tb-main bc-hscroll" title="工具按钮：放不下时可左右滚动（滚轮直接左右滚，不必按 Shift）；在「设置 → 工具栏管理」里可自由调整 / 分组">
-        {renderArea(mainItems)}
-      </div>
-
-      {/* —— 右侧固定区：常驻手边工具（空间不够时同样可左右滚动） —— */}
-      <div className="tb-right bc-hscroll">
-        {renderArea(rightItems)}
-
-        {/* 后台任务按钮：常驻在「⋯更多」的**左边**（下载 / 更新都有进度，可暂停 / 继续 / 取消） */}
-        <TaskButton />
-
-        {/* 「⋯ 更多」：收纳停靠为 more 的按钮 */}
-        {moreItems.length > 0 && (
-          <div className="tb-more-wrap" ref={moreWrapRef}>
-            <button className="tb-more-btn" title={`还有 ${moreItems.length} 个按钮收在这里`} onClick={() => setMoreOpen((o) => !o)}>
-              ⋯
-            </button>
-            <AnchoredPanel
-              open={moreOpen}
-              anchorRef={moreWrapRef}
-              onClose={() => setMoreOpen(false)}
-              className="tb-more-panel"
-              align="right"
-            >
-              {moreItems.map((it) => (
-                <button
-                  key={it.id}
-                  className="tb-more-item"
-                  title={it.title}
-                  onClick={() => { if (!it.block) it.onClick?.(); setMoreOpen(false); }}
-                >{it.icon && <span className="tb-icon">{it.icon}</span>}{typeof it.label === 'function' ? it.label() : it.label}</button>
-              ))}
-            </AnchoredPanel>
+      {portrait ? (
+        /* v0.4.6 竖屏：固定 9 个按钮（顶部 操作/设备/更多 + 6 个直出），
+           桌面那套排序 / 停靠 / 分组完全不参与。 */
+        <PortraitToolbar
+          opMap={opMap}
+          items={items}
+          canvasWidth={canvasWidth}
+          onCanvasWidthChange={onCanvasWidthChange}
+          zoom={zoom}
+          onZoomChange={onZoomChange}
+          onExport={doExport}
+          onPreview={doPreview}
+          onExportTemplate={doExportTemplate}
+          outlines={outlines}
+          onToggleOutlines={() => setOutlines((v) => !v)}
+          issueCount={issueCount}
+          onOpenHealth={() => setHealthOpen(true)}
+        />
+      ) : (
+        <Fragment>
+          {/* —— 主区：可滚动流水线（竖向滚轮直接左右滚） —— */}
+          <div className="tb-main bc-hscroll" title="工具按钮：放不下时可左右滚动（滚轮直接左右滚，不必按 Shift）；在「设置 → 工具栏管理」里可自由调整 / 分组">
+            {renderArea(mainItems)}
           </div>
-        )}
-      </div>
+
+          {/* —— 右侧固定区：常驻手边工具（空间不够时同样可左右滚动） —— */}
+          <div className="tb-right bc-hscroll">
+            {renderArea(rightItems)}
+
+            {/* 后台任务按钮：常驻在「⋯更多」的**左边**（下载 / 更新都有进度，可暂停 / 继续 / 取消） */}
+            <TaskButton />
+
+            {/* 「⋯ 更多」：收纳停靠为 more 的按钮 */}
+            {moreItems.length > 0 && (
+              <div className="tb-more-wrap" ref={moreWrapRef}>
+                <button className="tb-more-btn" title={`还有 ${moreItems.length} 个按钮收在这里`} onClick={() => setMoreOpen((o) => !o)}>
+                  ⋯{portrait ? <span className="tb-pt-label">更多</span> : null}
+                </button>
+                <AnchoredPanel
+                  open={moreOpen}
+                  anchorRef={moreWrapRef}
+                  onClose={() => setMoreOpen(false)}
+                  className={'tb-more-panel' + (portrait ? ' pt-menu-panel' : '')}
+                  align={portrait ? 'left' : 'right'}
+                >
+                  {moreItems.map((it) => {
+                    // 菜单项要带图标：注册项里的 icon 是"图标名"而不是节点，直接渲染 it.icon
+                    // 什么也画不出来（第一版就是这样，菜单里只有干巴巴的文字）。
+                    const ico = opMap.get(it.id)?.icon;
+                    return (
+                      <button
+                        key={it.id}
+                        className="tb-more-item"
+                        title={it.title}
+                        onClick={() => { if (!it.block) it.onClick?.(); setMoreOpen(false); }}
+                      >{ico && <span className="tb-icon"><Icon name={ico} size={15} /></span>}{typeof it.label === 'function' ? it.label() : it.label}</button>
+                    );
+                  })}
+                </AnchoredPanel>
+              </div>
+            )}
+          </div>
+        </Fragment>
+      )}
 
       {tips && <div className="export-tips">{tips}</div>}
 
-      {/* 导出前体检向导（Portal 到 body，不受工具栏高度限制） */}
+      {/* 导出前体检向导（Portal 到 body，不受工具栏高度限制）——
+          竖屏也从第二条栏的「体检」按钮打开，所以这里必须两种档位都渲染 */}
       <HealthWizard
         open={healthOpen}
         onClose={() => { setHealthOpen(false); pendingAfterHealth.current = null; }}

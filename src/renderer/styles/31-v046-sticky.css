@@ -1,0 +1,100 @@
+/* ============================================================================
+   v0.4.6 · sticky 可视化 (R6-17)
+   ----------------------------------------------------------------------------
+   sticky 的效果只在"页面滚动"时可见，而画布本身不滚（滚的是外层 .canvas-wrap），
+   所以编辑器里它对用户来说"看不出任何区别"。
+
+   这里用两种标记把**生效条件**显性化（不做假的滚动预览）：
+     · data-bc-sticky="armed" —— 写了吸附距离，滚动时会挂住
+     · data-bc-sticky="idle"  —— 没写 top/bottom，永远不会吸附（最常见的错）
+   角标文案由 src/renderer/components/canvas/sticky.ts 统一生成。
+   ========================================================================== */
+
+.canvas [data-bc-sticky] {
+  position: relative;
+}
+
+/* 角标挂在元素左上角外侧 —— 不占布局、不挡点击 */
+.canvas [data-bc-sticky]::before {
+  content: attr(data-bc-sticky-label);
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translateY(-100%);
+  z-index: 30;
+  pointer-events: none;
+  white-space: nowrap;
+  padding: 1px 5px;
+  border-radius: 3px 3px 0 0;
+  font-size: 10px;
+  line-height: 15px;
+  letter-spacing: 0.01em;
+  color: #fff;
+  background: #7c3aed;
+  opacity: 0.9;
+}
+
+/* idle：写错了的那种，用警示色，并把说明补在括号里 */
+.canvas [data-bc-sticky='idle']::before {
+  background: #d97706;
+}
+
+/* armed 的那条吸附线：用一条贯穿元素宽度的细虚线示意"挂在这一行" */
+.canvas [data-bc-sticky='armed']::after {
+  content: '';
+  position: absolute;
+  left: -6px;
+  right: -6px;
+  top: -1px;
+  height: 2px;
+  z-index: 29;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(124, 58, 237, 0.85) 0 6px,
+    transparent 6px 12px
+  );
+  opacity: 0.75;
+}
+
+/* Alt 交互期间隐藏角标：那会儿屏幕上已经有盒模型/墙/吸附线了，别再加噪音 */
+body.bc-alt-dragging .canvas [data-bc-sticky]::before,
+body.bc-alt-down .canvas [data-bc-sticky='idle']::before {
+  opacity: 0.35;
+}
+
+/* 选中时角标更实，方便确认"我在改的就是这个" */
+.canvas [data-bc-sticky][data-bc-sel='1']::before {
+  opacity: 1;
+}
+
+/* ── 快捷助手里的两句话提示（属性面板） ─────────────────────────────────── */
+.pos-sticky-warn,
+.pos-sticky-ok {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 6px 0 2px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.pos-sticky-warn {
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+
+.pos-sticky-ok {
+  color: #5b21b6;
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+}
+
+.pos-sticky-warn > svg,
+.pos-sticky-ok > svg {
+  flex: none;
+  margin-top: 2px;
+}

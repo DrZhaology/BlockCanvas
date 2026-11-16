@@ -2,72 +2,32 @@ import { create } from 'zustand';
 import type { SceneElement, SceneGraph, ElementType, ElementStyle, Breakpoint } from '@lib/types';
 import { SELF_CLOSING_TAGS, TEXT_ONLY_TAGS, CONTAINER_TAGS } from '@lib/types';
 import { SCHEMA } from '@lib/propertySchema';
+import { flyOutElement } from '@lib/elLeave';
 import type { TokenEntry } from '@lib/designTokens';
-import { cssTextToObject, styleToCssText } from '@lib/styleClass';
+// v0.4.6（R6-5）：树查询与样式合并搬到 store/scene/*（纯函数，可单测）
+import {
+  deepClone, findNode, findParent, findFirstWithToken, findFirstWithRel,
+  pruneDescendantIds, indexOfChild, isDescendant, revealHost
+} from './scene/tree';
+import { getEffectiveStyle } from './scene/style';
+import { stripAncestorChildStyles } from './scene/childStyles';
+import { pushPast, type History as SceneHistory } from './scene/history';
+import { reassignIds, appendPasted } from './scene/structure';
+import { syncClassmates } from './scene/sync';
+import { uuid, defaultAttrsFor, defaultStyleFor, defaultTextFor } from './scene/factory';
 
-// ============================================================================
-// 容器「子元素样式」（childStyles）与子元素自身样式的冲突消解（v0.4.4d）
-// ----------------------------------------------------------------------------
-// 背景：模板插入的元素（如 .cards-row 里的 .card-title）的样式是由**父容器的
-//   childStyles** 生成的规则 `.cards-row .card-title { margin: ... }` 提供的，
-//   而子元素自己的样式挂在 `.card-title { ... }` 上。
-//   CSS 特异性：`.cards-row .card-title`(0,2,0) > `.card-title`(0,1,0) →
-//   **用户选中子元素改样式，写进 .card-title 也不生效**（被容器规则盖住）。
-//   这正是"模板元素选中后里面的样式都不能修改"的根因。
-// 解决：当用户改动某元素的某几个 CSS 属性时，把同名的声明从**指向它的祖先
-//   childStyles** 里剔除 —— 于是子元素自己的样式重新生效（改得动）。
-//   只按"类名 token / 精确标签"匹配，且仅当子元素自身有类名时才处理，避免误伤。
-// ============================================================================
-
-/** 该 childStyles 选择器是否指向这个子节点（宽松匹配：类名 token 或精确标签） */
-function childSelectorTargets(sel: string, node: SceneElement): boolean {
-  const s = (sel ?? '').trim();
-  if (!s) return false;
-  const last = s.split(/[\s>+~]+/).filter(Boolean).pop() || '';
-  if (!last) return false;
-  const tokens = (node.attrs?.className ?? '').trim().split(/\s+/).filter(Boolean);
-  for (const t of tokens) {
-    if (last.includes('.' + t)) return true;
-  }
-  const tag = last.replace(/[.:#[].*$/, '').toLowerCase();
-  return !!tag && tag === node.type;
-}
-
-/** 把 keys 这些 CSS 属性从"路径上所有祖先的、指向 target 的 childStyles"里删掉 */
-function stripAncestorChildStyles(root: SceneElement, target: SceneElement, keys: string[]): void {
-  if (!target.attrs?.className) return; // 无类名的元素走行内样式，天然盖过 childStyles，无需处理
-  const walk = (n: SceneElement): boolean => {
-    let contains = false;
-    for (const c of n.children) {
-      if (c === target) { contains = true; break; }
-      if (walk(c)) { contains = true; break; }
-    }
-    // n 的子树里含 target → n 就是"祖先"，清掉它 childStyles 里命中 target 的同名声明
-    if (contains && n.childStyles?.length) {
-      for (const cs of n.childStyles) {
-        if (!childSelectorTargets(cs.sel, target)) continue;
-        const obj = cssTextToObject(cs.css);
-        let changed = false;
-        for (const k of keys) { if (k in obj) { delete obj[k]; changed = true; } }
-        if (changed) cs.css = styleToCssText(obj);
-      }
-    }
-    return contains;
-  };
-  walk(root);
-}
+/**
+ * v0.4.6：**保持对外导出不变**。
+ *
+ * `findNode` / `findParent` / `getEffectiveStyle` 有 40+ 个调用点从 `@store/sceneStore` 导入，
+ * 搬实现时不能顺手改调用方（那会让"重构"变成"大范围改业务代码"，风险高且 diff 噪音大）。
+ * 所以这里原样 re-export —— 调用方一行不用改，实现已经分层。
+ */
+export { findNode, findParent, getEffectiveStyle };
 
 // 把 schema 转成 key→item 映射，便于 removeVisibleProp 知道一条属性对应的 style 字段
 const SCHEMA_LOOKUP = new Map<string, (typeof SCHEMA)[number]>();
 for (const s of SCHEMA) SCHEMA_LOOKUP.set(s.key, s);
-
-// ============ 工具：UUID ============
-function uuid(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
 const genId = uuid;
 
 // ============ 节点工厂 ============
@@ -91,337 +51,10 @@ export function createElement(type: ElementType, overrides: Partial<SceneElement
   };
 }
 
-// 一些元素需要预设 HTML 原生属性
-function defaultAttrsFor(type: ElementType): SceneElement['attrs'] {
-  switch (type) {
-    case 'a': return { href: '#' };
-    case 'input':
-    case 'textarea':
-      return {};
-    case 'img':
-      return { src: '', alt: '' };
-    default: return undefined;
-  }
-}
-
-// 按元素类型给个基础干净的默认样式（仅保留宽、高、背景等核心必要属性）
-function defaultStyleFor(type: ElementType): ElementStyle {
-  switch (type) {
-    case 'div':
-    case 'section':
-    case 'header':
-    case 'nav':
-    case 'footer':
-    case 'main':
-    case 'article':
-    case 'aside':
-      // v0.4.4：块级容器默认 8px 内边距（createElement 会同步写 visibleProps）。
-      // ⚠ 必须写 4 个 longhand，不能写 `padding: '8px'` 简写 ——
-      // 四值输入（TrblInput）读的是 paddingTop/... 4 个字段，写简写会显示 0,0,0,0，
-      // 且用户编辑 longhand 时残留的简写会在 simplifyStyle 输出里反过来覆盖它（改不动）。
-      // 4 边都有值 → 导出时 simplifyStyle 自动合并回 `padding: 8px` 简写，代码依旧干净。
-      return {
-        width: '100%',
-        minHeight: '80px',
-        paddingTop: '8px',
-        paddingRight: '8px',
-        paddingBottom: '8px',
-        paddingLeft: '8px',
-        backgroundColor: '#eaf2ff'
-      };
-    case 'h1':
-      return { fontSize: '32px', fontWeight: '700' };
-    case 'h2':
-      return { fontSize: '24px', fontWeight: '700' };
-    case 'h3':
-      return { fontSize: '20px', fontWeight: '700' };
-    case 'h4':
-      return { fontSize: '16px', fontWeight: '700' };
-    case 'p':
-      return { lineHeight: '1.6' };
-    case 'button':
-      return {
-        width: '120px',
-        height: '36px',
-        backgroundColor: '#1e88e5',
-        color: '#ffffff',
-        cursor: 'pointer'
-      };
-    case 'a':
-      return { color: '#1e88e5', textDecoration: 'underline' };
-    case 'span':
-      return {
-        backgroundColor: '#fff3cd'
-      };
-    case 'img':
-      return {
-        width: '200px',
-        height: '120px',
-        backgroundColor: '#e2e8f0'
-      };
-    case 'input':
-      return {
-        width: '200px',
-        height: '32px',
-        backgroundColor: '#ffffff'
-      };
-    case 'textarea':
-      return {
-        width: '280px',
-        height: '80px',
-        backgroundColor: '#ffffff'
-      };
-    case 'hr':
-      return {
-        width: '100%',
-        height: '1px',
-        backgroundColor: '#c8ccd4'
-      };
-    case 'table':
-      return { width: '100%', minHeight: '60px', backgroundColor: '#ffffff' };
-    case 'thead':
-    case 'tbody':
-    case 'tfoot':
-      return {};
-    case 'caption':
-      return {
-        paddingTop: '6px',
-        paddingBottom: '6px',
-        fontWeight: '600',
-        textAlign: 'center'
-      };
-    case 'th':
-    case 'td':
-      return {
-        minHeight: '32px',
-        backgroundColor: type === 'th' ? '#f1f5f9' : '#ffffff'
-      };
-    case 'blockquote':
-      return {
-        minHeight: '40px',
-        backgroundColor: '#f8fafc'
-      };
-    case 'code':
-      return {
-        backgroundColor: '#f1f5f9',
-        color: '#be185d'
-      };
-    case 'mark':
-      return { backgroundColor: '#fef08a', color: '#713f12' };
-    case 'ul':
-    case 'ol':
-      return {
-        width: '100%',
-        minHeight: '32px',
-        backgroundColor: '#f8fafc'
-      };
-    case 'li':
-      return { minHeight: '24px' };
-    case 'label':
-      return { color: '#555555' };
-    case 'form':
-      return {
-        width: '100%',
-        minHeight: '80px',
-        backgroundColor: '#f8fafc'
-      };
-    default:
-      return { width: '100%', minHeight: '40px' };
-  }
-}
-
-// 按元素类型给默认占位文案
-function defaultTextFor(type: ElementType): string | undefined {
-  switch (type) {
-    case 'h1': return '一级标题';
-    case 'h2': return '二级标题';
-    case 'h3': return '三级标题';
-    case 'h4': return '四级标题';
-    case 'p': return '这里是段落文字，可以双击编辑。';
-    case 'button': return '按钮';
-    case 'a': return '链接文字';
-    case 'label': return '标签';
-    case 'span': return '行内文字';
-    case 'li': return '列表项';
-    case 'th': return '表头';
-    case 'td': return '单元格';
-    case 'caption': return '表格标题';
-    case 'img': return undefined;
-    case 'hr': return undefined;
-    case 'input': return undefined;
-    case 'textarea': return undefined;
-    case 'ul': return undefined;
-    case 'ol': return undefined;
-    case 'form': return undefined;
-    // v0.4.5（用户反馈 C补12）：这些也都是"有内容才有意义"的元素。
-    // 以前插入后是空的，在画布上是一个 0 尺寸的空盒子 —— 既看不见、也点不中，
-    // 用户以为"插进去了但选不上"。统一给一段可立即编辑的默认文案。
-    case 'h5': return '五级标题';
-    case 'h6': return '六级标题';
-    case 'strong': return '重点加粗';
-    case 'em': return '斜体强调';
-    case 'mark': return '高亮文字';
-    case 'small': return '小字说明';
-    case 'code': return 'code';
-    case 'del': return '删除线';
-    case 'sup': return '上标';
-    case 'sub': return '下标';
-    case 'blockquote': return '这里是一段引用内容。';
-    case 'figcaption': return '图片说明文字';
-    case 'pre': return '预格式化文本';
-    default: return undefined;
-  }
-}
-
-// ============ 深拷贝 ============
-function deepClone<T>(x: T): T {
-  return structuredClone(x);
-}
-
-// ============ 树查询 ============
-export function findNode(root: SceneElement, id: string): SceneElement | null {
-  if (root.id === id) return root;
-  for (const c of root.children) {
-    const r = findNode(c, id);
-    if (r) return r;
-  }
-  return null;
-}
-
-/** 找第一个 className 含某 token 的元素（可排除某个 id）——"该类的样子"以它为准 */
-function findFirstWithToken(root: SceneElement, token: string, excludeId?: string): SceneElement | null {
-  const walk = (n: SceneElement): SceneElement | null => {
-    if (n.id !== excludeId) {
-      const cls = (n.attrs?.className ?? '').trim();
-      if (cls && cls.split(/\s+/).includes(token)) return n;
-    }
-    for (const c of n.children) {
-      const r = walk(c);
-      if (r) return r;
-    }
-    return null;
-  };
-  return walk(root);
-}
-
-/** 找第一个 relSelector 相同的元素（可排除某个 id） */
-function findFirstWithRel(root: SceneElement, rel: string, excludeId?: string): SceneElement | null {
-  const walk = (n: SceneElement): SceneElement | null => {
-    if (n.id !== excludeId) {
-      const r = (n.attrs?.relSelector ?? '').trim();
-      if (r && r === rel) return n;
-    }
-    for (const c of n.children) {
-      const res = walk(c);
-      if (res) return res;
-    }
-    return null;
-  };
-  return walk(root);
-}
-
-function findParent(root: SceneElement, id: string, parent: SceneElement | null = null): SceneElement | null {
-  if (root.id === id) return parent;
-  for (const c of root.children) {
-    const r = findParent(c, id, root);
-    if (r !== null) return r;
-  }
-  return null;
-}
-export { findParent };
-
-// 判断 candidate 是否是 node 的祖先（node 向上能走到 candidate）
-function isAncestorOf(root: SceneElement, candidateId: string, nodeId: string): boolean {
-  let cur: SceneElement | null = null;
-  const target = findNode(root, nodeId);
-  if (!target) return false;
-  cur = findParent(root, nodeId);
-  while (cur && cur !== root) {
-    if (cur.id === candidateId) return true;
-    cur = findParent(root, cur.id);
-  }
-  return false;
-}
-
-// 从选中的 id 集合中剔除"祖先也同时被选中"的后代 id：
-// 多选复制/剪切父+子时，子级已含在父级子树快照里，不能再单独复制一份，
-// 否则粘贴会重复出现（父级带子级 + 独立子级）。只保留"顶层"选中。
-function pruneDescendantIds(root: SceneElement, ids: string[]): string[] {
-  const idSet = new Set(ids.filter((id) => id !== root.id));
-  return [...idSet].filter((id) => {
-    for (const other of idSet) {
-      if (other !== id && isAncestorOf(root, other, id)) return false;
-    }
-    return true;
-  });
-}
-
-// 当前元素在父级 children 数组中的索引；找不到返回 -1
-function indexOfChild(parent: SceneElement, id: string): number {
-  return parent.children.findIndex((c) => c.id === id);
-}
-
-// 判断 candidate 是否是 node 的后代（禁止把父级挪进自己子树）
-function isDescendant(node: SceneElement, candidateId: string): boolean {
-  if (node.id === candidateId) return true;
-  for (const c of node.children) {
-    if (isDescendant(c, candidateId)) return true;
-  }
-  return false;
-}
-
-// 自 node 起向上把隐藏的祖先链全部解除隐藏。
-// 往隐藏容器里插入/粘贴元素 → 自动显示该容器（含各级隐藏祖先），
-// 保证"插进 div 的东西"永远在画布可见，不会只在图层树里
-function revealAncestors(root: SceneElement, node: SceneElement): void {
-  let cur: SceneElement | null = node;
-  while (cur && cur !== root) {
-    cur.hidden = false;
-    cur = findParent(root, cur.id);
-  }
-}
-
-// ============ 给树里所有元素重新分配 id（粘贴用，避免 id 冲突） ============
-function reassignIds(node: SceneElement): SceneElement {
-  return {
-    ...node,
-    id: uuid(),
-    children: node.children.map(reassignIds)
-  };
-}
-
-// 把剪贴板内容（单个元素或数组）追加到 target.children，并把选区设为"刚粘贴的元素"
-function appendPasted(scene: SceneGraph, target: SceneElement, clip: SceneElement | SceneElement[]): void {
-  const items = Array.isArray(clip) ? clip : [clip];
-  const inserted = items.map((it) => reassignIds(deepClone(it)));
-  target.children.push(...inserted);
-  scene.selectedIds = inserted.map((n) => n.id);
-  scene.selectedId = inserted.length ? inserted[inserted.length - 1].id : null;
-}
-
-// ============ History ============
-interface History {
-  past: SceneGraph[];
-  future: SceneGraph[];
-}
-
-/**
- * 计算元素在指定断点下的级联有效样式（Desktop -> Tablet -> Mobile）
- */
-export function getEffectiveStyle(node: SceneElement, breakpoint: Breakpoint = 'desktop'): ElementStyle {
-  if (breakpoint === 'desktop') return node.style;
-  const tabStyle = node.responsive?.tablet ?? {};
-  if (breakpoint === 'tablet') {
-    return { ...node.style, ...tabStyle };
-  }
-  const mobStyle = node.responsive?.mobile ?? {};
-  return { ...node.style, ...tabStyle, ...mobStyle };
-}
-
 // ============ Store ============
 export interface SceneStore {
   scene: SceneGraph;
-  history: History;
+  history: SceneHistory;
   // 内部剪贴板：单个元素或元素数组（多选复制/剪切）。数组元素永不为空。
   clipboard: SceneElement | SceneElement[] | null;
   /** beginStyleEdit 标记了"连续编辑"进行中：结束时的 updateStyle/updateAttr 不再额外入栈
@@ -553,6 +186,8 @@ export interface SceneStore {
   setTokenGroupOpen: (group: string, open: boolean) => void;
   /** 页面「全局样式」：任意 CSS 属性（key=属性名），undefined/空串 = 删除该属性；走撤销栈 */
   setBodyExtra: (patch: Record<string, string | undefined>) => void;
+  /** 基准视口高度（v0.4.6 / R6-16）：fixed 的空气墙 + 画布最小高度；走撤销栈 */
+  setViewportHeight: (px: number) => void;
 }
 
 // 初始空场景：一个 body 根
@@ -624,7 +259,7 @@ export const useScene = create<SceneStore>((set) => ({
       }
 
       parent.children.push(el);
-      revealAncestors(scene.root, parent);
+      revealHost(scene.root, parent);
       scene.selectedId = el.id;
       scene.selectedIds = [el.id];
       return { scene, history: pushPast(st.history, st.scene) };
@@ -648,7 +283,7 @@ export const useScene = create<SceneStore>((set) => ({
       };
       const el = renew(deepClone(tree));
       parent.children.push(el);
-      revealAncestors(scene.root, parent);
+      revealHost(scene.root, parent);
       scene.selectedId = el.id;
       scene.selectedIds = [el.id];
       return { scene, history: pushPast(st.history, st.scene) };
@@ -656,6 +291,9 @@ export const useScene = create<SceneStore>((set) => ({
   },
 
   removeElement: (id) => {
+    // v0.4.6：退场动画。节点马上要从 DOM 消失，先留一个按原位钉住的影子淡出
+    // （纯视觉，不碰状态；见 lib/elLeave.ts）。
+    flyOutElement(id);
     set((st) => {
       if (id === st.scene.root.id) return st;
       const scene = deepClone(st.scene);
@@ -671,6 +309,8 @@ export const useScene = create<SceneStore>((set) => ({
   },
 
   removeMany: (ids) => {
+    // 同上：每个被点名的元素各留一个影子（后代跟着父级一起消失，不必单独播）
+    for (const id of ids) flyOutElement(id);
     set((st) => {
       const pruned = pruneDescendantIds(st.scene.root, ids);
       if (pruned.length === 0) return st;
@@ -784,7 +424,7 @@ export const useScene = create<SceneStore>((set) => ({
       const parent = findNode(scene.root, parentId);
       if (!parent || SELF_CLOSING_TAGS.has(parent.type)) return st;
       appendPasted(scene, parent, st.clipboard);
-      revealAncestors(scene.root, parent);
+      revealHost(scene.root, parent);
       return { scene, history: pushPast(st.history, st.scene) };
     });
   },
@@ -806,7 +446,7 @@ export const useScene = create<SceneStore>((set) => ({
         target = findParent(scene.root, target.id) ?? scene.root;
       }
       appendPasted(scene, target, st.clipboard);
-      revealAncestors(scene.root, target);
+      revealHost(scene.root, target);
       return { scene, history: pushPast(st.history, st.scene) };
     });
   },
@@ -1380,33 +1020,69 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
-      // 删属性时也要消解祖先 childStyles（否则容器规则会继续把值"补"回来，看起来删不掉）
-      const delKeys = (() => {
-        const item = SCHEMA_LOOKUP.get(key);
-        if (item) {
-          return (item.input === 'box4' || item.input === 'trbl') && item.sides
-            ? item.sides.map((s) => s.key)
-            : [item.key];
+      /**
+       * 「删一个属性」到底要删哪些 style 字段？
+       *
+       * ⚠ v0.4.7 修的真 BUG（用户：「删除属性卡片删不掉，会卡」）：
+       *   有的属性**从不在 style 里留下自己那个 key**，而是展开成一组 longhand ——
+       *   · border  → borderTopWidth / borderRightWidth / … / borderStyle / borderColor
+       *   · 四向属性 → paddingTop / paddingRight / …
+       *   以前只删 `border` 这一个键：它本来就不存在，等于什么都没删，
+       *   而 `borderTopWidth` 还在 → `hasStyleValue()` 又认为"这条有值"→ 行立刻回列表，
+       *   于是看起来是"删不掉"，而且因为列表一直在恢复，动画也一直重来（用户感知为"卡"）。
+       *   现在把 border 系列显式展开，其它有 sides 的沿用 sides。
+       */
+      const keysOf = (item: (typeof SCHEMA)[number] | undefined, fallbackKey: string): string[] => {
+        if (!item) return [fallbackKey];
+        if (item.key === 'border') {
+          // 简写 + 四边宽度/线型 + 全局线型/颜色，一起清
+          return [
+            'border',
+            'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+            'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
+            'borderStyle', 'borderColor'
+          ];
         }
-        return [key];
-      })();
+        // 背景色：background 简写与 backgroundColor 都要清（否则删了立刻又"有值"）
+        if (item.key === 'backgroundColor') return ['backgroundColor', 'background'];
+        if ((item.input === 'box4' || item.input === 'trbl') && item.sides) {
+          return item.sides.map((s) => s.key);
+        }
+        return [item.key];
+      };
+      const item = SCHEMA_LOOKUP.get(key);
+      const delKeys = keysOf(item, key);
+      // 删属性时也要消解祖先 childStyles（否则容器规则会继续把值"补"回来，看起来删不掉）
       stripAncestorChildStyles(scene.root, node, delKeys);
       // 移出列表
       if (node.visibleProps) {
         node.visibleProps = node.visibleProps.filter((k) => k !== key);
         if (node.visibleProps.length === 0) node.visibleProps = undefined;
       }
-      // 彻底删除对应 style 字段（含 4 边拆分）
-      const item = SCHEMA_LOOKUP.get(key);
-      if (item) {
-        const keys = (item.input === 'box4' || item.input === 'trbl') && item.sides
-          ? item.sides.map((s) => s.key)
-          : [item.key];
-        for (const k of keys) {
-          delete (node.style as Record<string, string | undefined>)[k];
+      // 彻底删除对应 style 字段（含简写展开）
+      for (const k of delKeys) {
+        delete (node.style as Record<string, string | undefined>)[k];
+      }
+      /**
+       * ⚠ v0.4.7 修的真 BUG（用户：「删除属性卡片删不掉，会卡」）：
+       *   上面只删了**基础层**（node.style）。可面板判断"这条属性在不在"用的是
+       *   `styleForPresence` = 基础层 + **当前断点的覆盖层**（ElementPropsBody）。
+       *   而写值是按 `activeBreakpoint` 走的 —— 右侧面板一宽、画布落到 753px 以下
+       *   就写进 `responsive.tablet`，于是：
+       *     删除 → 基础层本来就没有这个键（没删掉任何东西）→ tablet 层原封不动 →
+       *     `hasStyleValue()` 依然为真 → **行当场回到列表**，用户看到的就是"删不掉"。
+       *   所以必须把每个断点层里的同名字段一起清掉。
+       */
+      if (node.responsive) {
+        for (const layer of [node.responsive.tablet, node.responsive.mobile]) {
+          if (!layer) continue;
+          for (const k of delKeys) delete (layer as Record<string, string | undefined>)[k];
+          if (Object.keys(layer).length === 0) {
+            if (layer === node.responsive.tablet) delete node.responsive.tablet;
+            else delete node.responsive.mobile;
+          }
         }
-      } else {
-        delete (node.style as Record<string, string | undefined>)[key];
+        if (Object.keys(node.responsive).length === 0) node.responsive = undefined;
       }
       // 关键：全量同步给所有同类名、同关系选择器的元素，防止样式不一致导致类名ID冲突！
       syncClassmates(scene.root, node);
@@ -1602,6 +1278,22 @@ export const useScene = create<SceneStore>((set) => ({
     });
   },
 
+  // 基准视口高度（v0.4.6 / R6-16）：
+  //  · 画布最小高度 = 它（短页面也能看见整屏，fixed: bottom:0 有落点）；
+  //  · fixed 元素的拖动墙止步于这条线（"首屏线"）。
+  // 走撤销栈：用户改了它也算一次可回退的编辑。
+  setViewportHeight: (px) => {
+    set((st) => {
+      const next = Math.max(320, Math.min(4000, Math.round(px)));
+      if ((st.scene.viewportHeight ?? 900) === next) return st;
+      const push = !st.styleEditPending;
+      return {
+        scene: { ...st.scene, viewportHeight: next },
+        history: push ? pushPast(st.history, st.scene) : st.history
+      };
+    });
+  },
+
   setPageSec: (patch) => set((st) => ({
     scene: {
       ...st.scene,
@@ -1632,57 +1324,6 @@ export const useScene = create<SceneStore>((set) => ({
     }
   }))
 }));
-
-function pushPast(h: History, snapshot: SceneGraph): History {
-  const past = [...h.past, snapshot];
-  if (past.length > 200) past.shift();
-  return { past, future: [] };
-}
-
-// 「编辑即统一」：node 有类名(classString)或关系选择器(relSelector)时，
-// 把整棵树上所有同类名或同关系选择器的元素样式全量覆盖为 node 当前样式 —— 一改全改。
-// 无类名且无关系选择器的元素（或 root）不触发联动。
-/**
- * 「编辑即统一」：把改好的样式同步给"同一个名字"的元素。
- *
- * · 同名**类名**：全文档同步（类 = 一种样子，用户明确的可复用单元）。
- * · 同**关系选择器**：只在**同一个父容器下的兄弟**之间同步。
- *
- * ⚠ 为什么关系选择器要限定"同父"（v0.4.4 修）：
- *   关系选择器是"结构定位"（`.data-table > tbody > tr:nth-child(2) > td:nth-child(1)`），
- *   它长得一样**不代表是同一个元素** —— 文档里两张表都叫 `data-table` 时，
- *   两张表的同位置格子会拿到完全相同的选择器字符串。旧实现按字符串全文同步，
- *   于是"改表 A 的一格，表 B 的同一格跟着变"（用户报的"改第二行，第一行也被带动"）。
- *   而真正需要"组同步"的场景（给容器内同类子元素统一设置选择器）本来就是同父兄弟，
- *   所以限定同父既修掉误伤、又完整保留原本的组语义。
- */
-function syncClassmates(root: SceneElement, node: SceneElement): void {
-  const cls = (node.attrs?.className ?? '').trim();
-  const rel = (node.attrs?.relSelector ?? '').trim();
-  if ((!cls && !rel) || node === root) return;
-  const nodeParent = findParent(root, node.id);
-  const targetStyle = deepClone(node.style);
-  const targetVisible = node.visibleProps ? deepClone(node.visibleProps) : undefined;
-  const targetPseudo = node.pseudoStyles ? deepClone(node.pseudoStyles) : undefined;
-  const targetResponsive = node.responsive ? deepClone(node.responsive) : undefined;
-  const copyTo = (n: SceneElement) => {
-    n.style = deepClone(targetStyle);
-    n.visibleProps = targetVisible ? deepClone(targetVisible) : undefined;
-    n.pseudoStyles = targetPseudo ? deepClone(targetPseudo) : undefined;
-    n.responsive = targetResponsive ? deepClone(targetResponsive) : undefined;
-  };
-  const walk = (n: SceneElement, parent: SceneElement | null): void => {
-    if (n !== node) {
-      if (cls && (n.attrs?.className ?? '').trim() === cls) {
-        copyTo(n);
-      } else if (rel && parent === nodeParent && (n.attrs?.relSelector ?? '').trim() === rel) {
-        copyTo(n);
-      }
-    }
-    for (const c of n.children) walk(c, n);
-  };
-  walk(root, null);
-}
 
 // re-export for components
 export { CONTAINER_TAGS, SELF_CLOSING_TAGS };
@@ -1717,6 +1358,7 @@ if (typeof window !== 'undefined') {
       prev.globalCss !== state.scene.globalCss ||
       prev.quickCss !== state.scene.quickCss ||
       prev.bodyExtra !== state.scene.bodyExtra ||
+      prev.viewportHeight !== state.scene.viewportHeight ||
       curPastLen > lastPastLen;
 
     lastPastLen = curPastLen;

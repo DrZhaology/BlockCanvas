@@ -1,0 +1,189 @@
+/* ============================================================================
+   BlockCanvas · 38-v046-ptoolbar.css —— 竖屏第二条操作栏（v0.4.6 · 第 43 批 B 组）
+   ----------------------------------------------------------------------------
+   这套样式只服务 PortraitToolbar.tsx：固定的 9 个按钮 + 三个二级菜单
+   （操作 / 设备 / 更多）。
+
+   为什么全部加 `.app[data-shell='stack']` 前缀：
+     竖屏外壳（窗口 <900px）= data-shell='stack'。不加前缀的话，桌面端窗口拉窄
+     到 900px 以下时也会被这套"大按钮"接管 —— 但桌面端有鼠标，不需要 44px。
+
+   为什么菜单那几条**没有**前缀：
+     二级菜单是 AnchoredPanel Portal 到 body 的，body 不是 .app 的后代，
+     加了前缀一条都匹配不上（36 号分片踩过同一个坑）。菜单容器只会由本组件
+     挂 `.pt-tbtn-menu`，不会串到桌面端的「更多」面板。
+
+   用户原话（本轮要解决的两个毛病）：
+     「所有按钮高度一样，现在高度都不一样，按钮又大又丑，改一下。宽度可以不同。」
+     → 高度一律 44px（也是触摸目标下限），宽度按文字自适应、最小 52px。
+   ========================================================================== */
+
+/* ── 一条可横滑的按钮流水线 ──────────────────────────────────────────────── */
+.app[data-shell='stack'] .pt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+  width: max-content;
+  min-width: 100%;
+  padding: 0 4px;
+  box-sizing: border-box;
+  /* 外层 .pt-bar2-inner 负责滚动，这里只是"内容宽度=按钮总宽" */
+  flex: 0 0 auto;
+}
+
+/* ── 单个按钮：图标在上、文字在下，全部同一高度 ────────────────────────────── */
+.app[data-shell='stack'] .pt-tbtn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 44px;
+  min-width: 52px;
+  padding: 3px 8px;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1.15;
+  white-space: nowrap;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background var(--dur-fast) var(--ease-standard),
+              color var(--dur-fast) var(--ease-standard),
+              transform var(--dur-fast) var(--ease-standard);
+}
+
+/* 按压反馈：手指落在按钮上能立刻看到"按到了"（触摸没有 hover 可以依赖） */
+.app[data-shell='stack'] .pt-tbtn:active:not(:disabled) {
+  background: var(--hover);
+  transform: scale(0.96);
+}
+
+.app[data-shell='stack'] .pt-tbtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* 开关态 / 菜单展开态：主色 + 淡底，和"未激活"一眼区分 */
+.app[data-shell='stack'] .pt-tbtn.is-on,
+.app[data-shell='stack'] .pt-tbtn.is-open,
+.app[data-shell='stack'] .pt-tbtn.is-primary {
+  color: var(--accent);
+  background: var(--hover);
+  font-weight: 600;
+}
+
+.app[data-shell='stack'] .pt-tbtn.has-issue { color: var(--danger); }
+
+.app[data-shell='stack'] .pt-tbtn-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+}
+
+/* 「更多」用「⋯」字符（不是三条横线）——
+   最底那条栏里已经有一颗"三"的入口按钮，两个都画成三条线会分不清。 */
+.app[data-shell='stack'] .pt-tbtn-dots {
+  font-size: 20px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 1px;
+  transform: translateY(-2px);
+}
+
+.app[data-shell='stack'] .pt-tbtn-label {
+  font-size: 10px;
+  line-height: 1.15;
+}
+
+/* 体检角标：只报"有问题几条"，清单在向导里（与桌面端 tb-health-badge 同义） */
+.app[data-shell='stack'] .pt-tbtn-badge {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 7px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 二级菜单（Portal 到 body，故不加 .app[data-shell='stack'] 前缀）─────────
+   菜单一律出现在按钮上方：第二条栏就在屏幕底部，AnchoredPanel 量完发现下方
+   放不下会自动向上翻。max-height + overflow 兜住"插件按钮很多"的情况 ——
+   否则菜单会长到屏幕外，最上面几项永远点不到。 */
+.tb-anchored-panel.pt-tbtn-menu {
+  min-width: 190px;
+  max-height: 58vh;
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: var(--r-3);
+  /* 横滑条别露出来：竖屏是手指滑，画一条灰杠只是脏 */
+  scrollbar-width: none;
+}
+.tb-anchored-panel.pt-tbtn-menu::-webkit-scrollbar { width: 0; height: 0; }
+
+.tb-anchored-panel.pt-tbtn-menu .tb-more-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: auto;
+  min-height: 44px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-radius: var(--r-2);
+  font-size: 13.5px;
+  text-align: left;
+  white-space: nowrap;
+}
+.tb-anchored-panel.pt-tbtn-menu .tb-more-item:hover:not(:disabled) { background: var(--hover); }
+.tb-anchored-panel.pt-tbtn-menu .tb-more-item:disabled { opacity: 0.4; cursor: not-allowed; }
+.tb-anchored-panel.pt-tbtn-menu .tb-more-item .tb-icon {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+/* 选中项（当前设备 / 已开启的开关）：accent 色 + ✓ */
+.tb-anchored-panel.pt-tbtn-menu .tb-more-item.is-on,
+.tb-anchored-panel.pt-tbtn-menu .tb-more-item.active {
+  color: var(--accent);
+  font-weight: 600;
+  background: var(--hover);
+}
+.tb-anchored-panel.pt-tbtn-menu .pt-menu-check {
+  margin-left: auto;
+  padding-left: 10px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* 缩放项右侧的百分比：等宽数字，不跟着动画跳 */
+.tb-anchored-panel.pt-tbtn-menu .pt-menu-val {
+  margin-left: auto;
+  padding-left: 10px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 分组分隔：操作 / 抽屉里的"不常用"按钮与常用按钮之间视觉分组 */
+.tb-anchored-panel.pt-tbtn-menu .pt-menu-sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--line);
+}

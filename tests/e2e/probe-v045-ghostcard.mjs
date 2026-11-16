@@ -79,62 +79,92 @@ async function main() {
   });
   await sleep(500);
 
-  // 默认开关是开着的 → 不应出现「代管属性占位卡」（该卡已按用户要求删除）
-  const before = await win.evaluate(() => ({
-    oldGhost: document.querySelectorAll('.prop-ghost-card').length,
-    rows: document.querySelectorAll('.props-list .prop-row').length
-  }));
-  check('开关打开时：代管属性直接列在列表里，没有占位卡',
-    before.oldGhost === 0 && before.rows > 0, JSON.stringify(before));
+  // v0.4.6：这个开关**改成默认关闭**（用户："默认关闭，也就不把属性显示到下方 CSS"）
+  // 所以先把开关打开，再看"代管属性是否进列表"。
+  const openHelper = async () => {
+    await win.evaluate(() => {
+      const head = [...document.querySelectorAll('.inspector-sec-head')].find((x) => /快捷助手/.test(x.textContent || ''));
+      if (head && !document.querySelector('.qh-sync-label')) head.click();
+    });
+    await sleep(400);
+  };
+  await openHelper();
+  const defaultOff = await win.evaluate(() =>
+    document.querySelector('.qh-sync-label input[type="checkbox"]')?.checked === false
+  );
+  check('「显示到下方 CSS 属性」默认关闭', defaultOff, String(defaultOff));
 
-  // 关掉「是否显示到下方 CSS 属性」。
-  // ⚠ 这个开关在「快捷助手」板块里，而该板块默认是收起的 —— 探针必须先展开它，
-  //   否则点击落空（第一版就踩了这个坑：labels: 0）。
+  const offRows = await win.evaluate(() => document.querySelectorAll('.props-list .prop-row').length);
+
+  // 打开开关 → 代管属性（display / gap / flexDirection…）出现在列表里
   await win.evaluate(() => {
-    const head = [...document.querySelectorAll('.inspector-sec-head')].find((x) => /快捷助手/.test(x.textContent || ''));
-    if (head && !document.querySelector('.qh-sync-label')) head.click();
+    const box = document.querySelector('.qh-sync-label input[type="checkbox"]');
+    if (box && !box.checked) box.click();
   });
-  await sleep(500);
-  const hasToggle = await win.evaluate(() => document.querySelectorAll('.qh-sync-label input[type="checkbox"]').length);
-  check('准备：「快捷助手」里有「是否显示到下方 CSS 属性」开关', hasToggle === 1, `count=${hasToggle}`);
+  await sleep(800);
+  const onRows = await win.evaluate(() => ({
+    rows: document.querySelectorAll('.props-list .prop-row').length,
+    hasDisplay: !!document.querySelector('[data-prop-key="display"]')
+  }));
+  check('打开开关后：代管属性进入下方列表',
+    onRows.rows > offRows && onRows.hasDisplay, JSON.stringify({ off: offRows, on: onRows }));
 
+  // 再关掉 → 从列表消失
   await win.evaluate(() => {
     const box = document.querySelector('.qh-sync-label input[type="checkbox"]');
     if (box && box.checked) box.click();
   });
   await sleep(800);
+  const backOff = await win.evaluate(() => ({
+    rows: document.querySelectorAll('.props-list .prop-row').length,
+    hasDisplay: !!document.querySelector('[data-prop-key="display"]')
+  }));
+  check('关掉后：代管属性从列表消失',
+    backOff.rows === offRows && !backOff.hasDisplay, JSON.stringify(backOff));
 
   /**
-   * v0.4.5 第十六批（用户明确要求）：
-   * 「幽灵卡片完全没有做……而幽灵卡片就是临时的作用，比如中间选中元素输入 position，
-   *   Enter 就可以直接定位到这个元素右侧的 position 的幽灵卡片。」
-   * → 上一轮那张"快捷助手隐藏属性时的占位说明"（`.prop-ghost-card`）已删除，
-   *   现在唯一的"幽灵卡片"是**定位临时卡**（`[data-bc-pos-ghost]`），
-   *   它的行为在 probe-v045-batch16b 里逐条验证。
+   * v0.4.6：幽灵卡片的语义变了（用户第二次提，并按新规则定稿）
+   * ---------------------------------------------------------------
+   * 「快捷助手关闭了显示到下方 CSS 属性的时候，中键搜索属性的时候，临时做一个幽灵卡片，
+   *   颜色做的不一样。这个卡片关闭当前选中元素的属性面板后就下次进来不显示了。」
+   *   → 只有开关**关闭**时，中键搜到的属性才会进这张紫色卡片；
+   *   → **没有关闭按钮**（不能叉掉），换元素/离开面板自然消失。
    */
-  const ghost = await win.evaluate(() => ({
-    oldGhost: document.querySelectorAll('.prop-ghost-card').length,
-    posGhost: document.querySelectorAll('[data-bc-pos-ghost="1"]').length,
-    rows: document.querySelectorAll('.props-list .prop-row').length
-  }));
-  check('关掉开关后：代管属性从列表消失（快捷助手开关的原有作用仍在）',
-    ghost.rows < before.rows, JSON.stringify({ before: before.rows, after: ghost.rows }));
-  check('旧「占位说明型」幽灵卡片已彻底移除', ghost.oldGhost === 0, String(ghost.oldGhost));
+  const fireSearch = async (key) => {
+    await win.evaluate((k) => {
+      window.dispatchEvent(new CustomEvent('bc:focus-prop', { detail: { key: k, add: false } }));
+    }, key);
+    await sleep(700);
+  };
 
-  // 普通元素不该凭空冒出任何幽灵卡片（避免噪音）
-  const clean = await win.evaluate(async () => {
-    const st = window.__sceneStore.getState();
-    st.addElement('div', null);
-    const id3 = window.__sceneStore.getState().scene.selectedId;
-    await new Promise((r) => setTimeout(r, 400));
+  // 关着开关时搜一条代管属性 → 出幽灵卡片，里面有这条属性
+  await fireSearch('gap');
+  const ghost = await win.evaluate(() => {
+    const card = document.querySelector('[data-bc-ghost-card="1"]');
     return {
-      id: id3,
-      oldGhost: document.querySelectorAll('.prop-ghost-card').length,
-      posGhost: document.querySelectorAll('[data-bc-pos-ghost="1"]').length
+      exists: !!card,
+      rows: card ? card.querySelectorAll('.prop-row').length : 0,
+      closeBtn: card ? card.querySelectorAll('.ghost-prop-card-head button, .pos-ghost-x, [title*="关闭"]').length : 0
     };
   });
-  check('普通元素不会凭空出现任何幽灵卡片',
-    clean.oldGhost === 0 && clean.posGhost === 0, JSON.stringify(clean));
+  check('开关关闭 + 中键搜属性 → 出幽灵卡片', ghost.exists, JSON.stringify(ghost));
+  check('幽灵卡片里能直接改这条属性', ghost.rows >= 1, `rows=${ghost.rows}`);
+  check('幽灵卡片**没有**关闭按钮（用户明确不要 ×）', ghost.closeBtn === 0, `buttons=${ghost.closeBtn}`);
+
+  // 换元素 → 幽灵卡片消失（下次进来不再显示）
+  await win.evaluate(() => {
+    const st = window.__sceneStore.getState();
+    st.addElement('div', null);
+  });
+  await sleep(900);
+  const afterSwitch = await win.evaluate(() => document.querySelectorAll('[data-bc-ghost-card="1"]').length);
+  check('换元素后幽灵卡片自动消失', afterSwitch === 0, String(afterSwitch));
+
+  // 普通元素不会凭空出现幽灵卡片（只有"搜过"才会有）
+  const clean = await win.evaluate(() => ({
+    ghost: document.querySelectorAll('[data-bc-ghost-card="1"]').length
+  }));
+  check('没搜过就不会凭空出现幽灵卡片', clean.ghost === 0, JSON.stringify(clean));
 
   // 深色模式：切过去后语义变量真的变了（不是只有 data-bc-dark 这个属性）
   const dark = await win.evaluate(() => {

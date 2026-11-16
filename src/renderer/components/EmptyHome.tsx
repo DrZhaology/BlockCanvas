@@ -522,11 +522,30 @@ export function EmptyHome(props: {
         applyBg({ kind: 'image', src: res.path, dim, blur });
         setTab('image');
       } else {
-        // v0.4.5：先探一次能不能解码。注意区分"慢"和"坏"——
-        // 慢（timeout）照样套用，让浏览器继续加载；只有明确不支持才拦下并说明。
+        /**
+         * v0.4.6（R6-18）：**先读容器头**再决定要不要试播。
+         *
+         * 老做法是直接挂一个 <video preload=metadata> 试探 —— 但 Chromium 遇到不带的编码
+         * （HEVC / 杜比视界 / 10bit H.264）会在**挂载的瞬间**就让原生解码器报
+         * `ffmpeg_common.cc Unsupported pixel format: -1`，那条日志 JS 屏蔽不了。
+         * 现在先用主进程读 moov/stsd 里的编码四字码：明确解不了就直接拦下 + 给转换建议，
+         * 一次解码器都不初始化。读不出来（unknown）时仍按老路试播，不误杀。
+         */
+        let codecRes: { result: 'supported' | 'unsupported' | 'unknown'; advice?: string } | null = null;
+        try {
+          codecRes = await window.bc.probeMediaCodec(res.path);
+        } catch { /* 探测失败不是致命问题，走老路 */ }
+        if (codecRes?.result === 'unsupported') {
+          const badPath = String(res.path);
+          markBadVideo(badPath);
+          setBadVideos((prev) => (prev.includes(badPath) ? prev : [...prev, badPath]));
+          showToast(codecRes.advice || '这个视频的编码编辑器解不了，建议转成 H.264（MP4）再插入。', 'err');
+          return;
+        }
+        // 容器头没读出来（或读出来是支持的）→ 仍然试播一次，区分"慢"和"坏"
         const probe = await probeVideoPlayable(mediaSrc(res.path));
         if (probe === 'unsupported') {
-          showToast('这段视频的编码在编辑器里解不了（导出后在浏览器里仍可正常播放）。建议换一个 mp4 / webm。', 'err');
+          showToast(codecRes?.advice || '这段视频的编码在编辑器里解不了（导出后在浏览器里仍可正常播放）。建议换一个 mp4 / webm。', 'err');
           return;
         }
         setVidSrc(res.path);

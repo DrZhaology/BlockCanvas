@@ -1,7 +1,7 @@
 {
   "name": "blockcanvas",
-  "version": "0.4.5",
-  "bcStage": "阶段 5 · 界面与交互全面打磨（测试版）",
+  "version": "0.4.6",
+  "bcStage": "阶段 6 · 架构重构与 Web 版上线（正式版）",
   "description": "BlockCanvas 积木画布 - 可视化静态网页构建工具",
   "main": "out/main/main.js",
   "author": "Dr.Zhaology",
@@ -10,16 +10,20 @@
   "scripts": {
     "version:sync": "node tools/sync-version.mjs",
     "version:check": "node tools/sync-version.mjs --check",
+    "icons:gen": "node tools/gen-icons.mjs",
+    "icons:check": "node tools/gen-icons.mjs --check",
     "git:doctor": "node tools/git-ignore-doctor.mjs",
-    "prebuild": "node tools/sync-version.mjs",
+    "prebuild": "node tools/sync-version.mjs && node tools/gen-icons.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:web": "vite build --config vite.web.config.ts",
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:e2e": "pnpm build && node tests/e2e/gui.mjs",
     "test:e2e:fast": "node tests/e2e/gui.mjs --no-shots",
     "test:probe": "node tests/e2e/run-probes.mjs",
     "test:probe:once": "node tests/e2e/run-probes.mjs --no-retry",
+    "test:unit": "node tests/unit/table-ops.test.mjs && node tests/unit/scene-logic.test.mjs",
     "dev:quiet": "node tools/run-quiet.mjs dev",
     "build:quiet": "node tools/run-quiet.mjs build"
   },
@@ -28,12 +32,13 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^33.2.0",
+    "electron": "^38.1.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
     "playwright": "^1.62.1",
     "typescript": "^5.7.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vite-plugin-singlefile": "^2.3.4"
   },
   "dependencies": {
     "marked": "^18.1.0",

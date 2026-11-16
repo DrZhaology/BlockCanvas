@@ -1,0 +1,145 @@
+/* ============================================================================
+   v0.4.6 · 画布内「浏览器视口」+「首屏线」
+   ----------------------------------------------------------------------------
+   用户原话：
+     「把浏览器的视口，在画布内部做成一个也是固定的像浏览器一样的视口：画布的左右就是
+       左边缘和右边缘，上下边缘根据工具栏的变化始终变化……呈现矩形，固定红色。
+       Alt 的时候，fixed 的元素就只能在这个视口内部移动，同时不会触发画布的上下滚动。」
+
+   于是这里有两样东西：
+     1. `.canvas-fixed-frame` —— 那块红色矩形。选中 fixed 元素时出现，它就是参照面本身；
+     2. `[data-bc-fixed="1"]` —— 真正的 fixed 元素：滚动时用 translate 抵消位移，
+        钉在视口上（浏览器里 fixed 就是这样）；缩放/改宽度时临时隐藏。
+
+   「首屏线」保留：它标的是**场景里记的基准视口高度**（导出后浏览器一屏多高），
+   和上面那块"当前窗口里真实可见的带子"不是一回事 —— 前者是设计参数，后者是当前可视区。
+   ========================================================================== */
+
+/* ── 画布内「浏览器视口」：红色 1px 框（固定色，不跟主题走 —— 它是尺子，不是装饰）── */
+.canvas-fixed-frame {
+  position: fixed;
+  z-index: 41;
+  pointer-events: none;
+  border: 1px solid #e5484d;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(229, 72, 77, 0.18);
+}
+
+.canvas-fixed-frame > span {
+  position: absolute;
+  right: -1px;
+  top: 0;
+  transform: translateY(-100%);
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  color: #fff;
+  background: #e5484d;
+  border-radius: 3px 3px 0 0;
+  letter-spacing: 0.02em;
+}
+
+/* Alt 拖动时别让框抢视觉（那时屏幕上辅助线已经很多） */
+body.bc-alt-dragging .canvas-fixed-frame {
+  opacity: 0.45;
+}
+
+/* ── 画布内「浏览器视口层」：fixed 元素的包含块 ───────────────────────────────
+   v0.4.6 重做。这一层的位置与尺寸**就等于红框**（由 lib/fixedViewport.ts 写
+   --bc-fl-* 驱动），并且它自带 translate → 天然构成 fixed 的包含块。
+
+   于是层内 fixed 元素的 left/top/right/bottom 全部相对**视口**解析：
+     · `bottom: 0` = 贴视口底（不再是"贴画布底"，画布可是会长到 3000px 的）；
+     · 四个角对齐就是四个角，不会突破红框；
+     · 面板里只留两条偏移，画布上也就只按两条摆。
+
+   注意：**不能**给这一层写 padding / border —— 它会把这个内缩量算进包含块，
+   元素就整体偏一截（这正是老代码的错法之一）。
+   ------------------------------------------------------------------------- */
+.canvas-fixed-layer {
+  position: absolute;
+  left: var(--bc-fl-left, 0px);
+  top: var(--bc-fl-top, 0px);
+  width: var(--bc-fl-w, 0px);
+  height: var(--bc-fl-h, 0px);
+  /* 滚动时把整层拉回来（画布会随滚动往上跑，fixed 不该跟着跑） */
+  translate: 0 var(--bc-fixed-shift, 0px);
+  /* 不做裁切：fixed 元素允许超出视口（浏览器里也是这样），只是会被判定"越界" */
+  overflow: visible;
+  pointer-events: none;
+  z-index: 3;
+  /* 自己就是包含块，靠这个而不是靠父级的 transform */
+  will-change: transform;
+}
+
+/* 层本身不吃鼠标，但里面的元素要吃（否则画布上的 fixed 元素点不中） */
+.canvas-fixed-layer > * {
+  pointer-events: auto;
+}
+
+/* 缩放画布 / 拖画布宽度期间：fixed 元素暂时隐藏（用户："显示了反麻烦"） */
+body.bc-fixed-hidden .canvas-fixed-layer {
+  visibility: hidden;
+}
+
+.canvas-viewport-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  pointer-events: none;
+  /* 压在内容之上但不抢交互；比选中框(z-index 由元素自己管)低一档 */
+  z-index: 40;
+  border-top: 1px dashed var(--accent, #2563eb);
+  opacity: 0.55;
+}
+
+.canvas-viewport-line > span {
+  position: absolute;
+  right: 6px;
+  top: -1px;
+  transform: translateY(-100%);
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--accent, #2563eb);
+  border-radius: 3px 3px 0 0;
+  opacity: 0.85;
+  /* 缩小画布时也别糊成一团 */
+  letter-spacing: 0.02em;
+}
+
+/* 隐藏（Alt 拖动 / 框选中）时不要干扰读数 —— 那两种状态下屏幕上的辅助线已经很多了 */
+body.bc-alt-dragging .canvas-viewport-line,
+body.bc-marqueeing .canvas-viewport-line {
+  opacity: 0.25;
+}
+
+/* 「首屏高度」这一行：数字框 + 单位，跟 body 设置里其它行对齐 */
+.page-quick-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.page-quick-inline .prop-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--panel-soft);
+  color: var(--text);
+}
+.page-quick-inline .prop-input:focus { border-color: var(--accent); outline: none; }
+.page-quick-unit {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-muted);
+}

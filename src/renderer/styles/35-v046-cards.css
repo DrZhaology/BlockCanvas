@@ -1,0 +1,186 @@
+/* ============================================================================
+   BlockCanvas · v0.4.6 · 画布元素进退场动画 + 属性卡片统一
+   ----------------------------------------------------------------------------
+   用户这一轮的两条反馈：
+     「添加元素的加入动画和退出动画都没了，什么时候你删除了？」
+     「元素卡片的样式统一，不生效的卡片，临时卡片就用不同颜色的卡片区分，
+       不要别的样式，现在不生效卡片的样式很丑」
+   ========================================================================== */
+
+/* ── 1. 画布元素进场 ──────────────────────────────────────────────────────
+   标记由 components/canvas/useEnterAnim.ts 打（只给"这一帧新出现的 id"），
+   所以打开工程时整页不会闪。
+
+   ⚠ 必须用 animation，不能用 `transition` + 常驻规则：
+   `.canvas [data-bc-id]` 上加 transition 会盖掉用户自己在画布上写的 transition，
+   伪类预览（:hover 过渡）当场就废了。
+   ------------------------------------------------------------------------ */
+@keyframes bcNodeIn {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+    scale: 0.985;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+.canvas [data-bc-new='1'] {
+  animation: bcNodeIn 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── 2. 画布元素退场 ──────────────────────────────────────────────────────
+   节点从场景树里删掉的那一刻就没有 DOM 了，播不了动画 ——
+   所以 lib/elLeave.ts 会留一个"按原位钉住的影子"（.bc-node-leaving）淡出。
+   ------------------------------------------------------------------------ */
+@keyframes bcNodeOut {
+  from {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+  to {
+    opacity: 0;
+    translate: 0 -6px;
+    scale: 0.985;
+  }
+}
+
+.canvas .bc-node-leaving {
+  animation: bcNodeOut 200ms cubic-bezier(0.4, 0, 1, 1) both;
+  /* 影子永远不抢交互，也不吃选中高亮 */
+  pointer-events: none !important;
+  outline: none !important;
+  z-index: 2;
+}
+
+/* 减弱动效：进退场直接切 */
+@media (prefers-reduced-motion: reduce) {
+  .canvas [data-bc-new='1'],
+  .canvas .bc-node-leaving {
+    animation-duration: 0.01ms;
+  }
+}
+
+/* ── 3. 属性卡片统一：同一副骨架，只用颜色区分 ────────────────────────────
+   三种卡片（正式 / 不生效 / 临时）以后是**同一个形状**：
+   一样的圆角、一样的 1px 描边、一样的底色梯度、一样的内边距。
+   区别只在"色相"：
+     · 正式   —— 中性（原来的 --muted-bg-2）
+     · 不生效 —— 琥珀（告诉你是"条件没满足"，不是坏了）
+     · 临时   —— 紫（快捷助手暂存，换个元素就没了）
+
+   以前不生效是「虚线左边框 + 灰底 + 文字变浅 + 内容降透明」四件套叠在一起，
+   用户原话"很丑"，这里全部撤掉，只留底色和下框线。
+   ------------------------------------------------------------------------ */
+.prop-row.is-inapplicable {
+  background: color-mix(in srgb, #f59e0b 6%, var(--muted-bg-2, #fff));
+  border-color: color-mix(in srgb, #f59e0b 30%, var(--border, #e5e7eb));
+  /* 干掉老分片留下的虚线与高亮边 */
+  border-left-style: solid;
+  border-left-width: 1px;
+  box-shadow: none;
+  opacity: 1;
+}
+
+.prop-row.is-inapplicable .prop-label {
+  color: var(--text, inherit);
+}
+
+.prop-row.is-inapplicable .prop-row-body {
+  opacity: 1;
+}
+
+/* 「不生效」小徽标保留（它是信息，不是装饰），但去掉警示色的厚重感 */
+.prop-row.is-inapplicable .prop-warn-tag {
+  color: #b45309;
+  background: color-mix(in srgb, #f59e0b 14%, transparent);
+  border-color: color-mix(in srgb, #f59e0b 34%, transparent);
+}
+
+/* 临时卡片：与正式属性卡片**同一副骨架**，只是换成紫色系 */
+.ghost-prop-card {
+  height: auto;
+  border: 1px solid color-mix(in srgb, #7c3aed 26%, var(--border, #e5e7eb));
+  border-radius: var(--r-2, 10px);
+  background: color-mix(in srgb, #7c3aed 6%, var(--muted-bg-2, #fff));
+  box-shadow: none;
+  padding: 6px;
+}
+
+.ghost-prop-card .ghost-prop-card-head {
+  color: #6d28d9;
+}
+
+/* 卡片内部的行不要再套一层"卡片"（盒子套盒子）—— 只留内容与一条细分隔线 */
+.ghost-prop-card .prop-row {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  margin-bottom: 0;
+  padding: 6px 2px;
+}
+
+.ghost-prop-card .prop-row + .prop-row {
+  border-top: 1px solid color-mix(in srgb, #7c3aed 16%, transparent);
+}
+
+html[data-bc-dark] .prop-row.is-inapplicable {
+  background: color-mix(in srgb, #f59e0b 10%, var(--muted-bg-2, #111));
+  border-color: color-mix(in srgb, #f59e0b 34%, var(--border, #333));
+}
+
+html[data-bc-dark] .ghost-prop-card {
+  border-color: color-mix(in srgb, #a78bfa 32%, var(--border, #333));
+  background: color-mix(in srgb, #a78bfa 10%, var(--muted-bg-2, #111));
+}
+
+html[data-bc-dark] .ghost-prop-card .ghost-prop-card-head {
+  color: #c4b5fd;
+}
+
+/* ── 4. 设置页的「横屏 / 竖屏 / 公共」三块区域 ─────────────────────────────
+   用户原话：「设置里在做一个访问性的设置……我建议横屏，竖屏，公共的就可以分成三块区域。」
+   以前只有标题前缀（"横屏 · …"），读起来还是散的一条列表。现在这些标题统一挂
+   `fluent-area-head` + `data-area`，变成带色条的**分区横幅**，三块区域一眼分得开。
+   （同一区域出现两段的情况——公共——用同一种颜色，读起来就是"公共（续）"。）
+   ------------------------------------------------------------------------ */
+.fluent-group-title.fluent-area-head {
+  margin: 20px 0 8px;
+  padding: 6px 10px;
+  border-radius: var(--r-2, 10px);
+  border-left: 3px solid var(--accent, #1e88e5);
+  background: color-mix(in srgb, var(--accent, #1e88e5) 7%, transparent);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-1, inherit);
+}
+
+.fluent-group-title.fluent-area-head[data-area='landscape'] {
+  border-left-color: #16a34a;
+  background: color-mix(in srgb, #16a34a 8%, transparent);
+}
+
+.fluent-group-title.fluent-area-head[data-area='portrait'] {
+  border-left-color: #0ea5e9;
+  background: color-mix(in srgb, #0ea5e9 8%, transparent);
+}
+
+.fluent-group-title.fluent-area-head[data-area='common'] {
+  border-left-color: #64748b;
+  background: color-mix(in srgb, #64748b 8%, transparent);
+}
+
+/* 第一块不要顶出多余留白 */
+.fluent-cards-container > .fluent-group-title.fluent-area-head:first-child {
+  margin-top: 0;
+}
+
+html[data-bc-dark] .fluent-group-title.fluent-area-head {
+  background: color-mix(in srgb, var(--accent, #1e88e5) 14%, transparent);
+}

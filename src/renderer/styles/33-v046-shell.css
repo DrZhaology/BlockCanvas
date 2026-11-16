@@ -1,0 +1,577 @@
+/* ============================================================================
+   v0.4.6 · 窄屏外壳 (R6-7 / R6-8 / R6-10)
+   ----------------------------------------------------------------------------
+   背景：主窗口以前被 `minWidth: 960` 硬锁住，所以"编辑器自己的手机界面"这件事
+   **根本不存在**（不是做得不好）。本版放开到 360，按 900px 切外壳形态：
+
+     data-shell="split"   ≥900px —— 左右面板并排（原样）
+     data-shell="stack"   <900px —— 左右面板改**抽屉**，画布占满，抽屉入口浮在画布上
+
+   ⚠ v0.4.6 拆轴：这一层的 `.app[data-shell]` 只管**布局**（看宽度）。
+     "是不是触摸设备"是正交的另一个轴 = `.app[data-input='pointer|touch']`（见 lib/inputMode.ts）。
+     以前两者共用 `data-shell` 的 wide/narrow，导致 1280px 平板横放调不出 Alt 悬停、
+     700px 桌面窄窗被塞 420ms 长按 —— 别再把触摸相关规则写进 data-shell 块里。
+   ⚠ 别和 `.workspace[data-layout='left|bottom']` 混：那个是"元素面板摆左边还是下边"，
+     和整壳形态是两件事（同名属性会让后来人写错选择器，所以这里不叫 data-layout）。
+
+   为什么阈值是 900 而不是 768：
+     右侧属性面板默认 456 + 左侧元素面板 230 = 686，900 - 686 = 214px 画布；
+     再窄连"看出页面大概样子"都不够，所以 900 是"并排还能用"的下限。
+
+   ⚠ 这一层只管**编辑器外壳**。被设计的那张网页仍按 768 / 480 断点走（lib/device）。
+   ========================================================================== */
+
+/* ── 抽屉入口（只在窄屏渲染，DOM 里宽屏不出现）──────────────────────────
+   v0.4.7 重做（上一版那颗"大蓝按钮"被用户否了）：
+     「改成非常小的两个抽屉形式的按钮，svg 要小。这个抽屉最好按钮小到
+       完全不挡住画布的任何面积。」「抽屉打开的时候抽屉按钮要不显示。」
+   ------------------------------------------------------------------------
+   尺寸账（probe-shell-narrow 逐条量）：
+     · 按钮**边框盒** 22×48 —— 宽 22 ≤ 40 ✓（几乎不挡画布），高 48 ≥ 44 ✓（手指点得准）；
+     · 看得见的只有 ::before 那一条 10×34，紧贴屏幕边，静止 opacity .42；
+     · 图标 10px 正好铺在那一条上 —— 所以它读起来是"屏幕边上的小抽屉"，
+       不是一颗按钮。悬停 / 按下 / 拖动时 opacity 1 + 品牌色。
+   抽屉开着时把手隐藏（data-drawer 决定），关闭走"往边缘滑 / 点遮罩"两条路。 */
+.shell-drawer-btn {
+  position: absolute;
+  top: 50%;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  width: 30px;
+  height: 60px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--text-2, #475569);
+  opacity: 0.72;
+  cursor: pointer;
+  /* 在把手上上下拖是"调位置"，别让浏览器顺手去滚页面 */
+  touch-action: none;
+  transition: opacity var(--dur-fast, 120ms) var(--ease-out, ease),
+              color var(--dur-fast, 120ms) var(--ease-out, ease);
+}
+
+/* 看得见的那一条：20×46 的圆角小舌。描边用 box-shadow 画，不占盒宽 */
+.shell-drawer-btn::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 20px;
+  height: 46px;
+  transform: translateY(-50%);
+  background: var(--surface-2, #fff);
+  box-shadow: 0 1px 6px rgba(15, 23, 42, 0.14),
+              0 0 0 1px color-mix(in srgb, var(--text-3, #94a3b8) 34%, transparent);
+  transition: background var(--dur-fast, 120ms) var(--ease-out, ease),
+              box-shadow var(--dur-fast, 120ms) var(--ease-out, ease);
+}
+
+/* 图标压在那一条上面（否则 ::before 会盖住 svg） */
+.shell-drawer-btn > svg {
+  position: relative;
+  z-index: 1;
+}
+
+.shell-drawer-btn:hover,
+.shell-drawer-btn:focus-visible,
+.shell-drawer-btn:active,
+.shell-drawer-btn[data-dragging='1'] {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.shell-drawer-btn:hover::before,
+.shell-drawer-btn:active::before,
+.shell-drawer-btn[data-dragging='1']::before {
+  background: color-mix(in srgb, var(--accent, #2563eb) 12%, var(--surface-2, #fff));
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.24),
+              0 0 0 1px color-mix(in srgb, var(--accent, #2563eb) 55%, transparent);
+}
+
+/* 抽屉开着的时候把手**不显示**（关闭已经有"往边缘滑 / 点遮罩"两条路） */
+.workspace[data-drawer='left'] .shell-drawer-btn.is-left,
+.workspace[data-drawer='right'] .shell-drawer-btn.is-right {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.shell-drawer-btn.is-left {
+  left: 0;
+  justify-content: flex-start;
+}
+
+.shell-drawer-btn.is-right {
+  right: 0;
+  justify-content: flex-end;
+}
+
+.shell-drawer-btn.is-left::before {
+  left: 0;
+  border-radius: 0 10px 10px 0;
+}
+
+.shell-drawer-btn.is-right::before {
+  right: 0;
+  border-radius: 10px 0 0 10px;
+}
+
+/* 遮罩：点一下就收起（手机上"点外面关闭"的习惯） */
+.shell-drawer-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(1px);
+  animation: bcScrimIn 140ms var(--ease-out, ease);
+}
+
+@keyframes bcScrimIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── 基准形态：左右面板 = 覆盖层抽屉（v0.4.6 方向翻转）────────────────────
+   这一节的规则**不加 data-shell 前缀** —— 它们就是基准形态本身（堆叠/窄屏）。
+   并排形态（≥900px）在下一节把面板放回网格。
+   以前这里是 51 个 `.app[data-shell='narrow']` + `!important` 去**撤销**宽屏写法，
+   每加一个宽屏功能就欠一笔撤销的债 —— 现在反过来，宽屏才需要额外声明。 */
+
+/* 面板变成覆盖层：从侧边滑入，占满高度。
+
+   v0.4.7：位移统一写成 `translateX(var(--bc-drawer-x, <默认值>))` ——
+   手势期间 useEdgeSwipe 把**实时像素位移**写进面板自己的行内变量（跟手 / 可打断），
+   手指一松开就把变量删掉，交还下面这些 open / closed 规则，
+   过渡于是从"当前位置"自然收尾（用户特别强调的"打断动画"就靠这一手）。
+   `--bc-pane-off` = 收起时的位移，往哪边收由方位覆盖改符号。 */
+.elem-pane-wrap,
+.right-pane-wrap {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* 覆盖层要压在画布之上、工具栏之下（工具栏 560）。
+     ⚠ 只在这里**不加** z-index：并排形态的层级由 24/28 号分片的 --z-sheet(700) 负责，
+     之前把 z-index 写进基准再在并排里还原成 auto，把面板的 700 覆盖掉了 ——
+     probe-inspector 立刻报"面板 0 / 工具栏 560"（面板会掉到画布覆盖层下面）。 */
+  width: min(86vw, 360px);
+  max-width: 86vw;
+  --bc-pane-off: -102%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(var(--bc-drawer-x, var(--bc-pane-off)));
+  transition: transform var(--dur-mid, 180ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+              opacity var(--dur-mid, 180ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+              visibility 0s linear var(--dur-mid, 180ms);
+}
+
+/* 覆盖层专属层级：只在堆叠/抽屉形态下生效（并排形态沿用 --z-sheet） */
+.app[data-shell='stack'] .elem-pane-wrap,
+.app[data-shell='stack'] .right-pane-wrap {
+  z-index: 58;
+}
+
+.elem-pane-wrap {
+  left: 0;
+}
+
+.right-pane-wrap {
+  right: 0;
+  /* 右侧面板不再需要"固定 456"，直接吃满抽屉宽度 */
+  width: min(92vw, 420px);
+  max-width: 92vw;
+  --bc-pane-off: 102%;
+}
+
+/* 跟手期间：关掉过渡（否则面板永远比手指慢 180ms），并强制可见
+   （从"收起"状态往里拖时，面板本身还是 visibility:hidden）。 */
+body.bc-drawer-track .elem-pane-wrap,
+body.bc-drawer-track .right-pane-wrap {
+  transition: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* 已经打开的那一侧：基准位移变成 0（跟手量仍可叠加在上面，用来往边缘滑关闭） */
+.workspace[data-drawer='left'] .elem-pane-wrap,
+.workspace[data-drawer='right'] .right-pane-wrap {
+  transform: translateX(var(--bc-drawer-x, 0px));
+  opacity: 1;
+  visibility: visible;
+  transition: transform var(--dur-mid, 180ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+              opacity var(--dur-mid, 180ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+              visibility 0s linear 0s;
+}
+
+/* 抽屉里不要拖手（覆盖层没地方给你拖宽度）—— 这是一条"主动隐藏"，
+   不是撤销，所以保持带前缀而不是在并排形态里反向解锁。 */
+.app[data-shell='stack'] .panel-resizer { display: none !important; }
+
+/* ── 并排形态（≥900px）：把两个面板放回网格 ───────────────────────────────
+   特异性用 4 个（.app + [data-shell] + .workspace + .elem-pane-wrap），
+   保证压过上面 `.workspace[data-drawer='left'] .elem-pane-wrap`（3 个），
+   这样即使抽屉状态残留也不会把并排形态带歪。
+
+   ⚠ 这里**只还原抽屉改动过的几何**（定位/宽度/位移/透明度/阴影），
+     不要碰 z-index —— 并排形态的层级是 24/28 号分片的 --z-sheet(700)，
+     碰了就会把面板压到画布覆盖层下面（probe-inspector 的层级纪律断言）。 */
+.app[data-shell='split'] .workspace .elem-pane-wrap,
+.app[data-shell='split'] .workspace .right-pane-wrap {
+  /* 原样是 relative（24-v044h / 28-v045-zindex 就是这么给的），不是 static */
+  position: relative;
+  inset: auto;
+  width: auto;
+  max-width: none;
+  box-shadow: none;
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: none;
+  --bc-pane-off: 0px;
+}
+
+/* ── 窄屏抽屉里的「元素面板」必须换回竖排 ────────────────────────────────
+   用户的工程用的是「元素面板放底部」布局（data-layout='bottom'），那一套是
+   **横向七列平铺**（每个分类 flex:1 一行排开、每格最小 90px）。
+   同一份 DOM 被塞进 354px 的抽屉里 → 七列挤成三条、每列只剩 90px，
+   分类标题上下拉成一根根空白的竖条（用户：「面板也崩了」）。
+
+   抽屉是竖着的，就该用竖排：分类上下堆叠、每类铺满宽度、格子按 32px 行高排，
+   整块可以上下滚。 */
+.app[data-shell='stack'] .elem-pane-wrap .element-body {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  overflow-y: auto;
+  overflow-x: hidden;
+  gap: 0;
+}
+
+.app[data-shell='stack'] .elem-pane-wrap .element-group {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  margin: 0;
+  padding: 10px 0 0;
+  border-left: none;
+  border-top: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.app[data-shell='stack'] .elem-pane-wrap .element-group:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.app[data-shell='stack'] .elem-pane-wrap .group-title {
+  margin: 0 0 6px;
+  font-size: 11.5px;
+}
+
+.app[data-shell='stack'] .elem-pane-wrap .element-group .element-grid {
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 0;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  /* 底部布局写死了 repeat(auto-fill, 26px)，这里必须清掉，否则行高按 26px 硬排 */
+  grid-template-rows: none;
+  grid-auto-rows: 32px;
+  overflow: visible;
+}
+
+.app[data-shell='stack'] .elem-pane-wrap .element-btn {
+  height: 32px;
+  font-size: 12px;
+}
+
+/* 模板 / 素材板块同理：抽屉里只有一个方向可长，别再横向摊开 */
+.app[data-shell='stack'] .elem-pane-wrap .tpl-body,
+.app[data-shell='stack'] .elem-pane-wrap .asset-gallery {
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 窄屏下画布区的内边距收紧，给内容留地方 */
+.app[data-shell='stack'] .canvas-wrap {
+  padding: 10px;
+}
+
+/* 只读快照：窄屏下右侧面板本来就是抽屉，不需要固定宽度 */
+.app[data-shell='stack'] .workspace.is-readonly .right-pane-wrap {
+  width: min(96vw, 420px);
+}
+
+/* v0.4.7 · 竖屏没有多标签页管理（用户明确要求）：
+   新建标签的「+」和每个标签上的关闭按钮都不显示 —— 竖屏一屏只放得下一个页面，
+   留着这些按钮只会让人误以为能开一堆标签然后互相挤爆。 */
+.app[data-shell='stack'] .project-tab-bar .tab-add-btn,
+.app[data-shell='stack'] .project-tab-bar .tab-close-btn {
+  display: none !important;
+}
+
+.app[data-shell='stack'] .project-tab-bar .tab-item {
+  max-width: calc(100% - 12px);
+}
+
+/* ── 触摸 / 窄窗：可点元素 ≥44×44（R6-10）─────────────────────────────────
+   v0.4.6 拆轴：判据从"窗口窄"扩成"窗口窄 **或** 设备是手指优先"，两条取并集。
+   为什么不能只看宽度：1280px 的平板横放窗口够宽（布局是 split、面板并排正常），
+   但它没有鼠标，32px 的按钮用手指点就是点不准 —— 这正是拆轴之前漏掉的那一半。
+     · data-shell='stack'  → 小屏幕：目标大一点本来就该
+     · data-input='touch'  → 大屏幕 + 手指：同样需要
+   具体违规清单由 probe-ui-overflow / probe-shell-narrow 扫描输出。 */
+/* ⚠ v0.4.6 修死选择器：以前这里写 `.toolbar .tb-btn`，但工具栏按钮的真实类是
+   `tb-btn-ghost` / `tb-btn-primary` / `tb-grp-btn`（见 Toolbar.tsx 的 op.cls），
+   `.tb-btn` 一个都匹配不到 —— 这条"触摸目标 ≥44px"的规则一直是空转的，
+   探针的扫描列表同样是空的，所以两边一起"通过"了很久。
+
+   ⚠ v0.4.6 拆轴后修正判据：**只认触摸，不认窗口窄**。
+   老写法"窄屏就给 44px"是在没有输入轴时把两件事混在一起的产物：
+   窗口拉窄的桌面用户有鼠标，给 44px 只会把工具栏从 153px 挤到 201px，
+   画布白掉 48px（实测 412×915 下）。手指才需要 44，小屏不等于手指。 */
+.app[data-input='touch'] .toolbar .tb-btn-ghost,
+.app[data-input='touch'] .toolbar .tb-btn-primary,
+.app[data-input='touch'] .toolbar .tb-grp-btn,
+.app[data-input='touch'] .toolbar .tb-more-btn,
+.app[data-input='touch'] .tab-bar .tab-btn,
+.app[data-input='touch'] .inspector-tab,
+.app[data-input='touch'] .pseudo-tab {
+  min-height: 44px;
+}
+
+.app[data-input='touch'] .toolbar .tb-btn-ghost,
+.app[data-input='touch'] .toolbar .tb-btn-primary,
+.app[data-input='touch'] .toolbar .tb-grp-btn,
+.app[data-input='touch'] .toolbar .tb-more-btn {
+  min-width: 44px;
+}
+
+/* 工具栏在窄屏下**改成两行**（用户："竖屏的竖向空间反而大，菜单从一条改成两条；
+   原来右侧菜单的部分放到第一条"）。
+   以前是横向滚（放不下就滚），后果是"最常用的导出被滚出屏幕"，手指根本找不到。
+   现在：右侧那组（设备/缩放/更多）用 order:-1 提到第一行，主按钮组折到第二行。 */
+.app[data-shell='stack'] .toolbar {
+  flex-wrap: wrap;
+  height: auto;
+  row-gap: 4px;
+  padding-bottom: 6px;
+}
+
+.app[data-shell='stack'] .tb-main {
+  overflow-x: visible;
+  overflow-y: visible;
+  flex-wrap: wrap;
+  flex: 1 1 100%;
+  order: 2;
+}
+
+.app[data-shell='stack'] .tb-right {
+  order: 1;
+  margin-left: auto;
+}
+
+/* 调位置时的横向参考线（铺满窗口，1px，很淡） */
+.bc-handle-guide {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 0;
+  z-index: 9997;
+  pointer-events: none;
+  border-top: 1px dashed var(--accent, #1e88e5);
+  opacity: 0.6;
+}
+
+/* ── 抽屉方位（v0.4.6 · 设置 → 竖屏 → 抽屉方位） ────────────────────────
+   四种：左右分布（默认）/ 左右反向 / 都收在左 / 都收在右。
+
+   v0.4.7：这里只负责两件事 —— ①面板贴哪条边、`--bc-pane-off` 用哪个符号；
+   ②把手贴在对应那条边上。**不写 top**：把手高度一律由 DrawerHandle 的行内
+   `top: <百分比>%` 决定（长按可调 + 同边自动错开 38%/62%，见 lib/drawerHandle.ts）。
+   同边模式如果这里再写死 top，行内样式会盖掉它，两个把手就叠在一起了。
+   ------------------------------------------------------------------------ */
+
+/* 左右反向：元素面板去右，属性面板去左 */
+.app[data-shell='stack'][data-drawer-side='split-reverse'] .elem-pane-wrap {
+  left: auto;
+  right: 0;
+  --bc-pane-off: 102%;
+}
+.app[data-shell='stack'][data-drawer-side='split-reverse'] .right-pane-wrap {
+  right: auto;
+  left: 0;
+  --bc-pane-off: -102%;
+}
+.app[data-drawer-side='split-reverse'] .shell-drawer-btn.is-left {
+  left: auto;
+  right: 0;
+  justify-content: flex-end;
+}
+.app[data-drawer-side='split-reverse'] .shell-drawer-btn.is-left::before {
+  left: auto;
+  right: 0;
+  border-radius: 5px 0 0 5px;
+}
+.app[data-drawer-side='split-reverse'] .shell-drawer-btn.is-right {
+  right: auto;
+  left: 0;
+  justify-content: flex-start;
+}
+.app[data-drawer-side='split-reverse'] .shell-drawer-btn.is-right::before {
+  right: auto;
+  left: 0;
+  border-radius: 0 5px 5px 0;
+}
+
+/* 都收在左：属性面板也停左边 */
+.app[data-shell='stack'][data-drawer-side='both-left'] .right-pane-wrap {
+  right: auto;
+  left: 0;
+  --bc-pane-off: -102%;
+}
+.app[data-drawer-side='both-left'] .shell-drawer-btn.is-right {
+  right: auto;
+  left: 0;
+  justify-content: flex-start;
+}
+.app[data-drawer-side='both-left'] .shell-drawer-btn.is-right::before {
+  right: auto;
+  left: 0;
+  border-radius: 0 5px 5px 0;
+}
+
+/* 都收在右：元素面板也停右边 */
+.app[data-shell='stack'][data-drawer-side='both-right'] .elem-pane-wrap {
+  left: auto;
+  right: 0;
+  --bc-pane-off: 102%;
+}
+.app[data-drawer-side='both-right'] .shell-drawer-btn.is-left {
+  left: auto;
+  right: 0;
+  justify-content: flex-end;
+}
+.app[data-drawer-side='both-right'] .shell-drawer-btn.is-left::before {
+  left: auto;
+  right: 0;
+  border-radius: 5px 0 0 5px;
+}
+
+/* ── 设置页：竖屏验收的四个按钮 ───────────────────────────────────────── */
+/* v0.4.6（用户："那几个按钮首先没有 css 样式"）：给它们正经的尺寸与换行规则，
+   否则窄的 ctrl 区会把「窄档 360×800」挤成两行、看着像坏了。 */
+.portrait-accept-ctrl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  max-width: 340px;
+}
+
+.portrait-accept-ctrl .fluent-btn {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  border-radius: var(--r-2);
+}
+
+/* 这一组只改「窗口尺寸」这件事 —— 加一行说明，别让人以为动了画布 */
+.fluent-group-note {
+  margin: -4px 0 10px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-3, #94a3b8);
+}
+
+/* ── 首页在窄屏下别挤爆（用户实测：348px 宽时文字溢出、页面设置面板出界） ── */
+.app[data-shell='stack'] .empty-home {
+  padding: 16px 12px 24px;
+}
+
+.app[data-shell='stack'] .eh-center {
+  width: 100%;
+  max-width: 100%;
+}
+
+.app[data-shell='stack'] .eh-title {
+  font-size: clamp(22px, 8vw, 34px);
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.app[data-shell='stack'] .eh-sub,
+.app[data-shell='stack'] .eh-search input {
+  font-size: 12.5px;
+}
+
+/* 三个快捷入口按钮：放不下就换行，别横向撑出滚动条 */
+.app[data-shell='stack'] .eh-actions {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* 页面设置面板：窄屏下贴住视口宽度
+   ⚠ 第一版只改了 .eh-panel 的 left/right/width，结果它塌成一条 40px 的竖条 ——
+   因为 .eh-panel 是 .eh-settings（position:absolute、无宽度）的子元素，
+   给父级一个"左右都贴边"的盒子，子元素才量得出可用宽度。 */
+.app[data-shell='stack'] .eh-settings {
+  left: 12px;
+  right: 12px;
+  top: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.app[data-shell='stack'] .eh-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 40px;
+  width: auto;
+  max-width: none;
+  max-height: calc(100vh - 140px);
+}
+
+/* 最近项目卡片：一行一个，别挤成两列窄条 */
+.app[data-shell='stack'] .eh-recent-grid {
+  grid-template-columns: 1fr;
+}
+
+/* 窄屏下设置页本身也要能用（Fluent 侧边栏在窄屏会挤掉内容区） */
+.app[data-shell='stack'] .fluent-settings-page {
+  grid-template-columns: 1fr;
+}
+
+.app[data-shell='stack'] .fluent-sidebar {
+  /* 窄屏下侧边栏改为顶部横条，可横向滚动 */
+  flex-direction: row;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-height: none;
+  height: auto;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.app[data-shell='stack'] .fluent-sidebar .fluent-nav-item {
+  min-width: 44px;
+  min-height: 44px;
+  white-space: nowrap;
+}
+
+.app[data-shell='stack'] .fluent-main {
+  padding: 12px;
+}
+
+/* 空首页 / 项目中心在窄屏下的内边距收紧（内容本来就有自适应） */
+.app[data-shell='stack'] .empty-home,
+.app[data-shell='stack'] .projects-page {
+  padding-left: 12px;
+  padding-right: 12px;
+}

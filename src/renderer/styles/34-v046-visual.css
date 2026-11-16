@@ -1,0 +1,806 @@
+/* ============================================================================
+   BlockCanvas · v0.4.6 设计基线（视觉层第 1 片）
+   ----------------------------------------------------------------------------
+   这一片只放"全程序级"的视觉规则，不放任何单个组件的细节。顺序上它是最后
+   一个被 import 的分片，所以可以放心覆盖前面 34 片里的裸值。
+
+   内容：
+     1. 连续曲率圆角（用户规则 1）—— 靠 Chromium 的 `corner-shape`
+     2. 圆角尺度（新的代码请用 --r-*，不要再写裸 px）
+     3. 自绘窗口标题栏 + 窗口四周主题色描边
+
+   ⚠ 为什么 "连续曲率" 要走 `corner-shape` 而不是自己画遮罩：
+     · `border-radius` 画的是正圆弧（Apple 说的 "continuous curvature" 是超椭圆）；
+     · Chromium 139+ 原生支持 `corner-shape: squircle`，它改的是**边框盒的形状**，
+       于是背景、边框、box-shadow、overflow 裁切**全部自动跟着走**，一行搞定；
+     · 自己用 mask/clip-path 做超椭圆，会把这些全破坏掉（阴影被裁、边框变直线）。
+     · 低版本内核（网页版遇到的老浏览器）不认识这条属性 → 自动退回普通圆角，
+       不会报错、不会错位。这就是"向下兼容"的正确做法。
+   ========================================================================== */
+
+/* ── 1. 连续曲率圆角 ──────────────────────────────────────────────────────
+   全程序统一。只有两类例外：
+     · `.canvas` 及其子元素 —— 那是**用户设计的页面**，圆角必须和导出后一模一样，
+       不能被编辑器改掉（`corner-shape` 会影响渲染，等同于偷偷改了用户的稿子）；
+     · `.bc-round` —— 必须是正圆的那些（小圆点、开关滑块、色板），挂这个类即可。
+   ------------------------------------------------------------------------ */
+@supports (corner-shape: squircle) {
+  html *,
+  html *::before,
+  html *::after {
+    corner-shape: squircle;
+  }
+
+  .canvas,
+  .canvas *,
+  .canvas *::before,
+  .canvas *::after,
+  .bc-round,
+  .bc-round::before,
+  .bc-round::after {
+    corner-shape: round;
+  }
+}
+
+/* ── 2. 圆角尺度 ──────────────────────────────────────────────────────────
+   连续曲率会把同样的半径"看得更收"，所以这套尺度比以前的裸值略大一点：
+     6 → 7 / 8 → 9 / 10 → 12 / 14 → 16
+   新代码请直接用变量；老分片里的裸值保留（一次性替换 594 处属于大改，见设计文档）。
+   ------------------------------------------------------------------------ */
+
+/* ── 3. 自绘窗口标题栏（v0.4.6） ───────────────────────────────────────────
+   主进程已经 frame:false，这条栏取代了系统标题栏：
+     左：产品标识 + 菜单（文件/编辑/视图/帮助/设置）
+     右：最小化 / 最大化 / 关闭
+   高度 36px 是 Windows 上"看得清又不浪费"的常见值（VS Code 35、Fluent 32~40）。
+   ------------------------------------------------------------------------ */
+.bc-titlebar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding-left: 10px;
+  background: var(--bg-panel, #fff);
+  border-bottom: 1px solid var(--line-soft, var(--border, #e5e5e5));
+  /* 整条栏都能拖动窗口；里面的按钮各自 no-drag */
+  -webkit-app-region: drag;
+  user-select: none;
+  /* v0.4.6：**永远在界面之上**
+     设置页 / 帮助中心 / 更新中心 / 模态都是 position:fixed; inset:0 的全屏层，
+     以前会把这条栏一起盖掉 —— 看起来像"窗口没有边框了"。
+     抬到 9990（高于 modal-top 960，低于 critical 9999 的启动/更新遮罩）之后，
+     全屏界面只盖到栏下面，窗口始终有自己的那条顶边。 */
+  position: relative;
+  z-index: 9990;
+}
+
+.bc-titlebar-lead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-right: 12px;
+  flex: none;
+}
+
+/* 产品标识：直接用应用自己的 logo（用户：左上方那个方块没用上，要用 logo） */
+.bc-titlebar-logo {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  pointer-events: none;
+}
+
+.bc-titlebar-name {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--text-2, var(--text-muted, #707070));
+}
+
+.bc-titlebar-menu {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
+/* 菜单按钮：**悬停就要看得出来**（用户："要求鼠标浮在上面就显示"），点一下同样有效 */
+.bc-titlebar-menu-btn {
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--text-2, var(--text-muted, #707070));
+  font-size: 12px;
+  font-family: inherit;
+  cursor: default;
+  transition: background var(--dur-fast, 110ms) var(--ease-out, ease),
+              color var(--dur-fast, 110ms) var(--ease-out, ease);
+}
+
+.bc-titlebar-menu-btn:hover {
+  background: var(--hover-accent, #f0f7ff);
+  color: var(--accent, #1e88e5);
+}
+
+/* v0.4.7：菜单弹出去之后按钮自己要留在"按下"的样子 ——
+   以前只有 hover 态，鼠标一挪开按钮就恢复常态，看起来像没点着。 */
+.bc-titlebar-menu-btn.is-open {
+  background: var(--hover-accent, #f0f7ff);
+  color: var(--accent, #1e88e5);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #1e88e5) 24%, transparent);
+}
+
+/* 键盘走查（Tab 到菜单、方向键切换、Enter 打开）时的焦点环 */
+.bc-titlebar-menu-btn:focus-visible {
+  outline: 2px solid var(--accent, #1e88e5);
+  outline-offset: -2px;
+}
+
+.bc-titlebar-menu-btn:active {
+  background: var(--focus-accent, #e1f0ff);
+}
+
+.bc-titlebar-menu-btn.is-open,
+.bc-titlebar-menu-btn.is-open:hover {
+  background: var(--focus-accent, #e1f0ff);
+  color: var(--accent, #1e88e5);
+}
+
+.bc-titlebar-menu-btn:focus-visible {
+  outline: 2px solid var(--accent, #1e88e5);
+  outline-offset: -2px;
+}
+
+/* 拖动区：吃掉中间所有空白，双击最大化由系统原生负责 */
+.bc-titlebar-drag {
+  flex: 1;
+  align-self: stretch;
+  min-width: 24px;
+}
+
+.bc-titlebar-win {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+/* 窗口按钮：46×36（Windows 11 的标准尺寸），悬停填充，关闭键悬停变红 */
+.bc-win-btn {
+  width: 46px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-2, var(--text-muted, #707070));
+  cursor: default;
+  transition: background var(--dur-fast, 90ms) linear, color var(--dur-fast, 90ms) linear;
+}
+
+.bc-win-btn:hover {
+  background: var(--hover, #f0f0f0);
+  color: var(--text, #1f1f1f);
+}
+
+.bc-win-btn:active {
+  background: var(--panel-tint-2, #eef1f5);
+}
+
+.bc-win-btn.is-close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+
+.bc-win-btn.is-close:active {
+  background: #b02718;
+  color: #fff;
+}
+
+/* ── 4. 窗口四周 1px 主题色描边 ────────────────────────────────────────────
+   用这一层"贴在最上面的细线"来画描边，而不是给 .app 加 box-shadow：
+   inset 阴影会被铺满边缘的子元素盖住（标题栏、工具栏、画布都贴边），根本看不见。
+   pointer-events:none 保证它不挡任何点击。
+   ------------------------------------------------------------------------ */
+.bc-win-ring {
+  position: fixed;
+  inset: 0;
+  z-index: 9998; /* 压在所有界面之上、但在"必须无条件最上"的更新遮罩之下 */
+  pointer-events: none;
+  border: 1px solid var(--bc-win-ring);
+}
+
+/* 深色主题下强调色偏亮，描边降一点存在感，免得像刮花的边 */
+html[data-bc-dark] .bc-win-ring {
+  border-color: color-mix(in srgb, var(--bc-win-ring) 72%, transparent);
+}
+
+/* ── 4.5 全屏页面必须从标题栏**下面**开始（v0.4.6） ───────────────────────
+   用户验收：「全屏的页面例如项目页面，上面的按钮全部被覆盖了」。
+   根因：这些页面自己写着 `position:absolute; inset:0` 或 `height:100vh`，
+   而 `.app` 是 flex 列、标题栏占了 36px —— 于是页面的第一行（返回按钮、面包屑、
+   页签）正好顶到标题栏底下，被压住。
+
+   正确做法不是给标题栏抬 z-index 就完事（那只是"盖住"），而是**让页面自己让位**：
+   它们本来就是 `.app` 的直接子元素，交给 flex 分配剩余高度即可。
+   `inset: auto` 顺手把绝对定位收回成普通流，以后再加全屏页面只要 root 挂在这张表里。
+   ------------------------------------------------------------------------ */
+.app > .empty-home,
+.app > .update-page,
+.app > .help-page,
+.app > .fluent-settings-page,
+.app > .projects-page,
+.app > .pc-page,
+.app > .tbl-page,
+.app > .table-editor-page,
+.app > .pocket-page {
+  position: relative;
+  inset: auto;
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ── 5. 窄屏：标题栏只留窗口按钮 ────────────────────────────────────────
+   竖屏/窄屏下菜单与产品名收起（竖屏那点宽度要留给画布），
+   菜单的动作改由工具栏第二行提供。
+   ------------------------------------------------------------------------ */
+.app[data-shell='stack'] .bc-titlebar-name,
+.app[data-shell='stack'] .bc-titlebar-menu {
+  display: none;
+}
+
+.app[data-shell='stack'] .bc-titlebar {
+  padding-left: 6px;
+}
+
+.app[data-shell='stack'] .bc-win-btn {
+  width: 40px;
+}
+
+/* ── 6. 自绘滚动条（v0.4.6） ──────────────────────────────────────────────
+   实现见 lib/overlayScroll.ts。这里只管两件事：
+     ① 把原生滚动条**彻底藏起来**（它占布局宽度，是"抽搐"的根源）；
+     ② 给自绘的滑块上极简样式（3px 圆角长条，静止透明，滚起来才显形）。
+
+   ⚠ `:not(.canvas *)` 这个例外很重要：
+     `.canvas` 里是**用户设计的网页**，它的滚动条要和导出后一模一样，
+     不能被编辑器偷偷改掉（否则"画布上没滚动条、导出后有"）。
+   ------------------------------------------------------------------------ */
+.app *:not(.canvas *) {
+  scrollbar-width: none;
+}
+
+.app *:not(.canvas *)::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* 自绘层：整层不吃事件，只有滑块自己吃 */
+.bc-osb-layer {
+  position: fixed;
+  inset: 0;
+  /* v0.4.7：以前抬到 9990（比模态还高），结果画布的滑块会盖在**右侧属性面板 / 抽屉**
+     上面 —— 用户看到的就是"右侧面板完全和滚动条重合"。
+     滑块只需要"盖住自己容器里的内容"，所以压到抽屉(58)/工具栏(560)/模态(900)之下。 */
+  z-index: 45;
+  pointer-events: none;
+  contain: strict;
+}
+
+.bc-osb-thumb {
+  position: fixed;
+  border-radius: var(--r-pill);
+  background-color: rgba(120, 128, 140, 0.45);
+  /* 静止态**常显**（0.55），滚动/悬停时加深到 1。
+     v0.4.7：用户说"5px 太细小、按下变宽看不出来" —— 现在三档厚度
+     5（静止）→ 7（悬停）→ 9（按住拖动），透明度 0.55 → 1，
+     两者都走 140ms 过渡。粗细由这根线自己的 width/height 决定（JS 只写长度，
+     所以 CSS 换档不会被内联样式压住），并且**锚定同一条边**（JS 写 right/bottom），
+     变粗时只往容器里侧长，边缘不会漂移。 */
+  opacity: 0.55;
+  pointer-events: auto;
+  cursor: default;
+  transition:
+    width 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    height 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 140ms ease-out,
+    background-color 140ms ease-out;
+}
+
+/* 三档粗细：竖条改 width、横条改 height；长度由 JS 内联写，互不干扰 */
+.bc-osb-thumb.is-y { width: 5px; }
+.bc-osb-thumb.is-x { height: 5px; }
+.bc-osb-thumb.is-y:hover { width: 7px; }
+.bc-osb-thumb.is-x:hover { height: 7px; }
+
+/* 老分片里给工具栏 / 页签条 / 图层树单独写过 ::-webkit-scrollbar 的粗样式，
+   优先级比那条全局隐藏更高 —— 这里点名摁掉，否则"上方菜单还冒一条横条"。 */
+.app .toolbar .tb-main,
+.app .toolbar .tb-right,
+.app .tab-strip,
+.app .tbman-preview,
+.app .layer-tree,
+.app .element-body {
+  scrollbar-width: none;
+}
+
+.app .toolbar .tb-main::-webkit-scrollbar,
+.app .toolbar .tb-right::-webkit-scrollbar,
+.app .tab-strip::-webkit-scrollbar,
+.app .tbman-preview::-webkit-scrollbar,
+.app .layer-tree::-webkit-scrollbar,
+.app .element-body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* 滚动中（is-visible）与悬停都是"实"的；静止保持 0.55，**永不透明到 0** */
+.bc-osb-thumb.is-visible,
+.bc-osb-thumb:hover,
+.bc-osb-thumb.is-dragging {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.bc-osb-thumb:hover,
+.bc-osb-thumb.is-dragging {
+  background-color: rgba(96, 104, 118, 0.66);
+}
+
+/* 按住拖动最粗（9px）。必须排在 :hover 之后 —— 同优先级靠顺序取胜，
+   拖动时指针也压在滑块上（:hover 同时命中），顺序反了就永远是 7px。 */
+.bc-osb-thumb.is-y.is-dragging { width: 9px; }
+.bc-osb-thumb.is-x.is-dragging { height: 9px; }
+
+html[data-bc-dark] .bc-osb-thumb {
+  background-color: rgba(190, 200, 215, 0.34);
+}
+
+html[data-bc-dark] .bc-osb-thumb:hover,
+html[data-bc-dark] .bc-osb-thumb.is-dragging {
+  background-color: rgba(210, 220, 235, 0.52);
+}
+
+/* 减弱动效：粗细/透明度直接跳变（滑块本身还是要常显的） */
+@media (prefers-reduced-motion: reduce) {
+  .bc-osb-thumb { transition-duration: 0.01ms; }
+}
+
+/* ── 12. 右侧面板缺失的过渡（v0.4.6，设计规则 6） ─────────────────────────
+   用户："一些部分没动画，比如右侧元素菜单有些部分没有，需要做一下。"
+
+   缺的三处：① 页签切换（元素/类名/页面/变量）② 新增的属性行 ③ 板块内容首帧。
+   用 `@starting-style` 做"入场过渡"——它只在新元素**第一次**出现在 DOM 时生效，
+   已有的行不会每次重渲染都抖一下（这正是我们以前不敢加动画的原因）。
+   `transition-behavior: allow-discrete` 让 display 也能参与过渡，收场才不会"啪"地消失。
+   ------------------------------------------------------------------------ */
+@supports (transition-behavior: allow-discrete) {
+  .tab-body,
+  .props-list > .prop-row,
+  .inspector-sec-body > *,
+  .ghost-prop-card {
+    transition: opacity 150ms var(--ease-out, ease-out),
+                translate 150ms var(--ease-out, ease-out);
+  }
+
+  @starting-style {
+    .tab-body { opacity: 0; translate: 0 4px; }
+    .props-list > .prop-row { opacity: 0; translate: 0 3px; }
+    .inspector-sec-body > * { opacity: 0; translate: 0 3px; }
+    .ghost-prop-card { opacity: 0; translate: 0 3px; }
+  }
+}
+
+/* ── 13. 快捷助手：把"盒子套盒子"拆平（设计规则 2） ──────────────────────
+   用户原话：「不要盒子套盒子，比如快捷助手这里套了很多层，边框又多，很花眼睛」。
+
+   以前的面板是四层框：面板 → 板块框 → 定位区框 → 每组输入框。
+   现在只保留最后一层（输入框自己的边框，它是"可编辑"的信号），
+   其余层级交给**留白 + 一条细分隔线**表达。一眼只看得到内容，看不到格子。
+   ------------------------------------------------------------------------ */
+.quick-helper {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.quick-helper .qh-block {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.quick-helper .qh-block + .qh-block {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft, #f0f0f0);
+}
+
+.quick-helper .qh-block-head {
+  background: transparent;
+  padding: 4px 0;
+}
+
+.quick-helper .qh-block-body {
+  padding: 2px 0 4px;
+  background: transparent;
+}
+
+/* 顶部那个开关条：不再是一条带底色的横条，就是一行文字 + 复选框 */
+.quick-helper .qh-sync-bar {
+  border: none;
+  background: transparent;
+  padding: 0 0 6px;
+  margin: 0;
+}
+
+/* 定位区：原来是"带边框 + 浅底"的小盒子，现在是纯留白 */
+.quick-helper .pos-edges {
+  border: none;
+  background: transparent;
+  padding: 0;
+  gap: 2px;
+}
+
+.quick-helper .pos-helper {
+  padding: 4px 0 0;
+  gap: 8px;
+}
+
+/* 定位助手展开/收起（v0.4.7）
+   用户："快捷助手里面的定位助手没有展开合起来的动画。"
+   机制跟布局 / 文字渐变那两个板块**完全一致**（<Collapse>：grid-template-rows
+   0fr ↔ 1fr 撑开高度 + 透明度 + 上浮，无需测量高度；收场等动画跑完才卸载元素）。
+   唯一的差别是时长：快捷助手是"点一下就变"的轻量面板，180ms 比属性面板的
+   0.3s 更跟手，仍落在 150~200ms 这一档。
+   `.collapse-inner` 自带的 overflow:hidden 保证动画过程中内容不会掉出来，
+   跑完（is-settled）才放开裁切，下拉菜单不会被剪。 */
+.quick-helper .collapse.qh-pos-collapse {
+  transition-duration: 180ms;
+}
+/* 减弱动效：和全局 .collapse 一样直接跳过动画（这条必须写在上面那条之后，
+   否则同优先级下 180ms 会把 prefers-reduced-motion 的 0.01ms 盖掉） */
+@media (prefers-reduced-motion: reduce) {
+  .quick-helper .collapse.qh-pos-collapse {
+    transition-duration: 0.01ms;
+  }
+}
+
+/* 说明文字：不要底色块（一大片灰底最"花眼睛"），只要小字 */
+.quick-helper .pos-hint,
+.quick-helper .flex-helper-hint-row,
+.quick-helper .pos-static-note,
+.quick-helper .pos-clamp-note,
+.quick-helper .pos-rel-note {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--text-3, #94a3b8);
+}
+
+/* sticky 的两种状态提示保留"一条竖线 + 小字"，不放底色块 */
+.quick-helper .pos-sticky-warn,
+.quick-helper .pos-sticky-ok {
+  background: transparent;
+  border: none;
+  border-left: 2px solid currentColor;
+  border-radius: 0;
+  padding: 1px 0 1px 8px;
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+
+/* 分组内的"预设格子"（网格预设等）：只留描边，不填底色 */
+.quick-helper .grid-preset-btn,
+.quick-helper .flex-mini-btn,
+.quick-helper .seg-btn {
+  background: var(--bg-panel, #fff);
+}
+
+.quick-helper .grid-preset-btn.active,
+.quick-helper .flex-mini-btn.active,
+.quick-helper .seg-btn.active {
+  background: var(--hover-accent, #f0f7ff);
+  border-color: var(--accent, #1e88e5);
+  color: var(--accent, #1e88e5);
+}
+
+/* ── 11. 定位助手：四边解锁 + 四角预设（v0.4.6） ──────────────────────────
+   一条边一行：前面是复选框（解锁才有资格拖 / 改数值），后面是数字框。
+   锁着的边不画输入框，只写「未解锁」—— 因为那时候输入也没有意义（会被 auto 覆盖）。
+   ------------------------------------------------------------------------ */
+.pos-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.pos-line + .pos-line {
+  margin-top: 2px;
+}
+
+.pos-line-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 96px;
+  flex: none;
+  font-size: 12px;
+  color: var(--text-2, #475569);
+  cursor: pointer;
+  user-select: none;
+}
+
+.pos-line-check input {
+  margin: 0;
+  accent-color: var(--accent, #1e88e5);
+  cursor: pointer;
+}
+
+.pos-line.is-on .pos-line-check { color: var(--text, #1f1f1f); }
+
+.pos-line-locked {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  padding-left: 2px;
+  font-size: 11.5px;
+  color: var(--text-3, #94a3b8);
+}
+
+.pos-corner-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-soft, #f0f0f0);
+}
+
+/* 居中钉死：两个复选框一行，和四边解锁同一套视觉 */
+.pos-pin-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line-soft, #f0f0f0);
+}
+
+.pos-pin-row .pos-line-check { width: auto; }
+
+/* 粘性定位：吸附方向（二选一）+ 距边距离，两块分开排 */
+.pos-sticky-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pos-sticky-seg {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pos-sticky-seg .pos-corner-btn {
+  flex: 1;
+  min-width: 0;
+}
+
+.pos-corner-label {
+  width: 96px;
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-3, #94a3b8);
+}
+
+.pos-corner-btns {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pos-corner-btn {
+  height: 26px;
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: var(--r-2);
+  background: var(--bg-panel, #fff);
+  color: var(--text-2, #475569);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: border-color 110ms ease-out, color 110ms ease-out, background 110ms ease-out;
+}
+
+.pos-corner-btn:hover:not(:disabled) {
+  border-color: var(--accent, #1e88e5);
+  color: var(--accent, #1e88e5);
+}
+
+.pos-corner-btn.is-on {
+  border-color: var(--accent, #1e88e5);
+  background: var(--hover-accent, #f0f7ff);
+  color: var(--accent, #1e88e5);
+}
+
+.pos-corner-btn:disabled { opacity: 0.42; cursor: default; }
+
+/* ── 8. 切换定位方式的「清外边距」模态（v0.4.6） ──────────────────────────
+   用户要求：全屏模态、说清为什么、三个选项、第三个绿色（推荐）。
+   它是"用户必须做决定"的模态：点遮罩不关（防误触），Esc = 先不设置定位。
+   ------------------------------------------------------------------------ */
+.bc-posswitch-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 900);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 20, 30, 0.5);
+  backdrop-filter: blur(2px);
+  animation: bcScrimIn 130ms ease-out;
+}
+
+.bc-posswitch-card {
+  width: min(480px, 92vw);
+  padding: 18px 20px 16px;
+  border-radius: var(--r-4);
+  background: var(--bg-panel, #fff);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.26);
+  animation: bcGhostIn 170ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.bc-posswitch-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text, #1f1f1f);
+  margin-bottom: 10px;
+}
+
+.bc-posswitch-body { font-size: 12.5px; line-height: 1.75; color: var(--text-2, #475569); }
+.bc-posswitch-body p { margin: 0 0 8px; }
+.bc-posswitch-body code {
+  padding: 1px 4px;
+  border-radius: 8px;
+  background: var(--surface-sunken, #f1f5f9);
+  font-family: Consolas, monospace;
+  font-size: 11.5px;
+}
+.bc-posswitch-tip {
+  padding: 8px 10px;
+  border-radius: var(--r-2);
+  background: var(--hover-accent, #f0f7ff);
+  color: var(--text-2, #475569);
+}
+
+.bc-posswitch-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.bc-posswitch-btn {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--border, #e5e5e5);
+  border-radius: var(--r-2);
+  background: var(--bg-panel, #fff);
+  color: var(--text, #1f1f1f);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+}
+
+.bc-posswitch-btn:hover { border-color: var(--accent, #1e88e5); color: var(--accent, #1e88e5); }
+
+.bc-posswitch-btn.is-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted, #707070);
+}
+.bc-posswitch-btn.is-ghost:hover { background: var(--hover, #f0f0f0); color: var(--text, #1f1f1f); }
+
+/* 推荐项：绿色实心（用户："最后的第三个按钮用绿色"） */
+.bc-posswitch-btn.is-recommend {
+  border-color: #16a34a;
+  background: #16a34a;
+  color: #fff;
+  font-weight: 600;
+}
+.bc-posswitch-btn.is-recommend:hover {
+  border-color: #15803d;
+  background: #15803d;
+  color: #fff;
+}
+
+/* ── 7. 幽灵属性卡片（v0.4.6） ────────────────────────────────────────────
+   「显示到下方 CSS 属性」关掉后，中键搜到的属性临时放这里改。
+   三条：颜色必须和正式卡片不一样（紫）、没有关闭按钮、里面不写说明文字。
+   ------------------------------------------------------------------------ */
+.ghost-prop-card {
+  /* v0.4.6（用户）："放到 CSS 属性里面，并且淡紫色，文字，现在还有阴影和边框和别的卡片不匹配"
+     → 去掉阴影与边框，只留一层很淡的紫底；它现在就是列表里的一段，而不是"另一张卡片"。 */
+  margin: 0 0 6px;
+  padding: 6px 8px 8px;
+  border: none;
+  border-radius: var(--r-2);
+  background: color-mix(in srgb, #7c3aed 7%, transparent);
+  box-shadow: none;
+  animation: bcGhostIn 170ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes bcGhostIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.99); }
+  to   { opacity: 1; transform: none; }
+}
+
+.ghost-prop-card-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 6px;
+  color: #7c3aed;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+/* 卡片里的属性行不要再套一层边框（"不要盒子套盒子"） */
+.ghost-prop-card .prop-row {
+  border: none;
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.ghost-prop-card .prop-row + .prop-row {
+  border-top: 1px dashed color-mix(in srgb, #7c3aed 18%, transparent);
+}
+
+html[data-bc-dark] .ghost-prop-card {
+  border-color: transparent;
+  background: color-mix(in srgb, #a78bfa 12%, transparent);
+}
+
+html[data-bc-dark] .ghost-prop-card-head { color: #b39bfb; }
+
+/* ============================================================================
+   附：定位切换确认弹窗（lib/posSwitch.tsx）的窄屏排版
+   ----------------------------------------------------------------------------
+   用户截图（300px 宽的窗口）：三个按钮挤成一行，每个都被压到 60~70px，
+   "先不设置定位 / 保留外边距并切换 / 清除外边距并切换" 全变成两行字，还溢出卡片。
+   这里在窄屏把它们竖排成"一行一个"，宽度撑满，点起来也稳。
+   ========================================================================== */
+.bc-posswitch-actions { flex-wrap: wrap; }
+.bc-posswitch-btn { white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .bc-posswitch-card { width: min(420px, 94vw); padding: 16px 14px 14px; }
+  .bc-posswitch-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .bc-posswitch-btn {
+    width: 100%;
+    min-height: 42px;
+    justify-content: center;
+    text-align: center;
+  }
+}
+

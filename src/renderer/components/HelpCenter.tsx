@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
 import { Icon } from './Icon';
+import { useClosing } from '@lib/useClosing';
+import { useShellLayout } from '@lib/shellMode';
 import {
   DOCS,
   headingId,
@@ -197,6 +199,149 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
   const [hits, setHits] = useState(0);
   const [showResults, setShowResults] = useState(false);
   const [closing, setClosing] = useState(false);
+  /**
+   * v0.4.6 竖屏：手册页的顶栏（文档页签 + 搜索）和左侧目录在 412px 里太挤，
+   * 用户要求「下方第一层工具栏加一个侧边栏按钮，放到最左边，可以打开侧边栏，
+   * 切换文档，搜索」。所以竖屏把这三样收进一个抽屉，由第一条栏最左那颗按钮开合。
+   */
+  const shell = useShellLayout();
+  const stacked = shell.layout === 'stack';
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  /**
+   * v0.4.6 第 45 批：竖屏手册侧边栏 —— **往左滑关闭 + 退场动画 + 可打断**。
+   *
+   * 用户原话：「使用手册右侧的菜单改成往左边滑动关闭，有退出动画和打断动画，
+   *   现在退出无动画。」
+   *
+   * 之前它是 `{sidebarOpen && …}` 条件渲染：一关就整个卸载 → 退场动画根本没机会播，
+   * 看起来就是"啪一下没了"。
+   *
+   * 现在分三层：
+   *   · useClosing：关掉之后先留在 DOM 里播退场动画，播完才卸载；
+   *   · 拖拽：手指按住抽屉往左拖，抽屉**跟着手指走**（位移写在 CSS 变量上，
+   *     不走 React → 拖动跟手）；松手时按位移/速度决定是关闭还是弹回；
+   *   · 可打断：退场动画播到一半再按住 → 从**当前位置**重新抓住继续拖，
+   *     动画不跳帧、不回起点。
+   */
+  // 卸载延迟要**大于** CSS 里的滑出时长（--dur-drawer = 0.24s），
+  // 否则最后 20ms 会被提前摘掉，看着就是滑到一半突然没了。
+  const { mounted: drawerMounted, closing: drawerClosing } = useClosing(sidebarOpen, 320);
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const dragRef = useRef<{ x0: number; y0: number; base: number; t0: number; axis: 'none' | 'x' | 'y' } | null>(null);
+  const [dragging, setDragging] = useState(false);
+
+  /** 抽屉宽度：既是"完全滑出"的距离，也是拖拽的上限 */
+  const drawerW = () => drawerRef.current?.offsetWidth ?? 320;
+  /** 位移写进 CSS 变量（0 = 完全展开，-宽度 = 完全滑出屏幕左侧） */
+  const setDrawerX = (x: number) => drawerRef.current?.style.setProperty('--help-drawer-x', `${x}px`);
+  /** 抽屉**此刻**的实际位移（退场动画播到一半时是半路值，打断要从这里接着抓） */
+  const drawerXNow = () => {
+    const el = drawerRef.current;
+    if (!el) return 0;
+    const t = getComputedStyle(el).transform;
+    if (!t || t === 'none') return 0;
+    try { return new DOMMatrixReadOnly(t).m41; } catch { return 0; }
+  };
+
+  /**
+   * 所有"关闭"入口（遮罩 / 右上叉 / 第一条栏那颗按钮）都走这里：
+   * 先把抽屉**滑出去**再让 state 变 false —— 直接 setSidebarOpen(false) 的话
+   * useClosing 只是延后 260ms 卸载，元素停在原地不动，看起来还是"啪一下没了"。
+   */
+  const closeDrawer = useCallback(() => {
+    setDrawerX(-drawerW());
+    setSidebarOpen(false);
+  }, []);
+
+  /**
+   * 进场：**用 keyframes，不用变量过渡**。
+   *
+   * 踩过的坑：把 --help-drawer-x 从 -w 改到 0 靠 transition 播 —— 对"刚挂载"的元素
+   * 不生效（首帧样式就是 0，浏览器不认为发生了从 -w 到 0 的变化），于是进场变成硬切。
+   * 用户反馈「左边的菜单进入动画没有了」就是它。
+   * 现在挂载后打 260ms 的 is-entering 类，交给 CSS keyframes 播；
+   * 播完撤类，transform 回到变量（0），不会跳。
+   */
+  const [drawerEntering, setDrawerEntering] = useState(false);
+  useEffect(() => {
+    if (!drawerMounted || drawerClosing) { setDrawerEntering(false); return undefined; }
+    if (dragRef.current) return undefined;
+    setDrawerEntering(true);
+    const t = window.setTimeout(() => setDrawerEntering(false), 260);
+    return () => window.clearTimeout(t);
+  }, [drawerMounted, drawerClosing]);
+  const onDrawerDown = (e: React.PointerEvent) => {
+    const el = drawerRef.current;
+    if (!el) return;
+    /**
+     * v0.4.7：**必须抓指针**。
+     * 用户反馈「现在滑动关闭不了，会回弹」—— 真机拖到一半手指已经离开抽屉
+     * （抽屉跟手往左走，屏幕边缘之外没有可命中的元素），后续 pointermove / pointerup
+     * 就全丢了：位移停在半路、松手事件也没人接，看起来就是"拖不动 / 弹回去"。
+     * 探针用 dispatchEvent 直接打在 aside 上，所以一直显示通过 —— 这也是我漏掉它的原因。
+     */
+    try { el.setPointerCapture(e.pointerId); } catch { /* 老内核可能不支持 */ }
+    // 退场动画途中被按住 → **从当前位置**重新抓住，动画不跳回起点、不回弹
+    const base = drawerXNow();
+    el.style.setProperty('--help-drawer-x', `${base}px`);
+    dragRef.current = { x0: e.clientX, y0: e.clientY, base, t0: e.timeStamp, axis: 'none' };
+    if (drawerClosing) setSidebarOpen(true);
+  };
+
+  const onDrawerMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const dx = e.clientX - d.x0;
+    const dy = e.clientY - d.y0;
+    if (d.axis === 'none') {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      // 方向锁：横着划归抽屉（滑动关闭），竖着划还给内容自己滚（目录很长）
+      d.axis = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
+      if (d.axis === 'y') { dragRef.current = null; return; }
+      setDragging(true);
+    }
+    if (d.axis !== 'x') return;
+    const w = drawerW();
+    const next = d.base + dx;
+    // 只往左滑有效；往右给 0.25 的阻尼（橡皮筋手感，不会真的把抽屉拽出容器）
+    setDrawerX(next <= 0 ? Math.max(-w, next) : Math.min(w * 0.25, next * 0.25));
+  };
+
+  const onDrawerUp = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    try { drawerRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    /** 真机一次滑过 30% 挺难的；22% 就已经是明确意图了（探针同步放宽） */
+    setDragging(false);
+    const w = drawerW();
+    const x = drawerXNow();
+    // 只是按了一下（没横向拖）也要有个交代：退场途中按住的，按"出去多少"决定去留。
+    // 不处理的话抽屉会**停在半路**（-247px 那种），既不算开也不算关。
+    if (!d || d.axis !== 'x') {
+      if (x < -w * 0.5) closeDrawer();
+      else setDrawerX(0);
+      return;
+    }
+    const dt = Math.max(1, e.timeStamp - d.t0);
+    // 速度要**带方向**：只有"往左甩"才算关闭意图。
+    // 用 |位移| 的话，用户从半路往右拖回来（拖得急）也会被判成"甩出去"，
+    // 明明救回来了却又被关掉（探针里就是这条翻的车）。
+    const vx = (x - d.base) / dt;   // px/ms，<0 = 正在往左（关闭方向）
+    // 关闭条件（都要"真的滑出去"才成立，避免轻轻一扫就关）：
+    //   · 滑过 30% 宽度；或
+    //   · 往左甩得很快（>0.8 px/ms）且已经出去 15% 宽度
+    if (x < -w * 0.22 || (vx < -0.8 && x < -w * 0.12)) closeDrawer();
+    else setDrawerX(0);
+  };
+
+  const openRef = useRef(false);
+  openRef.current = sidebarOpen;
+  useEffect(() => {
+    const onToggle = () => { if (openRef.current) closeDrawer(); else setSidebarOpen(true); };
+    window.addEventListener('bc:help-sidebar', onToggle);
+    return () => window.removeEventListener('bc:help-sidebar', onToggle);
+  }, [closeDrawer]);
+
   const docRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
@@ -475,6 +620,7 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
   }, [toc, docKey]);
 
   const jumpTo = (id: string) => {
+    setSidebarOpen(false); // 竖屏抽屉里点了目录就收起来，别挡正文
     const el = docRef.current?.querySelector('#' + CSS.escape(id)) as HTMLElement | null;
     const scroller = scrollRef.current;
     if (!el || !scroller) return;
@@ -484,6 +630,7 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
   /** 点搜索结果：切到对应文档 + 跳到段落 + 高亮 */
   const goHit = (h: Hit) => {
     setShowResults(false);
+    setSidebarOpen(false);
     setQueryInput(h.title);
     setQuery(h.title);
     if (h.doc !== docKey) {
@@ -497,6 +644,7 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
 
   const switchDoc = (k: DocKey) => {
     if (k === docKey) return;
+    setSidebarOpen(false);
     tocJson.current = '';
     setToc([]);
     setActiveId('');
@@ -505,81 +653,131 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
     if (sc) sc.scrollTo({ top: 0 });
   };
 
-  return (
-    <div className={'help-page' + (closing ? ' is-closing' : '')}>
-      <div className="help-topbar">
-        <button className="fluent-back-btn" onClick={close} title="返回编辑器 (Esc)">
-          <Icon name="chevronLeft" size={14} /> 返回编辑器
+  // —— 三块可复用的小部件（宽屏放顶栏/左栏，竖屏全收进抽屉）——
+  const brandBlock = (
+    <div className="help-brand">
+      <span className="help-brand-logo"><Icon name={docDef.icon} size={18} /></span>
+      <span className="help-brand-text">{docDef.label}</span>
+    </div>
+  );
+  const tabsBlock = (
+    <div className="help-doc-tabs">
+      {DOCS.map((d) => (
+        <button
+          key={d.key}
+          className={'help-doc-tab' + (d.key === docKey ? ' active' : '')}
+          onClick={() => switchDoc(d.key)}
+          title={`查看《${d.label}》`}
+        >
+          <span className="help-doc-tab-ico"><Icon name={d.icon} size={15} /></span>{d.label}
         </button>
-        <div className="help-brand">
-          <span className="help-brand-logo"><Icon name={docDef.icon} size={18} /></span>
-          <span className="help-brand-text">{docDef.label}</span>
-        </div>
-        <div className="help-doc-tabs">
-          {DOCS.map((d) => (
-            <button
-              key={d.key}
-              className={'help-doc-tab' + (d.key === docKey ? ' active' : '')}
-              onClick={() => switchDoc(d.key)}
-              title={`查看《${d.label}》`}
-            >
-              <span className="help-doc-tab-ico"><Icon name={d.icon} size={15} /></span>{d.label}
+      ))}
+    </div>
+  );
+  const searchBlock = (
+    <div className="help-search" ref={searchRef}>
+      <span className="help-search-ico" aria-hidden="true"><Icon name="search" size={15} /></span>
+      <input
+        className="help-search-input"
+        type="text"
+        value={queryInput}
+        placeholder="搜索三份文档（回车/点结果跳转）"
+        onChange={(e) => { setQueryInput(e.target.value); setShowResults(true); }}
+        onFocus={() => { if (queryInput.trim()) setShowResults(true); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { setQueryInput(''); setQuery(''); setShowResults(false); (e.target as HTMLInputElement).blur(); }
+          if (e.key === 'Enter' && results[0]) goHit(results[0]);
+        }}
+      />
+      {queryInput.trim() && (
+        <span
+          className={'help-search-count' + (hits === 0 ? ' is-empty' : '')}
+          title={hits === 0 ? '当前文档没有匹配' : `当前文档命中 ${hits} 处`}
+        >
+          {hits === 0 ? '没有匹配' : `${hits} 处`}
+        </span>
+      )}
+      {/* 搜索结果下拉框（按权重排序） */}
+      {showResults && queryInput.trim() && (
+        <div className="help-results bc-scroll">
+          {results.length === 0 && <div className="help-results-empty">没有找到「{queryInput.trim()}」相关内容</div>}
+          {results.map((h) => (
+            <button key={h.doc + h.id} className="help-result" onClick={() => goHit(h)}>
+              <div className="help-result-top">
+                <span className="help-result-doc">{h.docLabel}</span>
+                <span className={'help-result-title lv' + h.level}>{h.title}</span>
+              </div>
+              <div className="help-result-snippet">{h.snippet}</div>
             </button>
           ))}
         </div>
-        <div className="help-search" ref={searchRef}>
-          <span className="help-search-ico" aria-hidden="true"><Icon name="search" size={15} /></span>
-          <input
-            className="help-search-input"
-            type="text"
-            value={queryInput}
-            placeholder="搜索三份文档（回车/点结果跳转）"
-            onChange={(e) => { setQueryInput(e.target.value); setShowResults(true); }}
-            onFocus={() => { if (queryInput.trim()) setShowResults(true); }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') { setQueryInput(''); setQuery(''); setShowResults(false); (e.target as HTMLInputElement).blur(); }
-              if (e.key === 'Enter' && results[0]) goHit(results[0]);
-            }}
-          />
-          {queryInput.trim() && (
-            <span
-              className={'help-search-count' + (hits === 0 ? ' is-empty' : '')}
-              title={hits === 0 ? '当前文档没有匹配' : `当前文档命中 ${hits} 处`}
-            >
-              {hits === 0 ? '没有匹配' : `${hits} 处`}
-            </span>
-          )}
-          {/* 搜索结果下拉框（按权重排序） */}
-          {showResults && queryInput.trim() && (
-            <div className="help-results bc-scroll">
-              {results.length === 0 && <div className="help-results-empty">没有找到「{queryInput.trim()}」相关内容</div>}
-              {results.map((h) => (
-                <button key={h.doc + h.id} className="help-result" onClick={() => goHit(h)}>
-                  <div className="help-result-top">
-                    <span className="help-result-doc">{h.docLabel}</span>
-                    <span className={'help-result-title lv' + h.level}>{h.title}</span>
-                  </div>
-                  <div className="help-result-snippet">{h.snippet}</div>
-                </button>
-              ))}
-            </div>
-          )}
+      )}
+    </div>
+  );
+  const tocBlock = (
+    <aside className="help-toc bc-hscroll">
+      <div className="help-toc-title">目录（{toc.length} 节）</div>
+      {toc.map((t) => (
+        <button
+          key={t.id}
+          className={'help-toc-item lv' + t.level + (activeId === t.id ? ' active' : '')}
+          onClick={() => jumpTo(t.id)}
+          title={t.text}
+        >{t.text}</button>
+      ))}
+      {toc.length === 0 && <div className="help-toc-empty">正在解析文档…</div>}
+    </aside>
+  );
+
+  return (
+    <div className={'help-page' + (closing ? ' is-closing' : '')}>
+      {/* 竖屏不渲染顶栏：品牌/页签/搜索都在抽屉里（见下） */}
+      {!stacked && (
+        <div className="help-topbar">
+          <button className="fluent-back-btn" onClick={close} title="返回编辑器 (Esc)">
+            <Icon name="chevronLeft" size={14} /> 返回编辑器
+          </button>
+          {brandBlock}
+          {tabsBlock}
+          {searchBlock}
         </div>
-      </div>
+      )}
+
+      {/* 竖屏侧边栏抽屉：切换文档 / 搜索 / 目录（用户要求收在这里）。
+          v0.4.6 第 45 批：**往左滑关闭**（跟手）+ 退场动画 + 可打断。
+          · mounted 由 useClosing 管：关掉后先留 DOM 播退场，播完才卸载；
+          · 位移写在 --help-drawer-x 上（不走 React → 拖起来跟手）；
+          · is-dragging 期间关掉 transition，否则会"追着手指慢慢挪"。 */}
+      {stacked && drawerMounted && (
+        <>
+          <div
+            className={'help-drawer-scrim' + (drawerClosing ? ' is-closing' : '')}
+            onClick={closeDrawer}
+          />
+          <aside
+            ref={drawerRef}
+            className={'help-drawer' + (drawerClosing ? ' is-closing' : '') + (dragging ? ' is-dragging' : '') + (drawerEntering ? ' is-entering' : '')}
+            role="dialog"
+            aria-label="手册侧边栏"
+            aria-hidden={drawerClosing}
+            onPointerDown={onDrawerDown}
+            onPointerMove={onDrawerMove}
+            onPointerUp={onDrawerUp}
+            onPointerCancel={onDrawerUp}
+          >
+            {/* 没有关闭按钮：用户要求"按住侧边栏往左滑"关闭（点遮罩也行） */}
+            <div className="help-drawer-head">
+              {brandBlock}
+            </div>
+            {tabsBlock}
+            {searchBlock}
+            <div className="help-drawer-toc">{tocBlock}</div>
+          </aside>
+        </>
+      )}
 
       <div className="help-body">
-        <aside className="help-toc bc-hscroll">
-          <div className="help-toc-title">目录（{toc.length} 节）</div>
-          {toc.map((t) => (
-            <button
-              key={t.id}
-              className={'help-toc-item lv' + t.level + (activeId === t.id ? ' active' : '')}
-              onClick={() => jumpTo(t.id)}
-              title={t.text}
-            >{t.text}</button>
-          ))}
-          {toc.length === 0 && <div className="help-toc-empty">正在解析文档…</div>}
-        </aside>
+        {!stacked && tocBlock}
 
         <div className="help-scroll bc-scroll" ref={scrollRef}>
           <div className="help-doc" ref={docRef} dangerouslySetInnerHTML={{ __html: html }} />

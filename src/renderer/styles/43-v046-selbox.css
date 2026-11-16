@@ -1,0 +1,85 @@
+/* ============================================================================
+   v0.4.6 第 47 批 · 画布选中框：橙框 + 呼吸闪烁（≤5 个）/ 只橙框（>5 个）
+   ----------------------------------------------------------------------------
+   用户原话：
+     「选中元素的橙色选中框不明显了，按照下面的改：
+      1~5 个元素，所有选中的元素橙色边框+闪烁，这样显眼；
+      大于5个，只显示橙色边框，防止卡顿。」
+
+   为什么需要这一版：
+     25-v044-storage-ui.css 里当初写的是"橙色描边 + 很轻的固定光晕"，注释里还记着
+     v0.4.5 因为"多选时每个元素都在跑无限动画，满屏橙色闪光既刺眼又费 GPU"
+     把呼吸闪烁删掉了 —— 于是单元素选中时也不闪，用户在复杂页面里根本看不出选没选中。
+
+   现在的做法：**按选中数量分流**，兼顾"看得见"和"不卡"：
+     · 1~5 个：橙框 + 呼吸光晕（每帧只改 filter，合成层，代价很小）；
+     · >5 个 ：只留橙框，不加任何动画（十几个元素各跑一个 drop-shadow 动画会掉帧，
+              这也正是当初删掉它的原因）。
+
+   ⚠ 数量由 CanvasNode 写到根节点 `data-bc-seln`（1 = 闪烁档，0 = 仅边框档），
+     用属性切换而不是"多个类名"，避免和 body.bc-sel-plain（用户手动选的蓝色细线档）打架。
+   ========================================================================== */
+
+/* ── 基础：橙色 2px 框（不变，两种档位共用） ───────────────────────────────── */
+.canvas [data-bc-sel='1'] {
+  outline: 2px solid #f97316;
+  outline-offset: -2px;
+}
+
+/* ── 1~5 个：加呼吸光晕（"闪烁"要做成呼吸，不是硬闪，硬闪很廉价） ─────────────
+   只动 filter：合成器即可完成，不触发布局/重绘，5 个元素同时跑也稳。
+   周期 1.1s —— 比 v0.4.5 那版（1.6s）快一点，扫一眼就能确认"选中了"。 */
+@keyframes bcSelBreath {
+  0%, 100% {
+    filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.55))
+            drop-shadow(0 0 1px rgba(249, 115, 22, 0.7));
+  }
+  50% {
+    filter: drop-shadow(0 0 11px rgba(249, 115, 22, 0.95))
+            drop-shadow(0 0 3px rgba(249, 115, 22, 1));
+  }
+}
+.canvas [data-bc-sel='1'][data-bc-seln='1']:not([data-bc-sel-plain]) {
+  animation: bcSelBreath 1.1s ease-in-out infinite;
+}
+
+/* ── >5 个：只边框（去掉光晕与动画，"防止卡顿"） ──────────────────────────── */
+.canvas [data-bc-sel='1'][data-bc-seln='0'] {
+  animation: none;
+  filter: none;
+}
+
+/* ── 用户手动选了「蓝色细线」档（设置里可切）：仍然尊重它，不闪 ──────────────── */
+body.bc-sel-plain .canvas [data-bc-sel='1'] {
+  outline: 2px solid #1e88e5;
+  animation: none;
+  filter: none;
+}
+
+/* ── 按住 Alt：藏掉"已选中"的橙框（这时用户看的是 Alt 悬停/拖动框，两个橙框会糊） ── */
+body.bc-alt-down .canvas [data-bc-sel='1'] {
+  outline: none;
+  animation: none;
+  filter: none;
+}
+body.bc-alt-down .canvas-inline-sel { display: none; }
+
+/* ── 行内元素合并外框（Canvas 那层画的）跟同一套节奏 ─────────────────────────
+   它是 `.canvas-inline-sel` 一个 div，跟着"有闪烁"的档位一起呼吸。 */
+.canvas-inline-sel[data-bc-seln='1'] {
+  animation: bcSelBreath 1.1s ease-in-out infinite;
+}
+.canvas-inline-sel[data-bc-seln='0'] {
+  animation: none;
+  filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.5));
+}
+body.bc-sel-plain .canvas-inline-sel { animation: none; filter: none; }
+
+/* 系统「减少动态效果」：不闪，只留框 */
+@media (prefers-reduced-motion: reduce) {
+  .canvas [data-bc-sel='1'],
+  .canvas-inline-sel {
+    animation: none !important;
+    filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.5));
+  }
+}

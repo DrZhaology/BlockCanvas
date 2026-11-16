@@ -61,7 +61,7 @@
   gap: 5px;
   height: 28px;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--text);
@@ -102,7 +102,7 @@
   text-align: center;
   background: #faf8ff;
   border: 1px solid #ece6fb;
-  border-radius: 10px;
+  border-radius: 16px;
   margin: 12px;
   flex: 1;
 }
@@ -123,7 +123,7 @@
   line-height: 1.7;
   color: #6d28d9;
   background: #f3edff;
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 8px 10px;
   text-align: left;
 }
@@ -154,7 +154,7 @@
 .snap-info-path {
   margin-top: 12px;
   padding: 8px;
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--panel-soft);
   color: var(--text-muted);
   font-size: 10.5px;
@@ -169,7 +169,7 @@
   color: var(--text-muted);
   background: #faf8ff;
   border: 1px solid #ece6fb;
-  border-radius: 8px;
+  border-radius: 14px;
   padding: 9px 10px;
 }
 
@@ -186,7 +186,7 @@
   align-items: stretch;
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--bg-panel);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
@@ -216,14 +216,14 @@
   display: block;
   background: var(--panel-soft);
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   overflow: hidden;
 }
 .outline-preview-box {
   height: 34px;
   display: grid;
   place-items: center;
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   font-size: 11px;
   color: var(--text-muted);
@@ -246,7 +246,7 @@
   height: 15px;
   padding: 0 4px;
   margin-right: 5px;
-  border-radius: 3px;
+  border-radius: 6px;
   background: #eef2f8;
   color: #64748b;
   font-size: 9.5px;
@@ -347,7 +347,7 @@
    判断"下面放不放得下"，CSS 写得更高就会顶出窗口底部。 */
 .add-prop-menu {
   max-height: 380px;
-  border-radius: 10px;
+  border-radius: 16px;
   box-shadow: 0 12px 34px rgba(15, 23, 42, 0.18);
 }
 .add-prop-menu .add-prop-scroll { padding-bottom: 8px; }
@@ -370,7 +370,7 @@
   padding: 4px 8px;
   margin: 6px 0;
   border: 1px solid #fde68a;
-  border-radius: 7px;
+  border-radius: 12px;
   background: #fffbeb;
 }
 .cls-warn-flash .cls-warn-ico {
@@ -383,7 +383,7 @@
   height: 26px;
   color: #d97706;
   background: rgba(245, 158, 11, 0.16);
-  border-radius: 8px;
+  border-radius: 14px;
 }
 .cls-warn-flash .cls-warn-ico svg { display: block; }
 /* 两行小字：标题 + 一句原因。以前挤成一行会被截断成"样式还没有名字，…" */
@@ -416,7 +416,7 @@
   height: 22px;
   padding: 0 7px;
   border: 1px solid #f59e0b;
-  border-radius: 5px;
+  border-radius: 9px;
   background: #fff;
   color: #92400e;
   font-family: inherit;
@@ -437,14 +437,7 @@
      这里整体裁切，超出的部分交给右侧设置面板自己滚。 */
   overflow: hidden;
 }
-.empty-home .eh-center { max-height: 100%; }
 /* 设置面板自己限高 + 内部滚动，不再把整页撑开 */
-.eh-settings { max-height: calc(100vh - 28px); display: flex; flex-direction: column; }
-.eh-panel {
-  max-height: calc(100vh - 64px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
 /* 矮窗口仍然从上往下排，避免内容被压出屏幕 */
 @media (max-height: 760px) {
   .empty-home { align-items: flex-start; padding-top: 6vh; }
@@ -464,17 +457,6 @@
     transform: none;
   }
 }
-.empty-home .eh-center { animation: none; }
-.empty-home .eh-center > * {
-  animation: ehRiseIn 0.52s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-.empty-home .eh-center > *:nth-child(1) { animation-delay: 0.02s; }
-.empty-home .eh-center > *:nth-child(2) { animation-delay: 0.06s; }
-.empty-home .eh-center > *:nth-child(3) { animation-delay: 0.10s; }
-.empty-home .eh-center > *:nth-child(4) { animation-delay: 0.14s; }
-.empty-home .eh-center > *:nth-child(5) { animation-delay: 0.18s; }
-.empty-home .eh-center > *:nth-child(6) { animation-delay: 0.22s; }
-.empty-home .eh-center > *:nth-child(n + 7) { animation-delay: 0.26s; }
 /* 右上角齿轮稍晚一点出现，不跟标题抢注意力 */
 .empty-home .eh-settings { animation: ehRiseIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) 0.16s both; }
 /* 离场仍然整块淡出（点击"打开工程"的瞬间要干脆） */
@@ -500,7 +482,7 @@
   gap: 8px 10px;
   padding: 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--panel-soft);
 }
 .pos-edge {
@@ -527,7 +509,7 @@
   height: 28px;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text);
   font-family: inherit;
@@ -543,7 +525,7 @@
   line-height: 1.7;
   color: var(--text-muted);
   background: var(--panel-soft);
-  border-radius: 6px;
+  border-radius: 10px;
   padding: 8px 10px;
 }
 .pos-hint strong { color: var(--text); font-weight: 600; }
@@ -586,7 +568,7 @@
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--panel-soft);
   min-width: 0;
 }
@@ -596,7 +578,7 @@
   height: 22px;
   padding: 0 8px;
   border: none;
-  border-radius: 4px;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-muted);
   font-family: inherit;
@@ -620,7 +602,7 @@
   gap: 5px;
   align-items: flex-start;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--panel-soft);
   font-size: 10.5px;
   line-height: 1.6;
@@ -644,7 +626,7 @@
   gap: 7px;
   padding: 9px 10px;
   border: 1px solid #fcd34d;
-  border-radius: 8px;
+  border-radius: 14px;
   background: #fffbeb;
 }
 .pos-confirm-text {
@@ -655,7 +637,7 @@
 .pos-confirm-text strong { font-weight: 600; }
 .pos-confirm-text code {
   padding: 0 3px;
-  border-radius: 3px;
+  border-radius: 6px;
   background: #fef3c7;
   font-family: Consolas, monospace;
   font-size: 10.5px;
@@ -665,7 +647,7 @@
   height: 24px;
   padding: 0 9px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 9px;
   background: #fff;
   color: var(--text);
   font-family: inherit;
@@ -702,14 +684,6 @@
    点按钮的 mousedown 落在面板上 → 面板不关、按钮也点不到。
    这里做三件事：输入框提到最上层；面板自身可滚动但不拦截空白区域；
    面板高度受视口限制，不会盖住整页。 */
-.eh-search { position: relative; z-index: 4; }
-.eh-search input { position: relative; z-index: 1; }
-.eh-results {
-  max-height: min(340px, 46vh);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.eh-empty-hit { cursor: default; }
 
 /* ---------- 16. 添加属性菜单：↑↓ 键盘导航的高亮 ---------- */
 .add-prop-item.is-active,
@@ -753,7 +727,7 @@
 }
 
 /* —— A4：选中态统一成"淡底 + 描边 + 深色字"，不再整块实心蓝 —— */
-.seg-btn { border-radius: 6px; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+.seg-btn { border-radius: 10px; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
 .seg-btn.active,
 .outline-style-btn.active,
 .grid-span-btn.active,
@@ -800,7 +774,7 @@
 }
 .bg-image-thumb {
   height: 92px;
-  border-radius: 8px;
+  border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--panel-soft) center/cover no-repeat;
   overflow: hidden;
@@ -832,7 +806,7 @@
   height: 28px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 9px;
   background: var(--bg-panel);
   color: var(--text);
   font-size: 11px;
@@ -859,7 +833,7 @@
   height: 26px;
   padding: 0 4px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 9px;
   background: var(--bg-panel);
   color: var(--text);
   font-size: 11px;
@@ -874,7 +848,7 @@
   height: 24px;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: 9px;
   background: transparent;
   color: var(--text-muted);
   font-family: inherit;
@@ -945,7 +919,7 @@
   height: 20px;
   padding: 0 6px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 9px;
   background: var(--bg-panel);
   color: var(--text-muted);
   font-family: Consolas, monospace;
@@ -966,7 +940,7 @@
   overflow-y: auto;
   padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--bg-panel);
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
 }
@@ -983,7 +957,7 @@
   width: 100%;
   padding: 5px 8px;
   border: none;
-  border-radius: 5px;
+  border-radius: 9px;
   background: transparent;
   color: var(--text);
   font-family: inherit;
@@ -1017,7 +991,7 @@
   z-index: 86;
   box-sizing: border-box;
   border: 1.5px dashed rgba(100, 116, 139, 0.8);
-  border-radius: 3px;
+  border-radius: 6px;
   background: repeating-linear-gradient(
     45deg,
     rgba(148, 163, 184, 0.14) 0 6px,
@@ -1039,7 +1013,7 @@
   z-index: 89;
   transform: translate(-50%, -50%);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 8px;
   background: rgba(220, 38, 38, 0.92);
   color: #fff;
   font-size: 9.5px;
@@ -1054,7 +1028,7 @@
   transform: translate(-50%, -50%);
   max-width: 460px;
   padding: 2px 8px;
-  border-radius: 5px;
+  border-radius: 9px;
   background: rgba(15, 23, 42, 0.86);
   color: #fff;
   font-size: 10px;
@@ -1074,7 +1048,7 @@
   height: 15px;
   margin-left: 5px;
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: 6px;
   font-size: 9.5px;
   font-weight: 600;
   vertical-align: 1px;
@@ -1108,7 +1082,7 @@
   height: 22px;
   padding: 0 8px;
   border: 1px solid #fca5a5;
-  border-radius: 5px;
+  border-radius: 9px;
   background: #fff;
   color: #b91c1c;
   font-family: inherit;
@@ -1160,7 +1134,7 @@
   height: 26px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 9px;
   background: var(--bg-panel);
   color: var(--text);
   font-size: 11px;
@@ -1190,7 +1164,7 @@
   line-height: 1.65;
   color: var(--text-muted);
   background: var(--panel-soft);
-  border-radius: 6px;
+  border-radius: 10px;
   padding: 7px 9px;
 }
 
@@ -1233,7 +1207,7 @@
   min-width: 16px;
   height: 15px;
   padding: 0 4px;
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--panel-soft);
   color: var(--text-muted);
   font-size: 10px;
@@ -1278,7 +1252,7 @@
   gap: 4px;
   padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 14px;
   background: var(--bg-panel);
   cursor: pointer;
   text-align: left;
@@ -1294,7 +1268,7 @@
   height: 26px;
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text-muted);
   font-family: inherit;
@@ -1312,20 +1286,22 @@
   .empty-home { align-items: center; padding-top: 24px; }
 }
 
-/* —— C补11：选中边框不再呼吸闪烁 ——
-   多选时每个元素都在跑 1.6s 无限动画 → 满屏橙色闪光。
-   改成静态橙色描边 + 一层很轻的固定光晕，靠"有没有描边"表达选中即可。 */
-.canvas [data-bc-sel="1"] {
+/* —— 选中边框：呼吸闪烁的"旧禁令"（v0.4.7 已按用户新要求改成分档） ——
+   v0.4.5 的原始理由还成立（多选时每个元素跑无限动画 → 满屏闪光、费 GPU），
+   所以**禁令要保留在"选中很多"的那一档上**，而不是一刀切全禁。
+   用户 v0.4.7 原话：「1~5 个元素，所有选中的元素橙色边框+闪烁，这样显眼；
+     大于5个，只显示橙色边框，防止卡顿。」
+   现在：
+     · 数量 ≤5（data-bc-seln='1'）→ 交给 43-v046-selbox.css 的 bcSelBreath；
+     · 数量 >5（data-bc-seln='0'）→ 这里继续压成静态框 + 极轻固定光晕。
+   ⚠ 别再写成无条件的 `!important` —— 那会把单选的闪烁一起掐掉（v0.4.7 的 bug）。 */
+.canvas [data-bc-sel="1"][data-bc-seln='0'] {
   animation: none !important;
   filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.5));
 }
-.canvas-inline-sel {
+.canvas-inline-sel[data-bc-seln='0'] {
   animation: none !important;
   filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.5));
-}
-@media (prefers-reduced-motion: no-preference) {
-  /* 只给"单选"一个极轻的入场提示：一次性，不循环 */
-  .canvas [data-bc-sel="1"] { animation: bcSelOnce 0.32s ease-out 1; }
 }
 @keyframes bcSelOnce {
   from { filter: drop-shadow(0 0 10px rgba(249, 115, 22, 0.9)); }
@@ -1376,14 +1352,8 @@
   from { opacity: 1; transform: none; }
   to   { opacity: 0; transform: translateY(-6px) scale(0.98); }
 }
-.eh-panel { animation: ehPanelIn 0.18s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.eh-panel.is-closing {
-  animation: ehPanelOut 0.16s cubic-bezier(0.4, 0, 1, 1) both;
-  pointer-events: none;
-}
 @media (prefers-reduced-motion: reduce) {
-  .eh-panel, .eh-panel.is-closing { animation: none; }
-}
+  }
 
 /* —— C1：左侧页签不要上下跳动 ——
    三个页签的激活态内边距不一致，切换时整行会"弹"一下。
@@ -1440,9 +1410,12 @@
 .asset-item:hover { border-color: var(--accent); transform: translateY(-1px); }
 .asset-thumb {
   display: grid;
+  /* v0.4.6：隐式行会按图片的固有高度撑开（101px 的图塞进 62px 的盒子 → 溢出 39px 被裁）。
+     显式一行 minmax(0,1fr)，行高才真的等于盒子高度，img 的 height:100% 也才对得上。 */
+  grid-template-rows: minmax(0, 1fr);
   place-items: center;
   height: 62px;
-  border-radius: 5px;
+  border-radius: 9px;
   overflow: hidden;
   background: var(--panel-soft);
 }

@@ -69,9 +69,27 @@ export function simplifyStyle(style: Record<string, string | undefined>): Record
   // border-width **保留长写** —— 不合并为 border-width shorthand（React diff 长写单向更新更安全）
   // 留给 baseStyle 与 prev key 集合一致
   // 4 边都给值时，直接保留 longhand 形式：输出 borderTopWidth 等 4 个 longhand
+  //
+  // ⚠ v0.4.7（用户报「边框设置不了，写了浏览器不显示」）：
+  //   CSS 里 `border-style` 的初始值是 **none**，而 `border-width` 只在 style 不是 none 时才画出来。
+  //   旧数据/旧控件只写了 `borderTopWidth: 2px` + 颜色 → 计算值 `border-top-width: 0px`，一片空白。
+  //   这里在"某一边有宽度但没写 style"时补 `solid`，让任何写入路径（滑杆、数值框、旧工程、
+  //   手写 store）都能真正看见边框。用户后面显式选 dashed/dotted 时用自己的值。
   {
-    const bwKeys = ['borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'];
-    for (const k of bwKeys) if (defined(style[k])) out[k] = style[k];
+    const sides = ['Top', 'Right', 'Bottom', 'Left'] as const;
+    for (const s of sides) {
+      const wKey = `border${s}Width`;
+      const sKey = `border${s}Style`;
+      if (defined(style[wKey]) && !defined(style[sKey])) out[sKey] = 'solid';
+    }
+    // 简写 `borderWidth`（四边同宽）同理：没有 `borderStyle` 就补一个
+    if (defined(style.borderWidth) && !defined(style.borderStyle)) out.borderStyle = 'solid';
+
+    for (const s of sides) {
+      const wKey = `border${s}Width`;
+      if (defined(style[wKey])) out[wKey] = style[wKey];
+    }
+    if (defined(style.borderWidth)) out.borderWidth = style.borderWidth;
   }
   simplify4(
     ['borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomRightRadius', 'borderBottomLeftRadius'],
@@ -321,6 +339,8 @@ export function collectStyleClasses(root: SceneElement, ctx: StyleClassSet): voi
 export function quickCssToCss(q: SceneGraph['quickCss'] | undefined, extra?: Record<string, string>): string {
   const bodyDecls: string[] = [];
   if (q?.bodyBg) bodyDecls.push(`background-color: ${q.bodyBg};`);
+  // 页面背景渐变 / 图片（v0.4.7）：写在 background-image 上，和纯色可以叠着用
+  if (q?.bodyBgImage) bodyDecls.push(`background-image: ${q.bodyBgImage};`);
   if (q?.textColor) bodyDecls.push(`color: ${q.textColor};`);
   if (q?.fontFamily) bodyDecls.push(`font-family: ${q.fontFamily};`);
   if (q?.bodyFontSize) bodyDecls.push(`font-size: ${q.bodyFontSize};`);

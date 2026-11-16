@@ -21,8 +21,8 @@
    这样被下方元素面板拦腰截断的（面板本身也没定位，只是恰好排在后面对不上）。
    现在：工具栏显式 --z-toolbar，面板显式 --z-sheet，浮层显式 --z-popover。
    ========================================================================== */
-.toolbar,
-.project-tab-bar,
+.app .toolbar,
+.app .project-tab-bar,
 .snapshot-bar {
   position: relative;
   z-index: var(--z-toolbar);
@@ -69,7 +69,7 @@ body.bc-alt-dragging { cursor: grabbing; }
   padding: 0;
   background: var(--bg-panel);
   border: 1px solid var(--line, var(--border));
-  border-radius: 10px;
+  border-radius: 16px;
   box-shadow: var(--shadow-2, 0 8px 28px rgba(15, 23, 42, 0.18));
   overflow: hidden;
   animation: bcPopIn 0.14s cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -117,7 +117,7 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
   width: 100%;
   padding: 5px 7px;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   background: transparent;
   text-align: left;
   cursor: pointer;
@@ -129,7 +129,7 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
   flex: 0 0 18px;
   width: 18px;
   height: 18px;
-  border-radius: 4px;
+  border-radius: 8px;
   border: 1px solid rgba(0, 0, 0, 0.14);
 }
 .bc-varmenu-glyph {
@@ -139,7 +139,7 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
   display: grid;
   place-items: center;
   font-size: 11px;
-  border-radius: 4px;
+  border-radius: 8px;
   border: 1px solid var(--line, var(--border));
   color: var(--text-3, var(--text-muted));
 }
@@ -298,7 +298,7 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
   height: 28px;
   padding: 0 10px;
   border: 1px solid var(--line, var(--border));
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--text-2, var(--text));
   font-size: 11.5px;
@@ -342,14 +342,14 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
   padding: 2px;
   margin-bottom: 8px;
   border: 1px solid var(--line, var(--border));
-  border-radius: 7px;
+  border-radius: 12px;
   background: var(--surface-sunken, var(--panel-soft));
 }
 .media-path-mode {
   height: 23px;
   padding: 0 10px;
   border: none;
-  border-radius: 5px;
+  border-radius: 9px;
   background: transparent;
   color: var(--text-3, var(--text-muted));
   font-size: 11.5px;
@@ -392,7 +392,7 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
   align-items: flex-start;
   margin: 6px 0 2px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: 10px;
   background: var(--surface-2, var(--panel-soft));
   font-size: 10.5px;
   line-height: 1.6;
@@ -425,7 +425,7 @@ html[data-bc-dark] .bc-varmenu-kind.k-shadow { color: #c4b5fd; border-color: #4c
   min-width: 220px;
   min-height: 54px;
   border: 1px dashed var(--line-strong, #94a3b8);
-  border-radius: 8px;
+  border-radius: 14px;
   background:
     repeating-linear-gradient(45deg,
       var(--surface-sunken, #f1f5f9) 0 8px,

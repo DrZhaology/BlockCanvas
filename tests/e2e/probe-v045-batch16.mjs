@@ -22,6 +22,19 @@ async function main() {
   // ==========================================================================
   // A. 静态：样式与源码层面的约定
   // ==========================================================================
+  /**
+   * v0.4.6（R6-3）：多了第三个"全目录"版本。
+   *
+   * 以前这几条断言硬编码"规则在 29-v045-perf.css 里" —— 而 R6-3 把 .eh-* 规则
+   * 搬回了空首页域（26-empty-home.css），断言立刻误报。
+   * 原则：**断言"这条规则存在"，不断言"它在哪个文件"** —— 文件位置是内部组织，
+   * 会随重构变化；规则本身才是对外承诺。
+   */
+  const { readdirSync } = await import('node:fs');
+  const allCss = readdirSync(resolve(ROOT, 'src/renderer/styles'))
+    .filter((f) => f.endsWith('.css'))
+    .map((f) => readFileSync(resolve(ROOT, 'src/renderer/styles', f), 'utf8'))
+    .join('\n');
   const css29 = readFileSync(resolve(ROOT, 'src/renderer/styles/29-v045-perf.css'), 'utf8');
   const css10 = readFileSync(resolve(ROOT, 'src/renderer/styles/10-settings-projects.css'), 'utf8');
   const css28 = readFileSync(resolve(ROOT, 'src/renderer/styles/28-v045-zindex.css'), 'utf8');
@@ -33,7 +46,7 @@ async function main() {
   check('元素面板包装层带切换动画（bcSwapIn）',
     /\.element-panel > \.elem-tab-anim\s*\{[^}]*animation:\s*bcSwapIn/.test(css29), 'ok');
   check('首页「页面设置」板块也有切换动画',
-    /\.eh-panel-tabbody\s*\{[^}]*animation:\s*bcSwapIn/.test(css29), 'ok');
+    /\.eh-panel-tabbody\s*\{[^}]*animation:\s*bcSwapIn/.test(allCss), '规则存在即可（不绑定文件）');
 
   // 关闭动画：入场动画带 both 填充，退场必须显式 animation: none，否则 opacity 被动画终态盖住
   check('快照抽屉关闭时会真正播退场（animation: none 解除 both 填充）',

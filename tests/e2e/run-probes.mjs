@@ -47,6 +47,7 @@ const PROBES = [
   'probe-projectfile',
   'probe-update',
   'probe-uiaudit',
+  'probe-icons',
   'probe-v045b-cards',
   'probe-v045-tokens',
   'probe-v045-position',
@@ -78,6 +79,39 @@ const PROBES = [
   'probe-v045-batch16',
   'probe-v045-batch16b',
   'probe-input-focus',
+  // v0.4.6 新增：结构重构（R6-1/2/6）+ 三个功能修复（R6-16/17/18）
+  'probe-arch',
+  'probe-fixed-airwall',
+  'probe-sticky',
+  'probe-codec',
+  'probe-plugin-perms',
+  'probe-shell-narrow',
+  // v0.4.6 外壳方向翻转：六档宽度扫描（360/500/700/898/902/1280），
+  // 每档断言"不横向溢出 / 画布不塌 / 网格形态正确" —— 这是"C 加宽屏功能别再崩窄屏"的网
+  'probe-shell-widths',
+  // v0.4.6 竖屏输入可用性：属性面板数值框 / 画布元素 / 浮层是否盖住输入
+  'probe-portrait-input',
+  // v0.4.6 竖屏画布手势：长按选中 / 长按加选 / 单指平移 / 双指缩放 / 空白滑动不选中
+  'probe-touch-canvas',
+  // v0.4.6 竖屏底部两条操作栏：折叠单行 / 长按上滑展开 / 下滑折叠 / 入口菜单层级
+  'probe-portrait-bars',
+  // v0.4.6 关闭标签的保存确认（保存并关闭 / 不保存 / 取消）
+  'probe-tab-close-guard',
+  // v0.4.6 会话缩略图保真度：iframe 里必须有"有底色/边框且有尺寸"的 div，
+  // 且设计变量（scene.tokens）要解析出来（曾经因为只传 root，缩略图里只剩文字）
+  'probe-session-thumb',
+  // v0.4.6 绗?47 鎵癸細灞炴€у崱鐗囪繘閫€鍦哄姩鐢?+ 鏍峰紡缁熶竴 + 浣撴鐨勫叧绯婚€夋嫨鍣ㄨ鍒?
+  'probe-prop-card-anim',
+  // v0.4.6 绗?47 鎵癸細瀹氫綅鍔╂墜鍦?relative / sticky 涓嬪亸绉婚噺蹇呴』鐪嬪緱瑙?
+  'probe-pos-helper',
+  // 图片插入链路：空图有盒子但不锁比例 / 有图按真实比例 / 只写 border-width 也看得见
+  'probe-img-border',
+  // 属性卡片「删不掉」：断点层（tablet/mobile）残留 + border 长写残留
+  'probe-prop-delete',
+  // v0.4.6 Web 版（R6-12/13/14）：需要先 `pnpm build:web` 产出 dist-web/index.html
+  'probe-web',
+  // v0.4.6 R6-3：CSS 域约束（主域登记 / 前缀归位 / 重复不超基线）
+  'probe-css-domains',
   'probe-ui-overflow'
 ];
 

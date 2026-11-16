@@ -1,0 +1,56 @@
+// BlockCanvas · 属性面板共享常量与小工具
+//
+// 这几样原来散在 Inspector.tsx 里（有的在文件顶部、有的夹在组件之间），
+// 拆分后两边都要用，集中放这里。
+
+/**
+ * 「快捷助手属性是否显示到下方 CSS 列表」的全局开关 key。
+ *
+ * v0.4.4：改为**全局统一**（所有元素共用一份，不再按元素/选择器单独记忆），
+ * 「设置 → 编辑器与画布」里是同一个开关，两边通过事件即时同步。
+ */
+export const HELPER_IN_CSS_KEY = 'bc-helper-in-css-global';
+
+/** 属性行删除动画时长（ms）——与 CSS 里的 .prop-row 退场动画同值 */
+export const PROP_REMOVE_MS = 340;
+
+/**
+ * 上一次"点 × 删除属性"的时间。
+ *
+ * 用途：删除有两种来源 —— ① 点行上的 ×（animateRemove 已经给那一行挂了 is-removing，
+ * 自己会播退场）；② Ctrl+Z / Ctrl+Y 或别的入口让某一行从列表里"凭空消失"
+ * （React 直接卸载，没有任何动画机会）。
+ * 第二种要由 CssPropsSection 补一个"幽灵行"来播同一段退场动画；为了避免第一种被补两次，
+ * 这里记一个时间戳，幽灵逻辑发现刚刚点过 × 就直接跳过。
+ */
+let lastRemoveAt = 0;
+export function propRemovalInFlight(): boolean {
+  return Date.now() - lastRemoveAt < PROP_REMOVE_MS + 120;
+}
+
+/**
+ * 播完退场动画再真正移除（元素可能不存在，静默跳过）。
+ *
+ * ⚠ v0.4.7 修的真 bug：以前调用方一律传 `e.currentTarget`，而**那是那颗 × 按钮**
+ *   而不是整张卡片 —— `.is-removing` 被挂在一个 18×18 的透明按钮上，
+ *   卡片本身一根毫毛都没动。用户原话：「为什么我手动点删除反而没有动画」。
+ *
+ * 现在这里自己往上找最近的 `.prop-row` / `.prop-card`：
+ *   · 找到卡片 → 标记卡片（卡片播 propCardOut：整张缩小 + 起阴影 + 右滑）；
+ *   · 找不到 → 用传入的元素兜底（页面里的独立按钮之类）。
+ *   调用方不需要再关心"该传谁"。
+ */
+export function animateRemove(el: Element | null, done: () => void): void {
+  lastRemoveAt = Date.now();
+  const card = (el?.closest?.('.prop-row, .prop-card') ?? null) as HTMLElement | null;
+  const target = card ?? (el as HTMLElement | null);
+  if (!target) { done(); return; }
+  target.classList.add('is-removing');
+  window.setTimeout(done, PROP_REMOVE_MS);
+}
+
+// ============ 命名转换（v0.4.7：PageCssBody 与 PageCards 都要用） ============
+/** 驼峰 CSS key → kebab 短横（bodyExtra 里存的是 kebab 名） */
+export const camelToKebab = (k: string) => k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+/** kebab → 驼峰（查 SCHEMA 需要驼峰 key） */
+export const kebabToCamel = (k: string) => k.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());

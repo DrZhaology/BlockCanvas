@@ -3,7 +3,7 @@
 import { createRequire } from 'module';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
-import { mkdirSync, rmSync, cpSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, rmSync, cpSync, existsSync, readFileSync, readdirSync } from 'fs';
 import { ensureEditor } from './ensure-editor.mjs';
 
 const require = createRequire(import.meta.url);
@@ -23,11 +23,39 @@ async function main() {
   // A. 静态：源码/CSS 层面的约定
   // ==========================================================================
   const updater = readFileSync(resolve(ROOT, 'src/main/updater.ts'), 'utf8');
-  const canvas = readFileSync(resolve(ROOT, 'src/renderer/components/Canvas.tsx'), 'utf8');
+  /**
+   * v0.4.6（R6-1）：画布拆成了 components/Canvas.tsx + components/canvas/*。
+   * 这里要断言的是"这些行为还在"，不是"它们还在某个文件里" —— 所以把两处拼起来匹配，
+   * 将来再拆细也不会让断言误报。
+   */
+  const canvasDir = resolve(ROOT, 'src/renderer/components/canvas');
+  const canvas = [
+    readFileSync(resolve(ROOT, 'src/renderer/components/Canvas.tsx'), 'utf8'),
+    ...(existsSync(canvasDir)
+      ? readdirSync(canvasDir).filter((f) => /\.tsx?$/.test(f)).sort()
+        .map((f) => readFileSync(resolve(canvasDir, f), 'utf8'))
+      : [])
+  ].join('\n');
   const css29 = readFileSync(resolve(ROOT, 'src/renderer/styles/29-v045-perf.css'), 'utf8');
   const css27 = readFileSync(resolve(ROOT, 'src/renderer/styles/27-v045-ui.css'), 'utf8');
   const layer = readFileSync(resolve(ROOT, 'src/renderer/components/LayerTree.tsx'), 'utf8');
-  const inspector = readFileSync(resolve(ROOT, 'src/renderer/components/Inspector.tsx'), 'utf8');
+  /**
+   * v0.4.6（R6-2）：属性面板拆成了 Inspector.tsx（外壳）+ inspector/{ElementPropsBody,PageCssBody,
+   * sections/*,rows/*}。断言只关心"这些实现在不在"，所以整目录拼起来匹配。
+   */
+  const inspectorDir = resolve(ROOT, 'src/renderer/components/inspector');
+  const inspector = [
+    readFileSync(resolve(ROOT, 'src/renderer/components/Inspector.tsx'), 'utf8'),
+    ...(existsSync(inspectorDir)
+      ? (function walk(dir) {
+        return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+          const p = resolve(dir, e.name);
+          if (e.isDirectory()) return walk(p);
+          return /\.tsx?$/.test(e.name) ? [readFileSync(p, 'utf8')] : [];
+        });
+      })(inspectorDir)
+      : [])
+  ].join('\n');
 
   // —— 更新器 ——
   check('更新器：改名目标收敛成固定 BlockCanvas（不再带版本号）',
@@ -65,22 +93,28 @@ async function main() {
   const inspectorCode = stripComments(inspector);
   const layerCode = stripComments(layer);
   const quickCode = stripComments(readFileSync(resolve(ROOT, 'src/renderer/components/QuickHelper.tsx'), 'utf8'));
-  check('定位偏移界面只暴露"两根轴各一边"（不再四边都给）',
-    /pos-axis/.test(css27) && /\.pos-axis-seg/.test(css27)
-    && /anchorX/.test(quickCode) && /setAnchorX/.test(quickCode), 'ok');
-  check('切换定位方式时会先问"要不要清 margin"',
-    /posSwitchAsk/.test(quickCode) && /清掉 margin 再切换/.test(quickCode), 'ok');
+  check('定位偏移界面改成"四边复选框解锁"（最多一条 X + 一条 Y）',
+    /OFFSET_SIDES/.test(quickCode) && /toggleSide/.test(quickCode) && /pickCorner/.test(quickCode)
+    && /pos-line-check/.test(quickCode), 'ok');
+  check('切换定位方式统一走全屏模态（三选项，第三个绿色推荐）',
+    /askPositionSwitch/.test(quickCode)
+    && /is-recommend/.test(readFileSync(resolve(ROOT, 'src/renderer/styles/34-v046-visual.css'), 'utf8'))
+    && /清除外边距并切换/.test(readFileSync(resolve(ROOT, 'src/renderer/lib/posSwitch.tsx'), 'utf8')), 'ok');
+  check('CSS 属性行里直接改 position 也走同一个模态（做统一）',
+    /askPositionSwitch/.test(stripComments(readFileSync(resolve(ROOT, 'src/renderer/components/inspector/rows/PropertyRow.tsx'), 'utf8'))),
+    'ok');
   check('绝对/固定定位的负偏移被钳到 0（relative/sticky 不受影响）',
     /const clampOffsets = posAfter === 'absolute' \|\| posAfter === 'fixed'/.test(
       readFileSync(resolve(ROOT, 'src/renderer/store/sceneStore.ts'), 'utf8')
     ), 'ok');
 
-  // —— 幽灵卡片 ——
+  // —— 幽灵卡片（v0.4.6 改版） ——
   check('旧「占位说明型」幽灵卡片已删除',
     !/prop-ghost-card/.test(css29) && !/prop-ghost-card/.test(inspector), 'ok');
-  check('新增 position「幽灵卡片」（中键搜 position 时临时出现）',
-    /PositionGhostCard/.test(inspector) && /POS_KEYS\.has\(key\)/.test(inspector)
-    && existsSync(resolve(ROOT, 'src/renderer/components/PositionGhostCard.tsx')), 'ok');
+  check('定位临时卡已并入通用「幽灵属性卡片」',
+    /GhostPropCard/.test(inspector)
+    && existsSync(resolve(ROOT, 'src/renderer/components/GhostPropCard.tsx'))
+    && !existsSync(resolve(ROOT, 'src/renderer/components/PositionGhostCard.tsx')), 'ok');
 
   // —— 图层 & 字体 ——
   // ⚠ "行的中线对齐容器中线" 这句话在注释里，stripComments 会把它删掉 →
@@ -145,7 +179,23 @@ async function main() {
   check('relative 的负偏移保留（位移量，负数合法）',
     clamp.rel.left === '-40px' && clamp.rel.top === '-25px', JSON.stringify(clamp.rel));
 
-  // —— position 幽灵卡片：中键搜 position → Enter → 右侧出现临时卡片 ——
+  // —— 临时卡片（幽灵属性卡片）：开关关着 + 属性由快捷助手代管 → 中键搜索时临时出一张 ——
+  //
+  // ⚠ v0.4.6 契约（用户原话）：
+  //   「临时卡片只有搜索快捷助手哪些 CSS 属性不在下方显示的元素有…现在所有的元素都会产生临时卡片」
+  //   判据只有一条：**这条属性此刻会不会出现在下方「CSS 样式属性」列表里？**
+  //     会出现 → 只展开+闪烁那一行，不出卡片；
+  //     不会出现 → 才出临时卡片。
+  //   "不会出现"的典型就是「快捷助手代管 + 显示到下方 CSS 属性开关关着」那几条
+  //   （display / gap / 背景渐变…，见 QuickHelper.tsx 的 HELPER_MANAGED_KEYS）。
+  //
+  //   为什么不再用 position 验：position 不在 HELPER_MANAGED_KEYS 里，下方列表本来就有它的行，
+  //   Ctrl+Enter（添加并定位）会把它加进列表 → 按新契约**不应该**再出卡片。
+  //   旧断言拿 position 测"开关关闭时出卡片"，是过期契约（会误报产品有 bug）。
+  const helperOff = await win.evaluate(() =>
+    !document.querySelector('.inspector [data-prop-key="display"]'));
+  check('准备：快捷助手代管的 display 不在下方列表里（开关关着）', helperOff === true, String(helperOff));
+
   await win.evaluate(() => {
     const el = document.querySelector('.canvas [data-bc-id]');
     const r = el.getBoundingClientRect();
@@ -173,7 +223,7 @@ async function main() {
     const ghost = await win.evaluate(async () => {
       const input = document.querySelector('.bc-prop-search-input');
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(input, 'position');
+      setter?.call(input, 'display');
       input.dispatchEvent(new Event('input', { bubbles: true }));
       await new Promise((r) => setTimeout(r, 400));
       const first = document.querySelector('.bc-prop-search-item');
@@ -184,60 +234,62 @@ async function main() {
         key: 'Enter', ctrlKey: !added, bubbles: true, cancelable: true
       }));
       await new Promise((r) => setTimeout(r, 700));
-      const card = document.querySelector('[data-bc-pos-ghost="1"]');
+      const card = document.querySelector('[data-bc-ghost-card="1"]');
       return {
         firstKey,
         added,
         closed: !document.querySelector('.bc-prop-search'),
         cardShown: !!card,
-        modes: [...(card?.querySelectorAll('.pos-ghost-mode') || [])].map((b) => (b.textContent || '').trim()),
-        axes: [...(card?.querySelectorAll('.pos-axis') || [])].length
+        hasDisplayRow: !!card?.querySelector('[data-prop-key="display"]'),
+        options: [...(card?.querySelectorAll('[data-prop-key="display"] select option') || [])]
+          .map((o) => (o.textContent || '').trim()),
+        // 卡片里不许出现"关闭 / ×"这类手动管理入口（用户明确要求删掉）
+        closeBtns: card ? card.querySelectorAll('.ghost-prop-card-head button, [title*="关闭"]').length : 0
       };
     });
-    check('搜 position 命中第一条就是 position', ghost.firstKey === 'position', ghost.firstKey);
+    check('搜 display 命中第一条就是 display', ghost.firstKey === 'display', ghost.firstKey);
     check('Enter / Ctrl+Enter 后搜索框关闭', ghost.closed === true, String(ghost.closed));
-    check('右侧出现 position「幽灵卡片」（临时定位卡）', ghost.cardShown === true, String(ghost.cardShown));
-    check('幽灵卡片给出 5 种定位方式', ghost.modes.length === 5, ghost.modes.join(' / '));
-    check('幽灵卡片只给两根轴（不是四边）', ghost.axes === 2, `axes=${ghost.axes}`);
+    check('开关关闭时：出现通用「幽灵属性卡片」', ghost.cardShown === true, String(ghost.cardShown));
+    check('卡片里就是 display 这条属性（可直接改）', ghost.hasDisplayRow === true, String(ghost.hasDisplayRow));
+    // display 的候选：block / inline / inline-block / flex / inline-flex / grid / inline-grid / none
+    const DISP = ['block', 'flex', 'grid', 'none'];
+    check('display 下拉给出全部显示方式',
+      DISP.every((p) => ghost.options.some((o) => o.includes(p))), ghost.options.join(' / '));
+    check('幽灵卡片没有关闭按钮（用户要求删掉 ×）', ghost.closeBtns === 0, String(ghost.closeBtns));
 
-    // 切换定位方式 → 有 margin 时应弹"要不要清 margin"
-    const ask = await win.evaluate(async () => {
-      const id = window.__sceneStore.getState().scene.selectedId;
-      window.__sceneStore.getState().updateStyle(id, { marginTop: '20px', marginLeft: '12px' });
-      await new Promise((r) => setTimeout(r, 300));
-      const btn = [...document.querySelectorAll('.pos-ghost-mode')].find((b) => /绝对/.test(b.textContent || ''));
-      btn?.click();
-      await new Promise((r) => setTimeout(r, 400));
-      const confirm = document.querySelector('.pos-ghost .pos-confirm');
-      return {
-        asked: !!confirm,
-        text: (confirm?.textContent || '').replace(/\s+/g, ' ').slice(0, 50),
-        buttons: [...(confirm?.querySelectorAll('button') || [])].map((b) => (b.textContent || '').trim())
-      };
-    });
-    check('切换定位方式时提示"要不要清除 margin"',
-      ask.asked === true && ask.buttons.some((b) => /清掉 margin/.test(b)),
-      JSON.stringify(ask.buttons));
-
-    // 点"清掉 margin" → margin 归零、定位生效
-    const cleared = await win.evaluate(async () => {
-      const btn = [...document.querySelectorAll('.pos-ghost .pos-confirm button')].find((b) => /清掉 margin/.test(b.textContent || ''));
-      btn?.click();
+    // 在卡片里把 display 改成 grid → store 里生效
+    const changed = await win.evaluate(async () => {
+      const sel = document.querySelector('[data-bc-ghost-card="1"] [data-prop-key="display"] select');
+      if (sel) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+        setter?.call(sel, 'grid');
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      }
       await new Promise((r) => setTimeout(r, 500));
       const id = window.__sceneStore.getState().scene.selectedId;
       const bp = window.__sceneStore.getState().activeBreakpoint;
       const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === id);
-      const m = { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) };
-      return m;
+      return { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) };
     });
-    check('点「清掉 margin」后 margin 归零、position 变成 absolute',
-      String(cleared.marginTop) === '0px' && String(cleared.marginLeft) === '0px' && cleared.position === 'absolute',
-      JSON.stringify({ pos: cleared.position, mt: cleared.marginTop, ml: cleared.marginLeft }));
-    check('同一根轴只留一边（另一边是 auto）',
-      (cleared.left === 'auto' || cleared.left === undefined || cleared.right === 'auto' || cleared.right === undefined)
-      && (cleared.top === 'auto' || cleared.top === undefined || cleared.bottom === 'auto' || cleared.bottom === undefined),
-      JSON.stringify({ left: cleared.left, right: cleared.right, top: cleared.top, bottom: cleared.bottom }));
+    check('在卡片里改显示方式立即生效（display=grid）',
+      changed.display === 'grid', JSON.stringify({ display: changed.display }));
   }
+
+  // —— 同一根轴只留一边（直接走 store，不再依赖卡片）——
+  const axis = await win.evaluate(async () => {
+    const st = window.__sceneStore.getState();
+    const id = st.scene.selectedId;
+    st.updateStyle(id, { position: 'absolute', left: '-40px', top: '-25px' });
+    await new Promise((r) => setTimeout(r, 300));
+    const bp = window.__sceneStore.getState().activeBreakpoint;
+    const n = window.__sceneStore.getState().scene.root.children.find((c) => c.id === id);
+    const s = { ...(n.style || {}), ...((bp !== 'desktop' && n.responsive && n.responsive[bp]) || {}) };
+    return { left: s.left, right: s.right, top: s.top, bottom: s.bottom };
+  });
+  check('同一根轴只留一边（另一边是 auto）',
+    (axis.left === 'auto' || axis.left === undefined || axis.right === 'auto' || axis.right === undefined)
+    && (axis.top === 'auto' || axis.top === undefined || axis.bottom === 'auto' || axis.bottom === undefined),
+    JSON.stringify(axis));
 
   // —— Alt + 滚轮：精准微调，且不弹盒模型 ——
   // 诊断：此时应用到底处于什么状态（画布/场景/视图）

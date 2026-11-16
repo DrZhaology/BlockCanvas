@@ -37,8 +37,8 @@ importers:
         specifier: ^4.3.4
         version: 4.3.4(supports-color@7.1.0)(vite@6.4.3(@types/node@22.20.1)(jiti@2.7.0))
       electron:
-        specifier: ^33.2.0
-        version: 33.2.0(supports-color@7.1.0)
+        specifier: ^38.1.1
+        version: 38.1.1(supports-color@7.1.0)
       electron-builder:
         specifier: ^26.15.3
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)(supports-color@7.1.0)
@@ -54,6 +54,9 @@ importers:
       vite:
         specifier: ^6.0.3
         version: 6.4.3(@types/node@22.20.1)(jiti@2.7.0)
+      vite-plugin-singlefile:
+        specifier: ^2.3.4
+        version: 2.3.4(rollup@4.62.4)(vite@6.4.3(@types/node@22.20.1)(jiti@2.7.0))
 
 packages:
 
@@ -710,9 +713,6 @@ packages:
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
 
-  '@types/node@20.19.43':
-    resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
-
   '@types/node@22.20.1':
     resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
 
@@ -1028,8 +1028,8 @@ packages:
     resolution: {integrity: sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==}
     engines: {node: '>=8.0.0'}
 
-  electron@33.2.0:
-    resolution: {integrity: sha512-PVw1ICAQDPsnnsmpNFX/b1i/49h67pbSPxuIENd9K9WpGO1tsRaQt+K2bmXqTuoMJsbzIc75Ce8zqtuwBPqawA==}
+  electron@38.1.1:
+    resolution: {integrity: sha512-LTFGxXpbIdU07AwSHLoVYVLbZHDiauT1KgTX1fgCPgPDoQIAGnYft/ABx6PkA+9ulQfBEEqg0mYTWaoReHG8Ag==}
     engines: {node: '>= 12.20.55'}
     hasBin: true
 
@@ -1478,6 +1478,10 @@ packages:
     resolution: {integrity: sha512-RvwwcruNjI1ncT5xRakeyS9Lf8lcItv34KD+aif+VH9kduAyfYBipGh12274xtenIPZ119/R9BdTBa8gAwSh0A==}
     engines: {node: '>=12'}
 
+  picomatch@4.0.7:
+    resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
+    engines: {node: '>=12'}
+
   pkijs@3.4.0:
     resolution: {integrity: sha512-emEcLuomt2j03vxD54giVB4SxTjnsqkU692xZOZXHDVoYyypEm+b3jpiTcc+Cf+myooc+/Ly0z01jqeNHVgJGw==}
     engines: {node: '>=16.0.0'}
@@ -1615,10 +1619,6 @@ packages:
 
   semver@5.5.0:
     resolution: {integrity: sha512-4SJ3dm0WAwWy/NVeioZh5AntkdJoWKxHxcmyP622fOkgHa4z3R0TdBJICINyaSDE6uNwVc8gZr+ZinwZAH4xIA==}
-    hasBin: true
-
-  semver@6.2.0:
-    resolution: {integrity: sha512-jdFC1VdUGT/2Scgbimf7FSx9iJLXoqfglSF+gJeuNWVpiE37OIbc1jywR/GJyFdz3mnkz2/id0L0J/cr0izR5A==}
     hasBin: true
 
   semver@6.3.1:
@@ -1764,6 +1764,16 @@ packages:
 
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
+
+  vite-plugin-singlefile@2.3.4:
+    resolution: {integrity: sha512-1FAhlTCL6KJDpSUudrVU+gspapvS+tmKCg70vwNaAU6tyXn3E/C6+NnwQIze06byhBRv7VggZ78K0h+J/Rsdrg==}
+    engines: {node: '>18.0.0'}
+    peerDependencies:
+      rollup: ^4.59.0
+      vite: ^5.4.21 || ^6.0.0 || ^7.0.0 || ^8.0.0
+    peerDependenciesMeta:
+      rollup:
+        optional: true
 
   vite@6.4.3:
     resolution: {integrity: sha512-NTKlcQjlAK7MlQoyb6LgaqHc8sso/pVyUJYWMws3jg21uTJw/LddqIFPcPqP6PzpgbIcZyKI85sFE4HBrQDA8A==}
@@ -2019,7 +2029,7 @@ snapshots:
       fs-extra: 8.1.0
       got: 11.8.5
       progress: 2.0.3
-      semver: 6.2.0
+      semver: 6.3.1
       sumchecker: 3.0.1(supports-color@7.1.0)
     optionalDependencies:
       global-agent: 3.0.0
@@ -2416,10 +2426,6 @@ snapshots:
       '@types/node': 22.20.1
 
   '@types/ms@2.1.0': {}
-
-  '@types/node@20.19.43':
-    dependencies:
-      undici-types: 6.21.0
 
   '@types/node@22.20.1':
     dependencies:
@@ -2826,10 +2832,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@33.2.0(supports-color@7.1.0):
+  electron@38.1.1(supports-color@7.1.0):
     dependencies:
       '@electron/get': 3.1.0(supports-color@7.1.0)
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
       extract-zip: 2.0.1(supports-color@7.1.0)
     transitivePeerDependencies:
       - supports-color
@@ -3309,6 +3315,8 @@ snapshots:
 
   picomatch@4.0.5: {}
 
+  picomatch@4.0.7: {}
+
   pkijs@3.4.0:
     dependencies:
       '@noble/hashes': 1.4.0
@@ -3486,8 +3494,6 @@ snapshots:
 
   semver@5.5.0: {}
 
-  semver@6.2.0: {}
-
   semver@6.3.1: {}
 
   semver@7.7.4: {}
@@ -3620,6 +3626,13 @@ snapshots:
   utf8-byte-length@1.0.5: {}
 
   util-deprecate@1.0.2: {}
+
+  vite-plugin-singlefile@2.3.4(rollup@4.62.4)(vite@6.4.3(@types/node@22.20.1)(jiti@2.7.0)):
+    dependencies:
+      picomatch: 4.0.7
+      vite: 6.4.3(@types/node@22.20.1)(jiti@2.7.0)
+    optionalDependencies:
+      rollup: 4.62.4
 
   vite@6.4.3(@types/node@22.20.1)(jiti@2.7.0):
     dependencies:

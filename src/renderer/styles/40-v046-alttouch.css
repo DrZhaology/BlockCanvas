@@ -1,0 +1,147 @@
+/* ============================================================================
+   v0.4.6 第 46 批 · 竖屏 Alt 模式的触摸手柄层（components/canvas/AltTouchHandles.tsx）
+   ----------------------------------------------------------------------------
+   用户原话：
+     「选中后，元素中间出现一个 svg（上下左右都是箭头），按住这个 svg 就可以改变
+       这个元素在画布上的位置。」
+     「4 个角出现 4 个方框，按住这个方框（不只是这个方框，方框外面的一部分区域也能按倒，
+       因为手指很大），就可以调整元素的宽度和高度。」
+     「4 条边也可以按住调整。」
+
+   规矩：
+     · 容器 `pointer-events: none`，只有手柄 `auto` —— 否则整块画布都别想点了；
+     · **视觉尺寸 ≠ 命中尺寸**：角视觉 20px / 命中 44px，边视觉 6px / 命中 26px（"手指很大"）；
+     · 全部 `touch-action: none` —— 手柄上的手指不要再触发浏览器滚动/缩放；
+     · 层级 41 = 和"选中 fixed 时的红框"同一档：盖住画布，但压在底部两条操作栏下面。
+   ========================================================================== */
+
+.bc-alttouch {
+  position: fixed;
+  z-index: 41;
+  pointer-events: none;
+  /* 手柄在拖动时不应该有自己的过渡（1:1 跟手） */
+  touch-action: none;
+}
+
+/* 元素边界：1.5px 实线，拖动时变虚线（"正在改"的提示，不抢注意力） */
+.bc-alttouch-box {
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid var(--accent, #3884ff);
+  border-radius: 4px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+}
+.bc-alttouch.is-dragging .bc-alttouch-box { border-style: dashed; }
+
+/* ── 中间：按住移动（52px 圆钮，够大拇指按住又不挡内容） ─────────────────── */
+.bc-alttouch-move {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent, #3884ff);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(20, 40, 80, 0.28);
+  pointer-events: auto;
+  touch-action: none;
+  cursor: move;
+  /* 轻微呼吸：让人看得出"这个是能按的"（减少动态效果时会关掉） */
+  animation: altHandlePulse 2.4s ease-in-out infinite;
+}
+.bc-alttouch.is-dragging .bc-alttouch-move { animation: none; transform: scale(0.96); }
+@keyframes altHandlePulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(20, 40, 80, 0.28); }
+  50% { box-shadow: 0 4px 18px rgba(56, 132, 255, 0.55); }
+}
+
+/* ── 4 角：视觉小方块 + 外扩命中区 ───────────────────────────────────────── */
+.bc-alttouch-corner {
+  position: absolute;
+  width: var(--vis, 20px);
+  height: var(--vis, 20px);
+  margin: calc(var(--vis, 20px) / -2) 0 0 calc(var(--vis, 20px) / -2);
+  background: #fff;
+  border: 1.5px solid var(--accent, #3884ff);
+  border-radius: 3px;
+  box-shadow: 0 1px 4px rgba(20, 40, 80, 0.22);
+  pointer-events: auto;
+  touch-action: none;
+  cursor: nwse-resize;
+}
+/* 命中区：44×44（手指直径），不影响视觉 */
+.bc-alttouch-corner::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--hit, 44px);
+  height: var(--hit, 44px);
+  transform: translate(-50%, -50%);
+}
+
+/* ── 4 边：细条 + 外扩命中区 ─────────────────────────────────────────────── */
+.bc-alttouch-edge {
+  position: absolute;
+  background: var(--accent, #3884ff);
+  border-radius: 3px;
+  opacity: 0.9;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  touch-action: none;
+}
+.bc-alttouch-edge::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(100% + 18px);
+  height: calc(var(--hit, 26px));
+  transform: translate(-50%, -50%);
+}
+.bc-alttouch-edge[data-edge='l']::after,
+.bc-alttouch-edge[data-edge='r']::after {
+  width: var(--hit, 26px);
+  height: calc(100% + 18px);
+}
+
+/* 系统"减少动态效果"：去掉呼吸灯 */
+@media (prefers-reduced-motion: reduce) {
+  .bc-alttouch-move { animation: none; }
+}
+
+/* 触摸拖动期间藏掉桌面那枚"模式 + 尺寸"气泡（bc-alt-badge）：
+   手指按在元素中间时，气泡正好盖在中间那颗移动柄上，等于把唯一的操作点糊住了。 */
+body.bc-alttouch-drag .bc-alt-badge { display: none; }
+
+/* ── 触摸档位要藏 / 要留什么 ────────────────────────────────────────────────
+   用户原话（第 47 批）：
+     「这个 Alt 模式做的非常的好！但是我还是希望能像电脑端显示 margin 和
+       top right bottom left 这些数值，电脑端有相关的代码你可以看一下。」
+   → 所以 **F12 式盒模型（.bc-boxm）必须留**，那是唯一显示这些数值的地方。
+
+   要藏的是另外两层：它们都画在**指针/手指位置**，正好把中间那颗移动柄糊住 ——
+     · .bc-alt-box   橙色悬停框（手柄层自己有蓝色框，两层框会互相盖）
+     · .bc-alt-badge "常规流 260×150" 尺寸气泡
+   上一版把 .bc-boxm 也一起 display:none 了，等于把用户要的数值全关掉（已修）。 */
+body.bc-alttouch-on .bc-alt-box,
+body.bc-alttouch-on .bc-alt-badge { display: none; }
+
+/* 盒模型的"定位方式 + 尺寸"标签挪到元素左上角外侧：正中是移动柄的位置 */
+body.bc-alttouch-on .bc-boxm-pos.is-touch {
+  transform: translate(0, -100%);
+  border-radius: 8px;
+}
+
+/* margin / padding 的数值标签是**贴着元素边缘居中**画的：
+   手指按住 4 角或 4 边时，46px 的手指正好压在这些数字上（看不见，也不影响操作，
+   但"想看一眼数值"的时机恰恰就是拖动时）。
+   所以触摸档位把它们统一挪到盒子外侧 1~2px 处（不影响命中，只是让开视觉）。 */
+body.bc-alttouch-on .bc-boxm-num,
+body.bc-alttouch-on .bc-boxm-inset { pointer-events: none; }
