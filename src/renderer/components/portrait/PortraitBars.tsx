@@ -247,6 +247,8 @@ export type PortraitBar2Props = {
   setCanvasWidth: (v: string) => void;
   /** 第三层「情境栏」要显示的按钮，由 App 按当前状态算好传进来；不传 = 一个都不显示 */
   ctxActions?: PortraitContextAction[];
+  /** 正在退场（离开编辑器）：从下方滑出，播完由 App 卸载 */
+  leaving?: boolean;
 };
 
 /** 默认值必须是模块级常量：写成解构默认的 `= []` 每次渲染都是新数组，
@@ -267,10 +269,10 @@ const NO_CTX_ACTIONS: PortraitContextAction[] = [];
  * 逻辑一份不动 —— 按钮清单由 Toolbar 自己维护。
  */
 export function PortraitBar2(props: PortraitBar2Props) {
-  const { zoom, setZoom, canvasWidth, setCanvasWidth, ctxActions = NO_CTX_ACTIONS } = props;
+  const { zoom, setZoom, canvasWidth, setCanvasWidth, ctxActions = NO_CTX_ACTIONS, leaving = false } = props;
 
   return (
-    <div className="pt-bar pt-bar2" role="toolbar" aria-label="工具栏（可左右滑动）">
+    <div className={'pt-bar pt-bar2' + (leaving ? ' is-leaving' : '')} role="toolbar" aria-label="工具栏（可左右滑动）">
       {/* 第三层「情境栏」：在工具栏**上面**，没按钮时高度 0（不占位、不可见） */}
       <PortraitContextBar actions={ctxActions} />
       <div className="pt-bar2-inner">

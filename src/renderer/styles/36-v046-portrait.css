@@ -897,12 +897,40 @@
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.app[data-shell='stack'] .fluent-settings-page,
+/**
+ * v0.4.6 第 46 批：**设置页**改成"右侧进入 / 右侧退出"。
+ * 用户原话：「进入和退出动画应该是右侧进入，右侧退出的样式，不要单纯刷新一下。」
+ * 离开时由 View Transitions 的 old(root) 截图播"往右滑出"（见下面 html[data-vtslide] 那两条），
+ * 这里只负责"进去"和"VT 不支持的降级"。
+ */
+@keyframes bcPageInRight {
+  from { opacity: 0; transform: translateX(30px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes bcPageOutRight {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(30px); }
+}
+.app[data-shell='stack'] .fluent-settings-page {
+  animation: bcPageInRight 240ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+}
 .app[data-shell='stack'] .pc-page,
 .app[data-shell='stack'] .help-center,
 .app[data-shell='stack'] .help-page,
 .app[data-shell='stack'] .bc-preview-view {
   animation: bcViewIn 220ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
+}
+/* View Transitions 接管"设置页"的进出：旧页右滑出、新页右滑入。
+   `data-vtslide` 由 App 的 switchView 打（只在涉及设置页且竖屏时）。 */
+html[data-vtslide='settings']::view-transition-old(root) {
+  animation: bcPageOutRight 200ms var(--ease-standard, ease) both;
+}
+html[data-vtslide='settings']::view-transition-new(root) {
+  animation: bcPageInRight 240ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+/* VT 已经在播"右侧进入"了，页面自己别再叠一遍（否则会看到两次位移） */
+html[data-vtslide='settings'] .app[data-shell='stack'] .fluent-settings-page {
+  animation: none;
 }
 
 /* ── 竖屏手册页：侧边栏抽屉（用户："下方第一层工具栏加一个侧边栏按钮，放到最左边，

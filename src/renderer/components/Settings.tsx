@@ -342,6 +342,17 @@ export function Settings(props: Props) {
     }
   ];
   const NAV_ITEMS = NAV_GROUPS.flatMap((g) => g.items);
+  /**
+   * 按形态过滤分组（v0.4.6 第 46 批）。
+   *
+   * 用户原话：「设置分成三个内容：通用设置（竖屏，横屏都有的设置项，通用），
+   *   横屏设置项（横屏才有，竖屏不显示），竖屏设置项（同理）。按需显示。」
+   * 现在竖屏看不到「电脑设置」（布局模式 / 工具栏编排这些在 412px 里既没法用、
+   * 又正是"文字被压成一列单字"的来源），宽屏也看不到「竖屏设置」。
+   */
+  const visibleGroups = NAV_GROUPS.filter((g) => (stacked ? g.title !== '电脑设置' : g.title !== '竖屏设置'));
+  // 形态切换后当前详情页可能已经被隐藏 → 退回第一项，避免停在一个"列表里没有"的页面
+  const activeVisible = visibleGroups.some((g) => g.items.some((it) => it.id === active));
 
   return (
     <div className="fluent-settings-page" data-level={stacked ? (section ? 'detail' : 'list') : 'split'}>
@@ -361,7 +372,7 @@ export function Settings(props: Props) {
         </div>
 
         <div className="fluent-nav-list">
-          {NAV_GROUPS.map((g) => (
+          {visibleGroups.map((g) => (
             <div className="fluent-nav-group" key={g.title}>
               <div className="fluent-nav-group-title">{g.title}</div>
               {g.items.map((item) => (
@@ -384,7 +395,7 @@ export function Settings(props: Props) {
       )}
 
       {/* 竖屏一级：分类列表（点一张卡片进具体设置页） */}
-      {stacked && !section && (
+      {stacked && (!section || !activeVisible) && (
         <div className="set-list">
           <div className="set-list-head">
             <div className="set-list-brand">
@@ -392,7 +403,7 @@ export function Settings(props: Props) {
               <span>设置</span>
             </div>
           </div>
-          {NAV_GROUPS.map((g) => (
+          {visibleGroups.map((g) => (
             <div className="set-list-group" key={g.title}>
               <div className="set-list-group-title">{g.title}</div>
               {g.items.map((item) => (
@@ -411,7 +422,7 @@ export function Settings(props: Props) {
       )}
 
       {/* 内容区：宽屏一直在；竖屏只在"进了某一项"之后出现 */}
-      {(!stacked || section) && (
+      {(!stacked || (section && activeVisible)) && (
       <div className="fluent-content">
         {stacked ? (
           <div className="set-detail-head">
@@ -442,7 +453,7 @@ export function Settings(props: Props) {
                 <div className="fluent-card-icon"><Icon name="sliders" /></div>
                 <div className="fluent-card-info">
                   <div className="fluent-card-title">显示第二条操作栏</div>
-                  <div className="fluent-card-desc">屏幕最下面第一条是撤销/会话/入口；第二条放工具栏按钮（设备、预览、导出…），可长按上滑展开。关掉它画布就多 72px 高。</div>
+                  <div className="fluent-card-desc">屏幕最下面第一条是撤销/会话/入口；第二条固定放 9 个工具按钮（操作、设备、更多、预览、轮廓、体检、导出 HTML、全部项目、导出元素模板），放不下可左右滑。关掉它画布就多 48px 高。</div>
                 </div>
                 <div className="fluent-card-ctrl">
                   <label className="fluent-switch">

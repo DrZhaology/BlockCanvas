@@ -1371,7 +1371,37 @@ html[data-bc-dark] .update-mirror-tip { color: var(--text-muted); }
   pointer-events: none;
 }
 @keyframes propRowOut {
-  from { opacity: 1; transform: translateX(0); }
-  60%  { opacity: 0.35; }
-  to   { opacity: 0; transform: translateX(64px); }
+  /* v0.4.6 第 46 批：用户要求"先缩小、阴影变换一下，然后从右侧划出" */
+  0% {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+    box-shadow: 0 0 0 rgba(20, 40, 80, 0);
+  }
+  /* 第一段：缩一点点 + 阴影浮起来（"这张卡要被抽走了"） */
+  30% {
+    opacity: 1;
+    transform: scale(0.965) translateX(0);
+    box-shadow: 0 8px 20px rgba(20, 40, 80, 0.18);
+  }
+  /* 第二段：带着阴影往右滑出去，同时缩小、淡出 */
+  100% {
+    opacity: 0;
+    transform: scale(0.94) translateX(64px);
+    box-shadow: 0 2px 8px rgba(20, 40, 80, 0.08);
+  }
+}
+/* 幽灵行（Ctrl+Y 重做让某一行凭空消失时补的占位）：只负责播同一段退场动画，
+   不参与交互、高度跟正常行一致，摘掉时列表不会跳一下 */
+.prop-row.prop-ghost {
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--panel-tint, rgba(20, 40, 80, 0.03));
+}
+.prop-row.prop-ghost .prop-name {
+  font-size: 12px;
+  color: var(--text-muted);
 }

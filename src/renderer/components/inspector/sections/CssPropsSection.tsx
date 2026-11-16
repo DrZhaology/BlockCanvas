@@ -10,6 +10,8 @@ import { HelpButton } from '../../HelpButton';
 import { Collapse } from '../../Collapse';
 import { AddPropertyMenu } from '../../AddPropertyMenu';
 import { PropertyRow } from '../rows/PropertyRow';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { PROP_REMOVE_MS, propRemovalInFlight } from '../shared';
 
 export type CssPropsSectionProps = {
   open: boolean;
@@ -36,6 +38,57 @@ export function CssPropsSection(props: CssPropsSectionProps) {
     open, onToggle, elementId, elementType, visibleSchema, elementStyle,
     justAddedKey, flashKey, onAdd, onRemove, onEdited, ghostSlot
   } = props;
+
+  /**
+   * 属性卡片的"重进 / 退出"（v0.4.6 第 46 批）
+   * ----------------------------------------------------------------------------
+   * 用户原话：「删除后先缩小，阴影变换一下，然后从右侧划出，这就是卡片删除的动画。
+   *   同时 Ctrl + Z 或者 Ctrl + Y 卡片的重进和退出也要做好。」
+   *
+   * 两种来源都要动起来：
+   *   · **进场**：新出现的一行（不管是"＋添加属性"加的，还是 Ctrl+Z 把删掉的恢复回来）
+   *     → 给一次入场动画；
+   *   · **退场**：一行从列表里消失。点 × 删除时 animateRemove 已经在那一行上挂了
+   *     is-removing（自己播）；而 Ctrl+Y 重做、或别的入口让它凭空消失时没有任何动画机会
+   *     → 这里补一条"幽灵行"，用同一段退场动画播完再摘掉。
+   */
+  const [enterKey, setEnterKey] = useState<string | null>(justAddedKey);
+  const [ghosts, setGhosts] = useState<Array<{ key: string; label: string }>>([]);
+  const prevSchema = useRef(visibleSchema);
+
+  useEffect(() => {
+    const now = visibleSchema;
+    const nowKeys = new Set(now.map((x) => x.key));
+    const gone = prevSchema.current.filter((x) => !nowKeys.has(x.key));
+    const added = now.find((x) => !prevSchema.current.some((y) => y.key === x.key));
+    prevSchema.current = now;
+
+    // 进场
+    if (added) setEnterKey(added.key);
+
+    // 退场：点 × 那条自己会播（is-removing），别重复补
+    if (gone.length > 0 && !propRemovalInFlight()) {
+      setGhosts((prev) => [
+        ...prev.filter((g) => !gone.some((x) => x.key === g.key)),
+        ...gone.map((x) => ({ key: x.key, label: x.label }))
+      ]);
+      const t = window.setTimeout(() => {
+        setGhosts((prev) => prev.filter((g) => !gone.some((x) => x.key === g.key)));
+      }, PROP_REMOVE_MS + 40);
+      return () => window.clearTimeout(t);
+    }
+    return undefined;
+  }, [visibleSchema]);
+
+  /** 进场动画只播一次，别让 .is-just-added 一直挂着（挂着会阻止后续过渡） */
+  const clearEnter = useCallback(() => setEnterKey(null), []);
+  useEffect(() => {
+    if (!enterKey) return;
+    const t = window.setTimeout(clearEnter, 460);
+    return () => window.clearTimeout(t);
+  }, [enterKey, clearEnter]);
+
+  const animKey = justAddedKey ?? enterKey;
 
   return (
     <div className="inspector-sec">
@@ -76,10 +129,16 @@ export function CssPropsSection(props: CssPropsSectionProps) {
                 elementId={elementId}
                 elementType={elementType}
                 onRemove={() => onRemove(s.key)}
-                highlight={justAddedKey === s.key}
+                highlight={animKey === s.key}
                 flash={flashKey === s.key}
-                onEdited={() => { if (justAddedKey === s.key) onEdited(); }}
+                onEdited={() => { if (animKey === s.key) { clearEnter(); onEdited(); } }}
               />
+            ))}
+            {/* 凭空消失的行（Ctrl+Y 重做等）：补一条幽灵，播完同一段退场动画再摘掉 */}
+            {ghosts.map((g) => (
+              <div className="prop-row prop-ghost is-removing" key={'ghost-' + g.key}>
+                <span className="prop-name">{g.label || g.key}</span>
+              </div>
             ))}
           </div>
         </div>

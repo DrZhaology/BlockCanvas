@@ -201,7 +201,20 @@ export function SessionsView({ onBack, onNewPage }: { onBack: () => void; onNewP
   let order = -1;
 
   return (
-    <div className={'sess-page' + (entering ? ' is-entering' : '')} role="region" aria-label="会话管理">
+    <div
+      className={'sess-page' + (entering ? ' is-entering' : '')}
+      role="region"
+      aria-label="会话管理"
+      /**
+       * 点旁边关掉"关闭确认"（用户：「改成二级菜单弹窗，从下面弹出，可以点击旁边关闭的」）。
+       * 确认面板和长按菜单本身都 stopPropagation，所以这里只会在"点外面"时触发。
+       */
+      onPointerDown={(e) => {
+        const t = e.target as HTMLElement;
+        if (confirmFor && !t.closest('.sess-confirm') && !t.closest('.sess-close')) closeConfirm(confirmFor);
+        if (menuFor && !t.closest('.sess-menu')) setMenuFor(null);
+      }}
+    >
       <div className="sess-head">
         <span className="sess-title">会话</span>
         <span className="sess-sub">{tabs.length} 个</span>

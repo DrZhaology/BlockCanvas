@@ -1,0 +1,128 @@
+/* ============================================================================
+   v0.4.6 第 46 批 · 竖屏 Alt 模式的触摸手柄层（components/canvas/AltTouchHandles.tsx）
+   ----------------------------------------------------------------------------
+   用户原话：
+     「选中后，元素中间出现一个 svg（上下左右都是箭头），按住这个 svg 就可以改变
+       这个元素在画布上的位置。」
+     「4 个角出现 4 个方框，按住这个方框（不只是这个方框，方框外面的一部分区域也能按倒，
+       因为手指很大），就可以调整元素的宽度和高度。」
+     「4 条边也可以按住调整。」
+
+   规矩：
+     · 容器 `pointer-events: none`，只有手柄 `auto` —— 否则整块画布都别想点了；
+     · **视觉尺寸 ≠ 命中尺寸**：角视觉 20px / 命中 44px，边视觉 6px / 命中 26px（"手指很大"）；
+     · 全部 `touch-action: none` —— 手柄上的手指不要再触发浏览器滚动/缩放；
+     · 层级 41 = 和"选中 fixed 时的红框"同一档：盖住画布，但压在底部两条操作栏下面。
+   ========================================================================== */
+
+.bc-alttouch {
+  position: fixed;
+  z-index: 41;
+  pointer-events: none;
+  /* 手柄在拖动时不应该有自己的过渡（1:1 跟手） */
+  touch-action: none;
+}
+
+/* 元素边界：1.5px 实线，拖动时变虚线（"正在改"的提示，不抢注意力） */
+.bc-alttouch-box {
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid var(--accent, #3884ff);
+  border-radius: 4px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+}
+.bc-alttouch.is-dragging .bc-alttouch-box { border-style: dashed; }
+
+/* ── 中间：按住移动（52px 圆钮，够大拇指按住又不挡内容） ─────────────────── */
+.bc-alttouch-move {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent, #3884ff);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(20, 40, 80, 0.28);
+  pointer-events: auto;
+  touch-action: none;
+  cursor: move;
+  /* 轻微呼吸：让人看得出"这个是能按的"（减少动态效果时会关掉） */
+  animation: altHandlePulse 2.4s ease-in-out infinite;
+}
+.bc-alttouch.is-dragging .bc-alttouch-move { animation: none; transform: scale(0.96); }
+@keyframes altHandlePulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(20, 40, 80, 0.28); }
+  50% { box-shadow: 0 4px 18px rgba(56, 132, 255, 0.55); }
+}
+
+/* ── 4 角：视觉小方块 + 外扩命中区 ───────────────────────────────────────── */
+.bc-alttouch-corner {
+  position: absolute;
+  width: var(--vis, 20px);
+  height: var(--vis, 20px);
+  margin: calc(var(--vis, 20px) / -2) 0 0 calc(var(--vis, 20px) / -2);
+  background: #fff;
+  border: 1.5px solid var(--accent, #3884ff);
+  border-radius: 3px;
+  box-shadow: 0 1px 4px rgba(20, 40, 80, 0.22);
+  pointer-events: auto;
+  touch-action: none;
+  cursor: nwse-resize;
+}
+/* 命中区：44×44（手指直径），不影响视觉 */
+.bc-alttouch-corner::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--hit, 44px);
+  height: var(--hit, 44px);
+  transform: translate(-50%, -50%);
+}
+
+/* ── 4 边：细条 + 外扩命中区 ─────────────────────────────────────────────── */
+.bc-alttouch-edge {
+  position: absolute;
+  background: var(--accent, #3884ff);
+  border-radius: 3px;
+  opacity: 0.9;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  touch-action: none;
+}
+.bc-alttouch-edge::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(100% + 18px);
+  height: calc(var(--hit, 26px));
+  transform: translate(-50%, -50%);
+}
+.bc-alttouch-edge[data-edge='l']::after,
+.bc-alttouch-edge[data-edge='r']::after {
+  width: var(--hit, 26px);
+  height: calc(100% + 18px);
+}
+
+/* 系统"减少动态效果"：去掉呼吸灯 */
+@media (prefers-reduced-motion: reduce) {
+  .bc-alttouch-move { animation: none; }
+}
+
+/* 触摸拖动期间藏掉桌面那枚"模式 + 尺寸"气泡（bc-alt-badge）：
+   手指按在元素中间时，气泡正好盖在中间那颗移动柄上，等于把唯一的操作点糊住了。 */
+body.bc-alttouch-drag .bc-alt-badge { display: none; }
+
+/* 手柄层挂载期间，把桌面那几层 hover 浮层收起来
+   （橙色高亮框 / F12 式盒模型 / "常规流 260×150"气泡 —— 它们都画在指针位置，
+     手指或鼠标停在元素中间时正好把移动柄盖住）。 */
+body.bc-alttouch-on .bc-alt-box,
+body.bc-alttouch-on .bc-boxm,
+body.bc-alttouch-on .bc-alt-badge { display: none; }

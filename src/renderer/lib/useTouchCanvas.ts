@@ -96,13 +96,18 @@ export function useTouchCanvas(opts: {
   onZoomChange: (z: number) => void;
   minZoom?: number;
   maxZoom?: number;
+  /** Alt 模式：长按只做单选（按住下一个元素，上一个自动取消），不能多选 */
+  altMode?: boolean;
 }) {
-  const { enabled, zoom, onZoomChange, minZoom = 0.1, maxZoom = 4 } = opts;
+  const { enabled, zoom, onZoomChange, minZoom = 0.1, maxZoom = 4, altMode = false } = opts;
   // 用 ref 读最新值：监听只挂一次，不能因为 zoom 变化重挂（重挂会把进行中的手势打断）
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
   const zoomCb = useRef(onZoomChange);
   zoomCb.current = onZoomChange;
+  // Alt 模式同样用 ref：开关变一次就重挂监听会把进行中的手势打断
+  const altRef = useRef(altMode);
+  altRef.current = altMode;
 
   useEffect(() => {
     if (!enabled) return;
@@ -180,6 +185,15 @@ export function useTouchCanvas(opts: {
       if (!store) return;
       const st = store.getState();
       const id = hitId(x, y);
+      /**
+       * Alt 模式（v0.4.6 第 46 批）：用户要求「元素必须被选中才能可视化调整」，
+       * 而且「不能选中多个元素，按住下一个元素，上一个元素自动取消选中」。
+       * 所以这一档永远走单选（selectElement），不 toggle、不加选。
+       */
+      if (altRef.current) {
+        st.selectElement(id);   // id 为 null = 长按空白 → 清空
+        return;
+      }
       if (!id) { st.selectElement(null); return; }
       const cur: string[] = st.scene.selectedIds ?? (st.scene.selectedId ? [st.scene.selectedId] : []);
       const armed = holdArmed;
@@ -326,6 +340,13 @@ export function useTouchCanvas(opts: {
     const onDown = (e: PointerEvent) => {
       pressDown = true;
       const w = wrap();      if (!w || !w.contains(e.target as Node)) return;
+      /**
+       * Alt 模式的手柄层（`.bc-alttouch`）虽然画在 `.canvas-wrap` 里面，但它不是"画布"：
+       * 按在手柄上是要拖元素、不是平移画布。这一层是 window 捕获阶段跑的，
+       * 一旦执行到下面的 stopPropagation，手柄自己的 pointerdown 就永远收不到，
+       * 所以这里必须先让步（否则"按手柄没反应"）。
+       */
+      if ((e.target as HTMLElement)?.closest?.('.bc-alttouch')) return;
       // 竖屏下画布这块完全由本层接管：不让画布自己的 pointerdown 选元素
       e.stopPropagation();
       // 新手势开始 → 上一段惯性立刻停（手指按下去就该由手指说了算）

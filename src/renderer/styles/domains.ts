@@ -77,7 +77,9 @@ export const DOMAIN_OF = {
   // v0.4.6 第 43 批：竖屏第二条操作栏的九个按钮与二级菜单
   '38-v046-ptoolbar.css': 'shell',
   // v0.4.6 第 43 批：竖屏双指缩放（禁掉浏览器自带捏合手势）
-  '39-v046-pinch.css': 'canvas'
+  '39-v046-pinch.css': 'canvas',
+  // v0.4.6 第 46 批：竖屏 Alt 模式的触摸手柄层（中间移动柄 / 4 角 / 4 边）
+  '40-v046-alttouch.css': 'canvas'
 } as const;
 
 export type CssDomain = typeof DOMAIN_OF[keyof typeof DOMAIN_OF];

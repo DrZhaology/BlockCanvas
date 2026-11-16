@@ -168,9 +168,11 @@ export default function App() {
   const [zoom, setZoom] = useState(1);
   /* v0.4.6 竖屏：画布触屏手势层 —— 长按选中 / 长按加选 / 单指平移 / 双指缩放。
      只在 stack 形态挂上；宽屏一条老逻辑都不动（见 lib/useTouchCanvas.ts 顶部说明）。
-     ⚠ Alt 模式打开时要**关掉手势层**：否则画布指针全被它吃掉，桌面那套 Alt 拖拽收不到事件。 */
+     ⚠ v0.4.6 第 46 批改：Alt 模式**不再关掉**手势层。以前"开了 Alt 就整个让位给桌面逻辑"，
+     可触摸屏没有 hover —— 元素既选不上也拖不动。现在手势层照常：长按=单选（altMode 档位
+     不允许加选）、单指=平移、双指=缩放；"改位置 / 改宽高"由画布上的触摸手柄显式触发。 */
   const altOn = useAltMode();
-  useTouchCanvas({ enabled: shell.layout === 'stack' && !altOn, zoom, onZoomChange: setZoom });
+  useTouchCanvas({ enabled: shell.layout === 'stack', zoom, onZoomChange: setZoom, altMode: altOn });
   /**
    * v0.4.6 第 43 批：竖屏「情境栏」（第三层菜单）要显示哪些按钮。
    *
@@ -217,6 +219,28 @@ export default function App() {
    * 两段式：先让**旧画布**左移淡出 160ms，再 newTab()，再让**新画布**从右侧滑入 260ms。
    * 只在"真的多出一页"时播；切标签不播。宽屏同样播（这个动画在桌面也不难看）。
    */
+  /**
+   * v0.4.6 第 46 批：离开编辑器时，第二条操作栏不要"啪一下没了"。
+   * 用户原话：「会话页面的进入和退出动画，下方的工具栏不要死板的闪烁一下……
+   *   第二层从下方退出，不要闪烁像刷新一下一样。」
+   *
+   * 做法：切走之后让它继续挂 220ms，期间 is-leaving 把它从下方滑出（脱流，不顶布局），
+   * 播完再真正卸载。进入编辑器时它是直接挂上来的，不用特殊处理。
+   */
+  const [bar2Leaving, setBar2Leaving] = useState(false);
+  const prevViewForBar2 = useRef(view);
+  useEffect(() => {
+    const was = prevViewForBar2.current;
+    prevViewForBar2.current = view;
+    if (was === 'editor' && view !== 'editor') {
+      setBar2Leaving(true);
+      const t = window.setTimeout(() => setBar2Leaving(false), 220);
+      return () => window.clearTimeout(t);
+    }
+    if (view === 'editor') setBar2Leaving(false);
+    return undefined;
+  }, [view]);
+
   const [pageAnim, setPageAnim] = useState<'out' | 'in' | null>(null);
   const pageAnimBusy = useRef(false);
   const requestNewPage = async () => {
@@ -248,6 +272,26 @@ export default function App() {
   }, [tabCount]);
   // 当前激活标签 + 是否"只读快照预览"（v0.4.5）
   const activeTab = useTabStore((s) => s.tabs.find((t) => t.id === s.activeTabId) ?? null);
+  /**
+   * v0.4.6 第 46 批：切页 / 新建页时把画布滚回左上。
+   *
+   * 用户原话：「新建画布的时候，如果上一个画布在下面，不是页面最顶部，
+   *   下面一个画布也会在底部，超过的画布，修一下。」
+   * 真因：滚动位置属于 `.canvas-wrap` 这个容器，换标签只换内容、容器不动 ——
+   * 于是新页面直接继承了上一页的滚动量（看着就像"新画布也在底部"）。
+   */
+  const activeTabId = activeTab?.id ?? '';
+  useEffect(() => {
+    if (!activeTabId) return;
+    // 等一帧：新画布挂上之后才能滚（首帧容器高度还是旧页面的）
+    const raf = requestAnimationFrame(() => {
+      const w = document.querySelector('.canvas-wrap') as HTMLElement | null;
+      if (!w) return;
+      w.scrollLeft = 0;
+      w.scrollTop = 0;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [activeTabId]);
   const readonly = isSnapshotTab(activeTab);
   // 自动保存节流锚点：手动 Ctrl+S / 自动保存成功都会刷新（见下方自动保存循环）
   const autoSaveLastRef = useRef(0);
@@ -267,8 +311,26 @@ export default function App() {
     // v0.4.3：更新进行中锁死视图切换 —— 更新要替换程序文件，
     // 这期间绝不能再去动工程数据（全屏遮罩会兜底拦住鼠标操作）。
     if (useUpdateBusy.getState().busy) return;
-    withViewTransition(() => setView((cur) => (cur === next ? cur : next)));
-  }, []);
+    /**
+     * v0.4.6 第 46 批：**设置页**的进出改成"右侧进入 / 右侧退出"。
+     *
+     * 用户原话：「设置页面变成了类似手机App设置的样式…但是进入和退出动画应该是右侧进入，
+     *   右侧退出的样式，不要单纯刷新一下。」
+     *
+     * 做法：切进 / 切出设置时，在 <html> 上打个标记，交给 CSS 改写
+     * `::view-transition-old(root)` / `-new(root)` 两段动画（旧页往右滑出、新页从右侧滑入）。
+     * 只挂 settings 这一档 —— 会话页那套"画布缩小成缩略图"是专门做的，不能被通用滑屏顶掉。
+     */
+    const html = document.documentElement;
+    const involvesSettings = next === 'settings' || viewRef.current === 'settings';
+    html.dataset.vtslide = involvesSettings && shell.layout === 'stack' ? 'settings' : '';
+    try {
+      withViewTransition(() => setView((cur) => (cur === next ? cur : next)));
+    } finally {
+      // 过渡结束后摘掉标记（留一帧，别在动画中途撤样式）
+      window.setTimeout(() => { html.dataset.vtslide = ''; }, 420);
+    }
+  }, [shell.layout]);
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -967,13 +1029,14 @@ export default function App() {
           第二条在编辑器且有会话时才出现，第一条在每个视图都在。 */}
       {shell.layout === 'stack' && (
         <>
-          {view === 'editor' && tabCount > 0 && ptPrefs.bar2 && (
+          {tabCount > 0 && ptPrefs.bar2 && (view === 'editor' || bar2Leaving) && (
             <PortraitBar2
               zoom={zoom}
               setZoom={setZoom}
               canvasWidth={canvasWidth}
               setCanvasWidth={setCanvasWidth}
               ctxActions={ctxActions}
+              leaving={bar2Leaving && view !== 'editor'}
             />
           )}
           <PortraitBar1

@@ -247,3 +247,41 @@
     opacity: 0;
   }
 }
+
+/* ============================================================================
+   v0.4.6 第 46 批 · 离开编辑器时第二条栏的退场
+   ----------------------------------------------------------------------------
+   用户原话：「会话页面的进入和退出动画，下方的工具栏不要死板的闪烁一下……
+     第二层从下方退出，不要闪烁像刷新一下一样。」
+
+   以前切到会话页，这一条栏是**条件渲染**直接卸载 —— 画面里少掉一整条，看着像刷新。
+   现在 App 让它多挂 220ms，挂 is-leaving 从下方滑出去，播完再卸载。
+   ⚠ 退场期间必须 position: fixed（脱离 flex 流），否则会话页会被顶矮 48px、再弹回来。
+   ========================================================================== */
+.app[data-shell='stack'] .pt-bar2.is-leaving {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: var(--pt-bar1-h, 56px);
+  z-index: 45;
+  pointer-events: none;
+  animation: ptBar2Out 200ms var(--ease-exit, cubic-bezier(0.4, 0, 1, 1)) both;
+}
+@keyframes ptBar2Out {
+  from { transform: translateY(0); opacity: 1; }
+  to   { transform: translateY(100%); opacity: 0; }
+}
+
+/* 第一条栏的按钮在"换了一套"时（编辑器 → 子页面）淡入放大到位，
+   而不是直接替换成另一个图形（用户要的"丝滑变换"的廉价版） */
+.app[data-shell='stack'] .pt-bar1 .pt-btn {
+  animation: ptBtnSwap 200ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+@keyframes ptBtnSwap {
+  from { opacity: 0; transform: scale(0.86); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app[data-shell='stack'] .pt-bar2.is-leaving { animation: none; opacity: 0; }
+  .app[data-shell='stack'] .pt-bar1 .pt-btn { animation: none; }
+}

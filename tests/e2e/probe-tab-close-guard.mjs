@@ -152,6 +152,48 @@ async function main() {
   check('④ 干净标签 → 不弹框，直接关', cleanDlg.shown === false && afterClean.exists === false,
     JSON.stringify({ dlg: cleanDlg.shown, tab: afterClean }));
 
+  // ⑥ 加过元素又全删掉 → **仍然要问**（用户明确要求："这个页面添加过元素，但是全部删除了，
+  //    不要直接能关闭，还是显示二级菜单，要不要保存"）
+  const idC = await win.evaluate(() => {
+    const st = window.__tabStore.getState();
+    const c = st.newTab('加了又清空');
+    window.__tabStore.getState().switchTab(c);
+    const sc = window.__sceneStore.getState();
+    sc.beginStyleEdit();
+    sc.addElement('div');
+    const kids = window.__sceneStore.getState().scene.root.children;
+    window.__sceneStore.getState().removeElement(kids[kids.length - 1].id);
+    sc.endStyleEdit();
+    window.__tabStore.getState().markActiveTabDirty(true);
+    return c;
+  });
+  await sleep(500);
+  const emptied = await win.evaluate((x) => {
+    const st = window.__tabStore.getState();
+    const t = st.tabs.find((k) => k.id === x);
+    return {
+      kids: t?.scene?.root?.children?.length ?? -1,
+      dirty: !!t?.isDirty,
+      past: x === st.activeTabId ? window.__sceneStore.getState().history.past.length : (t?.history?.past?.length ?? 0)
+    };
+  }, idC);
+  await win.evaluate((x) => {
+    window.dispatchEvent(new CustomEvent('bc:request-close-tab', { detail: { id: x } }));
+  }, idC);
+  await sleep(420);
+  const dlgC = await dialogNow();
+  check('⑥ 加过元素又全删掉 → 仍然弹保存确认（不算"空页面"）',
+    emptied.kids === 0 && dlgC.shown === true,
+    JSON.stringify({ ...emptied, dlg: dlgC.shown }));
+  // 收尾：点「不保存」把它关掉
+  if (dlgC.shown) {
+    await win.evaluate(() => {
+      const btns = [...document.querySelectorAll('.bc-confirm-btn')];
+      btns.find((b) => (b.textContent || '').includes('不保存'))?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await sleep(320);
+  }
+
   // ⑤ 全程没用系统原生弹窗
   const native = await win.evaluate(() => window.__nativeDialogUsed);
   check('⑤ 全程没有调用系统原生 confirm/alert', native === 0, `native=${native}`);

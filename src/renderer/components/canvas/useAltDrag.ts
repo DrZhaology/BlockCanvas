@@ -14,7 +14,7 @@ import { altHeld } from '@lib/altMode';
 import { measureFixedViewport } from '@lib/fixedViewport';
 import { contentBoxOf, hasSideValue, pickAxisSide, readBoxModel, edgeAt } from './geometry';
 import { applyAltDragMove, finishAltDrag, type AltDragCtx } from './altDragMove';
-import type { AltBoxModelData, AltDragState, AltHover, Bar, Bounds } from './types';
+import type { AltBoxModelData, AltDragState, AltEdge, AltHover, AltMode, Bar, Bounds } from './types';
 
 /** 播放锁定时要定格的帧：30fps 的第 30 帧 ≈ 1 秒 */
 export const LOCK_FRAME_SEC = 1;
@@ -37,6 +37,13 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
   const [altHover, setAltHover] = useState<AltHover | null>(null);
   const altHoverRef = useRef<AltHover | null>(null);
   altHoverRef.current = altHover;
+  /**
+   * 触摸档位（v0.4.6 第 46 批）：手指没有 hover，Alt 模式下的 4 角 / 4 边 / 中间移动手柄
+   * 由 `AltTouchHandles` 那层覆盖层点出来。它不能走 hover 那条路（手指按下去之前没有
+   * pointermove，`altHoverRef` 永远是 null → 拖不起来），所以先把手柄表达的目标写在这里，
+   * 再由下面 pointerdown 里"取 hover"那一行优先读它。
+   */
+  const pendingTouchRef = useRef<AltHover | null>(null);
 
   // Alt 拖拽中"实时边界框"的 rAF 句柄：样式写入 → React 提交 → 下一帧量真实 rect 再画框，
   // 保证拖动过程中橙色边界 1:1 跟手（以前拖动时框直接消失，松手才回来）
@@ -301,38 +308,8 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
     setAltHover(next);
   };
 
-  // Alt + 按下：开始一次"可能发生的"拖拽（真正开始改样式要等指针移动超过阈值，
-  // 否则单纯 Alt+单击仍按老规矩 = 选中父级）
-  const onWrapPointerDownCapture = (e: React.PointerEvent<HTMLDivElement>) => {
-    // 画布内任何一次按下（除了按在就地编辑框里）都先把正在编辑的文案提交掉 ——
-    // 画布会 preventDefault，焦点不会转移 → 光靠 blur 不可靠，这里主动提交。
-    const t0 = e.target as HTMLElement | null;
-    if (!t0?.classList?.contains('canvas-inline-text-input')) {
-      window.dispatchEvent(new CustomEvent('bc:commit-inline'));
-    }
-    // 点画布 = 离开右侧属性面板的输入框：主动 blur。
-    // 画布的 pointerdown 会 preventDefault()，焦点不会自然转移 → 焦点留在输入框里，
-    // 之后按 Ctrl+Z / Ctrl+Y 会被输入框"吃掉"（用户反馈：选中元素后撤销没反应）。
-    const ae = document.activeElement as HTMLElement | null;
-    if (ae && ae !== document.body && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)
-      && !ae.closest('.canvas')) {
-      ae.blur();
-    }
-    // 鼠标中键 = 打开"属性搜索"框（敲属性名 → Enter → 右侧面板定位高亮）
-    if (e.button === 1) {
-      e.preventDefault();
-      e.stopPropagation();
-      const el = t0?.closest?.('.canvas [data-bc-id]') as HTMLElement | null;
-      if (el) onMiddlePress?.(el.getAttribute('data-bc-id')!, e.clientX, e.clientY);
-      return;
-    }
-    if (!altHeld(e) || e.button !== 0) return;
-    // 已经有一次 Alt 拖拽在跑：不要用新的锚点覆盖它（会造成"闪一下又回弹"）
-    if (altDragRef.current) return;
-    const h = altHoverRef.current;
-    if (!h) return;
-    e.preventDefault();
-    e.stopPropagation();
+  /** 真正开始一次 Alt 拖拽：落状态 + 挂 window 的 move/up。鼠标和触摸共用这一份。 */
+  const beginDrag = (h: AltHover, clientX: number, clientY: number) => {
     const root = useScene.getState().scene.root;
     const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(h.id)}"]`) as HTMLElement | null;
     if (!el) return;
@@ -381,7 +358,7 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
       : (cb ? cb.bottom - rect.bottom : 0);
     altDragRef.current = {
       id: h.id, mode: h.mode, edge: h.edge,
-      startX: e.clientX, startY: e.clientY,
+      startX: clientX, startY: clientY,
       rect,
       startW: rect.width, startH: rect.height,
       positioned, isFixed, posKind,
@@ -409,12 +386,73 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
       parentId: parentNode?.id ?? null,
       startFont: parseFloat(cs.fontSize) || 16,
       engaged: false,
-      lastX: e.clientX,
-      lastY: e.clientY,
+      lastX: clientX,
+      lastY: clientY,
       axisSide
     };
     window.addEventListener('pointermove', onAltDragMove);
     window.addEventListener('pointerup', onAltDragUp);
+  };
+
+  // Alt + 按下：开始一次"可能发生的"拖拽（真正开始改样式要等指针移动超过阈值，
+  // 否则单纯 Alt+单击仍按老规矩 = 选中父级）
+  const onWrapPointerDownCapture = (e: React.PointerEvent<HTMLDivElement>) => {
+    // 画布内任何一次按下（除了按在就地编辑框里）都先把正在编辑的文案提交掉 ——
+    // 画布会 preventDefault，焦点不会转移 → 光靠 blur 不可靠，这里主动提交。
+    const t0 = e.target as HTMLElement | null;
+    if (!t0?.classList?.contains('canvas-inline-text-input')) {
+      window.dispatchEvent(new CustomEvent('bc:commit-inline'));
+    }
+    // 点画布 = 离开右侧属性面板的输入框：主动 blur。
+    // 画布的 pointerdown 会 preventDefault()，焦点不会自然转移 → 焦点留在输入框里，
+    // 之后按 Ctrl+Z / Ctrl+Y 会被输入框"吃掉"（用户反馈：选中元素后撤销没反应）。
+    const ae = document.activeElement as HTMLElement | null;
+    if (ae && ae !== document.body && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)
+      && !ae.closest('.canvas')) {
+      ae.blur();
+    }
+    // 鼠标中键 = 打开"属性搜索"框（敲属性名 → Enter → 右侧面板定位高亮）
+    if (e.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+      const el = t0?.closest?.('.canvas [data-bc-id]') as HTMLElement | null;
+      if (el) onMiddlePress?.(el.getAttribute('data-bc-id')!, e.clientX, e.clientY);
+      return;
+    }
+    if (!altHeld(e) || e.button !== 0) return;
+    // 已经有一次 Alt 拖拽在跑：不要用新的锚点覆盖它（会造成"闪一下又回弹"）
+    if (altDragRef.current) return;
+    // 触摸档位给的目标优先（手指按下前没有 hover，见 pendingTouchRef 的注释）
+    const h = pendingTouchRef.current ?? altHoverRef.current;
+    pendingTouchRef.current = null;
+    if (!h) return;
+    e.preventDefault();
+    e.stopPropagation();
+    beginDrag(h, e.clientX, e.clientY);
+  };
+
+  /**
+   * 触摸档位入口（v0.4.6 第 46 批）：AltTouchHandles 的 4 角 / 4 边 / 中间移动手柄按下时调用。
+   *
+   * 为什么不另写一套拖动：定位方式（margin / left-top / 双边约束 / fixed 视口）、贴墙吸附、
+   * 松手归一化，全在 beginDrag + altDragMove.ts 里，重写必有漂移。
+   *
+   * ⚠ 不要用"派发 synthetic pointerdown 让老流程跑"：实测 Chromium 会把派发进 .canvas 子树的
+   *   pointerdown 整个丢掉（连 document 捕获都收不到，mousedown 却正常），所以直接调 beginDrag。
+   */
+  const beginTouchDrag = (
+    target: { id: string; mode: AltMode; edge: AltEdge | null },
+    clientX: number,
+    clientY: number,
+    _pointerId = 0,
+    _pointerType = 'touch'
+  ): boolean => {
+    if (altDragRef.current) return false;
+    const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(target.id)}"]`) as HTMLElement | null;
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    beginDrag({ id: target.id, mode: target.mode, edge: target.edge, rect: { x: r.left, y: r.top, w: r.width, h: r.height } }, clientX, clientY);
+    return true;
   };
 
   /**
@@ -545,6 +583,7 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
     wheelNoBoxUntil,
     onWrapPointerMove,
     onWrapPointerDownCapture,
+    beginTouchDrag,
     onCanvasWheel,
     clearAltState,
     dispose,

@@ -22,6 +22,7 @@
 // ============================================================================
 import { useEffect, useRef, useState } from 'react';
 import { useTabStore } from '@store/tabStore';
+import { useScene } from '@store/sceneStore';
 
 type Anchor = { x: number; y: number; w: number; h: number };
 type Pending = { id: string; name: string; hasFile: boolean; anchor?: Anchor };
@@ -83,11 +84,16 @@ export function TabCloseGuard() {
       const st = useTabStore.getState();
       const tab = st.tabs.find((t) => t.id === id);
       if (!tab) return;
-      // 干净的标签不用问，直接关（关掉不丢东西）——**空页面也算干净**：
-      // 一个还没放任何元素的标签（新建的、或者画了又全删掉的），问它"要不要保存"
-      // 只是噪音。用户抱怨过弹窗打扰，这条短路是故意的。
-      const empty = !(tab.scene?.root?.children?.length);
-      if (!tab.isDirty || empty) { st.closeTab(id); return; }
+      // 干净的标签不用问，直接关（关掉不丢东西）。
+      // 「干净」= **从没动过**：新建的空白标签（撤销栈是空的、画布也是空的）直接关；
+      // 但"加过东西又全删掉"不行 —— 那也是改动，用户明确要求仍然弹保存确认。
+      // （以前只看 root.children.length，把"加了又删"也当空页静默关掉了。）
+      const everTouched = (() => {
+        const livePast = id === st.activeTabId ? useScene.getState().history.past.length : 0;
+        const tabPast = tab.history?.past?.length ?? 0;
+        return livePast > 0 || tabPast > 0 || Boolean(tab.scene?.root?.children?.length);
+      })();
+      if (!tab.isDirty || !everTouched) { st.closeTab(id); return; }
       setPending({ id, name: tab.name, hasFile: Boolean(tab.filePath), anchor: d.anchor });
     };
     window.addEventListener('bc:request-close-tab', onReq);

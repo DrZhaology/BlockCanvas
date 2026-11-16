@@ -9,6 +9,7 @@ import { CanvasTextMenu, isTextStylable, type TextMenuPayload } from './CanvasTe
 import { CanvasPropSearch } from './CanvasPropSearch';
 import { CanvasNode } from './canvas/CanvasNode';
 import { AltOverlays } from './canvas/AltOverlays';
+import { AltTouchLayer } from './canvas/AltTouchHandles';
 import { useAltDrag } from './canvas/useAltDrag';
 import { useMarquee } from './canvas/useMarquee';
 import { useStickyMarks } from './canvas/sticky';
@@ -166,6 +167,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     onZoomChange: (next) => { onZoomChange?.(() => next); },
     onMiddlePress: (id, x, y) => { select(id); setPropSearch({ x, y }); }
   });
+
 
   // 框选
   const mq = useMarquee(canvasRef);
@@ -338,7 +340,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
         {root.children.length === 0 && (
           <div className="canvas-empty">从下方元素面板点一个元素，就能插入到画布</div>
         )}
-        {/* 画布左右拖拽手柄：贴住画布左右边缘，鼠标上去变左右拉伸光标 */}
+        {/* 画布左右拖拽手柄（鼠标上去变左右拉伸光标） */}
         <span className="canvas-resize-handle canvas-resize-handle-l" onPointerDown={(e) => onResizeStart(e, 'l')} title="拖动调整画布宽度" />
         <span className="canvas-resize-handle canvas-resize-handle-r" onPointerDown={(e) => onResizeStart(e, 'r')} title="拖动调整画布宽度" />
       </div>
@@ -373,7 +375,7 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
         />
       ))}
-      {/* Alt 系列覆盖层（高亮框 / 盒模型 / 数值气泡 / 墙提示 / 吸附线 / 放入目标） */}
+      {/* Alt 覆盖层：高亮框 / 盒模型 / 气泡 / 墙提示 / 吸附线 / 放入目标 */}
       <AltOverlays
         api={{
           altHover: alt.altHover,
@@ -386,9 +388,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           boxModel: alt.boxModel
         }}
       />
-      {/* 右键文字样式菜单（Portal 到 body） */}
+      <AltTouchLayer zoom={zoom} beginDrag={alt.beginTouchDrag} />
       {textMenu && <CanvasTextMenu payload={textMenu} onClose={() => setTextMenu(null)} />}
-      {/* 中键属性搜索（Portal 到 body） */}
       {propSearch && <CanvasPropSearch x={propSearch.x} y={propSearch.y} onClose={() => setPropSearch(null)} />}
     </div>
   );
