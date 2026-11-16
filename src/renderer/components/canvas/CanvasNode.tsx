@@ -10,8 +10,8 @@ import { selectorForNode, cssTextToObject, simplifyStyle } from '@lib/styleClass
 import { useShowBr } from '@lib/showBr';
 import { useVideoCodecGate, CodecBlockedNotice } from './videoCodecGate';
 import { Icon } from '../Icon';
-import { LOCK_FRAME_SEC } from './useAltDrag';
 import { toRenderableSrc } from './mediaSrc';
+import { buildMediaPlayProps } from './mediaPlayProps';
 import { useFixedLayer } from './fixedLayer';
 import { useTextTapMenu } from './useTextTapMenu';
 import type { TextMenuPayload } from '../CanvasTextMenu';
@@ -55,9 +55,19 @@ const CanvasNodeBody = React.memo(function CanvasNodeBody(props: CanvasNodeProps
   // 「显示 <br>」：与属性面板共用同一份开关（见 lib/showBr.ts）
   const [showBr] = useShowBr();
 
-  // 选中态测量：display:inline 的元素跨行时 outline 会按行盒拆成多个框。
-  // 行内选中元素不再自画 outline（由 Canvas 的 .canvas-inline-sel 合并外框负责）。
-  // 用 data-bc-id 查 DOM（不用 ref——动态 Tag 的 ref 联合类型 TS 处理不了）。
+  /**
+   * 选中态测量：display:inline 的元素跨行时 outline 会按行盒**拆成多个框**
+   * （一个 span 折成两行 → 两个橙框），所以行内元素改由 Canvas 的
+   * `.canvas-inline-sel` 画一个合并外框。
+   *
+   * ⚠ v0.4.7 修的 BUG（用户：「选中的图片没有橙色框、也不闪」）：
+   *   旧判据只看 `display === 'inline'`。而 **`<img>` 的默认 display 就是 inline**，
+   *   于是每张图片一被选中就被当成"行内碎片"：data-bc-sel / data-bc-seln 全都不写，
+   *   橙框和闪烁一起消失，用户完全看不出图被选中了。
+   *   真正的判据是"**被拆成了多个行盒**" —— 用 getClientRects().length > 1 判断，
+   *   再排除替换元素（img/video/input 这类永远是单个盒子，不存在拆行问题）。
+   */
+  const REPLACED_TAGS = new Set(['img', 'video', 'audio', 'input', 'textarea', 'hr', 'select', 'iframe', 'canvas']);
   const [isInlineFrag, setIsInlineFrag] = useState(false);
   useEffect(() => {
     if (!isSelected) { setIsInlineFrag(false); return; }
@@ -67,7 +77,9 @@ const CanvasNodeBody = React.memo(function CanvasNodeBody(props: CanvasNodeProps
       try {
         const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(node.id)}"]`);
         if (!el) return;
-        setIsInlineFrag(getComputedStyle(el).display === 'inline');
+        const cs = getComputedStyle(el);
+        const fragmented = cs.display === 'inline' && el.getClientRects().length > 1;
+        setIsInlineFrag(fragmented && !REPLACED_TAGS.has(node.type));
       } catch { /* ignore */ }
     };
     check();
@@ -254,106 +266,8 @@ const CanvasNodeBody = React.memo(function CanvasNodeBody(props: CanvasNodeProps
   const codecGate = useVideoCodecGate(node.type, node.attrs?.srcAbs, node.attrs?.src);
   const codecBlocked = codecGate.blocked;
 
-  // 媒体元素（video / audio）的专属属性；audio 走自绘外壳，需要单独传 props
-  const mediaProps: Record<string, unknown> = MEDIA_TAGS.has(node.type) && !codecBlocked
-    ? (() => {
-        // v0.4.5（用户反馈 C补2 / C补3 / C补8）：
-        //  · 原生控件会吃掉鼠标事件 —— 音频整块都是控件区，所以"怎么点都选不中"；
-        //    视频也要精准点到左下角播放键才响。编辑时这很碍事。
-        //  · 方案：**未选中时不渲染控制条**（点击落到元素上 → 正常选中元素）；
-        //    选中后才显示控件，可以就地播放预览。想永远不要控件就用「背景模式」。
-        const bgMode = node.attrs?.controls === '0';   // 背景模式：永不显示控制条
-        const wantsAutoplay = node.attrs?.autoplay === '1';
-        // v0.4.5：**播放锁**（右侧媒体卡片上的「锁死播放」）。
-        //
-        // 用户第 2 次反馈（原话）：「理想状态：点一下，然后视频锁死，永远不会触发播放，
-        // 同时如果点之前视频正在播放，就关闭。并且锁死后显示视频的第 30 帧（或者别的帧），
-        // 用来体现这是视频，但是现在锁死后完全白色了，根本不对。如果是音频也要做好。」
-        //
-        // 之前为什么变白：锁死时我给了 `preload="none"` 且不挂控件 ——
-        // 浏览器手里一帧数据都没有，自然画不出任何东西。
-        //
-        // 现在：
-        //   · 视频 → `preload="metadata"`，加载到元数据后**定位到第 30 帧**（30fps 约 1 秒）并暂停，
-        //     于是画面停在一帧上（看得出是视频），但永远不会播放；
-        //   · 音频 → 保留控制条（不然就是一条空白），但拦截 play 并立刻暂停；
-        //   · 锁的瞬间如果正在播，`pause()` 立刻停掉（onPlay/onLoadedMetadata/锁标记变化都会按一次）。
-        const playLock = node.attrs?.playLock === '1';
-        const isAudio = node.type === 'audio';
-        /**
-         * v0.4.5 第 15 批（用户反复反馈："音频根本点击无法选中"）：**已查明真因，改走另一条路**。
-         *
-         * 一度想让"未选中的音频"渲染成一个 CSS 占位块（不挂 controls）。实测行不通：
-         * Chromium 的 UA 样式表里有 `audio:not([controls]) { display: none !important }`，
-         * 而 **UA 的 !important 优先级高于作者样式**（CSS 层叠顺序：
-         * author !important < user !important < UA !important），
-         * 所以没有 controls 的 <audio> 永远是 display:none，占位块根本画不出来（实测 0×0）。
-         *
-         * 正确做法：**音频始终带控制条**（这样它才有盒子、看得见），
-         * 选中与否只影响"点它是选中元素还是操作播放条"——
-         * 靠 `onPointerDownCapture` 只 stopPropagation（**不 preventDefault**）来选中，
-         * 因为 Chromium 在原生控件上被 preventDefault 之后连 click 都不再派发。
-         *
-         * 视频不一样：`<video>` 即使没有 controls 也能显示画面（首帧/定格帧），
-         * 所以视频仍然"选中后才出控制条"，排版时不挡手。
-         */
-        const showControls = bgMode ? false : (isAudio ? true : (isSelected && !playLock));
-        return {
-          src: node.attrs?.src ? toRenderableSrc(node.attrs.src, node.attrs.srcAbs) : undefined,
-          controls: showControls,
-          loop: node.attrs?.loop === '1',
-          // 自动播放必须静音，否则浏览器会直接拦掉（HTML 规范）
-          muted: node.attrs?.muted === '1' || wantsAutoplay || playLock,
-          autoPlay: wantsAutoplay && !playLock,
-          playsInline: node.type === 'video',
-          // 预载策略（v0.4.5 第 15 批微调）：
-          //   · 选中 / 锁死 → 必须读 metadata：前者要出控制条，后者要定格到第 30 帧；
-          //   · 未选中且未锁死 → **不预载**（一个页面里可能有十几个视频，
-          //     全部吃 metadata + 首帧解码会把 GPU 拖住 —— 用户反馈过 CPU 降不下来）。
-          preload: (isSelected || playLock) ? 'metadata' : 'none',
-          // 锁死标记：给 CSS 挂"禁止播放"的虚线描边 + 拦掉所有播放事件
-          // ⚠ 不要复用 data-bc-locked —— 那个是"元素锁定"（不可作为拖放目标），语义不同
-          'data-bc-play-lock': playLock ? '1' : undefined,
-          ...(playLock ? {
-            /** 把画面停在"第 30 帧"（30fps ≈ 1 秒；短视频取 20% 处，避免超出时长） */
-            onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => {
-              const el = e.currentTarget;
-              try {
-                el.pause();
-                if (el.dataset.bcLockSeek === '1') return;
-                const dur = Number.isFinite(el.duration) ? el.duration : 0;
-                const target = dur > 0
-                  ? Math.min(LOCK_FRAME_SEC, Math.max(0, dur * 0.2))
-                  : LOCK_FRAME_SEC;
-                el.dataset.bcLockSeek = '1';
-                if (Math.abs(el.currentTime - target) > 0.05) el.currentTime = target;
-              } catch { /* 忽略 */ }
-            },
-            // 定格帧定位完成后也再按一次暂停（有些浏览器 seek 会自动恢复播放）
-            onSeeked: (e: React.SyntheticEvent<HTMLMediaElement>) => { e.currentTarget.pause(); },
-            // 任何播放尝试一律按回去（用户点播放键、脚本 play()、浏览器自动播放都拦）
-            onPlay: (e: React.SyntheticEvent<HTMLMediaElement>) => { e.currentTarget.pause(); },
-            onPlaying: (e: React.SyntheticEvent<HTMLMediaElement>) => { e.currentTarget.pause(); },
-            // 锁死状态下的点击一律用于"选中元素"，任何情况下都不播放
-            // （同样不能 preventDefault，否则元素选不中）
-            onPointerDownCapture: (e: React.PointerEvent) => {
-              e.stopPropagation();
-              onSelect(node.id);
-            }
-          } : {
-            // 未选中时：这一次点击只用来**选中元素**，不交给原生控件
-            //（音频整块都是控件区，以前怎么点都选不中）。
-            onPointerDownCapture: (e: React.PointerEvent) => {
-              if (isSelected) return;
-              // ⚠ 不要 preventDefault：Chromium 在原生控件上被 preventDefault 后连 click 都不派发，
-              //    那样元素就永远选不中（用户反馈的"音频点击无法选中"）。只拦冒泡就够了。
-              e.stopPropagation();
-              onSelect(node.id);
-            }
-          })
-        };
-      })()
-    : {};
+  // 媒体元素（video / audio）的播放属性：细节全在 mediaPlayProps.tsx（带三条踩坑结论）
+  const mediaProps = buildMediaPlayProps({ node, isSelected, codecBlocked, onSelect });
 
   const commonProps = {
     'data-bc-id': node.id,
@@ -426,16 +340,23 @@ const CanvasNodeBody = React.memo(function CanvasNodeBody(props: CanvasNodeProps
           if (!boxW || !boxH) return;
           const boxRatio = boxW / boxH;
           const natRatio = natW / natH;
-          if (Math.abs(boxRatio - natRatio) / natRatio < 0.02) return; // 比例已经对了
-          // 画布可能被缩放（transform: scale(zoom)）：clientWidth 是缩放后的视觉像素，
-          // 写进 CSS 的必须是**未缩放**的 CSS 像素，所以这里用 DOM 上的实际缩放比换算。
-          const canvasEl = img.closest('.canvas') as HTMLElement | null;
-          const scale = canvasEl && canvasEl.offsetWidth
-            ? canvasEl.getBoundingClientRect().width / canvasEl.offsetWidth
-            : 1;
-          useScene.getState().updateStyle(node.id, {
-            height: Math.round((boxW / (scale || 1)) / natRatio) + 'px'
-          });
+          // 占位高度（factory 给的 minHeight）只在"还没选图"时有意义；
+          // 图一旦解码出来，盒子就该完全由真实比例决定 —— 否则 minHeight 会把
+          // 算好的高度顶回去（200px 宽、16:9 应为 112px，被 120px 兜住 → 变形 6%）。
+          const hasFloor = Boolean(
+            (node.style as Record<string, string | undefined>).minHeight
+          );
+          if (Math.abs(boxRatio - natRatio) / natRatio >= 0.02 || hasFloor) {
+            // 画布可能被缩放（transform: scale(zoom)）：clientWidth 是缩放后的视觉像素，
+            // 写进 CSS 的必须是**未缩放**的 CSS 像素，所以这里用 DOM 上的实际缩放比换算。
+            const canvasEl = img.closest('.canvas') as HTMLElement | null;
+            const scale = canvasEl && canvasEl.offsetWidth
+              ? canvasEl.getBoundingClientRect().width / canvasEl.offsetWidth
+              : 1;
+            useScene.getState().updateStyle(node.id, (hasFloor
+              ? { height: Math.round((boxW / (scale || 1)) / natRatio) + 'px', minHeight: undefined }
+              : { height: Math.round((boxW / (scale || 1)) / natRatio) + 'px' }) as Partial<typeof node.style>);
+          }
         };
       }
     } else if (node.type === 'input') {

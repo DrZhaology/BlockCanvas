@@ -104,6 +104,10 @@ const PROBES = [
   'probe-prop-card-anim',
   // v0.4.6 绗?47 鎵癸細瀹氫綅鍔╂墜鍦?relative / sticky 涓嬪亸绉婚噺蹇呴』鐪嬪緱瑙?
   'probe-pos-helper',
+  // 图片插入链路：空图有盒子但不锁比例 / 有图按真实比例 / 只写 border-width 也看得见
+  'probe-img-border',
+  // 属性卡片「删不掉」：断点层（tablet/mobile）残留 + border 长写残留
+  'probe-prop-delete',
   // v0.4.6 Web 版（R6-12/13/14）：需要先 `pnpm build:web` 产出 dist-web/index.html
   'probe-web',
   // v0.4.6 R6-3：CSS 域约束（主域登记 / 前缀归位 / 重复不超基线）

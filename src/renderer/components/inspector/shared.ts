@@ -48,3 +48,9 @@ export function animateRemove(el: Element | null, done: () => void): void {
   target.classList.add('is-removing');
   window.setTimeout(done, PROP_REMOVE_MS);
 }
+
+// ============ 命名转换（v0.4.7：PageCssBody 与 PageCards 都要用） ============
+/** 驼峰 CSS key → kebab 短横（bodyExtra 里存的是 kebab 名） */
+export const camelToKebab = (k: string) => k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+/** kebab → 驼峰（查 SCHEMA 需要驼峰 key） */
+export const kebabToCamel = (k: string) => k.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());

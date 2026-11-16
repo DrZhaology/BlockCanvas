@@ -155,11 +155,19 @@ async function main() {
       selectedIds: (st.scene.selectedIds || []).length,
       childTypes: (st.scene.root.children || []).map((c) => c.type).join(','),
       names: [...new Set(els.map((e) => getComputedStyle(e).animationName))],
-      infinite: els.map((e) => getComputedStyle(e).animationIterationCount)
+      infinite: [...new Set(els.map((e) => getComputedStyle(e).animationIterationCount))],
+      seln: els.length ? (els[0].getAttribute('data-bc-seln') || '') : ''
     };
   });
   console.log('DEBUG 选中:', JSON.stringify(sel));
-  // 直接校验样式表：选中态规则里不能再出现 infinite 动画
+  /**
+   * v0.4.7 用户改规则（原话）：
+   *   「选中元素的橙色选中框不明显了…1~5 个元素，所有选中的元素橙色边框+闪烁；
+   *     大于 5 个，只显示橙色边框，防止卡顿。」
+   * 所以这里不再断言"选中态一律不许有 infinite"，
+   * 而是断言**分档开关真的存在**：样式表里要有带 data-bc-seln 的闪烁规则，
+   * 且当前选中数（3 个）落在 ≤5 档 → 元素上 data-bc-seln="1"，动画确实是 infinite。
+   */
   const blinkRules = await win.evaluate(() => {
     const hits = [];
     for (const sheet of Array.from(document.styleSheets)) {
@@ -167,15 +175,17 @@ async function main() {
       try { rules = Array.from(sheet.cssRules || []); } catch { continue; }
       for (const r of rules) {
         const txt = r.cssText || '';
-        if (txt.includes('data-bc-sel') || txt.includes('canvas-inline-sel')) hits.push(txt);
+        if (txt.includes('data-bc-seln')) hits.push(txt);
       }
     }
-    const infinite = hits.filter((t) => /infinite/.test(t));
-    return { total: hits.length, infinite: infinite.length, sample: (infinite[0] || hits[0] || '').slice(0, 100) };
+    return { total: hits.length, sample: (hits[0] || '').slice(0, 120) };
   });
-  check('C补11 选中边框不再有无限闪烁动画（直接校验样式表）',
-    blinkRules.infinite === 0,
-    `选中态规则 ${blinkRules.total} 条，其中 infinite ${blinkRules.infinite} 条`);
+  check('C补11 选中框闪烁规则按"选中个数"分档存在（data-bc-seln）',
+    blinkRules.total > 0,
+    `data-bc-seln 规则 ${blinkRules.total} 条`);
+  check('C补11 3 个元素选中 → 落在会闪的那一档（data-bc-seln=1）',
+    sel.seln === '1' && sel.infinite.includes('infinite'),
+    `seln=${sel.seln} 动画=${JSON.stringify(sel.names)} 次数=${JSON.stringify(sel.infinite)}`);
   check('C补11 多选状态本身是生效的（selectedIds ≥ 2）',
     sel.selectedIds >= 2, `selectedIds=${sel.selectedIds}，元素类型 ${sel.childTypes}`);
 

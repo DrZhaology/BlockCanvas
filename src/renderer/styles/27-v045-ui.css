@@ -1286,20 +1286,22 @@
   .empty-home { align-items: center; padding-top: 24px; }
 }
 
-/* —— C补11：选中边框不再呼吸闪烁 ——
-   多选时每个元素都在跑 1.6s 无限动画 → 满屏橙色闪光。
-   改成静态橙色描边 + 一层很轻的固定光晕，靠"有没有描边"表达选中即可。 */
-.canvas [data-bc-sel="1"] {
+/* —— 选中边框：呼吸闪烁的"旧禁令"（v0.4.7 已按用户新要求改成分档） ——
+   v0.4.5 的原始理由还成立（多选时每个元素跑无限动画 → 满屏闪光、费 GPU），
+   所以**禁令要保留在"选中很多"的那一档上**，而不是一刀切全禁。
+   用户 v0.4.7 原话：「1~5 个元素，所有选中的元素橙色边框+闪烁，这样显眼；
+     大于5个，只显示橙色边框，防止卡顿。」
+   现在：
+     · 数量 ≤5（data-bc-seln='1'）→ 交给 43-v046-selbox.css 的 bcSelBreath；
+     · 数量 >5（data-bc-seln='0'）→ 这里继续压成静态框 + 极轻固定光晕。
+   ⚠ 别再写成无条件的 `!important` —— 那会把单选的闪烁一起掐掉（v0.4.7 的 bug）。 */
+.canvas [data-bc-sel="1"][data-bc-seln='0'] {
   animation: none !important;
   filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.5));
 }
-.canvas-inline-sel {
+.canvas-inline-sel[data-bc-seln='0'] {
   animation: none !important;
   filter: drop-shadow(0 0 2px rgba(249, 115, 22, 0.5));
-}
-@media (prefers-reduced-motion: no-preference) {
-  /* 只给"单选"一个极轻的入场提示：一次性，不循环 */
-  .canvas [data-bc-sel="1"] { animation: bcSelOnce 0.32s ease-out 1; }
 }
 @keyframes bcSelOnce {
   from { filter: drop-shadow(0 0 10px rgba(249, 115, 22, 0.9)); }

@@ -14,6 +14,7 @@ import { altHeld } from '@lib/altMode';
 import { measureFixedViewport } from '@lib/fixedViewport';
 import { contentBoxOf, hasSideValue, pickAxisSide, readBoxModel, edgeAt } from './geometry';
 import { applyAltDragMove, finishAltDrag, type AltDragCtx } from './altDragMove';
+import { createAltChrome } from './altChrome';
 import type { AltBoxModelData, AltDragState, AltEdge, AltHover, AltMode, Bar, Bounds } from './types';
 
 /** 播放锁定时要定格的帧：30fps 的第 30 帧 ≈ 1 秒 */
@@ -78,47 +79,10 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
   // 被标了 Alt 光标属性的元素（CSS 按 data-bc-alt 切换 resize/move/pointer 光标）
   const altTaggedRef = useRef<HTMLElement | null>(null);
 
-  // ── 幽灵 / 墙闪烁 / 光标标记 这些小工具（与计算无关，留在这里） ──────────────
-  const spawnAltGhost = (srcEl: HTMLElement, rect: DOMRect) => {
-    if (altGhostRef.current) return;
-    const g = srcEl.cloneNode(true) as HTMLElement;
-    g.removeAttribute('data-bc-id');
-    g.querySelectorAll('[data-bc-id]').forEach((n) => n.removeAttribute('data-bc-id'));
-    g.classList.add('bc-alt-ghost');
-    // 按元素真实大小定缩放：小元素 0.5 倍；很高的元素压到 ~200px 高，避免幽灵过大
-    const sc = Math.min(0.5, Math.max(0.16, 200 / Math.max(rect.height, 80)));
-    g.style.transform = `translate(0, 0) scale(${sc})`;
-    document.body.appendChild(g);
-    altGhostRef.current = g;
-  };
-  const moveAltGhost = (x: number, y: number) => {
-    const g = altGhostRef.current;
-    if (!g) return;
-    g.style.transform = g.style.transform.replace(/translate\([^)]*\)/, `translate(${x + 18}px, ${y + 18}px)`);
-  };
-  const removeAltGhost = () => {
-    window.clearTimeout(altPreviewTimer.current);
-    altPreviewRef.current = null;
-    document.querySelectorAll('.bc-drop-preview').forEach((n) => n.classList.remove('bc-drop-preview'));
-    altGhostRef.current?.remove();
-    altGhostRef.current = null;
-  };
-  const flashWall = (b: Bar | null) => {
-    if (!b) return;
-    setWallFlash(b);
-    window.clearTimeout(wallFlashTimer.current);
-    wallFlashTimer.current = window.setTimeout(() => setWallFlash(null), 620);
-  };
-  const tagAltCursor = (el: HTMLElement | null, kind: string) => {
-    if (altTaggedRef.current && altTaggedRef.current !== el) {
-      altTaggedRef.current.removeAttribute('data-bc-alt');
-      altTaggedRef.current = null;
-    }
-    if (el) {
-      el.setAttribute('data-bc-alt', kind);
-      altTaggedRef.current = el;
-    }
-  };
+  // ── 幽灵 / 墙闪烁 / 光标标记：纯 DOM 副作用，已拆到 altChrome.ts（v0.4.7） ────
+  const { spawnAltGhost, moveAltGhost, removeAltGhost, flashWall, tagAltCursor } = createAltChrome({
+    altGhostRef, altPreviewTimer, altPreviewRef, altTaggedRef, wallFlashTimer, setWallFlash
+  });
 
   // ── 每帧用的上下文（传给 altDragMove.ts） ────────────────────────────────────
   const ctx: AltDragCtx = {

@@ -1020,33 +1020,69 @@ export const useScene = create<SceneStore>((set) => ({
       const scene = deepClone(st.scene);
       const node = findNode(scene.root, id);
       if (!node) return st;
-      // 删属性时也要消解祖先 childStyles（否则容器规则会继续把值"补"回来，看起来删不掉）
-      const delKeys = (() => {
-        const item = SCHEMA_LOOKUP.get(key);
-        if (item) {
-          return (item.input === 'box4' || item.input === 'trbl') && item.sides
-            ? item.sides.map((s) => s.key)
-            : [item.key];
+      /**
+       * 「删一个属性」到底要删哪些 style 字段？
+       *
+       * ⚠ v0.4.7 修的真 BUG（用户：「删除属性卡片删不掉，会卡」）：
+       *   有的属性**从不在 style 里留下自己那个 key**，而是展开成一组 longhand ——
+       *   · border  → borderTopWidth / borderRightWidth / … / borderStyle / borderColor
+       *   · 四向属性 → paddingTop / paddingRight / …
+       *   以前只删 `border` 这一个键：它本来就不存在，等于什么都没删，
+       *   而 `borderTopWidth` 还在 → `hasStyleValue()` 又认为"这条有值"→ 行立刻回列表，
+       *   于是看起来是"删不掉"，而且因为列表一直在恢复，动画也一直重来（用户感知为"卡"）。
+       *   现在把 border 系列显式展开，其它有 sides 的沿用 sides。
+       */
+      const keysOf = (item: (typeof SCHEMA)[number] | undefined, fallbackKey: string): string[] => {
+        if (!item) return [fallbackKey];
+        if (item.key === 'border') {
+          // 简写 + 四边宽度/线型 + 全局线型/颜色，一起清
+          return [
+            'border',
+            'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+            'borderTopStyle', 'borderRightStyle', 'borderBottomStyle', 'borderLeftStyle',
+            'borderStyle', 'borderColor'
+          ];
         }
-        return [key];
-      })();
+        // 背景色：background 简写与 backgroundColor 都要清（否则删了立刻又"有值"）
+        if (item.key === 'backgroundColor') return ['backgroundColor', 'background'];
+        if ((item.input === 'box4' || item.input === 'trbl') && item.sides) {
+          return item.sides.map((s) => s.key);
+        }
+        return [item.key];
+      };
+      const item = SCHEMA_LOOKUP.get(key);
+      const delKeys = keysOf(item, key);
+      // 删属性时也要消解祖先 childStyles（否则容器规则会继续把值"补"回来，看起来删不掉）
       stripAncestorChildStyles(scene.root, node, delKeys);
       // 移出列表
       if (node.visibleProps) {
         node.visibleProps = node.visibleProps.filter((k) => k !== key);
         if (node.visibleProps.length === 0) node.visibleProps = undefined;
       }
-      // 彻底删除对应 style 字段（含 4 边拆分）
-      const item = SCHEMA_LOOKUP.get(key);
-      if (item) {
-        const keys = (item.input === 'box4' || item.input === 'trbl') && item.sides
-          ? item.sides.map((s) => s.key)
-          : [item.key];
-        for (const k of keys) {
-          delete (node.style as Record<string, string | undefined>)[k];
+      // 彻底删除对应 style 字段（含简写展开）
+      for (const k of delKeys) {
+        delete (node.style as Record<string, string | undefined>)[k];
+      }
+      /**
+       * ⚠ v0.4.7 修的真 BUG（用户：「删除属性卡片删不掉，会卡」）：
+       *   上面只删了**基础层**（node.style）。可面板判断"这条属性在不在"用的是
+       *   `styleForPresence` = 基础层 + **当前断点的覆盖层**（ElementPropsBody）。
+       *   而写值是按 `activeBreakpoint` 走的 —— 右侧面板一宽、画布落到 753px 以下
+       *   就写进 `responsive.tablet`，于是：
+       *     删除 → 基础层本来就没有这个键（没删掉任何东西）→ tablet 层原封不动 →
+       *     `hasStyleValue()` 依然为真 → **行当场回到列表**，用户看到的就是"删不掉"。
+       *   所以必须把每个断点层里的同名字段一起清掉。
+       */
+      if (node.responsive) {
+        for (const layer of [node.responsive.tablet, node.responsive.mobile]) {
+          if (!layer) continue;
+          for (const k of delKeys) delete (layer as Record<string, string | undefined>)[k];
+          if (Object.keys(layer).length === 0) {
+            if (layer === node.responsive.tablet) delete node.responsive.tablet;
+            else delete node.responsive.mobile;
+          }
         }
-      } else {
-        delete (node.style as Record<string, string | undefined>)[key];
+        if (Object.keys(node.responsive).length === 0) node.responsive = undefined;
       }
       // 关键：全量同步给所有同类名、同关系选择器的元素，防止样式不一致导致类名ID冲突！
       syncClassmates(scene.root, node);

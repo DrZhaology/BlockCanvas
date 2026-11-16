@@ -87,9 +87,24 @@ export function defaultStyleFor(type: ElementType): ElementStyle {
         backgroundColor: '#fff3cd'
       };
     case 'img':
+      /**
+       * 图片（v0.4.7 按用户要求改）：
+       *   「插图片前不要固定宽高比，插进去后才锁比例。」
+       *
+       * ⚠ 第一版改错了：把 `height` 整个删掉 → 空 `<img>`（src 还是空串）没有固有高度，
+       *   画布上直接塌成"窄的一条线"（用户立刻发现了）。`<img>` 是替换元素，
+       *   没有 src 就没有内在尺寸，光给 width 是撑不出高度的。
+       *
+       * 正确做法：给 `minHeight` 而不是 `height`。
+       *   · 显式 `height` 才等于"把比例定死"（200:120）；`minHeight` 只是保证
+       *     "空的时候也有个能看见、能点中的盒子"，**不构成比例约束** ——
+       *     宽度随便拖、高度想设多少设多少，都不会被这个值拽住；
+       *   · 一旦有了图，`CanvasNode` 的 onLoad 会按 naturalWidth/naturalHeight
+       *     把高度写成真实比例，之后怎么缩放都不变形。
+       */
       return {
         width: '200px',
-        height: '120px',
+        minHeight: '120px',
         backgroundColor: '#e2e8f0'
       };
     case 'input':
