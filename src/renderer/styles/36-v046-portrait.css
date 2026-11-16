@@ -86,6 +86,13 @@
 
 /* ── 第一条：5 个核心按钮 ─────────────────────────────────────────────────── */
 .pt-bar1 {
+  position: relative;
+  /* 用户原话：「让第一层菜单盖在这个上面，现在这个窗口在第一层菜单上面，看起来奇怪。
+     注意后续第一层弹窗永远是最在上层的。」
+     图层面板 bottom 钉在第一条栏上沿，本来不该重叠；但面板是 fixed、第一条栏是普通流，
+     一加 border/阴影就会露出 1px 缝。给第一条栏一个**比面板高**的层级把它压住，
+     同时保留 auto 以外的值也不会抢到 Portal 菜单（那些是 9999）。 */
+  z-index: 60;
   height: 56px;
   padding: 0 4px max(0px, env(safe-area-inset-bottom, 0px));
   gap: 2px;
@@ -120,6 +127,31 @@
   line-height: 1;
   letter-spacing: 0.2px;
   opacity: 0.85;
+}
+
+/* ── 第一条栏的 SVG 变换（用户："第一层工具栏可以上方的 SVG 丝滑变换，不要闪烁像刷新一下"）──
+   ① 「三」→「×」：三根线各自位移 + 旋转，是同一批线条在动（真形变，不换图）；
+   ② 左端按钮随视图换内容时，新的那颗从下方 4px 滑入并淡入（DOM 换人的瞬间不硬切）。 */
+.pt-menu-glyph line {
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 240ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+              opacity 140ms linear;
+}
+.pt-menu-glyph.is-open line:nth-child(1) { transform: translateY(5px) rotate(45deg); }
+.pt-menu-glyph.is-open .pt-mg-mid { opacity: 0; transform: scaleX(0.35); }
+.pt-menu-glyph.is-open line:nth-child(3) { transform: translateY(-5px) rotate(-45deg); }
+
+@keyframes ptLeadIn {
+  from { opacity: 0; transform: translateY(4px) scale(0.94); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* backwards（不是 both）：播完就不占 transform，否则 :active 的按压缩放会被动画帧永久压住 */
+.app[data-shell='stack'] .pt-bar1 .pt-btn {
+  animation: ptLeadIn 200ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) backwards;
 }
 
 /* 会话数角标：圆角正方形 + 中间数字 */
@@ -188,78 +220,26 @@
   touch-action: pan-x;
   transition: height var(--dur-mid, 200ms) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
 }
-/* 抓握提示条：告诉用户"这条能长按拖动"，左端再挂一个 Alt 模式开关。
-   ⚠ 抓手条不能写 width:100%：这一行还有 Alt 按钮 + padding + gap，
-   100% 会把它顶出右边界 35px（probe-shell-widths 的"没有元素越过右边界"报了 4 档）。 */
-.pt-bar2-head {
-  width: 100%;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  flex: 0 0 auto;
-  box-sizing: border-box;
-  overflow: hidden;
-}
-.pt-bar2-grip {
-  flex: 1 1 auto;
-  min-width: 24px;
-  height: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-/* Alt 开关：用户两轮都说"这个按钮这么小给谁点" ——
-   现在它是 26px 高的胶囊 + 完整文字「Alt 模式」，命中区再外扩到 44px。 */
-.pt-alt-btn {
-  position: relative;
-  flex: 0 0 auto;
-  height: 26px;
-  padding: 0 12px;
-  border-radius: 13px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.2px;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-}
-/* 命中区外扩到 44px 高（视觉不变，手指点得到） */
-.pt-alt-btn::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 44px;
-  transform: translateY(-50%);
-}
-.pt-alt-btn.is-on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.pt-bar2-grip::after {
-  content: '';
-  width: 34px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--border);
-}
+/* ⚠ 「抽屉把手 / Alt 胶囊 / 展开态 / 图层入口」这一整组样式已经删了（v0.4.7 第 47 批）：
+     · .pt-bar2-head / .pt-bar2-grip / .pt-alt-btn —— 抽屉能力上一轮就删了，
+       DOM 里早就不存在，只剩 CSS 在这里占位（用户："上方像抽屉把手的横条没有删除"）；
+     · .pt-layer-btn —— 图层入口已搬进右侧属性面板的「图层 / 属性」页签；
+     · .is-expanded —— 展开态由那套抽屉手势驱动，一起没了。
+   probe-css-domains 只查"同一选择器跨域重复"，查不出这类**死规则**，
+   所以以后再删组件时记得手动回来清 CSS（不然下一轮又会踩"改了没效果"）。 */
 
 .pt-bar2-inner {
   width: 100%;
   flex: 1 1 auto;
   min-height: 0;
+  /* 横滑容器：里面只有一条 .toolbar，flex 让它在纵向撑满栏高 */
+  display: flex;
+  align-items: stretch;
 }
 
 /* 折叠态：一行、可左右滑动。覆盖 33 号分片里"窄屏工具栏折成两行"的旧规则
    （那是顶部工具栏时代的要求，现在顶栏没了，改由这里接管）。
-   高度锁死在 58px：不锁的话里面工具栏的 padding/行高会把这条栏撑到 100px+，
+   高度锁死在 --pt-bar2-h：不锁的话里面工具栏的 padding/行高会把这条栏撑到 100px+，
    画布白掉半个屏幕。 */
 .pt-bar2:not(.is-expanded) { height: var(--pt-bar2-h, 72px); }
 .pt-bar2:not(.is-expanded) .pt-bar2-inner {
@@ -406,29 +386,7 @@
   font-size: 9px;
 }
 
-/* ── 展开态：全部按钮换行铺开，超过 4 行内部滚（不把画布挤没） */
-.pt-bar2.is-expanded { max-height: 52vh; }
-.pt-bar2.is-expanded .pt-bar2-inner {
-  overflow-y: auto;
-  /* 展开时「图层」按钮与工具栏各占一行：flex-wrap 让工具栏拿到 100% 宽，
-     否则它会跟图层按钮挤在同一行，.tb-main 被压成 50px 定高、换行的按钮溢出框外
-     （probe-portrait-bars 的"展开态主按钮区更高"就是这么挂的）。 */
-  flex-wrap: wrap;
-  align-items: flex-start;
-}
-.pt-bar2.is-expanded .pt-bar2-inner > .toolbar {
-  flex: 1 1 100%;
-  min-width: 0;
-  height: auto;
-}
-.pt-bar2.is-expanded .toolbar {
-  flex-wrap: wrap;
-  height: auto;
-  row-gap: 4px;
-  padding: 0 6px 8px;
-}
-.pt-bar2.is-expanded .tb-main { flex-wrap: wrap; flex: 1 1 100%; order: 2; overflow: visible; height: auto; }
-.pt-bar2.is-expanded .tb-right { order: 1; margin-left: auto; }
+/* ── 展开态：随抽屉手势一起删了（v0.4.7 第 47 批，DOM 里不会再有 .is-expanded） ── */
 
 /* 栏内工具栏不要自己的上边框和背景（栏体已经有了，别套两层） */
 .pt-bar2 .toolbar {
@@ -587,28 +545,6 @@
 .layer-menu button:active:not(:disabled) { background: var(--bg-hover, rgba(0, 0, 0, 0.08)); }
 .layer-menu button:disabled { opacity: 0.4; cursor: default; }
 
-/* 「图层」入口按钮：站在第二条操作栏最左边（更多 之后） */
-.pt-bar2-inner { display: flex; align-items: stretch; }
-.pt-layer-btn {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  min-width: 52px;
-  min-height: 44px;
-  padding: 3px 6px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--text);
-  font-size: 9.5px;
-  line-height: 1.15;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.pt-layer-btn.is-open { background: var(--bg-hover, rgba(0, 0, 0, 0.06)); color: var(--accent); }
 
 /* ── 竖屏程序内预览（整屏 iframe，底部第一条栏留着退出）─────────────────
    用户：「竖屏预览改程序内预览（第一层保留可退出）」。手机上把预览交给系统浏览器
@@ -709,7 +645,10 @@
 
 /* ── 项目中心：竖屏头两行放不下（实测 .pc-header-right 越界 429px）─────────
    宽屏那一行是「返回 + 标题 + 计数 + ? | 搜索 + 三个按钮」，竖屏 412px 装不下。
-   做法：头部分成三行 —— 第一行 返回+标题，第二行 搜索吃满宽，第三行 三个按钮横滑。 */
+   做法：头部分成三行 —— 第一行 返回+标题，第二行 搜索吃满宽，第三行 按钮**换行铺开**。
+   ⚠ 第三行不能只靠 overflow-x:auto 横滑：四个按钮（导入 / 新建 / 打开目录）在
+     412px 里正好把最后一颗切在屏幕外，用户看到的是"按钮没了、也滑不动"
+     （那张截图就是这样）。换行比横滑稳：一眼全在。 */
 .app[data-shell='stack'] .pc-page { width: 100%; min-width: 0; }
 .app[data-shell='stack'] .pc-header {
   flex-direction: column;
@@ -723,22 +662,27 @@
   min-width: 0;
 }
 .app[data-shell='stack'] .pc-header-right {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   min-width: 0;
   width: 100%;
   gap: 6px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-  padding-bottom: 2px;
+  overflow: visible;
 }
-.app[data-shell='stack'] .pc-header-right::-webkit-scrollbar { width: 0; height: 0; }
 .app[data-shell='stack'] .pc-search-input {
-  flex: 1 1 auto;
-  min-width: 120px;
+  flex: 1 1 100%;
+  min-width: 0;
   max-width: 100%;
+  height: 30px;
+  box-sizing: border-box;
 }
-.app[data-shell='stack'] .pc-header-right .btn-mini { flex: 0 0 auto; }
+.app[data-shell='stack'] .pc-header-right .btn-mini {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
 .app[data-shell='stack'] .pc-title { font-size: 14px; }
 .app[data-shell='stack'] .pc-body { padding: 8px 10px 12px; }
 /* 卡片一列（两张并排时缩略图只剩 160px，标题全被挤成省略号） */
@@ -859,7 +803,11 @@
 /* ── 竖屏的设置卡片：改成"图标 + 标题/说明"一行、控件单独一行的两段式 ────────
    原来一行放「图标 | 说明 | 控件」，412px 里说明被挤成三四个字一行
    （用户第三张截图那种"竖排文字"就是这么来的）。 */
-.app[data-shell='stack'] .fluent-settings-page .fluent-card {
+.app[data-shell='stack'] .fluent-settings-page .fluent-card:has(> .fluent-card-info) {
+  /* ⚠ 只给"标准三件套"卡片（图标 / 文案 / 控件）套两段式网格。
+     自定义结构的卡片（存储总览、扩展资源包）没有 .fluent-card-info，
+     一旦也套网格就会被塞进 34px 的图标列 —— 字全竖着排、按钮挤成一条。
+     非标准卡片的竖排规则见 41-v046-settings-fix.css。 */
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   grid-template-areas:
@@ -889,6 +837,12 @@
 .app[data-shell='stack'] .pc-back-btn,
 .app[data-shell='stack'] .hc-back-btn,
 .app[data-shell='stack'] .help-back-btn { display: none !important; }
+
+/* ── 竖屏「项目中心」的按钮尺寸：布局规则只在上面那一处写（.pc-header 系列），
+      这里以前还有一套 `.pc-header-right { flex: 1 1 100% }` + `.pc-search-input { flex:1 1 100% }`，
+      两套同时生效 → 搜索框 100% + 按钮行各占 100%，实测右侧越界 207px
+      （shots-ui-full 的 17-projects 一直在报 badCount=4，按钮被切在屏幕外）。
+      同一件事只准写一处。 */
 
 /* ── 页面跳转动画（用户："做好各个页面的跳转动画"）──────────────────────
    竖屏每个页面都是整屏替换，直接换会"啪"一下。统一给页面根节点一个
@@ -920,16 +874,21 @@
 .app[data-shell='stack'] .bc-preview-view {
   animation: bcViewIn 220ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
 }
-/* View Transitions 接管"设置页"的进出：旧页右滑出、新页右滑入。
-   `data-vtslide` 由 App 的 switchView 打（只在涉及设置页且竖屏时）。 */
-html[data-vtslide='settings']::view-transition-old(root) {
+/* View Transitions 接管这些整页视图的进出：旧页右滑出、新页右滑入。
+   `data-vtslide` 由 App 的 switchView 打（竖屏 + 涉及 SLIDE_VIEWS 时）。
+   第 47 批从"只有设置页"扩到所有整页视图（用户：「所有别的页面都要修改一下」）。 */
+html[data-vtslide]::view-transition-old(root) {
   animation: bcPageOutRight 200ms var(--ease-standard, ease) both;
 }
-html[data-vtslide='settings']::view-transition-new(root) {
+html[data-vtslide]::view-transition-new(root) {
   animation: bcPageInRight 240ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
 }
 /* VT 已经在播"右侧进入"了，页面自己别再叠一遍（否则会看到两次位移） */
-html[data-vtslide='settings'] .app[data-shell='stack'] .fluent-settings-page {
+html[data-vtslide] .app[data-shell='stack'] .fluent-settings-page,
+html[data-vtslide] .app[data-shell='stack'] .pc-page,
+html[data-vtslide] .app[data-shell='stack'] .help-center,
+html[data-vtslide] .app[data-shell='stack'] .help-page,
+html[data-vtslide] .app[data-shell='stack'] .bc-preview-view {
   animation: none;
 }
 
@@ -975,6 +934,12 @@ html[data-vtslide='settings'] .app[data-shell='stack'] .fluent-settings-page {
   will-change: transform;
   /* 纵向还给浏览器（目录能滚），横向由手势层接管（滑动关闭） */
   touch-action: pan-y;
+}
+/* 进场：keyframes（变量过渡对刚挂载的元素不生效，见 HelpCenter 里的注释） */
+.help-drawer.is-entering { animation: helpDrawerIn 240ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both; }
+@keyframes helpDrawerIn {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
 }
 /* 拖拽中不能有过渡，否则抽屉会"慢半拍地追手指" */
 .help-drawer.is-dragging { transition: none; }
@@ -1305,19 +1270,28 @@ html[data-vtslide='settings'] .app[data-shell='stack'] .fluent-settings-page {
 }
 .sess-card:active { transform: scale(0.975); }
 /* 进场动画（用户："当前的画布缩小到多标签页的缩略图"）：
-   当前这张从"整屏大小"缩回卡片位置，其余卡片错峰从下方浮上来。
-   ⚠ 用 animation 而不是 transition：卡片是刚挂载的，没有起始态可过渡。 */
+   当前这张从"接近整屏"缩回卡片位置，其余卡片错峰从下方浮上来。
+
+   用户第二轮反馈：「现在太快了或者开始一段时间不清晰，需要改进一下。」
+   真因有两条：
+     ① 起始 scale 1.55 太小 —— 画布在屏幕上几乎是满屏的，缩回卡片要走 5~6 倍，
+        1.55 起步等于"前 70% 的时间都停在卡片大小附近"，看着不像"从画布缩过来"；
+     ② `filter: blur(1px)` 在第一帧就糊了一层 —— 那就是"开始一段时间不清晰"。
+   现在：起点拉到 3.2（视觉上就是"画布整体塌下来"）、去掉模糊、时长 560ms，
+   前 25% 快走、后面缓收（cubic-bezier 自带减速，不用手写多段）。
+   另外叠一层"整块从画布位置抬起来"的 translateY，让缩小的落点更像从上方压下来。 */
 .sess-card.enter-active {
-  animation: sessCardInActive 420ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
-  transform-origin: center center;
+  animation: sessCardInActive 560ms cubic-bezier(0.16, 0.9, 0.24, 1) both;
+  transform-origin: 50% 34%;
+  z-index: 3;
 }
 .sess-card.enter {
-  animation: sessCardIn 300ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+  animation: sessCardIn 320ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
 }
 @keyframes sessCardInActive {
-  0%   { opacity: 0.15; transform: scale(1.55) translateY(6%); filter: blur(1px); }
-  55%  { opacity: 1; }
-  100% { opacity: 1; transform: scale(1) translateY(0); filter: none; }
+  0%   { opacity: 0; transform: scale(3.2) translateY(26%); }
+  18%  { opacity: 1; }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 @keyframes sessCardIn {
   0%   { opacity: 0; transform: translateY(26px) scale(0.96); }
@@ -1388,25 +1362,37 @@ html[data-vtslide='settings'] .app[data-shell='stack'] .fluent-settings-page {
   /* 缩略图与名字之间的分隔线只保留这一条（1px） */
   border-top: 1px solid var(--border);
 }
-/* ── 「有未保存的修改」确认面板：画在卡片内部（用户："放到会话卡片的下面"）──
-   两个卡片是 grid 同一行，所以打开面板会把整行撑高 —— 这是有意的：
-   面板属于这张卡片，不该飘在页面中央。 */
+/* ── 「有未保存的修改」确认面板 ──────────────────────────────────────────────
+   用户原话：「点×想要关闭页面，改成二级菜单弹窗，从下面弹出，可以点击旁边关闭的。」
+     「卡片的点×的二级弹窗我希望是紧贴×按钮的下边缘，不是现在的。」
+   以前它排在卡片内容流里（名字行下面），会把卡片撑高、和 × 离得很远；而且卡片一旦
+   进入进场动画（transform）就成了 fixed 的包含块，浮层会被 overflow:hidden 裁掉。
+   现在：Portal 到 body、fixed + 内联 left/top 钉在**那颗 × 的下边缘**，
+   动画从下方 10px 升起（"从下面弹出"），点旁边收起。
+   ⚠ 只在这里写一份 —— 上一版在 23 号和 36 号各写一套，两段动画互相盖，看起来像卡片内展开。 */
 .sess-confirm {
+  position: fixed;
+  z-index: 40;
+  width: 224px;
   padding: 8px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-panel-2, var(--bg));
-  animation: sessConfirmIn 180ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+  background: var(--bg-panel-2, var(--bg-panel));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+  transform-origin: top right;
+  animation: sessConfirmPop 190ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
 }
-.sess-confirm.is-closing {
-  animation: sessConfirmOut 150ms var(--ease-in, ease-in) both;
+.sess-confirm.is-closing { animation: sessConfirmPopOut 150ms var(--ease-in, ease-in) both; }
+@keyframes sessConfirmPop {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
 }
-@keyframes sessConfirmIn {
-  from { opacity: 0; transform: translateY(-8px); max-height: 0; }
-  to   { opacity: 1; transform: translateY(0); max-height: 260px; }
+@keyframes sessConfirmPopOut {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(10px) scale(0.97); }
 }
-@keyframes sessConfirmOut {
-  from { opacity: 1; transform: translateY(0); max-height: 260px; }
-  to   { opacity: 0; transform: translateY(-8px); max-height: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .sess-confirm, .sess-confirm.is-closing { animation: none; }
 }
 .sess-confirm-title {
   font-size: 12px;
@@ -1516,4 +1502,109 @@ html[data-vtslide='settings'] .app[data-shell='stack'] .fluent-settings-page {
   cursor: pointer;
 }
 .sess-menu button:active { background: var(--bg-hover, rgba(0, 0, 0, 0.08)); }
+
+
+/* 预览：iframe 按画布宽度显示、水平居中（左右留白露出底色，不再拉满整屏） */
+.app[data-shell='stack'] .bc-preview-view { justify-content: center; }
+
+/* ── 以下三段从 41 号分片搬回来：它们属于竖屏外壳域（会话卡 / 文字菜单 / 弹窗），
+      放在设置域里会变成跨域重复选择器（probe-css-domains 有基线） ── */
+
+/* 会话卡 → 进入该会话：卡片放大淡出（= 进入会话页动画的逆过程），页面同时轻微后缩。
+   用户："会话页面点击会话进入的时候进入动画和退出动画同理，反过来。" */
+.sess-page.is-opening { animation: sessPageZoomOut 200ms var(--ease-in, ease-in) both; }
+.sess-card.is-opening {
+  animation: sessCardOpen 200ms var(--ease-in, cubic-bezier(0.4, 0, 1, 1)) both;
+  z-index: 4;
+  transform-origin: center center;
+}
+@keyframes sessPageZoomOut {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(1.02); }
+}
+@keyframes sessCardOpen {
+  from { opacity: 1; transform: scale(1); }
+  60%  { opacity: 0.6; transform: scale(1.06); }
+  to   { opacity: 0; transform: scale(1.14); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sess-page.is-opening, .sess-card.is-opening { animation: none; }
+}
+
+/* ============================================================================
+   附：设置页**内部**的两级切换动画（列表 ⇄ 详情）
+   ----------------------------------------------------------------------------
+   用户原话：「设置页面进入时会多闪烁一次。而且我说的设置页面的动画，是点进的一个大设置项后，
+     右边相当于页面从右边划入，退出时从右边从左往右划出。你只貌似做了进入设置页面的动画，
+     不是设置页面内部的动画。」
+
+   为什么上一版是"只有进、没有出"：
+     列表 → 详情是 `setState` 换子树，**旧内容当场被卸载** ——
+     它没有机会播自己的退场，屏幕上看就是"新页滑进来、旧页凭空没了"。
+   现在用 View Transitions（lib/navTransition.ts）：
+     · 出发前给 .fluent-settings-page 挂 `view-transition-name: bc-set`，
+       浏览器自己给旧内容拍快照 → 退场动画作用在快照上，真 DOM 早已换成新的；
+     · 只给**内容区**挂名字 → 底下两条操作栏不参与，不会跟着闪
+       （用户：「下方的工具栏不要死板的闪烁一下」）；
+     · `data-vtset="fwd|back"` 决定四段动画往哪边播。
+
+   ⚠ 「多闪烁一次」的真因也在这里：以前**页面级** bcPageInRight（整页从右滑入）和
+   **列表级** setListIn（列表从左侧滑入）会同时播，方向还相反 —— 看起来就是闪一下。
+   现在页面级只负责"从编辑器进设置"这一趟；进来之后的列表 ⇄ 详情全交给下面的命名转场。
+   ========================================================================== */
+/* 参与转场的元素：只此一个（名字唯一，浏览器要求全文档唯一） */
+.fluent-settings-page.bc-vt-nav { view-transition-name: bc-set; }
+
+/* —— 进下一级（列表 → 详情）：详情从右边划入，列表往左退 —— */
+html[data-vtset='fwd']::view-transition-old(bc-set) {
+  animation: setSlideOutLeft 200ms var(--ease-standard, ease) both;
+}
+html[data-vtset='fwd']::view-transition-new(bc-set) {
+  animation: setSlideInRight 240ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+/* —— 退上一级（详情 → 列表）：详情往右划出，列表从左边回来 —— */
+html[data-vtset='back']::view-transition-old(bc-set) {
+  animation: setSlideOutRight 200ms var(--ease-standard, ease) both;
+}
+html[data-vtset='back']::view-transition-new(bc-set) {
+  animation: setSlideInLeft 240ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+
+@keyframes setSlideInRight {
+  from { opacity: 0; transform: translateX(34px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes setSlideOutLeft {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(-22px); }
+}
+@keyframes setSlideInLeft {
+  from { opacity: 0; transform: translateX(-26px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes setSlideOutRight {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(34px); }
+}
+
+/* 转场期间别让两段内容各播自己的入场（那才是"闪两下"） */
+html[data-vtset] .app[data-shell='stack'] .fluent-settings-page,
+html[data-vtset] .app[data-shell='stack'] .fluent-settings-page .fluent-content,
+html[data-vtset] .app[data-shell='stack'] .fluent-settings-page .set-list,
+html[data-vtset] .app[data-shell='stack'] .fluent-settings-page .fluent-cards-container {
+  animation: none;
+}
+
+/* 不支持 View Transitions（或系统开了"减少动态效果"）时的降级：
+   至少让新内容从右侧淡入，别硬切。 */
+.fluent-settings-page[data-level='detail'] .fluent-content {
+  animation: setSlideInRight 240ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+@supports (view-transition-name: none) {
+  .fluent-settings-page.bc-vt-nav[data-level='detail'] .fluent-content,
+  .fluent-settings-page.bc-vt-nav[data-level='list'] .set-list { animation: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fluent-settings-page[data-level='detail'] .fluent-content { animation: none; }
+}
 

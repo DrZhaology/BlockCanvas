@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useScene } from '@store/sceneStore';
 import {
   useToolbar, dockOf, getSortedItems, groupOfItem,
@@ -13,6 +13,7 @@ import { readSelHighlight, writeSelHighlight } from '@lib/selHighlight';
 import { useDrawerSide, DRAWER_SIDE_LABELS } from '@lib/drawerSide';
 import { usePortraitPrefs, setPortraitPrefs } from '@lib/portraitPrefs';
 import { useShellLayout } from '@lib/shellMode';
+import { withNavTransition } from '@lib/navTransition';
 import { appAlert, appConfirm } from '@lib/appConfirm';
 import type { DataPathsInfo, StorageStatsInfo, StorageBreakdownInfo, StorageCategoryId } from '../global';
 
@@ -62,9 +63,28 @@ export function Settings(props: Props) {
   /** 受控值优先（App 拿着它做"返回上一层"）；宽屏没传就是本组件自己的状态 */
   const section = props.section !== undefined ? props.section : sectionLocal;
   const active: SettingsSection = section ?? 'personalization';
+  /** 这一版切换的往返方向（只影响转场，不影响任何数据） */
+  const navDirRef = useRef<'fwd' | 'back'>('fwd');
+  /**
+   * 竖屏换页 = **右进右出**（用户：「点进的一个大设置项后，右边相当于页面从右边划入，
+   * 退出时从右边从左往右划出」）。
+   *
+   * 以前这里是裸 setState → 旧内容直接卸载，只有新内容自己的入场 animation，
+   * 所以用户看到"只有进没有出"。现在交给 View Transitions：
+   * 浏览器给旧内容拍快照，退场动画作用在快照上（真 DOM 早换成新的了）。
+   *
+   * 宽屏不分两级（导航常驻），保持原来的瞬间切换：那边没有"页"的概念，
+   * 给它加滑屏反而是噪音。
+   */
   const chooseSection = (s: SettingsSection | null) => {
-    setSection(s ?? 'personalization');
-    props.onSectionChange?.(s);
+    const apply = () => {
+      setSection(s ?? 'personalization');
+      props.onSectionChange?.(s);
+    };
+    if (!stacked) { apply(); return; }
+    // 进下一级 = fwd（新内容从右边划入）；回到列表 = back（旧内容往右划出）
+    navDirRef.current = s ? 'fwd' : 'back';
+    withNavTransition(navDirRef.current, apply);
   };
   // 竖屏那三条开关（显示第二条栏 / 长按判定 / 图层面板高度）—— 真实生效，不是摆设
   const ptPrefs = usePortraitPrefs();
@@ -350,7 +370,24 @@ export function Settings(props: Props) {
    * 现在竖屏看不到「电脑设置」（布局模式 / 工具栏编排这些在 412px 里既没法用、
    * 又正是"文字被压成一列单字"的来源），宽屏也看不到「竖屏设置」。
    */
-  const visibleGroups = NAV_GROUPS.filter((g) => (stacked ? g.title !== '电脑设置' : g.title !== '竖屏设置'));
+  /**
+   * 按形态过滤分组（v0.4.6 第 46 批）。
+   *
+   * 用户原话：「设置分成三个内容：通用设置（竖屏，横屏都有的设置项，通用），
+   *   横屏设置项（横屏才有，竖屏不显示），竖屏设置项（同理）。按需显示。」
+   * 现在竖屏看不到「电脑设置」（布局模式 / 工具栏编排这些在 412px 里既没法用、
+   * 又正是"文字被压成一列单字"的来源），宽屏也看不到「竖屏设置」。
+   *
+   * v0.4.7 第 47 批追加：「第二层菜单的排列不可在设置中修改，以及竖屏设置里面
+   *   不可以修改下方菜单的排布」。竖屏第二条栏是**固定九个按钮**（PortraitToolbar），
+   * 桌面那套排序/停靠/分组根本不参与渲染 —— 把入口摆在这里只会让人改了没反应。
+   * 所以「工具栏管理」在竖屏下一并隐藏（它本来就在「电脑设置」组里，这里是显式双保险）。
+   */
+  const HIDDEN_IN_STACK = new Set<SettingsSection>(['toolbar', 'editor']);
+  const visibleGroups = NAV_GROUPS
+    .filter((g) => (stacked ? g.title !== '电脑设置' : g.title !== '竖屏设置'))
+    .map((g) => ({ ...g, items: stacked ? g.items.filter((it) => !HIDDEN_IN_STACK.has(it.id)) : g.items }))
+    .filter((g) => g.items.length > 0);
   // 形态切换后当前详情页可能已经被隐藏 → 退回第一项，避免停在一个"列表里没有"的页面
   const activeVisible = visibleGroups.some((g) => g.items.some((it) => it.id === active));
 

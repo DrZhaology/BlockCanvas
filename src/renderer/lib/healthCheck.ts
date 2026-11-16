@@ -268,7 +268,34 @@ export function runHealthCheck(root: SceneElement): HealthIssue[] {
     list.push(n.id);
     relOwners.set(rel, list);
   }
-  const dupRels = [...relOwners.entries()].filter(([, ids]) => ids.length > 1);
+  /**
+   * ⚠ v0.4.7 修误报（用户：「我正常给一个多个子元素设置同一个选择器，两个元素的属性都是一样的，
+   *   还有这个 BUG」）。
+   *
+   * 以前：只要两个元素写了同一个 relSelector 就报 critical「关系选择器被多个元素共用」。
+   * 可这本来就是我们鼓励的用法 —— 给一堆同类子元素写同一条关系选择器，让它们共享样式，
+   * 完全合法，导出的 CSS 也只有一条规则。用户"正常做"就被红牌，这就是那条误报。
+   *
+   * 真正会出事的只有一种场景（v0.4.4 那个真实的 BUG）：
+   *   **两张互不相干的表用了同一个类名** → 它们同位置的格子算出一模一样的选择器
+   *   → 改表 A 的格子，表 B 同位置的格子跟着变（跨表串味），用户根本看不出来。
+   *
+   * 所以判据从「同一个选择器被多人用」收紧成
+   *   「同一个选择器被**分属不同表格**的元素共用」。
+   * 同一张表内的共用 = 有意共享，不报。
+   */
+  const dupRels = [...relOwners.entries()]
+    .filter(([, ids]) => ids.length > 1)
+    .filter(([, ids]) => {
+      const tableIds = new Set<string>();
+      for (const id of ids) {
+        const t = findTableAncestor(root, id);
+        // 不在任何表格里：属于"给多个普通子元素共用一条选择器"，合法，不算
+        if (t) tableIds.add(t.id);
+      }
+      // 跨了 ≥2 张不同的表才是真的串味
+      return tableIds.size > 1;
+    });
   if (dupRels.length > 0) {
     // 找出"受影响"的表（重名选择器所属的表）
     const affectedIds: string[] = [];

@@ -52,6 +52,9 @@ import './styles/37-v046-ctx.css'; // v0.4.6 第 43 批：竖屏情境栏（第�
 import './styles/38-v046-ptoolbar.css'; // v0.4.6 第 43 批：竖屏第二条操作栏的九个按钮与二级菜单
 import './styles/39-v046-pinch.css'; // v0.4.6 第 43 批：竖屏双指缩放（禁掉浏览器自带捏合）
 import './styles/40-v046-alttouch.css'; // v0.4.6 第 46 批：竖屏 Alt 模式的触摸手柄层
+import './styles/41-v046-settings-fix.css'; // v0.4.6 第 47 批：竖屏设置页塌陷修复
+import './styles/42-v046-propcards.css'; // v0.4.6 第 47 批：属性卡片统一样式 + 进退场动画
+import './styles/43-v046-selbox.css'; // v0.4.6 第 47 批：画布选中框（橙框 + 呼吸闪烁 / 多选只描边）
 
 // v0.4.5：动画性能总督（不可见即暂停 / 掉帧自动精简 / 尊重系统"减少动态效果"）。
 // 必须在渲染之前启动：它要往 <html> 上写 data-bc-anim，避免首帧先按完整动效画一遍。

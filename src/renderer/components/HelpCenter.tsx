@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
 import { Icon } from './Icon';
 import { useClosing } from '@lib/useClosing';
@@ -253,23 +253,34 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
     setSidebarOpen(false);
   }, []);
 
-  // 进场：挂载那一帧先推到屏幕外，下一帧再滑进来（否则第一次打开也是硬切）。
-  // ⚠ `dragRef.current` 那道闸门是给"打断"用的：退场途中按住 → 我们会把 open 改回 true，
-  //    这个 effect 就会重跑；若此时又把它推回屏幕外，手指下的抽屉会直接消失。
-  useLayoutEffect(() => {
-    if (!drawerMounted || drawerClosing || dragRef.current) return;
-    const el = drawerRef.current;
-    if (!el) return;
-    el.style.setProperty('--help-drawer-x', `${-drawerW()}px`);
-    const raf = requestAnimationFrame(() => {
-      el.style.setProperty('--help-drawer-x', '0px');
-    });
-    return () => cancelAnimationFrame(raf);
+  /**
+   * 进场：**用 keyframes，不用变量过渡**。
+   *
+   * 踩过的坑：把 --help-drawer-x 从 -w 改到 0 靠 transition 播 —— 对"刚挂载"的元素
+   * 不生效（首帧样式就是 0，浏览器不认为发生了从 -w 到 0 的变化），于是进场变成硬切。
+   * 用户反馈「左边的菜单进入动画没有了」就是它。
+   * 现在挂载后打 260ms 的 is-entering 类，交给 CSS keyframes 播；
+   * 播完撤类，transform 回到变量（0），不会跳。
+   */
+  const [drawerEntering, setDrawerEntering] = useState(false);
+  useEffect(() => {
+    if (!drawerMounted || drawerClosing) { setDrawerEntering(false); return undefined; }
+    if (dragRef.current) return undefined;
+    setDrawerEntering(true);
+    const t = window.setTimeout(() => setDrawerEntering(false), 260);
+    return () => window.clearTimeout(t);
   }, [drawerMounted, drawerClosing]);
-
   const onDrawerDown = (e: React.PointerEvent) => {
     const el = drawerRef.current;
     if (!el) return;
+    /**
+     * v0.4.7：**必须抓指针**。
+     * 用户反馈「现在滑动关闭不了，会回弹」—— 真机拖到一半手指已经离开抽屉
+     * （抽屉跟手往左走，屏幕边缘之外没有可命中的元素），后续 pointermove / pointerup
+     * 就全丢了：位移停在半路、松手事件也没人接，看起来就是"拖不动 / 弹回去"。
+     * 探针用 dispatchEvent 直接打在 aside 上，所以一直显示通过 —— 这也是我漏掉它的原因。
+     */
+    try { el.setPointerCapture(e.pointerId); } catch { /* 老内核可能不支持 */ }
     // 退场动画途中被按住 → **从当前位置**重新抓住，动画不跳回起点、不回弹
     const base = drawerXNow();
     el.style.setProperty('--help-drawer-x', `${base}px`);
@@ -299,6 +310,8 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
   const onDrawerUp = (e: React.PointerEvent) => {
     const d = dragRef.current;
     dragRef.current = null;
+    try { drawerRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    /** 真机一次滑过 30% 挺难的；22% 就已经是明确意图了（探针同步放宽） */
     setDragging(false);
     const w = drawerW();
     const x = drawerXNow();
@@ -317,7 +330,7 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
     // 关闭条件（都要"真的滑出去"才成立，避免轻轻一扫就关）：
     //   · 滑过 30% 宽度；或
     //   · 往左甩得很快（>0.8 px/ms）且已经出去 15% 宽度
-    if (x < -w * 0.3 || (vx < -0.8 && x < -w * 0.15)) closeDrawer();
+    if (x < -w * 0.22 || (vx < -0.8 && x < -w * 0.12)) closeDrawer();
     else setDrawerX(0);
   };
 
@@ -743,7 +756,7 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
           />
           <aside
             ref={drawerRef}
-            className={'help-drawer' + (drawerClosing ? ' is-closing' : '') + (dragging ? ' is-dragging' : '')}
+            className={'help-drawer' + (drawerClosing ? ' is-closing' : '') + (dragging ? ' is-dragging' : '') + (drawerEntering ? ' is-entering' : '')}
             role="dialog"
             aria-label="手册侧边栏"
             aria-hidden={drawerClosing}
@@ -752,11 +765,9 @@ export function HelpCenter({ initialDoc = 'manual', initialTarget = null, onBack
             onPointerUp={onDrawerUp}
             onPointerCancel={onDrawerUp}
           >
+            {/* 没有关闭按钮：用户要求"按住侧边栏往左滑"关闭（点遮罩也行） */}
             <div className="help-drawer-head">
               {brandBlock}
-              <button className="help-drawer-close" onClick={closeDrawer} aria-label="关闭侧边栏">
-                <Icon name="close" size={16} />
-              </button>
             </div>
             {tabsBlock}
             {searchBlock}

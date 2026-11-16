@@ -592,6 +592,11 @@
 .fluent-cards-container {
   animation: bcSwapIn var(--dur-view) var(--ease-standard);
 }
+/* v0.4.7 (batch 47): portrait no longer replays bcSwapIn here.
+   The double flash on entering Settings was this stacking with the page-level
+   slide-in. Portrait now uses the named View Transition (see 36-*.css / lib/navTransition.ts).
+   Desktop keeps it: wide layout has no page concept, a plain fade is right there. */
+.app[data-shell='stack'] .fluent-cards-container { animation: none; }
 
 /* —— 渐变面板焕新：去"卡片套卡片"，视觉分层更干净 —— */
 /* 背景颜色行内嵌渐变编辑器时，外层 prop-row 的彩色边线与内层卡片叠加显得旧；

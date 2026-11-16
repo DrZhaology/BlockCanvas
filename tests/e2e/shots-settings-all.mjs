@@ -56,7 +56,9 @@ const audit = (win) => win.evaluate(() => {
     // ② 竖排单字：宽不到 3 个字，却高于 3 行
     const fs = parseFloat(cs.fontSize) || 14;
     const lineH = parseFloat(cs.lineHeight) || fs * 1.4;
-    const text = (el.childElementCount === 0 ? el.textContent || '' : '').trim();
+    // 递归取文本：被挤成一列单字的往往是「包着一堆子元素的容器」，
+    // 只看叶子节点会漏掉（存储总览 / 扩展资源包就是这么漏的）。
+    const text = (el.textContent || '').trim();
     if (text.length >= 6 && r.width < fs * 3.2 && r.height > lineH * 3.2) {
       out.squeezed.push({ cls: String(el.className || el.tagName).slice(0, 40), w: Math.round(r.width), h: Math.round(r.height), text: text.slice(0, 24) });
     }

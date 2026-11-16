@@ -36,7 +36,7 @@ import { useLoadScreen } from '@store/loadStore';
 import { useShellLayout } from '@lib/shellMode';
 import { useInputMode } from '@lib/inputMode';
 import { useTouchCanvas } from '@lib/useTouchCanvas';
-import { useAltMode } from '@lib/altMode';
+import { useAltMode, setAltMode } from '@lib/altMode';
 import { PortraitBar1, PortraitBar2 } from '@comp/portrait/PortraitBars';
 import type { PortraitContextAction } from '@comp/portrait/PortraitContextBar';
 import { SessionsView } from '@comp/portrait/SessionsView';
@@ -73,6 +73,19 @@ const SNAPSHOT_PANE_WIDTH = 372;
 
 export type AppView = 'editor' | 'projects' | 'settings' | 'update' | 'table' | 'help' | 'sessions' | 'preview';
 
+/**
+ * 竖屏下整页切换走「右进右出」（View Transitions）的视图。
+ *
+ * 用户原话：「进入和退出动画应该是右侧进入，右侧退出的样式，不要单纯刷新一下。」
+ * 后来追加：「所有别的页面都要修改一下」—— 所以除了两处有专属动画的页面，
+ * 其余整页视图都归这一档：
+ *   · editor：画布本身有平移/缩放那套，不能被通用滑屏顶掉；
+ *   · sessions：有"画布缩小成缩略图"的专属转场。
+ */
+const SLIDE_VIEWS: ReadonlySet<string> = new Set<AppView>([
+  'projects', 'settings', 'update', 'table', 'help', 'preview'
+]);
+
 export default function App() {
   // v0.4.2：全局「横向滚动区直接滚轮」桥接（容器加 .bc-hscroll 即生效）
   useHorizontalWheel();
@@ -96,6 +109,7 @@ export default function App() {
   const ptPrefs = usePortraitPrefs();
   /** v0.4.6 竖屏：程序内预览的 HTML（交给全屏 iframe，第一条栏留返回） */
   const [previewHtml, setPreviewHtml] = useState<string>('');
+
   // 窄屏切回宽屏时把抽屉收掉（否则回到宽屏还挂着一个半透明遮罩）
   useEffect(() => {
     if (shell.layout === 'split' && drawer !== null) setDrawer(null);
@@ -172,6 +186,13 @@ export default function App() {
      可触摸屏没有 hover —— 元素既选不上也拖不动。现在手势层照常：长按=单选（altMode 档位
      不允许加选）、单指=平移、双指=缩放；"改位置 / 改宽高"由画布上的触摸手柄显式触发。 */
   const altOn = useAltMode();
+  /**
+   * 切回宽屏（电脑窗口）时**自动关掉 Alt 模式**（v0.4.7，用户要求）：
+   * 桌面本来就靠键盘上的 Alt 键，开关留着只会让人以为"Alt 一直按着"。
+   */
+  useEffect(() => {
+    if (shell.layout !== 'stack' && altOn) setAltMode(false);
+  }, [shell.layout, altOn]);
   useTouchCanvas({ enabled: shell.layout === 'stack', zoom, onZoomChange: setZoom, altMode: altOn });
   /**
    * v0.4.6 第 43 批：竖屏「情境栏」（第三层菜单）要显示哪些按钮。
@@ -188,6 +209,19 @@ export default function App() {
    *   所以这里只看 zoom，不看 canvasWidth。
    */
   const selectedCount = useScene((s) => s.scene.selectedIds.length);
+  /**
+   * 画布里"选中了一段文字"的状态（v0.4.7）。
+   *
+   * 用户原话：「选中文字的时候，第三层菜单出现全选和取消选中。」
+   * 就地编辑框里选区一变就发 `bc:text-sel`，这里只记一个布尔值，
+   * 两个按钮通过事件回传给编辑框执行（App 不碰 textarea 的细节）。
+   */
+  const [textSel, setTextSel] = useState(false);
+  useEffect(() => {
+    const on = (e: Event) => setTextSel(Boolean((e as CustomEvent<{ selected?: boolean }>).detail?.selected));
+    window.addEventListener('bc:text-sel', on);
+    return () => window.removeEventListener('bc:text-sel', on);
+  }, []);
   const ctxActions = useMemo<PortraitContextAction[]>(() => {
     const out: PortraitContextAction[] = [];
     // 「还原大小」先来（画布缩放比选中更早发生）→ 先到的排右边
@@ -200,7 +234,19 @@ export default function App() {
         onClick: () => resetCanvasView(setZoom)
       });
     }
-    if (selectedCount > 0) {
+    if (textSel) {
+      // 选中文字时：全选 / 取消选中（针对**文字选区**，不是元素选区）
+      out.push({
+        key: 'text-select-all',
+        label: '全选',
+        onClick: () => window.dispatchEvent(new CustomEvent('bc:text-sel-all'))
+      });
+      out.push({
+        key: 'clear-text-sel',
+        label: '取消选中',
+        onClick: () => window.dispatchEvent(new CustomEvent('bc:text-sel-clear'))
+      });
+    } else if (selectedCount > 0) {
       out.push({
         key: 'clear-selection',
         label: '取消选中',
@@ -208,7 +254,7 @@ export default function App() {
       });
     }
     return out;
-  }, [zoom, selectedCount]);
+  }, [zoom, selectedCount, textSel]);
   const [view, setView] = useState<AppView>('editor');
   // 标签数（用于空页面判断）。⚠ 必须在组件顶部调用 —— 不能放进 JSX 的 view 分支里，
   // 否则切到"表格编辑器/设置"等视图时这个 hook 不执行，hooks 数量前后不一致，
@@ -316,14 +362,15 @@ export default function App() {
      *
      * 用户原话：「设置页面变成了类似手机App设置的样式…但是进入和退出动画应该是右侧进入，
      *   右侧退出的样式，不要单纯刷新一下。」
+     * 第 47 批追加：「所有别的页面都要修改一下」→ 扩到 SLIDE_VIEWS 里的所有整页视图。
      *
-     * 做法：切进 / 切出设置时，在 <html> 上打个标记，交给 CSS 改写
+     * 做法：切进 / 切出这些页面时，在 <html> 上打个标记，交给 CSS 改写
      * `::view-transition-old(root)` / `-new(root)` 两段动画（旧页往右滑出、新页从右侧滑入）。
-     * 只挂 settings 这一档 —— 会话页那套"画布缩小成缩略图"是专门做的，不能被通用滑屏顶掉。
+     * 只挂整页视图 —— 会话页那套"画布缩小成缩略图"是专门做的，不能被通用滑屏顶掉。
      */
     const html = document.documentElement;
-    const involvesSettings = next === 'settings' || viewRef.current === 'settings';
-    html.dataset.vtslide = involvesSettings && shell.layout === 'stack' ? 'settings' : '';
+    const involvesSlide = SLIDE_VIEWS.has(next) || SLIDE_VIEWS.has(viewRef.current);
+    html.dataset.vtslide = involvesSlide && shell.layout === 'stack' ? 'page' : '';
     try {
       withViewTransition(() => setView((cur) => (cur === next ? cur : next)));
     } finally {
@@ -373,17 +420,54 @@ export default function App() {
   // 0.1 「更新任务进入替换阶段」→ 才锁死编辑器（下载阶段不锁，用户可以继续干活）
   useUpdateTaskBridge();
 
+  /**
+   * 自适应档位下的**实际画布宽度**（v0.4.7）。
+   *
+   * 用户原话：「这个三段点的切换有点问题，竖屏和横屏之间样式不一样，但是这个切换要等
+   *   一段时间，或者鼠标点一下元素才触发，应该像网页一样是实时监测变换的。」
+   *
+   * 真因：`widthToBreakpoint("auto")` 永远返回 desktop，所以"自适应"档位的断点根本
+   * 不跟窗口走 —— 只有等别的操作把 canvasWidth 改成 px 才会重算。
+   * 现在用 ResizeObserver 盯住 `.canvas` 的真实宽度（÷ zoom，因为缩放是 transform），
+   * 窗口一变、面板一拖，断点立刻跟上。
+   */
+  const [autoCanvasW, setAutoCanvasW] = useState(0);
+  useEffect(() => {
+    /**
+     * Canvas 会在挂载后 / 尺寸变化时广播真实宽度（含 ResizeObserver）。
+     * 不在这里自己 querySelector：首帧还没有 `.canvas`（首页 / 空标签），
+     * 查不到就再也不会重试 —— 断点会永远停在 desktop（用户报的就是这个）。
+     */
+    const on = (e: Event) => {
+      const w = (e as CustomEvent<{ w?: number }>).detail?.w ?? 0;
+      if (w > 0) setAutoCanvasW(Math.round(w));
+    };
+    window.addEventListener('bc:canvas-size', on);
+    return () => window.removeEventListener('bc:canvas-size', on);
+  }, []);
+
   // 0. 设备 / 断点 / 画布宽度 三合一同步
   //    - 画布宽度变化 → 自动推导当前编辑断点（电脑 / 平板 / 手机）
   //    - 任意地方广播 bc:set-device → 反推标准画布宽度
   useEffect(() => {
-    const bp = widthToBreakpoint(canvasWidth);
+    const effective = canvasWidth === 'auto' ? (autoCanvasW ? autoCanvasW + 'px' : 'auto') : canvasWidth;
+    const bp = widthToBreakpoint(effective);
     if (useScene.getState().activeBreakpoint !== bp) {
       useScene.getState().setActiveBreakpoint(bp);
     }
     // 广播给关心"画布是否自适应"的组件（如属性面板断点栏的「自适应」按钮高亮）
     window.dispatchEvent(new CustomEvent('bc:canvas-width-changed', { detail: canvasWidth }));
-  }, [canvasWidth]);
+  }, [canvasWidth, autoCanvasW]);
+
+  /** 预览交给 iframe 的最终 HTML：补一条"不要横向滚动条"（只影响预览，不动导出） */
+  const previewDoc = useMemo(() => (
+    previewHtml ? previewHtml.replace('</head>', '<style>html,body{overflow-x:hidden}</style></head>') : ''
+  ), [previewHtml]);
+  /** 预览宽度 = 当前画布宽度（auto 时用实测值） */
+  const previewW = useMemo(() => {
+    if (canvasWidth !== 'auto') return parseInt(canvasWidth, 10) || 0;
+    return autoCanvasW || 0;
+  }, [canvasWidth, autoCanvasW]);
 
   useEffect(() => {
     const onSetDevice = (e: Event) => {
@@ -595,7 +679,8 @@ export default function App() {
       if (useUpdateBusy.getState().busy) return;
       setHelpDoc(doc);
       setHelpTarget(target);
-      setView('help');
+      // 走 switchView 而不是 setView：手册页也要"右进右出"的转场（第 47 批）
+      switchView('help');
     };
     // 事件回调：允许携带 detail 指定文档（默认 manual）
     const onOpenHelpEvent = (e: Event) => {
@@ -834,7 +919,17 @@ export default function App() {
       ) : view === 'preview' ? (
         /* v0.4.6 竖屏程序内预览：整屏 iframe，底部第一条栏仍在（返回即可退出） */
         <div className="bc-preview-view">
-          <iframe className="bc-preview-frame" title="预览" srcDoc={previewHtml} />
+          {/* 预览按**当前画布宽度**渲染（以前铺满整屏，等于用另一个尺寸看设计，
+              用户："预览没有分清当前的设备，比如竖屏设置的样式用的还是横屏的"）。
+              同时把 iframe 文档的横向溢出藏掉 —— 8px 的 body 外边距配 width:100%+padding
+              就会多出一点点滚动条，`overflow-x: hidden` 是这里唯一不改变设计的手段。 */}
+          <iframe
+            className="bc-preview-frame"
+            title="预览"
+            srcDoc={previewDoc}
+            /* ⚠ 必须 flex:0 0 auto： 本身是 flex:1，光写 width 会被拉伸回满宽 */
+            style={previewW ? { width: previewW + 'px', flex: '0 0 auto' } : undefined}
+          />
         </div>
       ) : view === 'help' ? (
         <HelpCenter initialDoc={helpDoc} initialTarget={helpTarget} onBack={() => switchView('editor')} />
@@ -1231,11 +1326,26 @@ function startResize(
   const onUp = () => {
     window.removeEventListener('mousemove', onMove);
     window.removeEventListener('mouseup', onUp);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+    window.removeEventListener('blur', onUp);
     document.body.classList.remove('bc-resizing-ns');
     document.body.classList.remove('bc-resizing-col');
   };
   window.addEventListener('mousemove', onMove);
   window.addEventListener('mouseup', onUp);
+  /**
+   * v0.4.7：收尾要"多路兜底"。
+   *
+   * 用户在窗口外松手（或中途弹出原生对话框）时，`mouseup` 根本不会来 ——
+   * `bc-resizing-*` 就永久留在 <body> 上，而它的样式是
+   * `body.bc-resizing-* * { user-select: none; cursor: col-resize }`，
+   * 结果**全程序所有输入框都点不进去、打不了字**（用户报的"所有输入框又都坏了"）。
+   * 除了这里补 pointerup / pointercancel / blur，样式那边也留了输入控件的例外（见 06 号分片）。
+   */
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+  window.addEventListener('blur', onUp);
 }
 
 // ============ 全局快捷键 + 菜单事件 ============

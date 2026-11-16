@@ -65,7 +65,17 @@ export function AnchoredPanel(props: {
     //   这不是用户滚页面 —— 但会让面板刚挂上就被自己关掉
     //   （实测「设备」二级菜单点了没反应就是这个）。
     const t0 = Date.now();
-    const onScroll = () => { if (Date.now() - t0 < 200) return; closeRef.current(); };
+    /**
+     * ⚠ 只在"面板自己以外的"滚动时才关。以前是 window 捕获阶段一刀切，
+     *   于是**面板内部滚动也触发关闭** —— 「更多」里项多、要往下滑才能看全，
+     *   一滑菜单就没了（用户报的小 BUG）。
+     */
+    const onScroll = (e?: Event) => {
+      if (Date.now() - t0 < 200) return;
+      const t = e?.target;
+      if (t instanceof Element && (panelRef.current?.contains(t) || t === panelRef.current)) return;
+      closeRef.current();
+    };
     window.addEventListener('mousedown', onDoc);
     window.addEventListener('keydown', onKey);
     window.addEventListener('scroll', onScroll, true);

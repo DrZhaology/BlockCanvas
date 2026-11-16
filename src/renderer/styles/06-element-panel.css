@@ -101,6 +101,21 @@
    避免拖拽过程中光标在子元素上闪变成另一种方向 */
 body.bc-resizing-ns, body.bc-resizing-ns * { cursor: ns-resize; user-select: none; }
 body.bc-resizing-col, body.bc-resizing-col * { cursor: col-resize; user-select: none; }
+/* 但这把"全局 user-select:none"一旦滞留（拖手时在窗口外松手 → mouseup 丢了），
+   会让**所有输入框都点不进去**（用户报的"所有输入框又都坏了"）。
+   App 那边已经补了 pointerup / pointercancel / blur 三路收尾；这里再给输入控件开例外，
+   就算标记真的残留，输入框也照常能编辑。 */
+body.bc-resizing-ns input,
+body.bc-resizing-ns textarea,
+body.bc-resizing-ns select,
+body.bc-resizing-ns [contenteditable='true'],
+body.bc-resizing-col input,
+body.bc-resizing-col textarea,
+body.bc-resizing-col select,
+body.bc-resizing-col [contenteditable='true'] {
+  user-select: text;
+  cursor: text;
+}
 
 /* 画布左右拖手：整条边都可抓握（与面板手柄同逻辑）。不做任何可见的蓝线/蓝框，
    仅保留左右拖拽光标；悬停时给一道很淡的蓝色便于发现抓握区（与面板 hover 一致）。 */

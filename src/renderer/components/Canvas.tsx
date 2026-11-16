@@ -9,13 +9,14 @@ import { CanvasTextMenu, isTextStylable, type TextMenuPayload } from './CanvasTe
 import { CanvasPropSearch } from './CanvasPropSearch';
 import { CanvasNode } from './canvas/CanvasNode';
 import { AltOverlays } from './canvas/AltOverlays';
-import { AltTouchLayer } from './canvas/AltTouchHandles';
+import { AltTouchLayer, useAltTouchOn } from './canvas/AltTouchHandles';
 import { useAltDrag } from './canvas/useAltDrag';
 import { useMarquee } from './canvas/useMarquee';
 import { useStickyMarks } from './canvas/sticky';
 import { useFixedFrame } from './canvas/useFixedFrame';
 import { FixedLayerContext } from './canvas/fixedLayer';
 import { useEnterAnim } from './canvas/useEnterAnim';
+import { useCanvasSizeBroadcast } from '@lib/useCanvasSizeBroadcast';
 import { useInlineSel } from './canvas/useInlineSel';
 
 // BlockCanvas · 画布（组装层）
@@ -169,6 +170,11 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
   });
 
 
+  // 竖屏 Alt：盒模型标签让开中间那颗移动柄
+  const altTouchOn = useAltTouchOn();
+
+  // 广播画布真实宽度（给 App 推导断点，见 lib/useCanvasSizeBroadcast.ts）
+  useCanvasSizeBroadcast(canvasRef, zoom);
   // 框选
   const mq = useMarquee(canvasRef);
 
@@ -295,30 +301,17 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
     >
       {/* 画布样式注入（与导出同源同序）：① 自动样式类 ② 快速设置 ③ 用户全局 CSS ④ 同类同色（编辑器可视化） */}
       <style className="bc-auto-css">{autoCssBlock}</style>
-      {quickCssBlock && (
-        <style className="bc-quick-css">{quickCssBlock}</style>
-      )}
-      {globalCss && globalCss.trim() !== '' && (
-        <style className="bc-global-css">{globalCss}</style>
-      )}
-      {classColorCss && (
-        <style className="bc-class-colors">{classColorCss}</style>
-      )}
-      {canvasResponsiveCss && (
-        <style className="bc-canvas-responsive-css">{canvasResponsiveCss}</style>
-      )}
+      {quickCssBlock && <style className="bc-quick-css">{quickCssBlock}</style>}
+      {globalCss && globalCss.trim() !== '' && <style className="bc-global-css">{globalCss}</style>}
+      {classColorCss && <style className="bc-class-colors">{classColorCss}</style>}
+      {canvasResponsiveCss && <style className="bc-canvas-responsive-css">{canvasResponsiveCss}</style>}
       <div
         ref={canvasRef}
         className="canvas"
         style={{
           ...(canvasWidth === 'auto' ? undefined : { width: canvasWidth }),
-          // 始终给 .canvas 一个 transform：让它成为 fixed 后代的"包含块"，
-          // 于是画布里的 position:fixed 元素被关在画布内（相当于浏览器视口），
-          // 不会跑到编辑器面板上乱盖。zoom=1 时 scale(1) 视觉上无差别。
-          //
-          // v0.4.6 第 43 批：缩放走 CSS 变量（--bc-canvas-k / -dx / -dy）。
-          // 兜底值 = React 的 zoom（平时行为不变）；触摸双指缩放期间由手势层直接写变量，
-          // 一帧都不用 React 渲染 → 跟手不卡（以前每帧 setState → 整棵画布树重渲染 → 僵硬）。
+          // transform 让 .canvas 成为 fixed 的包含块（fixed 元素被关在画布内）；
+          // 缩放走 CSS 变量：双指期间手势层直接写变量，一帧都不 setState（跟手不卡）。
           transform: `translate(var(--bc-canvas-dx, 0px), var(--bc-canvas-dy, 0px)) scale(var(--bc-canvas-k, ${zoom}))`,
           transformOrigin: zoomOrigin,
           // v0.4.6（R6-16）：画布至少撑到基准视口高度 ——
@@ -372,6 +365,8 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
         <div
           key={r.key}
           className="canvas-inline-sel"
+          /* 和普通选中框同一档位（v0.4.7）：≤5 个元素时一起呼吸，多了只描边 */
+          data-bc-seln={selectedIds.length <= 5 ? '1' : '0'}
           style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
         />
       ))}
@@ -385,10 +380,11 @@ export function Canvas({ canvasWidth = 'auto', zoom = 1, onZoomChange, onUserRes
           wallHints: alt.wallHints,
           dropTarget: alt.dropTarget,
           guides: alt.guides,
-          boxModel: alt.boxModel
+          boxModel: alt.boxModel,
+          touchAlt: altTouchOn
         }}
       />
-      <AltTouchLayer zoom={zoom} beginDrag={alt.beginTouchDrag} />
+      <AltTouchLayer zoom={zoom} beginDrag={alt.beginTouchDrag} syncBox={alt.syncTouchBox} />
       {textMenu && <CanvasTextMenu payload={textMenu} onClose={() => setTextMenu(null)} />}
       {propSearch && <CanvasPropSearch x={propSearch.x} y={propSearch.y} onClose={() => setPropSearch(null)} />}
     </div>

@@ -69,9 +69,21 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange, 
   const [moreOpen, setMoreOpen] = useState(false);
   // 竖屏「设备」二级菜单（自适应 / 电脑 / 平板 / 手机 收进一个按钮里）
   const [deviceOpen, setDeviceOpen] = useState(false);
-  // 「导出前体检」向导：点 ⚠ 直接打开；导出/预览前若存在严重问题会先拦一道
+  // 「导出前体检」向导：点 ⚠ 直接打开；**只有导出 HTML 前**会先拦一道
   const [healthOpen, setHealthOpen] = useState(false);
   const pendingAfterHealth = useRef<(() => void) | null>(null);
+  /**
+   * 体检闸门（v0.4.7 收窄）。
+   *
+   * 用户原话：「处处前体检你正常就放在哪里，只有导出 HTML 的时候显示一下，
+   *   正常预览不要出现拦截了，比较影响」。
+   *
+   * 以前导出和预览都走这道闸：想看一眼效果，先被一张"1 个关系选择器被多个元素共用"
+   * 的红牌拦住，得先点掉才能看 —— 预览是高频动作，这个拦截的代价远大于它挡住的风险
+   * （预览不改任何文件）。所以现在：
+   *   · **导出 HTML** → 仍然先体检（导出会写盘、会拷媒体、要拿到能用的成品）；
+   *   · **预览** → 直接出，不拦；⚠ 按钮本身还在，想体检随时点。
+   */
   const runWithHealthGuard = (fn: () => void) => {
     const res = runHealthCheck(useScene.getState().scene.root);
     if (hasBlocking(res)) {
@@ -137,7 +149,8 @@ export function Toolbar({ canvasWidth, onCanvasWidthChange, zoom, onZoomChange, 
 
   // —— 内建操作 ——
   const doExport = () => runWithHealthGuard(exportNow);
-  const doPreview = () => runWithHealthGuard(previewNow);
+  /** 预览**不过体检闸门**（见 runWithHealthGuard 的注释：预览是高频动作，拦它代价太大） */
+  const doPreview = () => previewNow();
 
   const exportNow = async () => {
     /**

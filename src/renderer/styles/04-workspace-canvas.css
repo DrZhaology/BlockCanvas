@@ -110,13 +110,21 @@
   min-width: 0;
   min-height: 0;
   display: flex;
-  justify-content: center;
+  /* ⚠ v0.4.6 第 47 批：这里**不能**用 justify-content: center。
+     可滚动容器 + 居中 → 内容超出后左侧那半截滚不到，浏览器每次重算布局就会弹一下。
+     竖屏双指缩放时的抽搐就是它（用户原话：「画布会默认左边缘靠着左边缘视口，
+     导致移动的时候画布突然想到要靠左」）。改成画布自己 margin:auto ——
+     比容器窄时照样居中，比容器宽时 auto 变成 0、滚动范围完整。 */
+  justify-content: flex-start;
   padding: 24px;
   overflow: auto; /* 画布外的灰色斜纹区可滚 */
   background:
     repeating-linear-gradient(45deg, var(--stripe) 0 8px, transparent 8px 16px);
 }
 .canvas {
+  /* 居中交给 auto 外边距（见 .canvas-wrap 的注释：容器居中会毁掉滚动范围） */
+  margin-left: auto;
+  margin-right: auto;
   /* 设备边框 / 视口遮罩 / 拖拽手柄都以画布为定位基准。
      之前没写这条，它们全都锚到了 .canvas-wrap 上，边框位置因此整体错位。 */
   position: relative;

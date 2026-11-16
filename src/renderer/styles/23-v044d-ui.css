@@ -473,3 +473,35 @@ body.bc-alt-fonting .canvas [data-bc-id] { cursor: none; }
 
 
 
+
+/* ============================================================================
+   附：画布文字菜单（CanvasTextMenu）的进出动画 + 触摸友好的尺寸
+   ----------------------------------------------------------------------------
+   用户原话：「同时菜单的动画做好。」「如果觉的手机端还是比较别扭可以修改一下。」
+   - 进场：从 0.94 放大淡入（150ms），不是"啪"一下出现；
+   - 退场：缩回 0.96 + 淡出（150ms），点旁边才关；
+   - 触摸屏按钮加大到 40px 高，字号 13px，按着不费劲。
+   ========================================================================== */
+.bc-text-menu {
+  animation: bcTextMenuIn 150ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+@keyframes bcTextMenuIn {
+  from { opacity: 0; transform: scale(0.94) translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+.bc-text-menu.is-closing {
+  animation: bcTextMenuOut 150ms var(--ease-exit, cubic-bezier(0.4, 0, 1, 1)) both;
+  pointer-events: none;
+}
+@keyframes bcTextMenuOut {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: scale(0.96) translateY(4px); }
+}
+
+@media (max-width: 900px) {
+  .bc-text-menu { width: min(268px, calc(100vw - 24px)); padding: 12px; gap: 10px; }
+  .bc-text-menu .bc-ts-btn { min-width: 40px; min-height: 40px; }
+  .bc-text-menu .bc-text-menu-row { min-height: 40px; }
+  .bc-text-menu .bc-color-swatch { min-height: 32px; }
+}
+

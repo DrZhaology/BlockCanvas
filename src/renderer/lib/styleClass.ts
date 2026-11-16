@@ -321,6 +321,8 @@ export function collectStyleClasses(root: SceneElement, ctx: StyleClassSet): voi
 export function quickCssToCss(q: SceneGraph['quickCss'] | undefined, extra?: Record<string, string>): string {
   const bodyDecls: string[] = [];
   if (q?.bodyBg) bodyDecls.push(`background-color: ${q.bodyBg};`);
+  // 页面背景渐变 / 图片（v0.4.7）：写在 background-image 上，和纯色可以叠着用
+  if (q?.bodyBgImage) bodyDecls.push(`background-image: ${q.bodyBgImage};`);
   if (q?.textColor) bodyDecls.push(`color: ${q.textColor};`);
   if (q?.fontFamily) bodyDecls.push(`font-family: ${q.fontFamily};`);
   if (q?.bodyFontSize) bodyDecls.push(`font-size: ${q.bodyFontSize};`);

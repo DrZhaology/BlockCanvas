@@ -54,6 +54,8 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
   const altPadRef = useRef(0);
   // v0.4.5：按住 Alt 拖动时，按浏览器 F12 的方式把盒模型画出来
   const [boxModel, setBoxModel] = useState<AltBoxModelData | null>(null);
+  /** 触摸档位同步盒模型用的签名（避免每帧 setState，见 syncTouchBox） */
+  const boxSigRef = useRef('');
   /**
    * Alt+滚轮之后的短暂"不要弹盒模型"窗口（v0.4.5 第十六批）。
    * 用户原话：「Alt + 滚轮不要触发页面上的盒模型显示。」
@@ -456,6 +458,40 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
   };
 
   /**
+   * 触摸档位：把「当前选中元素的盒模型」推给覆盖层（v0.4.7）。
+   *
+   * 用户原话：「这个 Alt 模式做的非常的好！但是我还是希望能像电脑端显示 margin 和
+   *   top right bottom left 这些数值，电脑端有相关的代码你可以看一下。」
+   *
+   * 桌面那套盒模型只在 `pointermove`（hover）和拖动中产生 —— 触摸屏没有 hover，
+   * 手指抬起之后一个 pointermove 都不会再来，于是"选中了、但什么都没按"的时候
+   * 屏幕上一条数值都没有（用户看到的就是"没有 margin / top 这些"）。
+   * 所以给手柄层一个显式入口：它每帧量 rect 时顺手把盒模型同步过来。
+   *
+   * 传 null = 收起（没选中 / 离开 Alt 模式）。
+   */
+  const syncTouchBox = (id: string | null) => {
+    if (!id) {
+      if (boxSigRef.current !== '') { boxSigRef.current = ''; setBoxModel(null); }
+      return;
+    }
+    const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(id)}"]`) as HTMLElement | null;
+    if (!el) { if (boxSigRef.current) { boxSigRef.current = ''; setBoxModel(null); } return; }
+    const bm = readBoxModel(el, useScene.getState().scene.root);
+    /**
+     * ⚠ 必须比对"数值有没有变"再 setState：手柄层每帧都会调这个方法，
+     *   而 setBoxModel 每次都传新对象 → 每帧一次重渲染（React 无法判断相等）。
+     *   只把真正影响显示的字段拼成签名，值不变就一个字节都不写。
+     */
+    const sig = [bm.x, bm.y, bm.w, bm.h, bm.mt, bm.mr, bm.mb, bm.ml, bm.pt, bm.pr, bm.pb, bm.pl,
+      bm.posKind, bm.offsetX, bm.offsetY, bm.insets.top, bm.insets.right, bm.insets.bottom, bm.insets.left,
+      bm.autoSides.join(','), bm.setSides.join(',')].join('|');
+    if (sig === boxSigRef.current) return;
+    boxSigRef.current = sig;
+    setBoxModel(bm);
+  };
+
+  /**
    * 精准微调：把元素沿纵向挪 delta 个 CSS 像素（v0.4.5 第十六批）。
    *   · 定位元素 → 改它当前锚定的那一边（top 或 bottom，只动一条）；
    *   · 普通流元素 → 改 marginTop（这是流式布局里唯一"位移"的表达方式）。
@@ -584,6 +620,7 @@ export function useAltDrag({ zoom, canvasRef, onZoomChange, onMiddlePress }: Alt
     onWrapPointerMove,
     onWrapPointerDownCapture,
     beginTouchDrag,
+    syncTouchBox,
     onCanvasWheel,
     clearAltState,
     dispose,

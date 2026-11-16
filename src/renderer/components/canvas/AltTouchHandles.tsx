@@ -80,8 +80,14 @@ export function AltTouchHandles(props: {
   active: boolean;
   zoom: number;
   beginDrag: AltTouchBegin;
+  /**
+   * 把「当前选中元素的盒模型」推给覆盖层（v0.4.7）。
+   * 用户要求触摸档位也能看到 margin / top-right-bottom-left 这些数值；
+   * 桌面那套只在 hover 时产生，触摸屏抬起手指后永远不会再有 hover。
+   */
+  syncBox: (id: string | null) => void;
 }) {
-  const { active, zoom, beginDrag } = props;
+  const { active, zoom, beginDrag, syncBox } = props;
   const selectedIds = useScene((s) => s.scene.selectedIds);
   const [box, setBox] = useState<Box | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -91,13 +97,13 @@ export function AltTouchHandles(props: {
   // 实时跟框：元素可能因为滚动 / 改样式 / 动画在动，只有每帧量 rect 才不会错位。
   // 只在"有单个选中"时跑，代价可以忽略（一次 getBoundingClientRect）。
   useEffect(() => {
-    if (!single) { setBox(null); return; }
+    if (!single) { setBox(null); syncBox(null); return undefined; }
     let raf = 0;
     let alive = true;
     const tick = () => {
       if (!alive) return;
       const el = document.querySelector(`.canvas [data-bc-id="${CSS.escape(single)}"]`) as HTMLElement | null;
-      if (!el) { setBox(null); raf = requestAnimationFrame(tick); return; }
+      if (!el) { setBox(null); syncBox(null); raf = requestAnimationFrame(tick); return; }
       const r = el.getBoundingClientRect();
       const visible = r.width >= 8 && r.height >= 8 && getComputedStyle(el).visibility !== 'hidden';
       setBox((prev) => {
@@ -106,11 +112,14 @@ export function AltTouchHandles(props: {
         if (prev && prev.x === next.x && prev.y === next.y && prev.w === next.w && prev.h === next.h) return prev;
         return next;
       });
+      // 盒模型数值（margin / border / padding / 四条偏移）：同一帧顺手同步，
+      // 它内部按签名去重，值不变不会触发重渲染。
+      if (visible) syncBox(single); else syncBox(null);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
-    return () => { alive = false; cancelAnimationFrame(raf); };
-  }, [single, zoom]);
+    return () => { alive = false; cancelAnimationFrame(raf); syncBox(null); };
+  }, [single, zoom, syncBox]);
 
   if (!single || !box) return null;
 
@@ -183,13 +192,23 @@ export function AltTouchHandles(props: {
  * 自洽的挂载点：自己判断「竖屏 + Alt 模式开着」，Canvas 里只写一行。
  * 判断放这里而不是 Canvas，是为了让组装层保持干净（它也受 400 行预算约束）。
  */
-export function AltTouchLayer(props: { zoom: number; beginDrag: AltTouchBegin }) {
+/** 是否该启用"触摸版 Alt"：竖屏 + Alt 模式开着（Canvas 和手柄层共享这一个判断） */
+export function useAltTouchOn() {
   const altOn = useAltMode();
   const shell = useShellLayout();
-  const on = shell.layout === 'stack' && altOn;
-  // 手柄层在的时候，桌面的 hover 浮层（盒模型 / 尺寸气泡 / 橙色高亮框）会把中间那颗移动柄糊住
+  return shell.layout === 'stack' && altOn;
+}
+
+export function AltTouchLayer(props: {
+  zoom: number;
+  beginDrag: AltTouchBegin;
+  /** 见 AltTouchHandles 的说明：触摸档位没有 hover，盒模型要显式推 */
+  syncBox: (id: string | null) => void;
+}) {
+  const on = useAltTouchOn();
+  // 手柄层在的时候，桌面的 hover 浮层要靠边站（见 40 号分片的注释）
   useEffect(() => { if (on) document.body.classList.add('bc-alttouch-on'); else document.body.classList.remove('bc-alttouch-on'); }, [on]);
   if (!on) return null;
-  return <AltTouchHandles active zoom={props.zoom} beginDrag={props.beginDrag} />;
+  return <AltTouchHandles active zoom={props.zoom} beginDrag={props.beginDrag} syncBox={props.syncBox} />;
 }
 export default AltTouchHandles;

@@ -778,3 +778,29 @@ html[data-bc-dark] .ghost-prop-card {
 }
 
 html[data-bc-dark] .ghost-prop-card-head { color: #b39bfb; }
+
+/* ============================================================================
+   附：定位切换确认弹窗（lib/posSwitch.tsx）的窄屏排版
+   ----------------------------------------------------------------------------
+   用户截图（300px 宽的窗口）：三个按钮挤成一行，每个都被压到 60~70px，
+   "先不设置定位 / 保留外边距并切换 / 清除外边距并切换" 全变成两行字，还溢出卡片。
+   这里在窄屏把它们竖排成"一行一个"，宽度撑满，点起来也稳。
+   ========================================================================== */
+.bc-posswitch-actions { flex-wrap: wrap; }
+.bc-posswitch-btn { white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .bc-posswitch-card { width: min(420px, 94vw); padding: 16px 14px 14px; }
+  .bc-posswitch-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .bc-posswitch-btn {
+    width: 100%;
+    min-height: 42px;
+    justify-content: center;
+    text-align: center;
+  }
+}
+

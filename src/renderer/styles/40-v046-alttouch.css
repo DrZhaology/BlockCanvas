@@ -120,9 +120,28 @@
    手指按在元素中间时，气泡正好盖在中间那颗移动柄上，等于把唯一的操作点糊住了。 */
 body.bc-alttouch-drag .bc-alt-badge { display: none; }
 
-/* 手柄层挂载期间，把桌面那几层 hover 浮层收起来
-   （橙色高亮框 / F12 式盒模型 / "常规流 260×150"气泡 —— 它们都画在指针位置，
-     手指或鼠标停在元素中间时正好把移动柄盖住）。 */
+/* ── 触摸档位要藏 / 要留什么 ────────────────────────────────────────────────
+   用户原话（第 47 批）：
+     「这个 Alt 模式做的非常的好！但是我还是希望能像电脑端显示 margin 和
+       top right bottom left 这些数值，电脑端有相关的代码你可以看一下。」
+   → 所以 **F12 式盒模型（.bc-boxm）必须留**，那是唯一显示这些数值的地方。
+
+   要藏的是另外两层：它们都画在**指针/手指位置**，正好把中间那颗移动柄糊住 ——
+     · .bc-alt-box   橙色悬停框（手柄层自己有蓝色框，两层框会互相盖）
+     · .bc-alt-badge "常规流 260×150" 尺寸气泡
+   上一版把 .bc-boxm 也一起 display:none 了，等于把用户要的数值全关掉（已修）。 */
 body.bc-alttouch-on .bc-alt-box,
-body.bc-alttouch-on .bc-boxm,
 body.bc-alttouch-on .bc-alt-badge { display: none; }
+
+/* 盒模型的"定位方式 + 尺寸"标签挪到元素左上角外侧：正中是移动柄的位置 */
+body.bc-alttouch-on .bc-boxm-pos.is-touch {
+  transform: translate(0, -100%);
+  border-radius: 8px;
+}
+
+/* margin / padding 的数值标签是**贴着元素边缘居中**画的：
+   手指按住 4 角或 4 边时，46px 的手指正好压在这些数字上（看不见，也不影响操作，
+   但"想看一眼数值"的时机恰恰就是拖动时）。
+   所以触摸档位把它们统一挪到盒子外侧 1~2px 处（不影响命中，只是让开视觉）。 */
+body.bc-alttouch-on .bc-boxm-num,
+body.bc-alttouch-on .bc-boxm-inset { pointer-events: none; }

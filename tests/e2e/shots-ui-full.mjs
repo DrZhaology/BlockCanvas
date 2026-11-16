@@ -115,43 +115,36 @@ const main = async () => {
   /* ② 编辑器主界面（第二条栏折叠态） */
   await stop('02-editor', '.workspace');
 
-  /* ③ 第二条栏展开态：长按 420ms 再上滑（起点压在第二条栏内部，别滑到栏外，
-        否则 pointermove 落在画布上，栏收不到事件就"长按没反应"） */
-  const bar2Box = await win.locator('.pt-bar2').boundingBox();
-  if (bar2Box) {
-    const cx = Math.round(bar2Box.x + bar2Box.width / 2);
-    const y0 = Math.round(bar2Box.y + bar2Box.height - 8);
-    await win.mouse.move(cx, y0);
-    await win.mouse.down();
-    await sleep(460);
-    await win.mouse.move(cx, y0 - 30, { steps: 5 });
-    await win.mouse.up();
-    await sleep(520);
-    const exp = await win.evaluate(() => {
-      const b = document.querySelector('.pt-bar2');
-      return { cls: b?.className, h: Math.round(b?.getBoundingClientRect().height || 0) };
-    });
-    console.log('03-bar2-expanded  ' + JSON.stringify(exp));
-    await shot('03-bar2-expanded');
-    // 收回（同理，起点往下滑一点点，全程留在栏内）
-    const box2 = await win.locator('.pt-bar2').boundingBox();
-    const y1 = Math.round(box2.y + box2.height - 30);
-    await win.mouse.move(cx, y1);
-    await win.mouse.down();
-    await sleep(460);
-    await win.mouse.move(cx, y1 + 20, { steps: 5 });
-    await win.mouse.up();
-    await sleep(520);
-  }
+  /* ③ 第二条栏：单行折叠态已定稿（抽屉能力整体删除）。
+        这里不再做"长按上滑展开"的动作 —— 那套手势和 .is-expanded 一起删了，
+        所以改为量一量「九个按钮同高 + 一行不换行」是否成立。 */
+  const bar2Flat = await win.evaluate(() => {
+    const bar = document.querySelector('.pt-bar2');
+    const inner = bar?.querySelector('.pt-bar2-inner');
+    const btns = [...(bar?.querySelectorAll('.pt-tbtn') ?? [])];
+    const hs = btns.map((b) => Math.round(b.getBoundingClientRect().height));
+    const tops = btns.map((b) => Math.round(b.getBoundingClientRect().top));
+    return {
+      expanded: bar?.classList.contains('is-expanded') ?? null,
+      barH: Math.round(bar?.getBoundingClientRect().height || 0),
+      n: btns.length,
+      distinctH: [...new Set(hs)],
+      distinctTop: [...new Set(tops)],
+      innerScrollX: inner ? inner.scrollWidth > inner.clientWidth + 1 : null,
+      innerOverflowY: inner ? Math.round(inner.scrollHeight - inner.clientHeight) : null
+    };
+  });
+  console.log('03-bar2-flat  ' + JSON.stringify(bar2Flat));
+  await shot('03-bar2-flat');
 
-  /* ④ 更多菜单 */
-  await win.locator('.tb-more-btn').click();
+  /* ④ 更多菜单（竖屏第二条栏的「更多」= .pt-tbtn[data-key="more"]） */
+  await win.locator('.pt-bar2 .pt-tbtn[data-key="more"]').click();
   await stop('04-more-menu', '.pt-bar2');
   await win.keyboard.press('Escape');
   await sleep(300);
 
   /* ⑤ 设备菜单 */
-  await win.locator('.tb-device-pt-btn').click();
+  await win.locator('.pt-bar2 .pt-tbtn[data-key="device"]').click();
   await stop('05-device-menu', '.pt-bar2');
   await win.keyboard.press('Escape');
   await sleep(300);
@@ -162,8 +155,12 @@ const main = async () => {
   await win.mouse.click(200, 300);
   await sleep(300);
 
-  /* ⑦ 下方图层面板 */
-  await win.locator('.pt-layer-btn').click();
+  /* ⑦ 下方图层面板：入口是右侧属性面板的「图层」页签（第二条栏那颗按钮已删） */
+  await win.evaluate(() => {
+    const t = [...document.querySelectorAll('.tab-bar .tab-btn')].find((b) => b.textContent.trim() === '图层');
+    t?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await sleep(420);
   await stop('07-layers', '.pt-sheet');
 
   /* ⑧ 图层行长按菜单（长按 600ms 再松手） */
@@ -235,14 +232,18 @@ const main = async () => {
   await closers.nth(dirtyIdx).click();
   await sleep(500);
   const pop = await win.evaluate(() => {
-    // v0.4.6 第三十九批之后：确认面板画在**卡片内部**（.sess-confirm），不再是浮层
+    // v0.4.6 第 47 批之后：确认面板 Portal 到 body、fixed 贴在那颗 × 的下边缘
     const p = document.querySelector('.sess-confirm');
     if (!p) return null;
     const r = p.getBoundingClientRect();
-    const card = p.closest('.sess-card')?.getBoundingClientRect();
+    const active = document.querySelector('.sess-card.is-active') || document.querySelector('.sess-card');
+    const x = active?.querySelector('.sess-close')?.getBoundingClientRect();
     return {
       x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height),
-      innerCard: Boolean(card) && r.bottom <= card.bottom + 1
+      atBody: p.parentElement === document.body,
+      position: getComputedStyle(p).position,
+      gapFromX: x ? Math.round(r.top - x.bottom) : null,
+      underX: x ? r.top >= x.bottom - 1 : null
     };
   });
   console.log('12-session-confirm  ' + JSON.stringify({
@@ -334,22 +335,15 @@ const main = async () => {
   });
   console.log('16b-help-drawer  ' + JSON.stringify(drawer));
   await shot('16a-help-drawer');
-  await win.locator('.help-drawer-close').click();
-  await sleep(320);
+  // 抽屉没有关闭按钮了（用户要求"按住往左滑关闭"）→ 点遮罩收起
+  await win.evaluate(() => document.querySelector('.help-drawer-scrim')?.click());
+  await sleep(420);
 
   /* ⑰ 项目中心：先从手册页返回编辑器，再点第二条栏的「全部项目」 */
   await win.locator('.pt-bar1 .pt-btn[aria-label="返回"]').click();
   await sleep(800);
-  const projBtn = win.locator('.pt-bar2 .tb-main button', { hasText: '项目' }).first();
-  await projBtn.click().catch(async () => {
-    // 折叠态里它可能被横滑出视野：先展开第二条栏再点
-    await win.evaluate(() => {
-      const b = document.querySelector('.pt-bar2');
-      if (b && !b.classList.contains('is-expanded')) b.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-    await sleep(500);
-    await win.locator('.pt-bar2 .tb-main button', { hasText: '项目' }).first().click();
-  });
+  // 竖屏第二条栏是固定的九个按钮（.pt-tbtn），「全部项目」直接就是其中一颗
+  await win.locator('.pt-bar2 .pt-tbtn[data-key="projects"]').click();
   await stop('17-projects', '.pc-page');
 
   /* ⑱ 新建页面两段式动画取证：out（旧画布左移）→ in（新画布右进）→ null（收尾） */

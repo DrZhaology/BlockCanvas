@@ -30,8 +30,11 @@ const WEIGHTS: { v: string; label: string }[] = [
 ];
 
 export type TextMenuPayload =
-  | { mode: 'element'; id: string; x: number; y: number }
-  | { mode: 'range'; id: string; x: number; y: number; start: number; end: number; text: string };
+  | { mode: 'element'; id: string; x: number; y: number; avoid?: Rect }
+  | { mode: 'range'; id: string; x: number; y: number; start: number; end: number; text: string; avoid?: Rect };
+
+/** 要"绕开"的区域（通常是被选中的那段文字所在的元素） */
+export type Rect = { left: number; top: number; right: number; bottom: number };
 
 /** 取覆盖 [start,end) 的片段 */
 function runsCovering(runs: TextRun[], start: number, end: number): TextRun[] {
@@ -61,6 +64,15 @@ export function CanvasTextMenu({ payload, onClose }: { payload: TextMenuPayload;
   const updateStyle = useScene((s) => s.updateStyle);
   const applyTextRunStyle = useScene((s) => s.applyTextRunStyle);
   const ref = useRef<HTMLDivElement>(null);
+  /** 退场动画：点旁边 / Esc 时先播 140ms 再真正卸载（用户要求"菜单的动画做好"） */
+  const [closing, setClosing] = useState(false);
+  const requestClose = () => {
+    setClosing((c) => {
+      if (c) return c;
+      window.setTimeout(onClose, 150);
+      return true;
+    });
+  };
   /**
    * 用户（v0.4.6 竖屏）："长按调用的右键菜单不要直接出现在手指的地方，
    * 不然刚打开菜单直接操作了。"
@@ -71,28 +83,70 @@ export function CanvasTextMenu({ payload, onClose }: { payload: TextMenuPayload;
   const MENU_OFFSET = 18;
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: x + MENU_OFFSET, top: y + MENU_OFFSET });
 
+  /**
+   * 定位（v0.4.7）：**先躲开被选中的那段文字，再躲开手指**。
+   *
+   * 用户原话：「这个菜单要尽量避开选中的文字以及点击文字时，手指的位置，
+   *   如果实在文字多你就默认放一个地方。」
+   *
+   * 规则：
+   *   ① 优先放在文字块的**正下方**（块底 + 12px）；
+   *   ② 下方放不下就放**正上方**（块顶 - 12px - 菜单高）；
+   *   ③ 上下都放不下（这段文字几乎占满屏）→ 贴底居中（"默认放一个地方"）；
+   *   ④ 水平方向以点击点为中心，再钳进视口；
+   *   ⑤ 最后再检查一次：菜单矩形如果盖住点击点（手指位置），整体往远离手指的一侧推。
+   */
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const w = el.offsetWidth, h = el.offsetHeight;
-    const left = Math.min(Math.max(6, x + MENU_OFFSET), Math.max(6, window.innerWidth - w - 6));
-    const top = Math.min(Math.max(6, y + MENU_OFFSET), Math.max(6, window.innerHeight - h - 6));
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const margin = 10;
+    const GAP = 12;
+    const av = payload.avoid;
+    let left = Math.min(Math.max(margin, x - w / 2), Math.max(margin, vw - w - margin));
+    let top: number;
+    if (av) {
+      const belowTop = av.bottom + GAP;
+      const aboveTop = av.top - GAP - h;
+      if (belowTop + h <= vh - margin) top = belowTop;
+      else if (aboveTop >= margin) top = aboveTop;
+      else top = vh - h - margin;   // 文字几乎占满屏 → 默认贴底
+    } else {
+      top = Math.min(Math.max(margin, y + MENU_OFFSET), Math.max(margin, vh - h - margin));
+    }
+    // 手指位置：菜单矩形如果盖住触点，就往没盖住的那一侧挪
+    const covers = () => x >= left && x <= left + w && y >= top && y <= top + h;
+    if (covers()) {
+      const alt = y + 46;
+      if (alt + h <= vh - margin) top = alt;
+      else top = Math.max(margin, y - 46 - h);
+    }
     setPos({ left, top });
-  }, [x, y]);
+  }, [x, y, payload]);
 
   useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
+    const onDoc = (e: PointerEvent) => {
       if (ref.current?.contains(e.target as Node)) return;
-      onClose();
+      requestClose();
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    const onScroll = () => onClose();
-    window.addEventListener('mousedown', onDoc, true);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') requestClose(); };
+    /** 画布滚动 / 页面尺寸变化时菜单会脱离文字，直接收；但**菜单内部滚动**不算。
+     *  ⚠ 刚打开的 200ms 内不收：聚焦 textarea / 恢复选区常会触发一次 scrollIntoView，
+     *  那不是用户滚页面 —— 否则菜单刚出来就被自己关掉（表现为点了没反应）。 */
+    const t0 = Date.now();
+    const onScroll = (e?: Event) => {
+      if (Date.now() - t0 < 200) return;
+      const t = e?.target;
+      if (t instanceof Element && (ref.current?.contains(t) || t === ref.current)) return;
+      requestClose();
+    };
+    window.addEventListener('pointerdown', onDoc, true);
     window.addEventListener('keydown', onKey);
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onScroll);
     return () => {
-      window.removeEventListener('mousedown', onDoc, true);
+      window.removeEventListener('pointerdown', onDoc, true);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onScroll);
@@ -138,7 +192,7 @@ export function CanvasTextMenu({ payload, onClose }: { payload: TextMenuPayload;
   return createPortal(
     <div
       ref={ref}
-      className="bc-text-menu"
+      className={'bc-text-menu' + (closing ? ' is-closing' : '')}
       style={{ left: pos.left, top: pos.top }}
       onContextMenu={(e) => e.preventDefault()}
     >

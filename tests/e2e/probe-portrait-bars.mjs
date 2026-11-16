@@ -211,6 +211,8 @@ async function main() {
     const r = el.getBoundingClientRect();
     const r2 = b2?.getBoundingClientRect();
     const r1 = b1?.getBoundingClientRect();
+    const btns = [...document.querySelectorAll('.pt-bar1 .pt-btn')];
+    const er = btns[btns.length - 1]?.getBoundingClientRect();
     const cs = getComputedStyle(el);
     const cx = Math.round(r.left + r.width / 2);
     const cy = Math.round(r.top + r.height / 2);
@@ -221,16 +223,52 @@ async function main() {
       bottom: Math.round(r.bottom),
       bar2Top: r2 ? Math.round(r2.top) : -1,
       bar1Top: r1 ? Math.round(r1.top) : -1,
+      btnTop: er ? Math.round(er.top) : -1,
       onTop: !!el.contains(top),
       topCls: top ? String(top.className || '').slice(0, 30) : null
     };
   });
   check('④ 入口菜单存在且是 fixed 定位', menu.exists && menu.position === 'fixed', JSON.stringify(menu));
-  check('④ 菜单整块在第二条栏上方（不盖住工具栏）',
-    menu.exists && menu.bottom <= menu.bar2Top + 2,
-    `menuBottom=${menu.bottom} bar2Top=${menu.bar2Top}`);
+  // 用户第 47 批再次明确：菜单就紧贴这颗「三」按钮的上沿（允许压住第二条栏）
+  check('④ 菜单紧贴「三」按钮上沿（允许覆盖第二条栏）',
+    menu.exists && Math.abs(menu.bottom - menu.btnTop) <= 4,
+    `menuBottom=${menu.bottom} btnTop=${menu.btnTop}`);
   check('④ 菜单没被栏盖住（中心点命中的就是菜单自己）',
     menu.exists && menu.onTop === true, `命中=${menu.topCls}`);
+
+  // ④b 「三」→「×」是**形变**（三根线各自位移 + 旋转），不是换图
+  //     用户：「第一层工具栏可以上方的 SVG 丝滑变换，不要闪烁像刷新一下一样。」
+  const morph = await win.evaluate(() => {
+    const svg = document.querySelector('.pt-bar1 .pt-entry .pt-menu-glyph');
+    if (!svg) return { exists: false };
+    const lines = [...svg.querySelectorAll('line')];
+    return {
+      exists: true,
+      cls: String(svg.getAttribute('class') || ''),
+      tf: lines.map((l) => getComputedStyle(l).transform),
+      midOpacity: getComputedStyle(svg.querySelector('.pt-mg-mid')).opacity,
+      // 有 transition 才叫"丝滑"，否则是瞬移
+      dur: getComputedStyle(lines[0]).transitionDuration
+    };
+  });
+  check('④b 展开后「三」形变成 ×（上下线各转 ±45°，matrix 含 0.707）',
+    morph.exists && morph.cls.includes('is-open')
+      && /0\.707/.test(morph.tf[0] || '') && /0\.707/.test(morph.tf[2] || ''),
+    JSON.stringify(morph.tf));
+  check('④b 中线收掉（opacity < 0.2）且是过渡出来的（duration > 0）',
+    morph.exists && Number(morph.midOpacity) < 0.2 && parseFloat(morph.dur) > 0,
+    `opacity=${morph.midOpacity} dur=${morph.dur}`);
+
+  // ④c 左端按钮换内容时是"滑入"而不是硬切
+  const leadIn = await win.evaluate(() => {
+    const b = document.querySelector('.pt-bar1 .pt-btn.pt-lead-in');
+    if (!b) return { exists: false };
+    const cs = getComputedStyle(b);
+    return { exists: true, name: cs.animationName, dur: cs.animationDuration };
+  });
+  check('④c 左端按钮带 ptLeadIn 入场动画（换视图时不硬切）',
+    leadIn.exists && leadIn.name === 'ptLeadIn' && parseFloat(leadIn.dur) > 0,
+    JSON.stringify(leadIn));
 
   await win.evaluate(() => {
     document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
@@ -238,6 +276,65 @@ async function main() {
   await sleep(300);
   const closed = await win.evaluate(() => !document.querySelector('.pt-entry-menu'));
   check('④ 点旁边 → 菜单关闭', closed === true, String(closed));
+
+  // ⑤ 会话页「×」的保存确认：贴 × 下边缘 / 从下方弹出 / 点旁边关闭
+  //    用户：「点击×想要关闭页面，改成二级菜单弹窗，从下面弹出，可以点击旁边关闭的。」
+  //          「紧贴×按钮的下边缘。」
+  await win.evaluate(() => {
+    const btns = [...document.querySelectorAll('.pt-bar1 .pt-btn')];
+    btns.find((b) => (b.getAttribute('aria-label') || '').includes('管理会话'))?.click();
+  });
+  await sleep(900);
+  await win.evaluate(() => window.__tabStore.getState().markActiveTabDirty(true));
+  await sleep(200);
+  await win.evaluate(() => {
+    const card = document.querySelector('.sess-card.is-active') || document.querySelector('.sess-card');
+    card?.querySelector('.sess-close')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await sleep(360);
+  const conf = await win.evaluate(() => {
+    const p = document.querySelector('.sess-confirm');
+    if (!p) return { exists: false };
+    const r = p.getBoundingClientRect();
+    const card = document.querySelector('.sess-card.is-active') || document.querySelector('.sess-card');
+    const xr = card?.querySelector('.sess-close')?.getBoundingClientRect();
+    const cs = getComputedStyle(p);
+    return {
+      exists: true,
+      atBody: p.parentElement === document.body,
+      position: cs.position,
+      top: Math.round(r.top), left: Math.round(r.left), right: Math.round(r.right), w: Math.round(r.width),
+      vw: window.innerWidth,
+      xBottom: xr ? Math.round(xr.bottom) : -1,
+      xRight: xr ? Math.round(xr.right) : -1,
+      gap: xr ? Math.round(r.top - xr.bottom) : -999,
+      anim: cs.animationName
+    };
+  });
+  check('⑤ 确认面板在 body 下、fixed 定位（不会被卡片的 overflow 裁掉）',
+    conf.exists && conf.atBody === true && conf.position === 'fixed', JSON.stringify(conf));
+  check('⑤ 面板顶边紧贴 × 下边缘（0~10px）',
+    conf.exists && conf.gap >= 0 && conf.gap <= 10, `gap=${conf.gap} top=${conf.top} xBottom=${conf.xBottom}`);
+  // 右端贴 × 右缘；贴不下时（× 在左列）按视口左边 8px 夹住 —— 两种都算"对齐 ×"
+  check('⑤ 面板右缘对齐 × 右缘（贴不下时夹在视口内，不越界）',
+    conf.exists && conf.right >= conf.xRight - 1 && conf.left >= 8 && conf.right <= conf.vw - 8,
+    `left=${conf.left} right=${conf.right} xRight=${conf.xRight} vw=${conf.vw}`);
+  check('⑤ 进出动画是 sessConfirmPop（从下方升起，不是卡片内展开）',
+    conf.exists && conf.anim === 'sessConfirmPop', conf.anim);
+
+  await win.evaluate(() => {
+    document.querySelector('.sess-head')?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  });
+  await sleep(320);
+  const confGone = await win.evaluate(() => !document.querySelector('.sess-confirm'));
+  check('⑤ 点旁边 → 确认面板收起', confGone === true, String(confGone));
+
+  // 回编辑器，别把后续（若有）留在会话页
+  await win.evaluate(() => {
+    const btns = [...document.querySelectorAll('.pt-bar1 .pt-btn')];
+    btns.find((b) => (b.getAttribute('aria-label') || '').includes('返回'))?.click();
+  });
+  await sleep(500);
 
   check('无 page 错误', errs.length === 0, errs.slice(0, 2).join(' | '));
 

@@ -6,10 +6,11 @@
 //    内外边距是四向输入、枚举是下拉，不再是一排裸文本框；
 //  · body 的 7 个常用项仍走 quickCss（旧工程与导出完全兼容），其余任意 CSS 走 bodyExtra。
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useScene } from '@store/sceneStore';
 import type { ElementType, SceneGraph } from '@lib/types';
 import { getSchemaItem, applyUnit } from '@lib/propertySchema';
+import { isGradient, serializeGradient, defaultGradient } from '@lib/gradient';
 import { AddPropertyMenu } from '../AddPropertyMenu';
 import { Icon } from '../Icon';
 import { HelpButton } from '../HelpButton';
@@ -17,6 +18,7 @@ import { ColorField } from '../ColorPicker';
 
 import { FontPickerModal } from '../FontPickerModal';
 import { Collapse } from '../Collapse';
+import { GradientEditor } from '../GradientEditor';
 import { animateRemove } from './shared';
 
 // ============ 页面页签：body 设置 + 全局样式 ============
@@ -178,17 +180,37 @@ export function PageCssBody() {
           </label>
         </div>
         {visibleDefs.map((item) => (
-          <PagePropRow
-            key={item.key}
-            label={item.label}
-            cssKey={camelToKebab(item.schemaKey ?? item.key)}
-            schemaKey={item.schemaKey}
-            value={qc[item.key] ?? ''}
-            onChange={(v) => setKey(item.key, v)}
-            onFocusStart={() => beginStyleEdit()}
-            onFocusEnd={() => endStyleEdit()}
-            onRemove={() => removeKey(item.key)}
-          />
+          item.key === 'bodyBg' ? (
+            /* 页面背景（v0.4.7）：用户要求「页面的背景色加入可以设置渐变色」。
+               这里给它一个专用行：纯色 / 渐变 两段式，渐变复用元素那一套
+               GradientEditor（同样的角度盘、色标、预制配色），只是写进 quickCss。
+               ⚠ 两个字段分工不能混：
+                 · bodyBg     → background-color（纯色，旧工程与导出都认它）
+                 · bodyBgImage→ background-image（渐变 / 图片）
+               同时存在时浏览器会先铺色再盖渐变，正好可以"半透明渐变 + 底色"。 */
+            <PageBgRow
+              key={item.key}
+              color={qc.bodyBg ?? ''}
+              image={qc.bodyBgImage ?? ''}
+              onColor={(v) => setKey('bodyBg', v)}
+              onImage={(v) => setKey('bodyBgImage', v)}
+              onFocusStart={() => beginStyleEdit()}
+              onFocusEnd={() => endStyleEdit()}
+              onRemove={() => { removeKey('bodyBg'); removeKey('bodyBgImage'); }}
+            />
+          ) : (
+            <PagePropRow
+              key={item.key}
+              label={item.label}
+              cssKey={camelToKebab(item.schemaKey ?? item.key)}
+              schemaKey={item.schemaKey}
+              value={qc[item.key] ?? ''}
+              onChange={(v) => setKey(item.key, v)}
+              onFocusStart={() => beginStyleEdit()}
+              onFocusEnd={() => endStyleEdit()}
+              onRemove={() => removeKey(item.key)}
+            />
+          )
         ))}
         {/* v0.4.6（R6-16）：基准视口高度 —— 只影响编辑器里的画布，不进导出。
             它解决的是「fixed 元素往下拖永远贴不到底」：画布会随内容长长，
@@ -418,6 +440,95 @@ function PagePropRow(props: {
             onFocus={props.onFocusStart}
             onChange={(e) => props.onChange(e.target.value)}
             onBlur={props.onFocusEnd}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 页面背景（v0.4.7）：纯色 / 渐变 两段式。
+ *
+ * 用户原话：「页面的背景色加入可以设置渐变色」。
+ *
+ * 为什么不是把 GradientEditor 硬塞进 PagePropRow：
+ *   PagePropRow 按 schema.input 分发，而"背景"在 body 上是**两条** CSS
+ *   （background-color 和 background-image），一个 schema key 表达不了。
+ *   所以这里单独写一张行，两个字段各管一条，切模式时只清自己那一条 ——
+ *   这样"纯色 → 渐变 → 纯色"来回切不会把另一条弄丢。
+ */
+function PageBgRow(props: {
+  color: string;
+  image: string;
+  onColor: (v: string) => void;
+  onImage: (v: string) => void;
+  onFocusStart: () => void;
+  onFocusEnd: () => void;
+  onRemove: () => void;
+}) {
+  const { color, image, onColor, onImage, onFocusStart, onFocusEnd, onRemove } = props;
+  const isGrad = isGradient(image);
+  const mode: 'solid' | 'gradient' = isGrad ? 'gradient' : 'solid';
+  const draftRef = useRef(image);
+
+  const switchMode = (next: 'solid' | 'gradient') => {
+    if (next === mode) return;
+    onFocusStart();
+    if (next === 'gradient') {
+      // 已经写过渐变就沿用，否则给一套默认渐变（不留空白，点开就有东西看）
+      onImage(isGradient(image) ? image : serializeGradient(defaultGradient()));
+    } else {
+      onImage('');            // 回到纯色：只清 background-image
+    }
+    onFocusEnd();
+  };
+
+  return (
+    <div className="prop-row page-prop-row" data-cat="颜色">
+      <div className="prop-row-header">
+        <span>
+          页面背景
+          <HelpButton
+            title="页面背景（纯色 / 渐变）"
+            content={'· 纯色：写进 body 的 background-color。\n· 渐变：写进 body 的 background-image（可调方向、色标、预制配色）。\n· 两者可以同时存在：渐变半透明时会透出下面的纯色。'}
+          />
+        </span>
+        <button className="prop-remove" title="删除页面背景" onClick={(e) => animateRemove(e.currentTarget, onRemove)}>
+          <Icon name="close" size={12} />
+        </button>
+      </div>
+      <div className="prop-row-body page-bg-body">
+        <div className="bg-mode-seg">
+          <button
+            className={'bg-mode-btn' + (mode === 'solid' ? ' active' : '')}
+            onClick={() => switchMode('solid')}
+            title="纯色填充（写 background-color）"
+          >纯色</button>
+          <button
+            className={'bg-mode-btn' + (mode === 'gradient' ? ' active' : '')}
+            onClick={() => switchMode('gradient')}
+            title="渐变填充（写 background-image，可调方向与色标）"
+          >渐变</button>
+        </div>
+        {mode === 'solid' ? (
+          <ColorField
+            value={color}
+            fallback="#ffffff"
+            inputClassName="page-quick-input"
+            onInputFocus={onFocusStart}
+            onChange={onColor}
+            onInputBlur={onFocusEnd}
+            onModalOpen={onFocusStart}
+            onModalClose={onFocusEnd}
+          />
+        ) : (
+          <GradientEditor
+            value={image}
+            scope="background"
+            onChange={(css) => { draftRef.current = css; onImage(css); }}
+            onCommit={() => { onImage(draftRef.current); }}
+            onRemove={() => onImage('')}
           />
         )}
       </div>

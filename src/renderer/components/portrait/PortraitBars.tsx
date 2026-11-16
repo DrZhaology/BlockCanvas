@@ -37,11 +37,24 @@ function GlyphSessions({ n }: { n: number }) {
   );
 }
 
-/** 汉堡「三」 */
-function GlyphMenu() {
+/**
+ * 汉堡「三」—— 展开时**真的形变**成「×」（不是换图）。
+ *
+ * 用户原话：「第一层工具栏可以上方的 SVG 丝滑变换……不要闪烁像刷新一下一样。」
+ *
+ * 以前三根线是一整条 `<path>`，开合只能换一张图（淡入 + 微缩放）。
+ * 现在拆成三根 `<line>`，各自用 transform 过渡：上/下线平移到中线并各转 ±45°，
+ * 中线收成一点淡出 —— 视觉上是同一批线条在动，路径本身没有替换。
+ */
+function GlyphMenu({ open = false }: { open?: boolean }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-      <path d="M3.5 6h15M3.5 11h15M3.5 16h15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    <svg
+      className={'pt-menu-glyph' + (open ? ' is-open' : '')}
+      width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"
+    >
+      <line x1="3.5" y1="6" x2="18.5" y2="6" />
+      <line className="pt-mg-mid" x1="3.5" y1="11" x2="18.5" y2="11" />
+      <line x1="3.5" y1="16" x2="18.5" y2="16" />
     </svg>
   );
 }
@@ -97,23 +110,18 @@ export function PortraitBar1(props: PortraitBar1Props) {
 
   const openEntryMenu = () => {
     /**
-     * 菜单位置：**第二条栏上沿之上**。
+     * 菜单位置：**紧贴这颗「三」按钮的上沿**（允许压住第二条栏）。
      *
-     * 用户原话：「第一层菜单，也就是最下面的菜单，最右侧的类似"三"的按钮，
-     *   打开的二级菜单在按钮上面，不要跑道二层菜单上面。」
-     * → 菜单底边锚在**第二条栏的顶边**：既在按钮上方，又不会压在工具按钮上面。
-     *   （上一版锚的是第一条栏顶边，菜单整块盖住第二条栏，工具按钮全被挡掉。）
-     *
-     * 右端对齐按钮右缘，这样虽然中间隔了一条栏，看起来仍然是这颗按钮的菜单。
+     * 用户原话（第 47 批再次强调）：「我是说第一层操作栏的最右边类似"三"的按钮，
+     *   开启的二级菜单就紧贴的这个按钮上面，覆盖第二层菜单，现在是贴着第二层菜单了。」
+     * → 底边 = 按钮顶边（-2px 视觉缝隙），不再锚在第二条栏顶边。
+     *   右端对齐按钮右缘，菜单像从按钮里长出来。
      */
-    const bar2 = document.querySelector('.pt-bar2')?.getBoundingClientRect();
     const r = entryBtnRef.current?.getBoundingClientRect();
     if (r) {
-      // 兜底：第一条 56 + 第二条 48 —— 取不到矩形时按窗口底 104px 算，不会飘
-      const bar2Top = bar2 ? bar2.top : window.innerHeight - 104;
       setEntryPos({
         right: Math.max(8, Math.round(window.innerWidth - r.right)),
-        bottom: Math.round(window.innerHeight - bar2Top)
+        bottom: Math.round(window.innerHeight - r.top) + 2
       });
     }
     setEntryOpen(true);
@@ -141,7 +149,7 @@ export function PortraitBar1(props: PortraitBar1Props) {
 
   const newPageBtn = (
     <button
-      className="pt-btn" type="button" aria-label="新建页面" title="新建页面"
+      className="pt-btn pt-lead-in" type="button" aria-label="新建页面" title="新建页面"
       /* 交给 App 做两段式动画（旧画布左移出 → 新画布从右进），不再直接 newTab() */
       onClick={() => window.dispatchEvent(new CustomEvent('bc:new-page'))}
     >
@@ -155,7 +163,7 @@ export function PortraitBar1(props: PortraitBar1Props) {
           放到最左边，可以打开侧边栏，切换文档，搜索"）。它排在「返回」之前。 */}
       {onOpenHelpSidebar && (
         <button
-          className="pt-btn" type="button" aria-label="侧边栏" title="侧边栏：切换文档 / 搜索 / 目录"
+          className="pt-btn pt-lead-in" type="button" aria-label="侧边栏" title="侧边栏：切换文档 / 搜索 / 目录"
           onClick={onOpenHelpSidebar}
         >
           <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
@@ -168,7 +176,7 @@ export function PortraitBar1(props: PortraitBar1Props) {
       {editorish ? (
         <>
           <button
-            className="pt-btn" type="button" aria-label="撤销" title="撤销"
+            className="pt-btn pt-lead-in" type="button" aria-label="撤销" title="撤销"
             disabled={past === 0}
             onClick={() => useScene.getState().undo()}
           >
@@ -180,7 +188,7 @@ export function PortraitBar1(props: PortraitBar1Props) {
             </svg>
           </button>
           <button
-            className="pt-btn" type="button" aria-label="重做" title="重做"
+            className="pt-btn pt-lead-in" type="button" aria-label="重做" title="重做"
             disabled={future === 0}
             onClick={() => useScene.getState().redo()}
           >
@@ -193,7 +201,7 @@ export function PortraitBar1(props: PortraitBar1Props) {
           </button>
         </>
       ) : isHome ? newPageBtn : (
-        <button className="pt-btn" type="button" aria-label="返回" title="返回" onClick={onBack}>
+        <button className="pt-btn pt-lead-in" type="button" aria-label="返回" title="返回" onClick={onBack}>
           <GlyphBack />
         </button>
       )}
@@ -218,7 +226,7 @@ export function PortraitBar1(props: PortraitBar1Props) {
           title="更多入口"
           onClick={() => (entryOpen ? setEntryOpen(false) : openEntryMenu())}
         >
-          <GlyphMenu />
+          <GlyphMenu open={entryOpen} />
         </button>
       </div>
 

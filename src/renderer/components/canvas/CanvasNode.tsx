@@ -13,6 +13,7 @@ import { Icon } from '../Icon';
 import { LOCK_FRAME_SEC } from './useAltDrag';
 import { toRenderableSrc } from './mediaSrc';
 import { useFixedLayer } from './fixedLayer';
+import { useTextTapMenu } from './useTextTapMenu';
 import type { TextMenuPayload } from '../CanvasTextMenu';
 
 export type CanvasNodeProps = {
@@ -42,6 +43,14 @@ const CanvasNodeBody = React.memo(function CanvasNodeBody(props: CanvasNodeProps
   const [inlineDraft, setInlineDraft] = useState(node.text ?? '');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const editingRef = useRef(false);
+  /** 轻点选区弹菜单 / 全选 / 取消选中（80 行逻辑在 canvas/useTextTapMenu.ts） */
+  const textMenu = useTextTapMenu({
+    id: node.id,
+    editing: editingText,
+    inputRef,
+    onOpen: (pl) => onTextMenu(pl as never)
+  });
+
   editingRef.current = editingText;
   // 「显示 <br>」：与属性面板共用同一份开关（见 lib/showBr.ts）
   const [showBr] = useShowBr();
@@ -355,6 +364,14 @@ const CanvasNodeBody = React.memo(function CanvasNodeBody(props: CanvasNodeProps
     // 选中高亮（v0.4.4）：用 data 属性 + CSS 画，不再写内联 outline ——
     // 两种可切换样式（橙色光晕闪烁 / 蓝色细线）都在样式表里，body.bc-sel-plain 一键切换
     'data-bc-sel': isSelected && !isInlineFrag ? '1' : undefined,
+    /**
+     * 选中数量档位（v0.4.7）：用户要求
+     *   「1~5 个元素，所有选中的元素橙色边框+闪烁，这样显眼；
+     *    大于5个，只显示橙色边框，防止卡顿。」
+     * 数量不多时给呼吸光晕（合成层动画，代价小、显眼）；一多就只留 2px 橙框。
+     * 写成属性而不是多个类名：和 body.bc-sel-plain（用户自选的蓝色细线档）不会互相干扰。
+     */
+    'data-bc-seln': isSelected && !isInlineFrag ? (selectedIds.length <= 5 ? '1' : '0') : undefined,
     // 类名优先原则：用户类名（或兜底 hash 类）真实挂到 DOM；用 ID 做选择器时挂 id 属性 —— 与导出一致
     className: selInfo.classAttr || undefined,
     id: selInfo.idAttr || undefined,
@@ -538,28 +555,16 @@ const CanvasNodeBody = React.memo(function CanvasNodeBody(props: CanvasNodeProps
             onClick={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
             onChange={(e) => { setInlineDraft(e.target.value); autoGrow(e.target); }}
             onKeyDown={(e) => {
               e.stopPropagation();
               // Esc 也保存（用户要求）；换行交给浏览器默认（自动生成 <br>）
               if (e.key === 'Escape') { e.preventDefault(); commitInlineText(); }
             }}
-            onContextMenu={(e) => {
-              const ta = e.currentTarget;
-              const s = ta.selectionStart;
-              const en = ta.selectionEnd;
-              if (s === en) return;
-              e.preventDefault();
-              e.stopPropagation();
-              // 规则统一：选中"整段文本" → 走整段 CSS（与右侧面板同一份数据）；
-              //           只选了一部分 → 走内联 HTML 样式（整段 CSS 覆盖不了它）
-              if (s === 0 && en === ta.value.length) {
-                onTextMenu({ mode: 'element', id: node.id, x: e.clientX, y: e.clientY });
-              } else {
-                onTextMenu({ mode: 'range', id: node.id, x: e.clientX, y: e.clientY, start: s, end: en, text: ta.value });
-              }
-            }}
+            onPointerDown={textMenu.onPointerDown}
+            onPointerUp={textMenu.onPointerUp}
+            onSelect={textMenu.onSelect}
+            onContextMenu={textMenu.onContextMenu}
           />
           {/* 叠加层：文字透明，只负责画「下划线 / 删除线」和（开关开启时的）淡灰 <br> 标记。
               textarea 本身不渲染 text-decoration，所以用这一层补上，位置与输入文字逐字对齐。 */}

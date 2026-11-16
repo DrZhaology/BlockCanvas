@@ -6,8 +6,9 @@
 //     超过的画布，修一下。」
 //
 // 逐条量：
-//   ① 进设置页：<html data-vtslide="settings">，且真的有 view-transition 伪元素动画在跑
+//   ① 进设置页：<html data-vtslide="page">，且真的有 view-transition 伪元素动画在跑
 //   ② 从设置页返回编辑器：同样挂着（右进右出，不是单纯交叉淡入）
+//   ②c 项目中心 / 手册 / 预览 同样右进右出（第 47 批："所有别的页面都要修改一下"）
 //   ③ 会话页那套专属动画不受影响（不挂 vtslide）
 //   ④ 新建页面后画布滚回左上（不继承上一页的滚动位置）
 //
@@ -70,7 +71,7 @@ async function main() {
   await win.evaluate(() => window.dispatchEvent(new CustomEvent('menu:settings')));
   await sleep(90);
   const inSettings = await vtState(win);
-  check('① 进设置页挂上 vtslide=settings', inSettings.slide === 'settings', JSON.stringify(inSettings.slide));
+  check('① 进设置页挂上 vtslide=page', inSettings.slide === 'page', JSON.stringify(inSettings.slide));
   check('① 有 view-transition 伪元素动画在跑（不是单纯刷新）',
     inSettings.vtAnims.length > 0, inSettings.vtAnims.slice(0, 4).join(' | '));
   await win.waitForSelector('.fluent-settings-page', { timeout: 8000 });
@@ -83,9 +84,38 @@ async function main() {
   });
   await sleep(90);
   const outSettings = await vtState(win);
-  check('② 从设置页退出也挂 vtslide（右进右出）', outSettings.slide === 'settings', JSON.stringify(outSettings.slide));
+  check('② 从设置页退出也挂 vtslide（右进右出）', outSettings.slide === 'page', JSON.stringify(outSettings.slide));
   check('② 退出时同样有 view-transition 动画', outSettings.vtAnims.length > 0, outSettings.vtAnims.slice(0, 4).join(' | '));
   await sleep(600);
+
+  // ②c 项目中心 / 手册 / 预览：同一套右进右出（第 47 批扩面）
+  const slides = [];
+  for (const [label, fire, sel] of [
+    ['项目中心', 'menu:web-manager', '.pc-page'],
+    ['手册', 'menu:help', '.help-center, .help-page'],
+    ['预览', null, '.bc-preview-view']
+  ]) {
+    if (fire) await win.evaluate((ev) => window.dispatchEvent(new CustomEvent(ev)), fire);
+    else {
+      // 预览由工具栏在竖屏下换成"程序内预览"事件，这里直接派发同样的载荷
+      await win.evaluate(() => window.dispatchEvent(new CustomEvent('bc:inapp-preview', {
+        detail: { html: '<!doctype html><html><body style="margin:0"><div style="height:400px;background:#4a90d9"></div></body></html>' }
+      })));
+    }
+    await sleep(90);
+    const st = await vtState(win);
+    slides.push({ label, slide: st.slide, vt: st.vtAnims.length });
+    await win.waitForSelector(sel, { timeout: 8000 }).catch(() => {});
+    await sleep(600);
+    // 返回编辑器，准备下一次
+    await win.evaluate(() => {
+      const btns = [...document.querySelectorAll('.pt-bar1 .pt-btn')];
+      btns.find((b) => (b.getAttribute('aria-label') || '').includes('返回'))?.click();
+    });
+    await sleep(700);
+  }
+  check('②c 项目中心 / 手册 / 预览 都挂 vtslide=page 且有 VT 动画',
+    slides.every((s) => s.slide === 'page' && s.vt > 0), JSON.stringify(slides));
 
   // ②b 第二条栏：切到会话页时**不是立刻消失**，而是从下方滑出（220ms 后卸载）
   await win.evaluate(() => {
@@ -115,7 +145,7 @@ async function main() {
   await sleep(90);
   const inSessions = await vtState(win);
   check('③ 会话页不挂 vtslide（专属动画不被通用滑屏顶掉）',
-    inSessions.slide !== 'settings', JSON.stringify(inSessions.slide));
+    inSessions.slide !== 'page', JSON.stringify(inSessions.slide));
   await sleep(600);
 
   // 回到编辑器（会话页里没有 .canvas-wrap）

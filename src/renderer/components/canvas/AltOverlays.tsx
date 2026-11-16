@@ -4,7 +4,7 @@
 // 纯展示组件：数据由 useAltDrag 的 readBoxModel 提供，这里只负责排版。
 import type { AltBoxModelData } from './types';
 
-export function AltBoxModel({ bm }: { bm: AltBoxModelData }) {
+export function AltBoxModel({ bm, touchAlt = false }: { bm: AltBoxModelData; touchAlt?: boolean }) {
   const { x, y, w, h, mt, mr, mb, ml, bt, br, bb, bl, pt, pr, pb, pl } = bm;
   // 四层盒（外 → 内）：margin 盒 / border 盒 / padding 盒 / content 盒
   const margin = { left: x - ml, top: y - mt, width: w + ml + mr, height: h + mt + mb };
@@ -77,8 +77,12 @@ export function AltBoxModel({ bm }: { bm: AltBoxModelData }) {
       {show(pl) && <span className="bc-boxm-num is-pad" style={{ left: padding.left + pl / 2, top: y + h / 2 }}>{num(pl)}</span>}
       {show(pr) && <span className="bc-boxm-num is-pad" style={{ left: padding.left + padding.width - pr / 2, top: y + h / 2 }}>{num(pr)}</span>}
 
-      {/* 中央：定位方式 + 实际尺寸 */}
-      <span className="bc-boxm-pos" style={{ left: x + w / 2, top: y + h / 2 }}>
+      {/* 定位方式 + 实际尺寸：桌面摆在正中；触摸档位挪到左上角外侧 ——
+          正中正好是「移动柄」的位置，标签压上去等于把唯一的抓取点糊住了 */}
+      <span
+        className={'bc-boxm-pos' + (touchAlt ? ' is-touch' : '')}
+        style={touchAlt ? { left: x, top: y - 10 } : { left: x + w / 2, top: y + h / 2 }}
+      >
         <b>{bm.posLabel}</b>
         <i>{Math.round(w)} × {Math.round(h)}</i>
       </span>
@@ -135,9 +139,11 @@ export function AltOverlays({ api }: {
     dropTarget: { id: string; rect: { x: number; y: number; w: number; h: number } } | null;
     guides: { x: number | null; y: number | null; box: { left: number; top: number; right: number; bottom: number } | null } | null;
     boxModel: AltBoxModelData | null;
+    /** 竖屏 Alt（触摸手柄）档位：盒模型数值照常显示，只把"正中那枚标签"让开 */
+    touchAlt?: boolean;
   };
 }) {
-  const { altHover, dragging, altBadge, wallFlash, wallHints, dropTarget, guides, boxModel } = api;
+  const { altHover, dragging, altBadge, wallFlash, wallHints, dropTarget, guides, boxModel, touchAlt = false } = api;
   return (
     <>
       {/* 行内选中元素的合并外框由 Canvas 自己画（要测量），这里只管 Alt 系列 */}
@@ -152,7 +158,7 @@ export function AltOverlays({ api }: {
         </div>
       )}
       {/* Alt 拖动时的 F12 式盒模型：四层盒 + 各边数值 + 定位方式 + relative 偏移箭头 */}
-      {boxModel && <AltBoxModel bm={boxModel} />}
+      {boxModel && <AltBoxModel bm={boxModel} touchAlt={touchAlt} />}
       {/* Alt 拖拽实时数值气泡 */}
       {altBadge && (
         <div className="bc-alt-badge" style={{ left: altBadge.x, top: altBadge.y }}>{altBadge.text}</div>

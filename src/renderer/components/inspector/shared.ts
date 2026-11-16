@@ -28,10 +28,23 @@ export function propRemovalInFlight(): boolean {
   return Date.now() - lastRemoveAt < PROP_REMOVE_MS + 120;
 }
 
-/** 播完退场动画再真正移除（元素可能不存在，静默跳过） */
+/**
+ * 播完退场动画再真正移除（元素可能不存在，静默跳过）。
+ *
+ * ⚠ v0.4.7 修的真 bug：以前调用方一律传 `e.currentTarget`，而**那是那颗 × 按钮**
+ *   而不是整张卡片 —— `.is-removing` 被挂在一个 18×18 的透明按钮上，
+ *   卡片本身一根毫毛都没动。用户原话：「为什么我手动点删除反而没有动画」。
+ *
+ * 现在这里自己往上找最近的 `.prop-row` / `.prop-card`：
+ *   · 找到卡片 → 标记卡片（卡片播 propCardOut：整张缩小 + 起阴影 + 右滑）；
+ *   · 找不到 → 用传入的元素兜底（页面里的独立按钮之类）。
+ *   调用方不需要再关心"该传谁"。
+ */
 export function animateRemove(el: Element | null, done: () => void): void {
   lastRemoveAt = Date.now();
-  if (!el) { done(); return; }
-  el.classList.add('is-removing');
+  const card = (el?.closest?.('.prop-row, .prop-card') ?? null) as HTMLElement | null;
+  const target = card ?? (el as HTMLElement | null);
+  if (!target) { done(); return; }
+  target.classList.add('is-removing');
   window.setTimeout(done, PROP_REMOVE_MS);
 }

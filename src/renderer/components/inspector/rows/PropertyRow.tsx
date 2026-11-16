@@ -33,7 +33,16 @@ export function PropertyRow(props: {
   schemaItem: typeof SCHEMA[number];
   elementId: string;
   elementType: ElementType;
-  onRemove: () => void;
+  /**
+   * 删除这条属性（v0.4.7 新签名）：把**卡片自己的根节点**交给父级。
+   *
+   * 为什么必须传节点、不能让父级用 `querySelector` 去查：
+   *   · `.props-list > .prop-row[data-prop-key=…]` 只在"列表里的正式行"存在；
+   *     临时卡片（.ghost-prop-card）里的行、页面面板的行都不在 `.props-list` 下，
+   *     查不到就取不到真实高度，退场动画的高度收缩起不来（用户看到的"动画不对"）；
+   *   · 传节点还能顺带解决 `e.currentTarget`（那颗 × 按钮）挂错类名的老 bug。
+   */
+  onRemove?: (cardEl: HTMLElement | null) => void;
   /** 刚添加的高亮蓝框（编辑过就取消） */
   highlight?: boolean;
   /** 中键搜索定位到本行时的橙色闪烁高亮 */
@@ -46,8 +55,19 @@ export function PropertyRow(props: {
    * 摆一个 × 会让人以为要手动管理它（用户明确要求「临时卡片不要有 ×」）。
    */
   noRemove?: boolean;
+  /**
+   * 追加在根节点上的类（v0.4.7）。
+   *
+   * 为什么需要它：退场动画以前是 `animateRemove()` 直接往 DOM 上 `classList.add('is-removing')`。
+   * 只要这期间 React 因为任何原因重渲染了这一行，className 就会被重新算一遍 ——
+   * 那个类当场消失，动画还没播完就被抹掉（用户看到的"手动点删除没动画"有一半是这个）。
+   * 现在由父级用 state 控制，React 自己保证类一直在。
+   */
+  extraClass?: string;
+  /** 这条正在播退场动画（父级给的，等价于 DOM 上的 .is-removing） */
+  removing?: boolean;
 }) {
-  const { schemaItem, elementId, elementType, onRemove, highlight, flash, onEdited, noRemove } = props;
+  const { schemaItem, elementId, elementType, onRemove, highlight, flash, onEdited, noRemove, extraClass, removing } = props;
   const scene = useScene((s) => s.scene);
   const beginStyleEdit = useScene((s) => s.beginStyleEdit);
   const endStyleEdit = useScene((s) => s.endStyleEdit);
@@ -120,7 +140,14 @@ export function PropertyRow(props: {
 
   return (
     <div
-      className={'prop-row' + (highlight ? ' highlight is-just-added' : '') + (flash ? ' flash' : '') + (!app.applicable ? ' is-inapplicable' : '')}
+      /* v0.4.7：`highlight` 这个类名**保留**（探针与"编辑后取消高亮"的逻辑都靠它），
+         但它的样式已经改成"只闪一下"——不再加蓝框、不再换底色，新加的行和其它行长得一样。 */
+      className={'prop-row'
+        + (highlight ? ' highlight is-just-added' : '')
+        + (flash ? ' flash' : '')
+        + (!app.applicable ? ' is-inapplicable' : '')
+        + (removing ? ' is-removing' : '')
+        + (extraClass ? ' ' + extraClass : '')}
       // 分类配色：CSS 用 data-cat 给每类属性一条不同颜色的左边线，密集列表也能一眼分清
       data-cat={schemaItem.category}
       // 中键搜索定位用：找到这一行并滚动/高亮
@@ -154,10 +181,23 @@ export function PropertyRow(props: {
               <Icon name="warning" size={10} /> 不生效
             </span>
           )}
-          {highlight && <span className="prop-new-badge">新</span>}
+          {/* v0.4.7：**不再显示「新」徽标**。
+              用户原话：「添加属性有些的新元素显示不一样，直接闪烁就行，不要显示新的字样。」
+              刚加进来的那一行只靠"从右边滑入 + 底色闪一下"表达，不挂任何字。 */}
         </span>
         {!noRemove && (
-          <button className="prop-remove" title="删除此属性" onClick={(e) => animateRemove(e.currentTarget, onRemove)}><Icon name="close" size={12} /></button>
+          <button
+            className="prop-remove"
+            title="删除此属性"
+            /* 退场高度由父级在"加 is-removing 之前"写进 --bc-row-h。
+               这里把**卡片自己的根节点**（不是这颗 × 按钮）交给 onRemove，
+               父级才量得到真实高度、也才挂得对类。 */
+            onClick={(e) => {
+              const card = (e.currentTarget as HTMLElement).closest('.prop-row') as HTMLElement | null;
+              if (onRemove) onRemove(card);
+              else animateRemove(card ?? (e.currentTarget as HTMLElement), () => { /* 无回调 */ });
+            }}
+          ><Icon name="close" size={12} /></button>
         )}
       </div>
       <div className="prop-row-body">

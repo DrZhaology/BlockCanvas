@@ -234,14 +234,28 @@ export function useTouchCanvas(opts: {
       const el = canvasEl();
       const w = wrap();
       if (!el || !w) return;
-      const dx = parseFloat(el.style.getPropertyValue('--bc-canvas-dx') || '0');
-      const dy = parseFloat(el.style.getPropertyValue('--bc-canvas-dy') || '0');
+      let dx = parseFloat(el.style.getPropertyValue('--bc-canvas-dx') || '0');
+      let dy = parseFloat(el.style.getPropertyValue('--bc-canvas-dy') || '0');
       if (dx || dy) {
-        w.scrollLeft -= dx;
-        w.scrollTop -= dy;
+        const beforeX = w.scrollLeft;
+        const beforeY = w.scrollTop;
+        w.scrollLeft = beforeX - dx;
+        w.scrollTop = beforeY - dy;
+        /**
+         * v0.4.6 第 47 批：**只折进滚动能吃掉的那部分**。
+         *
+         * 用户报的"下一次点击突然闪现到另一个地方"就是这里：以前无条件清零，
+         * 而画布比视口小（缩放 < 100% 或本来就窄）时 scrollLeft 会被钳到 0，
+         * 折不进去的那段位移直接丢掉 → 画面在手指按下的瞬间跳一下。
+         * 现在把没吃掉的留在变量里，画面一帧都不动。
+         */
+        dx -= beforeX - w.scrollLeft;
+        dy -= beforeY - w.scrollTop;
       }
-      el.style.removeProperty('--bc-canvas-dx');
-      el.style.removeProperty('--bc-canvas-dy');
+      if (dx) el.style.setProperty('--bc-canvas-dx', dx + 'px');
+      else el.style.removeProperty('--bc-canvas-dx');
+      if (dy) el.style.setProperty('--bc-canvas-dy', dy + 'px');
+      else el.style.removeProperty('--bc-canvas-dy');
       el.style.removeProperty('--bc-canvas-k');
     };
 
@@ -257,14 +271,17 @@ export function useTouchCanvas(opts: {
       const rect = el?.getBoundingClientRect();
       const left = rect ? rect.left : 0;
       const top = rect ? rect.top : 0;
+      // 起始位移 = 画布上此刻的残留值（settleResidual 折不掉的那部分要继承）
+      const curDx = parseFloat(el?.style.getPropertyValue('--bc-canvas-dx') || '0');
+      const curDy = parseFloat(el?.style.getPropertyValue('--bc-canvas-dy') || '0');
       pinch = {
         zoom0,
         anchorX: (c.x - left) / zoom0,
         anchorY: (c.y - top) / zoom0,
         dist0: Math.max(1, dist()),
         k: zoom0,
-        dx: 0,
-        dy: 0
+        dx: curDx,
+        dy: curDy
       };
       pinchActive = true;
     };
@@ -347,6 +364,12 @@ export function useTouchCanvas(opts: {
        * 所以这里必须先让步（否则"按手柄没反应"）。
        */
       if ((e.target as HTMLElement)?.closest?.('.bc-alttouch')) return;
+      /**
+       * 就地编辑框（双击文字后的 textarea）自己管事件：选区、轻点弹菜单、右键菜单全在里面。
+       * 手势层一旦 stopPropagation，textarea 上的 pointerdown/up 全收不到 ——
+       * 表现为"选中文字后点一下没反应"（菜单弹不出来）。
+       */
+      if ((e.target as HTMLElement)?.closest?.('.bc-inline-edit-wrap, .canvas-inline-text-input, .bc-inline-br-overlay')) return;
       // 竖屏下画布这块完全由本层接管：不让画布自己的 pointerdown 选元素
       e.stopPropagation();
       // 新手势开始 → 上一段惯性立刻停（手指按下去就该由手指说了算）

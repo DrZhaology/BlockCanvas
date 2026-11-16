@@ -79,7 +79,13 @@ export const DOMAIN_OF = {
   // v0.4.6 第 43 批：竖屏双指缩放（禁掉浏览器自带捏合手势）
   '39-v046-pinch.css': 'canvas',
   // v0.4.6 第 46 批：竖屏 Alt 模式的触摸手柄层（中间移动柄 / 4 角 / 4 边）
-  '40-v046-alttouch.css': 'canvas'
+  '40-v046-alttouch.css': 'canvas',
+  // v0.4.6 第 47 批：竖屏设置页的塌陷修复（存储 / 扩展卡片）+ 页内切换动画
+  '41-v046-settings-fix.css': 'settings',
+  // v0.4.6 第 47 批：属性卡片统一样式（淡蓝 / 淡紫 / 淡琥珀）+ 进退场动画
+  '42-v046-propcards.css': 'inspector',
+  // v0.4.6 第 47 批：画布选中框（≤5 个橙框 + 呼吸闪烁，>5 个只描边防卡顿）
+  '43-v046-selbox.css': 'canvas'
 } as const;
 
 export type CssDomain = typeof DOMAIN_OF[keyof typeof DOMAIN_OF];

@@ -160,7 +160,10 @@ function main() {
   // v0.4.6 竖屏：+2（36 号分片新增 `.app[data-shell='stack'] .elem-pane-wrap` /
   // `.right-pane-wrap` 的抽屉几何覆盖，以及 `.app[data-shell='stack'] .pt-bar2 .toolbar`
   // 的层级归零）。这两条都是"竖屏要盖掉桌面写法"，合并会牵动宽屏回归，先记账。
-  const BASELINE = 219;
+  // v0.4.7（第 47 批）：+6。这一批给竖屏补了画布居中方式（.canvas-wrap 布局）、
+  // 预览按画布宽度渲染、设置页卡片塌陷修复、会话卡浮层与文字菜单动画 ——
+  // 都是竖屏档位要覆盖桌面写法的规则，合并会牵动宽屏回归，按老规矩记账。
+  const BASELINE = 225;
   check(`跨域重复选择器不超过基线（当前 ${realConflicts.length} / 基线 ${BASELINE}）`,
     realConflicts.length <= BASELINE,
     realConflicts.length > BASELINE

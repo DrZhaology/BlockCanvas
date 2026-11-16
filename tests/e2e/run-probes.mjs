@@ -100,6 +100,10 @@ const PROBES = [
   // v0.4.6 会话缩略图保真度：iframe 里必须有"有底色/边框且有尺寸"的 div，
   // 且设计变量（scene.tokens）要解析出来（曾经因为只传 root，缩略图里只剩文字）
   'probe-session-thumb',
+  // v0.4.6 绗?47 鎵癸細灞炴€у崱鐗囪繘閫€鍦哄姩鐢?+ 鏍峰紡缁熶竴 + 浣撴鐨勫叧绯婚€夋嫨鍣ㄨ鍒?
+  'probe-prop-card-anim',
+  // v0.4.6 绗?47 鎵癸細瀹氫綅鍔╂墜鍦?relative / sticky 涓嬪亸绉婚噺蹇呴』鐪嬪緱瑙?
+  'probe-pos-helper',
   // v0.4.6 Web 版（R6-12/13/14）：需要先 `pnpm build:web` 产出 dist-web/index.html
   'probe-web',
   // v0.4.6 R6-3：CSS 域约束（主域登记 / 前缀归位 / 重复不超基线）

@@ -272,15 +272,10 @@
   to   { transform: translateY(100%); opacity: 0; }
 }
 
-/* 第一条栏的按钮在"换了一套"时（编辑器 → 子页面）淡入放大到位，
-   而不是直接替换成另一个图形（用户要的"丝滑变换"的廉价版） */
-.app[data-shell='stack'] .pt-bar1 .pt-btn {
-  animation: ptBtnSwap 200ms var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
-}
-@keyframes ptBtnSwap {
-  from { opacity: 0; transform: scale(0.86); }
-  to   { opacity: 1; transform: none; }
-}
+/* 第一条栏按钮"换一套"时的入场动画已移到 36 号分片（ptLeadIn）——
+   这里原来是 ptBtnSwap（opacity + scale，且 fill-mode 用了 both，把 :active
+   的按压缩放永久压住了）。现在统一成"从下方 4px 滑入"，且播完不占 transform。 */
+
 @media (prefers-reduced-motion: reduce) {
   .app[data-shell='stack'] .pt-bar2.is-leaving { animation: none; opacity: 0; }
   .app[data-shell='stack'] .pt-bar1 .pt-btn { animation: none; }

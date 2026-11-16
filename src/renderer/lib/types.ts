@@ -268,6 +268,16 @@ export interface SceneGraph {
   // 「页面」页签可按需添加属性（+ 添加属性）：键存在（含空串）= 已添加；× 删除才移除键
   quickCss?: {
     bodyBg?: string; // 页面背景色（body）
+    /**
+     * 页面背景**图层**（body background-image）：渐变或图片。
+     *
+     * v0.4.7：用户要求「页面的背景色加入可以设置渐变色」。
+     * 为什么单开一个字段而不是把渐变塞进 bodyBg：
+     *   · bodyBg 一直被当成"纯色"写进 `background-color`（旧工程、导出、探针都认它）；
+     *   · 渐变属于 `background-image`，两者可以同时存在（渐变半透明、底下垫纯色很常见）。
+     * 合成顺序：background-color(bodyBg) → background-image(bodyBgImage)。
+     */
+    bodyBgImage?: string;
     textColor?: string; // 文字颜色（body）
     fontFamily?: string; // 页面字体（body）
     linkColor?: string; // 链接颜色（a）

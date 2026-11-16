@@ -17,6 +17,7 @@
 //   ⑥ 关闭保存提示放到卡片下面，进入 / 关闭都给动画。
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTabStore } from '@store/tabStore';
 import { isTabDirty, saveTabThenClose } from '../TabCloseGuard';
 import { exportHTML } from '@lib/exporter';
@@ -123,12 +124,26 @@ export function SessionsView({ onBack, onNewPage }: { onBack: () => void; onNewP
   /** 「有未保存的修改」确认面板：画在**这张卡片内部**（用户要求下沉） */
   const [confirmFor, setConfirmFor] = useState<string | null>(null);
   const [confirmClosing, setConfirmClosing] = useState<string | null>(null);
+  /**
+   * 确认面板的位置（v0.4.7）：**贴住那颗 × 的下边缘**（用户明确要求）。
+   * 卡片布局是"缩略图在上、名字 + × 在下"，所以面板要挂在卡片外面往下长，
+   * 不能再排在卡片内部（那样会盖住缩略图，而且离 × 很远）。
+   */
+  const [confirmAt, setConfirmAt] = useState<{ left: number; top: number } | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   /** 进场动画：播完就摘标记（只播一次） */
   const [entering, setEntering] = useState(true);
+  /**
+   * 点卡片进会话：先让**这张卡片放大淡出**（= 进会话页时"画布缩小成缩略图"的逆过程），
+   * 200ms 后再切标签。用户原话：「会话页面点击会话进入的时候进入动画和退出动画同理，反过来。」
+   */
+  const [opening, setOpening] = useState<string | null>(null);
+  /** 「新建页面」按钮的引用（关闭卡片后给它补一段 FLIP 位移动画） */
+  const addRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    const t = window.setTimeout(() => setEntering(false), 700);
+    // 进场要等整段动画播完才摘标记（560ms + 最多几张卡片的错峰延迟）
+    const t = window.setTimeout(() => setEntering(false), 900);
     return () => window.clearTimeout(t);
   }, []);
 
@@ -139,13 +154,54 @@ export function SessionsView({ onBack, onNewPage }: { onBack: () => void; onNewP
     return () => window.removeEventListener('pointerdown', close, true);
   }, [menuFor]);
 
+  /**
+   * 点旁边关掉"关闭确认"（用户：「可以点击旁边关闭的」）。
+   * 面板 Portal 到 body 之后就不在 `.sess-page` 的捕获范围里了，
+   * 所以这里挂 window 捕获阶段：点面板自己、点 × 都不算"旁边"，
+   * 其余任何地方一律收起（含第一条栏 / 第二条栏 / 页面空白）。
+   */
+  useEffect(() => {
+    if (!confirmFor) return;
+    const id = confirmFor;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.('.sess-confirm') || t?.closest?.('.sess-close')) return;
+      closeConfirm(id);
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+    // closeConfirm 是每次渲染新建的普通函数，行为只依赖 setState，不放进依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmFor]);
+
   /** 干净标签（或已确认）：播 190ms 退场动画再删 */
   const animateOut = (id: string) => {
     if (leaving === id) return;
+    /**
+     * FLIP：先记下「新建页面」按钮**现在**的位置，等卡片真删掉（布局变了）再量一次，
+     * 把差量用一次 Web Animation 补回来 —— 视觉上就是按钮被丝滑地顶上来。
+     * 用户原话：「新建页面的时候，这个新建页面的按钮会直接瞬移，不会丝滑上下移动。」
+     *
+     * 为什么走 el.animate 而不是 React state + CSS transition：
+     *   state 方案要连着两帧 setState（先放到旧位置、再放回 0），中间还得强制 reflow，
+     *   一旦这两帧被 React 合并就完全不播。animate 是一次性命令，不依赖渲染时机。
+     * ⚠ 用 getBoundingClientRect 而不是 offsetTop：前者相对视口，页面滚动量也算进去了。
+     */
+    const beforeTop = addRef.current?.getBoundingClientRect().top ?? null;
     setLeaving(id);
     window.setTimeout(() => {
       useTabStore.getState().closeTab(id);
       setLeaving((cur) => (cur === id ? null : cur));
+      requestAnimationFrame(() => {
+        const el = addRef.current;
+        if (!el || beforeTop === null) return;
+        const d = beforeTop - el.getBoundingClientRect().top;
+        if (Math.abs(d) < 1) return;
+        el.animate(
+          [{ transform: `translateY(${d}px)` }, { transform: 'translateY(0)' }],
+          { duration: 260, easing: 'cubic-bezier(0.2, 0, 0, 1)' }
+        );
+      });
     }, CLOSE_MS);
   };
 
@@ -154,14 +210,30 @@ export function SessionsView({ onBack, onNewPage }: { onBack: () => void; onNewP
     setConfirmClosing(id);
     window.setTimeout(() => {
       setConfirmFor((cur) => (cur === id ? null : cur));
+      setConfirmAt(null);
       setConfirmClosing((cur) => (cur === id ? null : cur));
     }, 150);
   };
 
-  const askOrClose = (id: string) => {
+  /**
+   * 打开确认面板。位置**永远按这张卡片自己的 ×** 算（不是按触发它的按钮）：
+   * 用户要求「紧贴 × 按钮的下边缘」—— 从长按菜单点「关闭」进来时，
+   * 触发点是菜单项而不是 ×，按菜单项定位就会飘到别处。
+   */
+  const askOrClose = (id: string, anchorRect?: DOMRect) => {
     if (!isTabDirty(id)) { animateOut(id); return; }
     setConfirmClosing(null);
     setConfirmFor(id);
+    const closeRect = document
+      .querySelector(`.sess-card[data-tab="${CSS.escape(id)}"] .sess-close`)
+      ?.getBoundingClientRect();
+    const r = closeRect || anchorRect;
+    if (r) {
+      const w = 224;
+      const left = Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8);
+      const top = Math.min(r.bottom + 6, window.innerHeight - 190);
+      setConfirmAt({ left, top });
+    }
   };
 
   const doSaveAndClose = async (id: string) => {
@@ -194,24 +266,30 @@ export function SessionsView({ onBack, onNewPage }: { onBack: () => void; onNewP
   const onCardClick = (id: string) => {
     if (holdRef.current.fired) { holdRef.current.fired = false; return; }
     if (confirmFor === id) return; // 确认面板开着时点卡片不要切走
-    switchTab(id);
-    onBack();
+    if (opening) return;
+    setOpening(id);
+    window.setTimeout(() => {
+      switchTab(id);
+      onBack();
+      setOpening(null);
+    }, 200);
   };
 
   let order = -1;
+  /** 正在问"要不要保存"的那个会话（面板 Portal 到 body，所以要单独找出来） */
+  const confirmTab = confirmFor ? tabs.find((x) => x.id === confirmFor) : undefined;
 
   return (
     <div
-      className={'sess-page' + (entering ? ' is-entering' : '')}
+      className={'sess-page' + (entering ? ' is-entering' : '') + (opening ? ' is-opening' : '')}
       role="region"
       aria-label="会话管理"
       /**
-       * 点旁边关掉"关闭确认"（用户：「改成二级菜单弹窗，从下面弹出，可以点击旁边关闭的」）。
-       * 确认面板和长按菜单本身都 stopPropagation，所以这里只会在"点外面"时触发。
+       * 点旁边关掉长按菜单（确认面板的"点旁边关闭"挂在 window 捕获阶段，
+       * 因为它 Portal 到 body 了，见上面的 effect）。
        */
       onPointerDown={(e) => {
         const t = e.target as HTMLElement;
-        if (confirmFor && !t.closest('.sess-confirm') && !t.closest('.sess-close')) closeConfirm(confirmFor);
         if (menuFor && !t.closest('.sess-menu')) setMenuFor(null);
       }}
     >
@@ -228,13 +306,20 @@ export function SessionsView({ onBack, onNewPage }: { onBack: () => void; onNewP
           return (
             <div
               key={t.id}
+              data-tab={t.id}
               className={
                 'sess-card'
                 + (isActive ? ' is-active' : '')
                 + (leaving === t.id ? ' is-leaving' : '')
                 + (entering ? (isActive ? ' enter-active' : ' enter') : '')
+                + (opening === t.id ? ' is-opening' : '')
               }
-              style={{ animationDelay: `${isActive ? 0 : 60 + idx * 55}ms` }}
+              /* ⚠ animationDelay **只在进场那一趟**给：它是内联样式，会作用到这张卡片上的
+                 **所有** animation。以前它一直挂着（60 + idx×55 ms），于是第 2 张卡片的关闭
+                 动画要等 115ms、第 3 张 170ms 才开始 —— 而 CLOSE_MS 只有 190ms，
+                 时间到就把节点删了，用户看到的就是"只有第一张有关闭动画，别的没有"。
+                 （用户原话：「除了第一个卡片，别的关闭动画都没有。」） */
+              style={entering ? { animationDelay: `${isActive ? 0 : 60 + idx * 55}ms` } : undefined}
               onPointerDown={() => startHold(t.id)}
               onPointerUp={endHold}
               onPointerCancel={endHold}
@@ -270,7 +355,7 @@ export function SessionsView({ onBack, onNewPage }: { onBack: () => void; onNewP
                   type="button"
                   aria-label={`关闭 ${t.name}`}
                   title="关闭"
-                  onClick={(e) => { e.stopPropagation(); askOrClose(t.id); }}
+                  onClick={(e) => { e.stopPropagation(); askOrClose(t.id, e.currentTarget.getBoundingClientRect()); }}
                 >
                   <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
                     <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -278,26 +363,10 @@ export function SessionsView({ onBack, onNewPage }: { onBack: () => void; onNewP
                 </button>
               </div>
 
-              {/* 「有未保存的修改」确认面板：就画在这张卡片里（用户："放到会话卡片的下面"），
-                  进 / 退都有动画（sessConfirmIn / sessConfirmOut）。 */}
-              {confirmFor === t.id && (
-                <div
-                  className={'sess-confirm' + (confirmClosing === t.id ? ' is-closing' : '')}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="sess-confirm-title">「{t.name}」有未保存的修改</div>
-                  <div className="sess-confirm-actions">
-                    <button
-                      className="sess-cbtn is-primary"
-                      disabled={Boolean(saving)}
-                      onClick={() => void doSaveAndClose(t.id)}
-                    >{saving === t.id ? '保存中…' : '保存并关闭'}</button>
-                    <button className="sess-cbtn is-danger" disabled={Boolean(saving)} onClick={() => doDiscardAndClose(t.id)}>不保存</button>
-                    <button className="sess-cbtn" disabled={Boolean(saving)} onClick={() => closeConfirm(t.id)}>取消</button>
-                  </div>
-                </div>
-              )}
+              {/* 「有未保存的修改」确认面板不挂在这里：它是 fixed 浮层，
+                  卡片一旦进入 :active（按下去会 scale）或进场动画（transform），
+                  就会变成 fixed 的包含块，被 overflow:hidden 裁掉。
+                  所以统一 Portal 到 body（见下面 grid 之后那一块）。 */}
 
               {menuFor === t.id && (
                 <div className="sess-menu" role="menu" onPointerDown={(e) => e.stopPropagation()}>
@@ -307,7 +376,7 @@ export function SessionsView({ onBack, onNewPage }: { onBack: () => void; onNewP
                   >重命名</button>
                   <button
                     role="menuitem" type="button"
-                    onClick={() => { setMenuFor(null); askOrClose(t.id); }}
+                    onClick={(ev) => { setMenuFor(null); askOrClose(t.id, (ev.currentTarget as HTMLElement).getBoundingClientRect()); }}
                   >关闭</button>
                 </div>
               )}
@@ -316,13 +385,40 @@ export function SessionsView({ onBack, onNewPage }: { onBack: () => void; onNewP
         })}
       </div>
 
-      {/* 用户："多标签页下面加入新增页面的按钮" */}
-      <button className="sess-addnew" type="button" onClick={onNewPage}>
+      {/* 用户："多标签页下面加入新增页面的按钮"。
+          新增一张卡片时它会整块被推下去，用 FLIP 补一段过渡（见 animateOut）。 */}
+      <button
+        ref={addRef}
+        className="sess-addnew"
+        type="button"
+        onClick={onNewPage}
+      >
         <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
         </svg>
         新建页面
       </button>
+
+      {confirmTab && createPortal(
+        <div
+          className={'sess-confirm' + (confirmClosing === confirmTab.id ? ' is-closing' : '')}
+          style={confirmAt ? { left: confirmAt.left, top: confirmAt.top } : { right: 12, top: 96 }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="sess-confirm-title">「{confirmTab.name}」有未保存的修改</div>
+          <div className="sess-confirm-actions">
+            <button
+              className="sess-cbtn is-primary"
+              disabled={Boolean(saving)}
+              onClick={() => void doSaveAndClose(confirmTab.id)}
+            >{saving === confirmTab.id ? '保存中…' : '保存并关闭'}</button>
+            <button className="sess-cbtn is-danger" disabled={Boolean(saving)} onClick={() => doDiscardAndClose(confirmTab.id)}>不保存</button>
+            <button className="sess-cbtn" disabled={Boolean(saving)} onClick={() => closeConfirm(confirmTab.id)}>取消</button>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
